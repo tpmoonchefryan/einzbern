@@ -5,6 +5,10 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+## 4.0.0
+
+Einzbern and Mana Orchestrate ship in lockstep at 4.0.0.
+
 ### Codex independent conversation coordination
 
 - Replace the Codex native collector controller and private bridge with one main
