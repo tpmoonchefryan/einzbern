@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
 import { LIGHT_STEPS, LIGHT_TESTS } from "../scripts/ci/light-roster.mjs";
 
@@ -47,6 +47,10 @@ console.log(JSON.stringify(receipt));
 `);
   await put(root, "scripts/test-wiring-proof.mjs", `console.log(JSON.stringify({ok:true,reasonCode:'TEST_WIRING_VERIFIED'}));\n`);
   for (const path of ["portal/scripts/proof.mjs", "scripts/ds-component-css-reconcile.mjs", "scripts/ds-component-css-proof.mjs"]) await put(root, path, "console.log('BOUNDED_FIXTURE_PROCESS');\n");
+  // Preserve the full harness's mandatory preload without admitting arbitrary options.
+  const controllerPolicyOption = "--import=" + new URL("../scripts/test-controller-child-policy.mjs", import.meta.url).href;
+  const expectedNodeOptions = "--import=" + pathToFileURL(join(root, "scripts/no-network.mjs")).href
+    + ((process.env.NODE_OPTIONS ?? "").split(/\s+/u).includes(controllerPolicyOption) ? " " + controllerPolicyOption : "");
   const probe = `
 import assert from 'node:assert/strict';
 import { get } from 'node:http';
@@ -58,7 +62,7 @@ assert.equal(globalThis.__TCRN_OFFLINE_GUARD__, true, 'PRETRANSPORT_GUARD_MISSIN
 assert.equal(process.env.COREPACK_ENABLE_NETWORK, '0');
 assert.equal(process.env.npm_config_offline, 'true');
 assert.equal(process.env.TCRN_OFFLINE_PROOF, '1');
-assert.equal(process.env.NODE_OPTIONS, ${JSON.stringify(`--import=${pathToFileURL(join(root, "scripts/no-network.mjs")).href}`)}, 'PRETRANSPORT_OPTIONS_CHANGED');
+assert.equal(process.env.NODE_OPTIONS, ${JSON.stringify(expectedNodeOptions)}, 'PRETRANSPORT_OPTIONS_CHANGED');
 await assert.rejects(fetch('http://192.0.2.1/'), {code:'OFFLINE_NETWORK_BLOCKED'});
 assert.throws(() => get('http://192.0.2.1/'), {code:'OFFLINE_NETWORK_BLOCKED'});
 assert.throws(() => new Socket().connect(9, '192.0.2.1'), {code:'OFFLINE_NETWORK_BLOCKED'});
@@ -158,7 +162,7 @@ test("archive mutation during an otherwise green privacy child cannot produce li
 // flags alone cannot make the verifier pass.
 test("downloaded light evidence replays raw bytes and refuses resealed semantic corruption", async t => {
   const { root } = await fixture(t);
-  const aggregatePath = new URL("../scripts/ci/aggregate-evidence.py", import.meta.url).pathname;
+  const aggregatePath = fileURLToPath(new URL("../scripts/ci/aggregate-evidence.py", import.meta.url));
   const program = String.raw`
 import copy, hashlib, importlib.util, json, shutil, sys
 from pathlib import Path
@@ -317,7 +321,7 @@ print(json.dumps(results))
 test("package smoke rereads sealed bytes and requires install/setup/doctor outcomes and exact light identity", async t => {
   const root = await mkdtemp(join(tmpdir(), "einzbern-light-seal-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const aggregatePath = new URL("../scripts/ci/aggregate-evidence.py", import.meta.url).pathname;
+  const aggregatePath = fileURLToPath(new URL("../scripts/ci/aggregate-evidence.py", import.meta.url));
   const program = String.raw`
 import copy, hashlib, importlib.util, json, shutil, sys
 from pathlib import Path

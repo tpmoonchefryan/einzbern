@@ -271,6 +271,8 @@ test("offline light guard declaration pins exact probes and rejects structural m
     { name: "missing guard", replace: ["assert.equal(globalThis.__TCRN_OFFLINE_GUARD__, true, 'PRETRANSPORT_GUARD_MISSING');", "/* required pretransport guard removed */"] },
     { name: "replacement preload", replace: ['pathToFileURL(join(root, "scripts/no-network.mjs")).href', 'pathToFileURL(join(root, "scripts/empty-preload.mjs")).href'] },
     { name: "changed options", replace: ["assert.equal(process.env.NODE_OPTIONS,", "assert.notEqual(process.env.NODE_OPTIONS,"] },
+    { name: "unapproved controller preload", replace: ['new URL("../scripts/test-controller-child-policy.mjs", import.meta.url).href', 'new URL("../scripts/unapproved-preload.mjs", import.meta.url).href'] },
+    { name: "unbounded inherited options", replace: ['? " " + controllerPolicyOption : ""', '? " " + process.env.NODE_OPTIONS : ""'] },
     { name: "changed target", replace: ["http://192.0.2.1/", "http://198.51.100.1/"] },
     { name: "extra fetch", append: 'await fetch("https://example.invalid");' },
     { name: "extra module", append: 'import https from "node:https";' },

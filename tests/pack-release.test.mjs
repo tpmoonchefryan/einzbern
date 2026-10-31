@@ -40,6 +40,11 @@ const repositoryRoot = resolve(import.meta.dirname, "..");
 const packScript = join(repositoryRoot, "scripts/pack-release.mjs");
 const RELEASE = `einzbern-${FRAMEWORK_VERSION}`;
 const ARCHIVE = `${RELEASE}.tar.gz`;
+// Retain the acquired pinned tool cache before the fixture substitutes HOME.
+const SOURCE_COREPACK_HOME = resolve(process.env.COREPACK_HOME ?? join(
+  process.env.XDG_CACHE_HOME ?? process.env.LOCALAPPDATA ?? join(homedir(), process.platform === "win32" ? "AppData/Local" : ".cache"),
+  "node/corepack",
+));
 const REFERENCES = Object.freeze(["doctor.md", "install.md", "migrate.md", "restore.md", "uninstall.md", "update.md"]);
 const SPECIFICATIONS = Object.freeze([
   "dispatch-admission-evidence-v1.md", "dot-execution-v1.md", "native-tool-evidence-v1.md", "host-fallback-v1.md", "engine-model-policy-v1.md",
@@ -881,7 +886,7 @@ test("packaged CLI executes the verified source project's memory-admitted gate, 
   await writeFile(telemetry, `import fs from 'node:fs';import cp from 'node:child_process';import {syncBuiltinESMExports} from 'node:module';
 const read=fs.readFileSync,exec=cp.execFileSync;fs.readFileSync=function(p,...a){if(p==='/proc/pressure/memory')return 'full avg10=0.00 avg60=0.00 avg300=0.00 total=0\\n';if(typeof p==='string'&&/^\\/proc\\/\\d+\\/smaps_rollup$/u.test(p))return 'Private_Clean: 0 kB\\nPrivate_Dirty: 0 kB\\n';return read.call(this,p,...a)};
 cp.execFileSync=function(p,a,...o){if(p==='/usr/bin/memory_pressure'&&a?.length===1&&a[0]==='-Q')return 'System-wide memory free percentage: 75%\\n';return exec.call(this,p,a,...o)};process.availableMemory=()=>12*1024**3;process.constrainedMemory=()=>16*1024**3;syncBuiltinESMExports();`);
-  const env = { ...isolated.env, COREPACK_ENABLE_NETWORK: "0", pnpm_config_verify_deps_before_run: "false" };
+  const env = { ...isolated.env, COREPACK_HOME: SOURCE_COREPACK_HOME, COREPACK_ENABLE_NETWORK: "0", pnpm_config_verify_deps_before_run: "false" };
   delete env.EINZBERN_MEMORY_LEASE; delete env.EINZBERN_HEAVY_SLOT; delete env.EINZBERN_HEAVY_LOCK_DIR;
   const entry = join(tree, "scripts/einzbern.mjs"), at = "2026-10-29T19:00:00Z";
   const invoke = args => {

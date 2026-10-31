@@ -66,6 +66,10 @@ Versioning after the first accepted release.
 - Preserve exact offline guard declarations and negative transport probes without
   granting Internet access. Keep private canonical Unix fixture paths within the
   portable socket limit and retain ownership, alias and unexpected-call refusals.
+- Decode checkout file URLs before executing verification tools, preserve the
+  mandatory test-controller preload in guard fixtures, and retain the acquired
+  offline Corepack cache across an isolated HOME. Keep independent CI selection
+  expectations aligned with newly required light tests.
 
 ## 3.4.0
 

@@ -168,7 +168,7 @@ test("real task entry reports resource refusal rather than an internal or assert
   const options = await fixture(t, policy({ budgetMiB: 1, fixedMiB: 1, workerMiB: 1 }));
   const env = { ...process.env, EINZBERN_HOME: options.deviceHome, EINZBERN_HEAVY_LOCK_DIR: options.directory };
   delete env.EINZBERN_HEAVY_SLOT; delete env.EINZBERN_MEMORY_LEASE;
-  const result = spawnSync(process.execPath, [new URL("../scripts/task.mjs", import.meta.url).pathname, "test"], { env, encoding: "utf8", timeout: 10_000 });
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/task.mjs", import.meta.url)), "test"], { env, encoding: "utf8", timeout: 10_000 });
   assert.equal(result.status, 1, result.stderr); assert.equal(result.stdout, "");
   const receipt = JSON.parse(result.stderr.trim());
   assert.ok(["MEMORY_BUDGET_INSUFFICIENT", "MEMORY_PRESSURE_HIGH", "MEMORY_SAMPLE_UNAVAILABLE"].includes(receipt.reasonCode), result.stderr);
