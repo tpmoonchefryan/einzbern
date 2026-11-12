@@ -385,7 +385,7 @@ test("F07: common defaults inherit optional project scalars only, and an unresol
   const f = await fixture(t); await configure(f.a, "alpha");
   const tiers = JSON.parse(readSettingsCatalog(f.a.reference.libraryId, []).settings.find(entry => entry.key === "models.tiers").currentValue).map(tier => ({ ...tier, model: "alpha-model" }));
   await appendHistoricalSetting(f.a, "models.tiers", JSON.stringify(tiers));
-  await setWorkspaceSetting(f.a.path, { key: "workspace.generatedArtifactsPath", value: "alpha-artifacts", occurredAt: at });
+  await setWorkspaceSetting(f.a.path, { key: "storage.snapshotEveryEvents", value: "128", occurredAt: at });
   await setConfigRecord(f.a.path, { collection: "gate", key: "alpha-gate", projectId: f.a.reference.projectId, value: { command: [process.execPath, "-e", "process.exit(0)"], root: ".", covers: ["**"], required: true, enabled: true, releaseOnly: false }, occurredAt: at });
   await setConfigRecord(f.b.path, { collection: "chain", key: "common-default", projectId: f.b.reference.projectId, value: f.a.reference, occurredAt: at });
   const resolved = await resolveProjectTarget(f.b.reference, f.home);
@@ -393,7 +393,7 @@ test("F07: common defaults inherit optional project scalars only, and an unresol
   assert.equal(source("design.authority"), "common", "an optional project scalar comes from the common default");
   assert.equal(source("artifact.language"), "common");
   assert.notEqual(source("models.tiers"), "common", "a collection setting never inherits");
-  assert.notEqual(source("workspace.generatedArtifactsPath"), "common", "a library-scope setting never inherits");
+  assert.notEqual(source("storage.snapshotEveryEvents"), "common", "a library-scope setting never inherits");
   assert.equal(resolved.configRecords.some(record => record.collection === "gate"), false, "gate declarations never inherit");
   assert.equal(resolved.readiness.gates.ready, false);
   // The common default names a target this device does not register: refused, not an empty default.
@@ -460,7 +460,8 @@ test("R46 I02: declared, library and inherited values keep their provenance unde
   const f = await fixture(t); await configure(f.a, "alpha");
   await setWorkspaceSetting(f.b.path, { key: "artifact.language", value: "fr", configurationProjectId: f.b.reference.projectId, occurredAt: at });
   await setWorkspaceSetting(f.b.path, { key: "artifact.language", value: "ja", occurredAt: at });
-  await setWorkspaceSetting(f.b.path, { key: "workspace.generatedArtifactsPath", value: "beta-artifacts", occurredAt: at });
+  await setWorkspaceSetting(f.b.path, { key: "storage.snapshotEveryEvents", value: "128", occurredAt: at });
+  await setWorkspaceSetting(f.b.path, { key: "workspace.generatedArtifactsPath", value: "beta-artifacts", configurationProjectId: f.b.reference.projectId, occurredAt: at });
   const args = ["--workspace", f.b.path, "--project-id", f.b.reference.projectId];
   const without = await catalogAs(f, args);
   assert.equal(Object.hasOwn(without, "commonDefault"), false, "a target without a common default gets no new field");
@@ -470,17 +471,18 @@ test("R46 I02: declared, library and inherited values keep their provenance unde
   const view = (key) => { const row = rowOf(catalog, key); return [row.currentValue, row.declaredValue, row.source.kind]; };
   assert.deepEqual(view("artifact.language"), ["fr", "fr", "project"], "the target's own declaration is its declaredValue");
   assert.equal(rowOf(catalog, "artifact.language").source.projectId, f.b.reference.projectId);
-  assert.deepEqual(view("workspace.generatedArtifactsPath"), ["beta-artifacts", "beta-artifacts", "library"], "a library key reads the library's declaration");
+  assert.deepEqual(view("storage.snapshotEveryEvents"), ["128", "128", "library"], "a library key reads the library's declaration");
+  assert.deepEqual(view("workspace.generatedArtifactsPath"), ["beta-artifacts", "beta-artifacts", "project"], "Story649 artifact directory is a project declaration, not a library key");
   assert.deepEqual(view("design.authority"), ["https://alpha.example.test", null, "common"], "an inherited key is not the target's declaration");
   assert.equal(rowOf(catalog, "design.authority").inheritedValue, "https://alpha.example.test");
   assert.deepEqual([rowOf(catalog, "design.authority").source.libraryId, rowOf(catalog, "design.authority").source.projectId], [f.a.reference.libraryId, f.a.reference.projectId]);
   // The rows that were right without a common default stay as they were, but for the provenance's library.
-  for (const key of ["artifact.language", "workspace.generatedArtifactsPath"]) assert.equal(rowOf(catalog, key).declaredValue, rowOf(without, key).declaredValue, key);
+  for (const key of ["artifact.language", "storage.snapshotEveryEvents"]) assert.equal(rowOf(catalog, key).declaredValue, rowOf(without, key).declaredValue, key);
   // The effective state the catalog reads rebuilds each record with the project it was declared on:
   // the target's own declaration keeps the target, a library key and an inherited key carry none.
   const effective = await effectiveProjectState(await materializeWorkspace(f.b.path), f.b.reference.projectId, f.home);
-  assert.deepEqual(effective.settings.filter(entry => ["artifact.language", "design.authority", "workspace.generatedArtifactsPath"].includes(entry.key)).map(entry => [entry.key, entry.value, entry.projectId ?? null]).sort(),
-    [["artifact.language", "fr", f.b.reference.projectId], ["design.authority", "https://alpha.example.test", null], ["workspace.generatedArtifactsPath", "beta-artifacts", null]]);
+  assert.deepEqual(effective.settings.filter(entry => ["artifact.language", "design.authority", "storage.snapshotEveryEvents"].includes(entry.key)).map(entry => [entry.key, entry.value, entry.projectId ?? null]).sort(),
+    [["artifact.language", "fr", f.b.reference.projectId], ["design.authority", "https://alpha.example.test", null], ["storage.snapshotEveryEvents", "128", null]]);
   // A reset of the target's language takes out its own declaration only: the library's stands and answers.
   await removeWorkspaceSetting(f.b.path, { key: "artifact.language", configurationProjectId: f.b.reference.projectId, occurredAt: at });
   const reset = await catalogAs(f, args);
@@ -846,4 +848,46 @@ test("INIT068 legacy planned content dispatch requires action, preserves researc
   assert.equal(implementation.contexts[0].executionAdmission.status, "refused");
   assert.equal(implementation.contexts[0].executionAdmission.contentReason, "work-content-incomplete");
   await assert.rejects(workProjectContexts(typed, work.id, f.home, { ...request, action: "pretend-research" }));
+});
+
+test("Story649: common-default artifact locations never redirect a different project's catalog or actual output", async t => {
+  const { putArtifact, verifyArtifacts } = await import("../dist/build/packages/core/src/artifact-store.js");
+  const { inflateSync } = await import("node:zlib");
+  const f = await fixture(t);
+  const previous = process.env.EINZBERN_HOME;
+  process.env.EINZBERN_HOME = f.home;
+  try {
+    await configure(f.a, "alpha");
+    const alphaRoot = join(f.root, "alpha-blobs");
+    const betaRoot = join(f.root, "beta-blobs");
+    await mkdir(alphaRoot); await mkdir(betaRoot);
+    await setWorkspaceSetting(f.a.path, { key: "workspace.generatedArtifactsPath", value: alphaRoot, configurationProjectId: f.a.reference.projectId, occurredAt: at });
+    await setConfigRecord(f.b.path, { collection: "chain", key: "common-default", projectId: f.b.reference.projectId, value: f.a.reference, occurredAt: at });
+    const args = ["--workspace", f.b.path, "--project-id", f.b.reference.projectId];
+    const catalog = await catalogAs(f, args);
+    const directory = rowOf(catalog, "workspace.generatedArtifactsPath");
+    assert.equal(directory.currentValue, "artifacts");
+    assert.equal(directory.source.kind, "default");
+    assert.equal(rowOf(catalog, "artifact.language").currentValue, "en");
+    assert.equal(rowOf(catalog, "artifact.language").source.kind, "common", "ordinary settings keep their common-default semantics");
+    const input = join(f.root, "beta-input.txt");
+    await writeFile(input, "beta project actual artifact");
+    const first = await putArtifact(f.b.path, { projectId: f.b.reference.projectId, file: input, at });
+    assert.equal(inflateSync(await readFile(join(f.b.path, directory.currentValue, first.blobName))).toString(), "beta project actual artifact");
+    await assert.rejects(readFile(join(alphaRoot, first.blobName)), { code: "ENOENT" });
+    await setWorkspaceSetting(f.b.path, { key: "workspace.generatedArtifactsPath", value: betaRoot, configurationProjectId: f.b.reference.projectId, occurredAt: at });
+    assert.equal(rowOf(await catalogAs(f, args), "workspace.generatedArtifactsPath").deviceValue, betaRoot);
+    const second = await putArtifact(f.b.path, { projectId: f.b.reference.projectId, file: input, at });
+    assert.equal(inflateSync(await readFile(join(betaRoot, second.blobName))).toString(), "beta project actual artifact");
+    assert.equal((await verifyArtifacts(f.b.path, f.b.reference.projectId)).reasonCode, "ARTIFACT_VERIFIED");
+    assert.equal(rowOf(await catalogAs(f, ["--workspace", f.a.path, "--project-id", f.a.reference.projectId]), "workspace.generatedArtifactsPath").deviceValue, alphaRoot);
+    await removeWorkspaceSetting(f.b.path, { key: "workspace.generatedArtifactsPath", configurationProjectId: f.b.reference.projectId, occurredAt: at });
+    await setConfigRecord(f.b.path, { collection: "chain", key: "common-default", projectId: f.b.reference.projectId, value: { libraryId: "library:" + "c".repeat(24), projectId: "project:" + "d".repeat(24) }, occurredAt: at });
+    const unresolved = await catalogAs(f, args);
+    assert.equal(unresolved.commonDefault.status, "unresolved");
+    assert.equal(rowOf(unresolved, "workspace.generatedArtifactsPath").currentValue, "artifacts");
+    assert.equal(rowOf(unresolved, "workspace.generatedArtifactsPath").source.kind, "default");
+    assert.equal(rowOf(unresolved, "artifact.language").currentValue, null);
+    assert.equal((await verifyArtifacts(f.b.path, f.b.reference.projectId)).reasonCode, "ARTIFACT_VERIFIED");
+  } finally { process.env.EINZBERN_HOME = previous; }
 });

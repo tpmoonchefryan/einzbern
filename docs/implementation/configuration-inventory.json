@@ -822,13 +822,13 @@
       "semanticType": "path",
       "storageType": "string",
       "controlType": "text",
-      "registeredScope": "library",
-      "scope": "library",
+      "registeredScope": "project",
+      "scope": "project",
       "owner": "governed-owner",
       "schemaOwner": "installed-engine",
       "source": "library events bound to stable target identity",
       "storageSource": "library settings.updated events (historical string transport)",
-      "inheritance": "target library only",
+      "inheritance": "explicit project parent chain, legacy library declaration, then default; no cross-project common-default inheritance; absolute locations resolve on this device",
       "sharing": "portable declarations sync with library",
       "export": "consumer-specific whitelist; library config projection is not an authority",
       "consumer": "artifact-store.ts artifact root resolution",
@@ -1066,6 +1066,38 @@
   "runtimeInputs": {
     "schemaVersion": "einzbern.runtime-input-contract.v1",
     "entries": [
+      {
+        "classification": "startup-override",
+        "visibility": "public",
+        "transport": "environment-string",
+        "defaultValue": false,
+        "owner": "device-user",
+        "source": "process environment",
+        "persistence": "invocation",
+        "sensitivity": "ordinary",
+        "pathBase": null,
+        "sharing": "device-local; never a shared library declaration",
+        "export": "not exported to shared AGENTS or config/project.json",
+        "restart": "Read for each invocation.",
+        "editing": "Set to 1 for a diagnostic invocation; unset to disable.",
+        "consumption": "wired",
+        "key": "env:EINZBERN_RECALL_OBSERVATION",
+        "kind": "environment",
+        "name": "EINZBERN_RECALL_OBSERVATION",
+        "semanticType": "boolean",
+        "validation": "Only literal 1 enables observation; unset or every other value disables it.",
+        "defaultDescription": "observation disabled",
+        "precedence": [
+          "EINZBERN_RECALL_OBSERVATION",
+          "disabled"
+        ],
+        "scope": "Recall CLI and hook invocation",
+        "consumer": [
+          "packages/cli/src/index.ts runCli",
+          "scripts/einzbern-hook.mjs runHookEvent"
+        ],
+        "effect": "Adds content-free request correlation, counters and process/stage costs to existing device hook log. Does not change retrieval, authority checks or output. No prompts or knowledge bodies are logged."
+      },
       {
         "classification": "internal-transient",
         "visibility": "internal",
@@ -7504,6 +7536,11 @@
         "mutates": false,
         "flags": [
           {
+            "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
             "name": "workspace",
             "required": false,
             "valueKind": "string"
@@ -7515,6 +7552,11 @@
         "availability": "cli",
         "mutates": true,
         "flags": [
+          {
+            "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
           {
             "name": "workspace",
             "required": false,
@@ -7542,6 +7584,11 @@
         "availability": "cli",
         "mutates": false,
         "flags": [
+          {
+            "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
           {
             "name": "workspace",
             "required": false,

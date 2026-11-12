@@ -7,7 +7,7 @@
 // The hook holds no rule of its own (D5): which event is answered and what the answer carries is
 // decided here, by the engine version that is current. In the development tree it reads the
 // build (dist/build); a release carries it as one file (TCRN-CROSS-STORY-481).
-// BL-34: SubagentStart recalls from the native agent_type and includes navigation before work.
+// STORY-646: SubagentStart role names are not tasks; retain navigation before work.
 // SessionStart remains a navigation-only fallback. BL-35 adds the narrowly bounded Read guard.
 // Codex peer observations use native tool results; no collector or polling process is started.
 // TCRN-CROSS-SUB-483 (TCRN-CROSS-STORY-529, MIN-257 D6): every prompt recalled here also leaves
@@ -46,7 +46,7 @@ function payloadDirectory(cwd, body) {
 
 // One line in log/hook.ndjson for one recall, written as the launcher writes its note: the
 // directory 0700, the file 0600, and every failure dropped.
-function noteRecall(device, event, cwd, reasonCode, host) {
+function noteRecall(device, event, cwd, reasonCode, host, observation, versions = {}) {
   try {
     const logDirectory = join(device, LOG_DIRECTORY);
     try {
@@ -54,7 +54,8 @@ function noteRecall(device, event, cwd, reasonCode, host) {
     } catch (error) {
       if (error?.code !== "EEXIST") return;
     }
-    const line = { schemaVersion: LOG_SCHEMA_VERSION, at: new Date().toISOString(), event, cwd, reasonCode, host };
+    const outcome = reasonCode === "HOOK_RECALL_ANSWERED" ? "hit" : reasonCode === "HOOK_RECALL_NO_HITS" ? "no-hit" : reasonCode === "HOOK_RECALL_PROMPT_EMPTY" ? "empty" : "refused-or-error";
+    const line = { schemaVersion: LOG_SCHEMA_VERSION, at: new Date().toISOString(), event, cwd, reasonCode, host, ...(observation === undefined ? {} : { outcome, observation, ...versions }) };
     appendFileSync(join(logDirectory, LOG_FILE), `${JSON.stringify(line)}\n`, { mode: 0o600 });
   } catch {
     // A hook never blocks a session, and a line it cannot write changes nothing it answers.
@@ -72,19 +73,30 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
   // file. Keep this guard for direct callers too: a hook answers nothing, and the CLI is where the
   // floor is reported (ENGINE_NODE_TOO_OLD).
   if (!meetsNodeFloor(process.versions.node)) return null;
-  const [{ hookEventName, hookHost, navigationPointerAnswer, promptRecallOutcome, hookProtocolOutput }, { deviceHome }, { kiroHookEventName }, { antigravityHookEventName }] = await Promise.all([
+  const [{ hookEventName, hookHost, navigationPointerAnswer, promptRecallOutcome, hookProtocolOutput }, { deviceHome }] = await Promise.all([
     import("../dist/build/packages/core/src/hook-recall.js"),
     import("../dist/build/packages/core/src/device-home.js"),
-    import("../dist/build/packages/core/src/kiro-host.js"),
-    import("../dist/build/packages/core/src/antigravity-host.js"),
   ]);
+  // Observation is opt-in. Loading its version/cache dependencies before every
+  // unobserved event changed startup allocation even on navigation-only paths.
+  let observe;
+  let versions;
+  if (process.env.EINZBERN_RECALL_OBSERVATION === "1") {
+    const [observation, cache, framework] = await Promise.all([
+      import("../dist/build/packages/core/src/recall-observation.js"),
+      import("../dist/build/packages/core/src/library-cache.js"),
+      import("../dist/build/packages/core/src/framework-version.js"),
+    ]);
+    observe = observation.withRecallObservation;
+    versions = { engineVersion: framework.FRAMEWORK_VERSION, projectionVersion: cache.CACHE_VIEWS_SCHEMA_VERSION };
+  }
   const body = payload !== null && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
   // Read once, for the recall and for its log line alike.
   const host = hookHost(process.env);
   const name = host === "kiro"
-    ? (kiroHookEventName(event) ?? hookEventName(event))
+    ? ((await import("../dist/build/packages/core/src/kiro-host.js")).kiroHookEventName(event) ?? hookEventName(event))
     : host === "antigravity"
-      ? (antigravityHookEventName(event) ?? hookEventName(event))
+      ? ((await import("../dist/build/packages/core/src/antigravity-host.js")).antigravityHookEventName(event) ?? hookEventName(event))
       : hookEventName(event);
   // Stale owned SubagentStop commands are inert until normal setup retires them.
   if (event === "subagent-stop") return host === "antigravity" ? "{}\n" : null;
@@ -93,7 +105,14 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
     await runCodexPeerHook(name, body, deviceHome(process.env));
   }
   // DSH retains its existing navigation contract; its next feature batch is separate.
-  if (name === "SubagentStart" && host === "dsh") return `${navigationPointerAnswer(host, name).output}\n`;
+  if (name === "SubagentStart" && host === "dsh") {
+    const result = `${navigationPointerAnswer(host, name).output}\n`;
+    if (observe !== undefined) {
+      const { observation } = await observe(async () => result);
+      noteRecall(deviceHome(process.env), event, absolute(cwd) ?? absolute(body.cwd) ?? process.cwd(), "HOOK_RECALL_PROMPT_EMPTY", host, observation, versions);
+    }
+    return result;
+  }
   switch (name) {
     case "PreToolUse": {
       const directory = payloadDirectory(cwd, body);
@@ -145,6 +164,7 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
         return "{}\n";
       }
       let outcome;
+      let observation;
       try {
         // A payload without a prompt string is an empty prompt (HOOK_RECALL_PROMPT_EMPTY).
         const prompt = host === "kiro" && typeof process.env.USER_PROMPT === "string"
@@ -152,20 +172,23 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
           : host === "antigravity" && typeof body.lastUserInput === "string"
             ? body.lastUserInput
             : (typeof body.prompt === "string" ? body.prompt : "");
-        outcome = await promptRecallOutcome({
+        const operation = () => promptRecallOutcome({
           libraryPath,
           // Native SubagentStart has agent_type, not a task prompt. Never read
           // arbitrary transcript paths or claim task-specific injection from a made-up field.
-          prompt: name === "SubagentStart" ? (typeof body.agent_type === "string" ? body.agent_type : "") : prompt,
+          prompt: name === "SubagentStart" ? "" : prompt,
           event: name,
           host,
           cwd: directory,
         });
+        if (observe !== undefined) {
+          ({ value: outcome, observation } = await observe(operation, value => { observation = value; }));
+        } else { outcome = await operation(); }
       } catch (error) {
-        noteRecall(device, event, directory, typeof error?.reasonCode === "string" ? error.reasonCode : UNCODED_FAILURE, host);
+        noteRecall(device, event, directory, typeof error?.reasonCode === "string" ? error.reasonCode : UNCODED_FAILURE, host, observation, versions);
         throw error;
       }
-      noteRecall(device, event, directory, outcome.reasonCode, host);
+      noteRecall(device, event, directory, outcome.reasonCode, host, observation, versions);
       if (name === "SubagentStart") {
         const pointer = navigationPointerAnswer(host, name);
         return `${hookProtocolOutput(host, name, [...pointer.lines, ...(outcome.answer?.lines ?? [])])}\n`;

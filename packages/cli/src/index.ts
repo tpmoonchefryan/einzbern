@@ -1,3 +1,6 @@
+import { isProjectArtifactBinding, resolveProjectArtifactBinding } from "../../core/src/portable-path.js";
+import { withRecallObservation } from "../../core/src/recall-observation.js";
+import { readRecallAuthority } from "../../core/src/recall-authority.js";
 import { MEMORY_LEASE_VARIABLE } from "../../../scripts/lib/memory-budget.mjs";
 import { readWorkContentImpact } from "../../core/src/work-requirements.js";
 import { workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
@@ -1420,6 +1423,16 @@ async function projectionRefreshReadback(state: Awaited<ReturnType<typeof materi
   catch { return { plan: null, status: "unavailable", reason: "projection-discovery-unavailable", refreshCommand: "configuration-projections-plan --workspace <library>" }; }
 }
 
+// A missing device binding prevents artifact use, not access to the editor that repairs it.
+function artifactDeviceReadback(key: string, value: unknown): { deviceValue?: string | null; deviceStatus?: "ready" | "unconfigured"; deviceReasonCode?: string } {
+  if (key !== "workspace.generatedArtifactsPath" || typeof value !== "string" || !isProjectArtifactBinding(value)) return {};
+  try { return { deviceValue: resolveProjectArtifactBinding(value), deviceStatus: "ready" }; }
+  catch (error) {
+    if ((error as { reasonCode?: string }).reasonCode !== "PATH_BINDING_UNCONFIGURED") throw error;
+    return { deviceValue: null, deviceStatus: "unconfigured", deviceReasonCode: "PATH_BINDING_UNCONFIGURED" };
+  }
+}
+
 async function writeSettingsState(io: CliIo, rawState: Awaited<ReturnType<typeof materializeWorkspace>>, key: string, projectId?: string): Promise<void> {
   const state = scopedWorkspaceState(rawState, projectId);
   const setting = state.settings.find((entry) => entry.key === key);
@@ -1437,6 +1450,7 @@ async function writeSettingsState(io: CliIo, rawState: Awaited<ReturnType<typeof
     source: current.source ?? null,
     setting: setting ?? null,
     effectiveValue: current.currentValue,
+    ...artifactDeviceReadback(key, current.currentValue),
     persistence: "committed",
     projections: { ...await projectionRefreshReadback(rawState, projectId), status: "refresh-required", targets: affectedProjectionTargets(rawState, projectId), includesLibraryDefaults: projectId === undefined, command: "agents-render", note: "Saving declarations does not refresh inherited outputs on other targets or devices." },
   } as const;
@@ -1745,9 +1759,9 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // CLAUDE.md, rendered against the library's records. --project names a directory of the project
   // (the current one when left out), and this device's registry gives the project and its library.
   { name: "agents-render", availability: "cli", mutates: true, flags: [{ name: "project", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "artifact-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }] },
-  { name: "artifact-put", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "file", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "artifact-verify", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }] },
+  { name: "artifact-list", availability: "cli", mutates: false, flags: [{ name: "project-id", required: false, valueKind: "string" }, { name: "workspace", required: false, valueKind: "string" }] },
+  { name: "artifact-put", availability: "cli", mutates: true, flags: [{ name: "project-id", required: false, valueKind: "string" }, { name: "workspace", required: false, valueKind: "string" }, { name: "file", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "artifact-verify", availability: "cli", mutates: false, flags: [{ name: "project-id", required: false, valueKind: "string" }, { name: "workspace", required: false, valueKind: "string" }] },
   { name: "chain-declare", availability: "cli", mutates: true, flags: [{ name: "project-id", required: false, valueKind: "string" }, { name: "workspace", required: false, valueKind: "string" }, { name: "role", required: true, valueKind: "string" }, { name: "coordination-library-id", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "chain-identity", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }] },
   // TCRN-CROSS-STORY-467 R4: replay a chain from genesis without trusting any view, and
@@ -2072,6 +2086,39 @@ export function assertDeclaredOutputCategory(command: string, output: string): v
 }
 
 export async function runCli(arguments_: readonly string[], io: CliIo): Promise<void> {
+  if (arguments_[0] !== "recall" || process.env["EINZBERN_RECALL_OBSERVATION"] !== "1") return runCliUnobserved(arguments_, io);
+  const results: { reasonCode: string; outcome: string }[] = [];
+  let observation: import("../../core/src/recall-observation.js").RecallObservation | undefined;
+  try {
+    await withRecallObservation(() => runCliUnobserved(arguments_, { write(value) {
+      let reasonCode = "CLI_RECALL_RESULT";
+      try {
+        const parsed = JSON.parse(value) as { reasonCode?: unknown };
+        if (typeof parsed.reasonCode === "string") reasonCode = parsed.reasonCode;
+      } catch { /* Non-JSON output is not copied into telemetry. */ }
+      const outcome = reasonCode === "RECALL_READY" ? "hit"
+        : reasonCode === "RECALL_NO_STRONG_HIT" ? "no-hit" : "result";
+      results.push({ reasonCode, outcome });
+      io.write(value);
+    } }), value => { observation = value; });
+  } catch (error) {
+    const reason = (error as { reasonCode?: unknown }).reasonCode;
+    const queryPosition = arguments_.indexOf("--query");
+    const query = queryPosition < 0 ? undefined : arguments_[queryPosition + 1];
+    const empty = typeof query === "string" && query.trim().length === 0
+      && (error as { message?: unknown }).message === "query"
+      && (reason === "CLI_ARGUMENT_MISSING" || reason === "CLI_ARGUMENT_MALFORMED");
+    results.push({ reasonCode: typeof reason === "string" ? reason : "CLI_RECALL_FAILED", outcome: empty ? "empty" : "error" });
+    throw error;
+  } finally {
+    if (observation !== undefined) {
+      const { logCliRecall } = await import("../../core/src/recall-observation-log.js");
+      await logCliRecall(observation, results);
+    }
+  }
+}
+
+async function runCliUnobserved(arguments_: readonly string[], io: CliIo): Promise<void> {
   const command = arguments_[0];
   if (!command || command.startsWith("--")) {
     fail("CLI_COMMAND_REQUIRED", "A governed command is required");
@@ -3425,7 +3472,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       typedValues: presentedSettings.map(entry => ({ ...annotateConfigValue(entry.key, entry.currentValue), effectiveScope: entry.scope, effectiveSource: entry.source ?? null })),
       projectBindings: state.configRecords.filter(record => record.collection === "chain" && record.key !== "identity"),
       // TCRN-CROSS-INIT-053 R47 (c1-B): a coordination chain lists its own runtime settings, each for the whole library.
-      settings: presentedSettings }));
+      settings: presentedSettings.map(entry => ({ ...entry, ...artifactDeviceReadback(entry.key, entry.currentValue) })) }));
     return;
   }
   if (command === "install-manifest") {
@@ -3477,7 +3524,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // meet again later. validateSettingValue is the same pure function setWorkspaceSetting
       // is about to call, so calling it here costs a second pass over one string and buys a
       // stable reason code rather than whichever check happened to be reached first.
-      await assertGeneratedArtifactsRoot(workspace, validateSettingValue(values.key, values.value ?? "", workspace));
+      await assertGeneratedArtifactsRoot(workspace, validateSettingValue(values.key, values.value ?? "", workspace), undefined, true);
     }
     const state = await withWriteLock(workspace, at, async () => setWorkspaceSetting(workspace, {
       occurredAt: at, ...configurationOptions(values),
@@ -3596,23 +3643,23 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     // reads it back before it takes the lock. No chain event is appended — the manifest is the record,
     // and keeping the put off the chain is what lets the blob root be a directory the engine does not
     // own.
-    const values = parseArguments(rest, ["workspace", "file", "at", "timeout-ms"]);
+    const values = parseArguments(rest, ["project-id", "workspace", "file", "at", "timeout-ms"]);
     required(values, ["workspace", "file", "at"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
-    io.write(canonicalJson(await putArtifact(workspace, { file: values.file ?? "", at })));
+    io.write(canonicalJson(await putArtifact(workspace, { file: values.file ?? "", at, ...(values["project-id"] ? { projectId: values["project-id"] } : {}) })));
     return;
   }
   if (command === "artifact-list") {
-    const values = parseArguments(rest, ["workspace"]);
+    const values = parseArguments(rest, ["project-id", "workspace"]);
     required(values, ["workspace"]);
-    io.write(canonicalJson(await listArtifacts(values.workspace ?? "")));
+    io.write(canonicalJson(await listArtifacts(values.workspace ?? "", values["project-id"])));
     return;
   }
   if (command === "artifact-verify") {
-    const values = parseArguments(rest, ["workspace"]);
+    const values = parseArguments(rest, ["project-id", "workspace"]);
     required(values, ["workspace"]);
-    io.write(canonicalJson(await verifyArtifacts(values.workspace ?? "")));
+    io.write(canonicalJson(await verifyArtifacts(values.workspace ?? "", values["project-id"])));
     return;
   }
   if (command === "snapshot-manifest") {
@@ -3968,10 +4015,11 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
     const workspace = values.workspace ?? "";
     const query = values.query ?? "";
-    if (query.length === 0 || query.length > RUNTIME_CAPACITY.stringCodeUnits || !query.isWellFormed()) fail("CLI_ARGUMENT_MALFORMED", "query");
+    if (query.trim().length === 0 || query.length > RUNTIME_CAPACITY.stringCodeUnits || !query.isWellFormed()) fail("CLI_ARGUMENT_MALFORMED", "query");
     const limit = values.limit === undefined ? undefined : integerValue(values, "limit");
     if (limit !== undefined && (limit < 1 || !Number.isSafeInteger(limit))) fail("CLI_ARGUMENT_MALFORMED", "limit");
-    const state = await effectiveProjectState(await validateWorkspace(workspace), values["project-id"]);
+    const { state: rawState, authority } = await readRecallAuthority(workspace, true);
+    const state = await effectiveProjectState(rawState, values["project-id"]);
     // Legacy project selection chooses configuration only; shared libraries also isolate corpora.
     const projectId = isSharedLibrary(state) ? values["project-id"] : undefined;
     const settingValue = (key: string): string | undefined => state.settings.find((entry) => entry.key === key)?.value;
@@ -4009,7 +4057,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       at: values.at ?? "",
       allowTrailing: booleanValue(values["allow-trailing"], "allow-trailing"),
       ...(cardStatus === "valid" ? {} : { status: cardStatus }),
-    });
+    }, authority);
     // TCRN-CROSS-STORY-474 R1: what the index holds is decided in one place (recall-inputs.ts), so
     // the verb and the prompt hook cannot index differently: the Stories, Incidents, Initiatives and
     // Epics with their goal, body and parent titles, every minutes record, and the cards.

@@ -1,3 +1,5 @@
+import { validateSettingValue } from "./settings.js";
+import { observeMaterialization, observeStage, observeCheckpoint, observeCacheReason, observeReplay } from "./recall-observation.js";
 import { WORK_CONTENT_KEY, workContent, validateWorkContent, contentFail } from "./work-content.js";
 import type { ContentWorkKind } from "./work-content.js";
 import { WORK_CONTENT_POLICY_KEY, readWorkContentPolicy, validateWorkContentPolicy, workContentPolicyApplies, workContentRolloutReadiness } from "./work-content-templates.js";
@@ -10,6 +12,7 @@ import { verifyDotExtensionSource } from "./dot-extension-source.js";
 import type { DotSourceVerificationBindings } from "./dot-extension-source.js";
 import { verifyWriteAuthorization } from "./write-authorization.js";
 import { consolidateStates } from "./consolidation-state.js";
+import { ConsolidationError } from "./consolidation-format.js";
 import { FormatVersionError, isEngineVersion, compareSemver } from "./format-version.js";
 import type { InvolvedProjects } from "../../protocol/src/index.js";
 import { normalizeInvolvedProjects, involvedProjectsOf, assertStoredInvolvedProjects, assertInvolvedProjectScope, storedInvolvedProjects } from "./involved-projects.js";
@@ -2229,6 +2232,10 @@ function replayModelPlanMutation(
 }
 
 function materialize(metadata: WorkspaceMetadata, events: readonly EventRecord[], snapshot?: ReplaySeed, merge?: MergeReplay): WorkspaceState {
+  return observeReplay(events.length, () => materializeEvents(metadata, events, snapshot, merge));
+}
+
+function materializeEvents(metadata: WorkspaceMetadata, events: readonly EventRecord[], snapshot?: ReplaySeed, merge?: MergeReplay): WorkspaceState {
   if (snapshot === undefined) {
     recordFullMaterialize();
   } else {
@@ -3335,6 +3342,7 @@ type LibraryReadShape = { readonly consolidation?: LibraryRead["consolidation"];
 interface LibrarySeed {
   readonly seed: ReplaySeed;
   readonly merge: MergeReplayCheckpoint;
+  readonly consolidatedTailVersion?: number;
 }
 
 interface LibraryReplayResult {
@@ -3350,17 +3358,17 @@ interface LibraryReplayResult {
  * device held first is renamed with an alias. The result does not depend on which device
  * merges: the order and the renaming are both deterministic.
  */
-function replayLibrary(library: Library, read: LibraryReadShape, cached?: LibrarySeed): LibraryReplayResult {
+function replayLibrary(library: Library, read: LibraryReadShape, cached?: LibrarySeed, sourceStates?: readonly WorkspaceState[]): LibraryReplayResult {
   if (read.consolidation !== undefined) {
     const { index, sources } = read.consolidation;
-    const inputs = sources.map(({ source, read: sourceRead }) => ({ source, state: replayLibrary({ root: `${library.root}/${source.archive}`, manifest: source.manifest }, sourceRead).state }));
-    const base = consolidateStates(index, inputs);
-    const entries = read.events.filter(entry => entry.event.sequence > (index.primaryVersionVector[entry.deviceId] ?? 0));
+    const inputs = cached === undefined ? sources.map(({ source, read: sourceRead }, index) => ({ source, state: sourceStates?.[index] ?? replayLibrary({ root: `${library.root}/${source.archive}`, manifest: source.manifest }, sourceRead).state })) : [];
+    const base = cached?.seed ?? (() => { const state = consolidateStates(index, inputs); return { ...state, prefixEvents: state.events }; })();
+    const entries = read.events.filter(entry => entry.event.sequence > (index.primaryVersionVector[entry.deviceId] ?? 0)).slice(cached?.consolidatedTailVersion ?? 0);
     const origins = new Map<EventRecord, ReplayOrigin>(entries.map(entry => [entry.event, { deviceId: entry.deviceId, streamId: entry.streamId, clock: entry.clock }]));
-    const merge = new MergeReplay(origins);
-    const replayed = materialize(libraryWorkspaceMetadata(library), entries.map(entry => entry.event), { ...base, prefixEvents: base.events }, merge);
+    const merge = new MergeReplay(origins, cached?.merge);
+    const replayed = materialize(libraryWorkspaceMetadata(library), entries.map(entry => entry.event), base, merge);
     const streams = read.streams.flatMap(stream => stream.manifest === null ? [] : [streamHead(stream.manifest)]);
-    const importedStreams = inputs.flatMap(entry => entry.state.library?.streams ?? []);
+    const importedStreams = sources.flatMap(({ read: sourceRead }) => sourceRead.streams.flatMap(stream => stream.manifest === null ? [] : [streamHead(stream.manifest)]));
     const headEventHash = canonicalSha256({ schemaVersion: "einzbern.shared-head.v1", provenance: library.manifest.consolidation!.sha256, head: libraryHeadDigest(streams) });
     return { state: checkedWorkContentBoundary({ ...replayed, headEventHash, library: { minEngineVersion: library.manifest.minEngineVersion, libraryRoot: library.root, versionVector: read.versionVector, streams, importedStreams, consolidation: index, rejectedEvents: merge.rejected, aliases: merge.aliases } }), replayExecutionConfig: replayed.executionConfig, merge };
   }
@@ -3390,6 +3398,7 @@ function replayLibrary(library: Library, read: LibraryReadShape, cached?: Librar
 
 /** Replay a library's merged events from genesis, without this device's cache. */
 export function materializeLibraryRead(library: Library, read: LibraryReadShape): WorkspaceState {
+  observeMaterialization();
   return replayLibrary(library, read).state;
 }
 
@@ -3458,7 +3467,7 @@ function seedFromSnapshot(snapshot: CacheSnapshot, read: LibraryRead): LibrarySe
   const state = snapshotState(snapshot.state);
   if (state === null) return null;
   const { merge, ...collections } = state;
-  return { seed: { version: prefix, ...collections, prefixEvents: read.events.slice(0, prefix).map((entry) => entry.event) }, merge };
+  return { seed: { ...collections, version: prefix, prefixEvents: read.events.slice(0, prefix).map((entry) => entry.event) }, merge };
 }
 
 // The snapshot interval: storage.snapshotEveryEvents, or its catalog default.
@@ -3470,8 +3479,9 @@ function snapshotInterval(state: WorkspaceState): number {
 async function cachedSeed(library: Library, read: LibraryRead): Promise<LibrarySeed | null> {
   try {
     const snapshot = await readCacheSnapshot(library.manifest.libraryId);
-    if (snapshot === null) return null;
-    const seeded = seedFromSnapshot(snapshot, read);
+    if (snapshot === null) { observeCacheReason("replay-seed-absent"); return null; }
+    const seeded = typeof snapshot.state === "object" && snapshot.state !== null && "consolidationBinding" in snapshot.state ? null : seedFromSnapshot(snapshot, read);
+    observeCacheReason(seeded === null ? "replay-seed-incompatible" : "replay-seed-validated");
     if (seeded === null) await discardCacheSnapshot(library.manifest.libraryId);
     return seeded;
   } catch {
@@ -3542,9 +3552,100 @@ async function refreshLibraryCache(
  * cache. A seed the rest of the events cannot be replayed onto is a cache fault, and the replay
  * starts again from genesis; the result is the same state either way.
  */
-async function replayLibraryResultThroughCache(library: Library, read: LibraryRead): Promise<LibraryReplayResult> {
-  if (read.consolidation !== undefined) return replayLibrary(library, read);
-  const cached = await cachedSeed(library, read);
+/** Events in the consolidation reducer's deterministic source order, rebuilt from
+ * fully validated bytes, never trusted from a cache payload. */
+function consolidationEvents(read: LibraryReadShape): readonly EventRecord[] {
+  if (read.consolidation === undefined) return read.events.map(entry => entry.event);
+  const { index, sources } = read.consolidation;
+  return [...sources.flatMap(source => consolidationEvents(source.read)), ...read.events.filter(entry => entry.event.sequence > (index.primaryVersionVector[entry.deviceId] ?? 0)).map(entry => entry.event)];
+}
+
+// The hashed state names its coverage as well as its base. A valid state file
+// paired with a damaged/replaced header must never resume at another boundary.
+function consolidationCheckpointBinding(snapshot: Pick<CacheSnapshot, "libraryId" | "engineVersion" | "version" | "maxClock" | "streams">, baseBinding: string, baseVersion: number): string {
+  return canonicalSha256({
+    schemaVersion: "einzbern.consolidation-replay.v2",
+    baseBinding,
+    baseVersion,
+    libraryId: snapshot.libraryId,
+    engineVersion: snapshot.engineVersion,
+    version: snapshot.version,
+    maxClock: snapshot.maxClock,
+    streams: snapshot.streams,
+  });
+}
+
+async function replayLibraryResultThroughCache(library: Library, read: LibraryRead, forceAuthorityReplay = false): Promise<LibraryReplayResult> {
+  if (read.consolidation !== undefined) {
+    const { hasVerifiedReplayProjection, recordVerifiedReplayProjection } = await import("./source-verification.js");
+    // Revalidate the index's expected source heads before trusting a prior merge.
+    // Stream self-consistency and an unchanged version vector alone do not prove
+    // that an archive has not been coherently rewritten at the same sequences.
+    for (const { source, read: sourceRead } of read.consolidation.sources) {
+      const streams = sourceRead.streams.flatMap(stream => stream.manifest === null ? [] : [streamHead(stream.manifest)]);
+      const head = source.manifest.consolidation === undefined ? libraryHeadDigest(streams) : canonicalSha256({ schemaVersion: "einzbern.shared-head.v1", provenance: source.manifest.consolidation.sha256, head: libraryHeadDigest(streams) });
+      if (head !== source.headEventHash || canonicalSha256(sourceRead.versionVector) !== canonicalSha256(source.versionVector) || Boolean(source.manifest.consolidation) !== Boolean(sourceRead.consolidation)) throw new ConsolidationError("CONSOLIDATION_SOURCE_CHANGED", "validated source head/vector differs from the consolidation index");
+    }
+    const binding = canonicalSha256({ projection: FRAMEWORK_VERSION, manifest: library.manifest, index: read.consolidation.index });
+    const baseEvents = read.consolidation.sources.flatMap(source => consolidationEvents(source.read));
+    const tail = read.events.filter(entry => entry.event.sequence > (read.consolidation!.index.primaryVersionVector[entry.deviceId] ?? 0));
+    let replay: LibraryReplayResult | null = null;
+    let cachedVersion: number | null = null;
+    try {
+      const snapshot = forceAuthorityReplay ? null : await readCacheSnapshot(library.manifest.libraryId);
+      const value = snapshot?.state as { consolidationBinding?: unknown; consolidationCheckpoint?: unknown } | undefined;
+      if (snapshot !== null && value?.consolidationBinding === binding && value.consolidationCheckpoint === consolidationCheckpointBinding(snapshot, binding, baseEvents.length) && await hasVerifiedReplayProjection(library, binding, snapshot)) {
+        const cached = seedFromSnapshot({ ...snapshot, version: snapshot.version - baseEvents.length }, { ...read, events: tail });
+        if (cached !== null) {
+          const seed = { ...cached.seed, version: snapshot.version, prefixEvents: [...baseEvents, ...cached.seed.prefixEvents] };
+          replay = replayLibrary(library, read, { seed, merge: cached.merge, consolidatedTailVersion: cached.seed.version });
+          cachedVersion = snapshot.version;
+          observeCacheReason("consolidation-checkpoint-validated");
+        }
+      }
+    } catch {
+      // Derived cache faults never replace source validation or suppress authority errors.
+      replay = null;
+    }
+    if (replay === null) {
+      observeCacheReason("consolidation-checkpoint-miss-full-replay");
+      const sourceStates: WorkspaceState[] = [];
+      for (const { source, read: sourceRead } of read.consolidation.sources) {
+        const sourceLibrary = { root: `${library.root}/${source.archive}`, manifest: source.manifest };
+        // A miss must not turn an unverified source snapshot into a newly
+        // attested root projection. Re-establish every source's authority.
+        sourceStates.push((await replayLibraryResultThroughCache(sourceLibrary, sourceRead, true)).state);
+      }
+      replay = replayLibrary(library, read, undefined, sourceStates);
+    }
+    try {
+      if (cachedVersion !== replay.state.version) {
+        const checkpoint = {
+          libraryId: library.manifest.libraryId,
+          engineVersion: FRAMEWORK_VERSION,
+          version: replay.state.version,
+          maxClock: tail.reduce((largest, entry) => Math.max(largest, entry.clock), 0),
+          streams: read.streams.flatMap(stream => stream.manifest === null || stream.manifest.headEventHash === null ? [] : [{ deviceId: stream.deviceId, streamId: stream.manifest.streamId, sequence: stream.manifest.sequence, eventHash: stream.manifest.headEventHash }]),
+        };
+        const header = await writeCacheSnapshot({
+          ...checkpoint,
+          state: {
+            ...Object.fromEntries(SNAPSHOT_COLLECTIONS.map(name => [name, replay.state[name]])),
+            attestationEnabledAtSequence: replay.state.attestationEnabledAtSequence,
+            consolidationBinding: binding,
+            consolidationCheckpoint: consolidationCheckpointBinding(checkpoint, binding, baseEvents.length),
+            executionConfig: replay.replayExecutionConfig,
+            merge: replay.merge.checkpoint(),
+          },
+        });
+        if ((replay.state.library?.rejectedEvents.length ?? 0) === 0) await recordVerifiedReplayProjection(library, binding, header);
+      }
+    } catch {
+      // A disposable cache write does not change the authority result.
+    }
+    return replay;
+  }
+  const cached = forceAuthorityReplay ? null : await cachedSeed(library, read);
   let replay: LibraryReplayResult | null = null;
   if (cached !== null) {
     try {
@@ -3560,13 +3661,29 @@ async function replayLibraryResultThroughCache(library: Library, read: LibraryRe
 }
 
 async function replayLibraryThroughCache(library: Library, read: LibraryRead): Promise<WorkspaceState> {
-  return (await replayLibraryResultThroughCache(library, read)).state;
+  const forceAuthorityReplay = read.consolidation !== undefined && (await import("./source-verification.js")).hasPendingSourceVerification();
+  return (await replayLibraryResultThroughCache(library, read, forceAuthorityReplay)).state;
 }
 
 /** Read every stream of a library and replay them merged, through this device's cache. */
 export async function materializeLibrary(libraryOrRoot: Library | string, options: LibraryReadOptions = {}): Promise<WorkspaceState> {
+  observeMaterialization();
   const library = typeof libraryOrRoot === "string" ? await openLibrary(libraryOrRoot) : libraryOrRoot;
-  return replayLibraryThroughCache(library, await readAllStreams(library.root, options));
+  // Ordinary reads need no native callback or retained verification envelope.
+  if (options.readFile !== undefined || options.timeoutMs !== undefined || options.archivedManifest !== undefined
+    || process.platform !== "darwin" || library.manifest.consolidation === undefined) {
+    const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
+    const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
+    observeCheckpoint(state.headEventHash);
+    return state;
+  }
+  const { withSourceVerification } = await import("./source-verification.js");
+  return withSourceVerification(library, async () => {
+    const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
+    const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
+    observeCheckpoint(state.headEventHash);
+    return { value: state, read, accepted: (state.library?.rejectedEvents.length ?? 0) === 0 };
+  });
 }
 
 /** The keys a record was renamed from, and the records renamed away from its key (TCRN-CROSS-STORY-468 R5). */
@@ -5417,13 +5534,25 @@ export async function setWorkspaceSetting(workspaceRoot: string, input: {
   readonly value: string;
 } & WorkspaceMutationOptions): Promise<WorkspaceState> {
   assertProjectSettingKey(input.key);
+  let value = input.value;
+  if (input.key === "workspace.generatedArtifactsPath" && isAbsolute(value)) {
+    if (!input.configurationProjectId) throw new SettingsError("SETTINGS_VALUE_INVALID", "an absolute artifact directory requires an explicit project scope");
+    const state = await materializeWorkspace(workspaceRoot);
+    assertScopedSettingWriteConsistent(state, input.key, value, input.configurationProjectId);
+    validateSettingValue(input.key, value, workspaceRoot);
+    // Keep the artifact writer out of read-only workspace/Recall imports.
+    const { assertGeneratedArtifactsRoot } = await import("./artifact-store.js");
+    await assertGeneratedArtifactsRoot(workspaceRoot, value, undefined, true);
+    const { projectArtifactBinding } = await import("./artifact-path-binding.js");
+    value = projectArtifactBinding(state.metadata.workspaceId, input.configurationProjectId);
+  }
   // TCRN-CROSS-SUB-481: the projection of config/project.json follows the append under the same lock;
   // the read and the delta stay outside it.
   return appendEvent(workspaceRoot, (state) => {
       const current = state.settings.find((record) => record.key === input.key && record.projectId === input.configurationProjectId);
       const record = createWorkspaceSettingRecord(
         input.key,
-        input.value,
+        value,
         (current?.revision ?? 0) + 1,
         input.occurredAt,
         workspaceRoot,
@@ -5451,7 +5580,15 @@ export async function setWorkspaceSetting(workspaceRoot: string, input: {
           record,
         ]),
       };
-    }, input, (root, committed) => projectConfiguration(root, committed));
+    }, input, async (root, committed) => {
+      if (input.key === "workspace.generatedArtifactsPath" && isAbsolute(input.value) && input.configurationProjectId) {
+        const { assertGeneratedArtifactsRoot } = await import("./artifact-store.js");
+        await assertGeneratedArtifactsRoot(root, input.value, undefined, true);
+        const { bindProjectArtifactPath } = await import("./artifact-path-binding.js");
+        await bindProjectArtifactPath(committed.metadata.workspaceId, input.configurationProjectId, input.value);
+      }
+      await projectConfiguration(root, committed);
+    });
 }
 
 export async function removeWorkspaceSetting(workspaceRoot: string, input: {

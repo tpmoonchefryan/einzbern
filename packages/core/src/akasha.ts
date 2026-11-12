@@ -1,3 +1,4 @@
+import { observeEventRead, observeMetadataBytes, observeMetadataRead, observeAuthorityWork } from "./recall-observation.js";
 import { readConsolidationIndex } from "./consolidation-format.js";
 import type { ConsolidationIndex, ConsolidationSource } from "./consolidation-format.js";
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
@@ -289,31 +290,34 @@ export async function readStreamManifest(libraryRoot: string, deviceId: string, 
   const invalid = (message: string): never => fail("AKASHA_STREAM_MANIFEST_INVALID", `${file}: ${message}`, { deviceId, file });
   let bytes: Buffer;
   try {
-    bytes = await readInternalFile(path, options.readFile ?? defaultReadBytes, invalid);
+    bytes = await observeMetadataRead(() => readInternalFile(path, options.readFile ?? defaultReadBytes, invalid));
   } catch (error) {
     if ((error as { code?: string }).code === "ENOENT") return null;
     throw error;
   }
-  let parsed: JsonValue;
-  try {
-    parsed = assertCanonicalJson(bytes.toString("utf8"));
-  } catch {
-    return invalid("is not canonical JSON");
-  }
-  // TCRN-CROSS-STORY-471 R1: a stream a newer format wrote is refused before its shape is judged.
-  if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
-    assertLibrarySupported({ formatVersion: (parsed as Readonly<Record<string, unknown>>).formatVersion }, {
-      engineVersion: FRAMEWORK_VERSION,
-      where: `stream ${DIRECTORY.events}/${deviceId}`,
-      details: { deviceId },
-    });
-  }
-  const manifest = validateStreamManifest(parsed, deviceId);
+  observeMetadataBytes(bytes.length);
+  const manifest = observeAuthorityWork("metadata", () => {
+    let parsed: JsonValue;
+    try {
+      parsed = assertCanonicalJson(bytes.toString("utf8"));
+    } catch {
+      return invalid("is not canonical JSON");
+    }
+    // TCRN-CROSS-STORY-471 R1: judge the version before the remaining shape.
+    if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      assertLibrarySupported({ formatVersion: (parsed as Readonly<Record<string, unknown>>).formatVersion }, {
+        engineVersion: FRAMEWORK_VERSION,
+        where: `stream ${DIRECTORY.events}/${deviceId}`,
+        details: { deviceId },
+      });
+    }
+    return validateStreamManifest(parsed, deviceId);
+  });
   await assertDerivedStreamIdentity(libraryRoot, manifest, options.archivedManifest);
   return manifest;
 }
 
-async function assertDerivedStreamIdentity(libraryRoot: string, manifest: StreamManifest, archivedManifest?: LibraryManifest): Promise<void> {
+async function assertDerivedStreamIdentity(libraryRoot: string, manifest: StreamManifest, archivedManifest?: LibraryManifest): Promise<LibraryManifest | undefined> {
   if (manifest.identityScheme === "legacy") return;
   const libraryManifest = archivedManifest ?? (await openLibrary(libraryRoot)).manifest;
   const expected = deriveStreamId(libraryManifest.libraryId, manifest.deviceId);
@@ -325,6 +329,7 @@ async function assertDerivedStreamIdentity(libraryRoot: string, manifest: Stream
       streamId: manifest.streamId,
     });
   }
+  return libraryManifest;
 }
 
 function validateSegmentEvent(value: unknown, manifest: StreamManifest, segment: StreamSegment, index: number): EventRecord {
@@ -380,12 +385,15 @@ function parseSegment(manifest: StreamManifest, segment: StreamSegment, bytes: B
 }
 
 /** Read one segment's committed bytes: exactly the recorded length, which must hash as recorded. */
-async function readSegmentBytes(libraryRoot: string, manifest: StreamManifest, segment: StreamSegment, readFile: ReadBytes): Promise<{ readonly bytes: Buffer; readonly digestMatches: boolean }> {
+async function readSegmentBytes(libraryRoot: string, manifest: StreamManifest, segment: StreamSegment, readFile: ReadBytes, scope: "live" | "archive", prepared?: Buffer): Promise<{ readonly bytes: Buffer; readonly digestMatches: boolean }> {
+  // A replay checkpoint is derived state, not an authenticated receipt of a
+  // prior source verification. A checksum or serialized generation binding in
+  // that cache cannot authorize skipping these bytes (STORY-648).
   const where = { deviceId: manifest.deviceId, streamId: manifest.streamId, segment: segment.name };
   let content: Buffer;
   try {
     const file = `${DIRECTORY.events}/${manifest.deviceId}/${segment.name}`;
-    content = await readInternalFile(
+    content = prepared ?? await readInternalFile(
       join(streamDirectory(libraryRoot, manifest.deviceId), segment.name),
       readFile,
       (message) => fail("AKASHA_SEGMENT_CORRUPT", `${segment.name} ${message}`, { deviceId: manifest.deviceId, streamId: manifest.streamId, segment: segment.name, file }),
@@ -396,9 +404,10 @@ async function readSegmentBytes(libraryRoot: string, manifest: StreamManifest, s
     if (code === "EISDIR") fail("AKASHA_SEGMENT_CORRUPT", `${segment.name} is not a file`, where);
     throw error;
   }
+  if (prepared === undefined) observeEventRead(content.length, manifest.streamId, scope);
   if (content.length < segment.bytes) fail("AKASHA_SEGMENT_CORRUPT", `${segment.name} is shorter than its manifest records`, where);
   const committed = content.subarray(0, segment.bytes);
-  return { bytes: committed, digestMatches: sha256(committed) === segment.sha256 };
+  return { bytes: committed, digestMatches: observeAuthorityWork("segmentHash", () => sha256(committed) === segment.sha256) };
 }
 
 /**
@@ -407,22 +416,52 @@ async function readSegmentBytes(libraryRoot: string, manifest: StreamManifest, s
  * device, stream and sequence where the stream stops being provable.
  */
 export async function readStreamEvents(libraryRoot: string, manifest: StreamManifest, options: StreamReadOptions = {}): Promise<readonly EventRecord[]> {
-  await assertDerivedStreamIdentity(libraryRoot, manifest, options.archivedManifest);
+  const libraryManifest = await assertDerivedStreamIdentity(libraryRoot, manifest, options.archivedManifest);
   const readFile = options.readFile ?? defaultReadBytes;
   const events: EventRecord[] = [];
   let mismatched: StreamSegment | null = null;
+  // This manifest was already read for stream identity. Ordinary streams have
+  // no verification scope, so they need neither its module nor its callbacks.
+  const verifier = readFile === defaultReadBytes && (manifest.identityScheme === "legacy" || options.archivedManifest !== undefined || libraryManifest?.consolidation !== undefined)
+    ? await import("./source-verification.js") : undefined;
+  const verification = verifier?.verifiedStreamSegments(libraryRoot, manifest, options.archivedManifest);
+  const prepared = verification === null || verification === undefined ? null : await verification;
+  let reused: Set<string> | undefined;
   for (const segment of manifest.segments) {
-    const { bytes, digestMatches } = await readSegmentBytes(libraryRoot, manifest, segment, readFile);
+    const verified = prepared?.get(segment.name);
+    if (verified?.events !== undefined) {
+      events.push(...verified.events);
+      reused ??= new Set<string>();
+      reused.add(segment.name);
+      continue;
+    }
+    const { bytes, digestMatches } = await readSegmentBytes(libraryRoot, manifest, segment, readFile, options.archivedManifest === undefined ? "live" : "archive", verified?.bytes);
     if (!digestMatches && mismatched === null) mismatched = segment;
-    events.push(...parseSegment(manifest, segment, bytes));
+    events.push(...observeAuthorityWork("eventValidation", () => parseSegment(manifest, segment, bytes)));
   }
   // A segment that no longer hashes as recorded is still read, so a change made in place is
   // reported where the stream stops being provable (TCRN-CROSS-STORY-467 AC3); a digest that
   // is wrong while every event checks out is reported against the segment.
-  const found = findStreamChainBreak(events, {
-    streamId: manifest.streamId,
-    eventId: (sequence) => streamEventId(manifest, sequence),
-    ...(manifest.identityScheme === "einzbern" ? { deviceId: manifest.deviceId } : {}),
+  const found = observeAuthorityWork("eventValidation", () => {
+    for (const segment of manifest.segments) {
+      const prior = events[segment.firstSequence - 2];
+      const first = events[segment.firstSequence - 1];
+      const expected = {
+        streamId: manifest.streamId,
+        eventId: (sequence: number) => streamEventId(manifest, sequence),
+        ...(manifest.identityScheme === "einzbern" ? { deviceId: manifest.deviceId } : {}),
+        firstSequence: segment.firstSequence,
+        priorHash: prior?.eventHash ?? null,
+        priorClock: prior === undefined ? 0 : eventClock(prior),
+      };
+      // The local record binds every event inside a reused segment. Its link to
+      // the preceding segment is still checked against this read's actual head.
+      if (reused?.has(segment.name) === true && first?.priorHash === expected.priorHash
+        && eventClock(first) > expected.priorClock) continue;
+      const broken = findStreamChainBreak(events.slice(segment.firstSequence - 1, segment.lastSequence), expected);
+      if (broken !== null) return broken;
+    }
+    return null;
   });
   if (found !== null) {
     const holding = manifest.segments.find((segment) => segment.firstSequence <= found.sequence && found.sequence <= segment.lastSequence);
@@ -447,6 +486,8 @@ export async function readStreamEvents(libraryRoot: string, manifest: StreamMani
       break: "head",
     });
   }
+  const recording = verifier?.recordVerifiedStreamEvents(libraryRoot, manifest, events);
+  if (recording !== undefined) await recording;
   return events;
 }
 

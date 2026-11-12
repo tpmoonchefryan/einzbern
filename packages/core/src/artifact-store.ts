@@ -1,3 +1,4 @@
+import { scopedWorkspaceState } from "./project-scope.js";
 import { pathIsInside } from "./path-containment.js";
 import { resolvePortablePath } from "./portable-path.js";
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
@@ -43,8 +44,8 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // manifest alone; the blob is copied and read back before the lock is taken (putArtifact).
 
 import { createHash } from "node:crypto";
-import { lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { basename, isAbsolute, resolve } from "node:path";
+import { access, constants, lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { deflateSync, inflateSync } from "node:zlib";
 
 import { assertCanonicalJson, assertStrictInstant, canonicalJson, compareCanonicalText } from "../../protocol/src/index.js";
@@ -118,6 +119,15 @@ export interface ArtifactVerifyFinding {
   readonly sha256: string;
   readonly finding: "missing" | "unreadable" | "digest-mismatch" | "size-mismatch";
   readonly detail: string;
+  readonly source?: ArtifactSource;
+}
+
+/** An index owns its entries and selects its blob root through that same configuration scope. */
+export interface ArtifactSource {
+  readonly scope: "project" | "library";
+  readonly projectId: string | null;
+  /** Library-relative index name, never a device-local blob address. */
+  readonly manifest: string;
 }
 
 function fail(reasonCode: ArtifactReasonCode, message: string): never {
@@ -215,6 +225,7 @@ export async function assertGeneratedArtifactsRoot(
   workspaceRoot: string,
   value: string,
   home?: string,
+  writable = false,
 ): Promise<string> {
   if (typeof workspaceRoot !== "string" || workspaceRoot.length === 0) {
     fail("ARTIFACT_INPUT_INVALID", "workspace root");
@@ -234,11 +245,17 @@ export async function assertGeneratedArtifactsRoot(
   if (pathIsInside(device, root)) {
     fail("ARTIFACT_PATH_INVALID", `${ARTIFACT_ROOT_SETTING_KEY} must be outside the machine control home`);
   }
-  return boundDirectory(root);
+  const directory = await boundDirectory(root);
+  if (pathIsInside(device, directory) || pathIsInside(workspace, directory)) fail("ARTIFACT_PATH_INVALID", "artifact directory resolves inside a control tree");
+  if (writable) {
+    try { await access(directory, constants.W_OK); }
+    catch (error) { fail("ARTIFACT_PATH_INVALID", `${directory}: ${String((error as NodeJS.ErrnoException).code ?? error)}`); }
+  }
+  return directory;
 }
 
-async function effectiveArtifactsSetting(workspaceRoot: string): Promise<string> {
-  return artifactsSettingOf(await materializeWorkspace(workspaceRoot));
+async function effectiveArtifactsSetting(workspaceRoot: string, projectId?: string): Promise<string> {
+  return artifactsSettingOf(scopedWorkspaceState(await materializeWorkspace(workspaceRoot), projectId));
 }
 
 // The blob root a library's state sets, or the catalog's default.
@@ -255,7 +272,8 @@ function artifactsSettingOf(state: Pick<WorkspaceState, "settings">): string {
 // TCRN-CROSS-STORY-469 R1: a library keeps the artifact manifest in its artifacts/ directory; the
 // blobs go to the configured root, which is that same directory unless the operator names
 // another. An old-layout workspace's manifest stays in its control directory, read-only.
-async function manifestPath(workspaceRoot: string): Promise<string> {
+async function manifestPath(workspaceRoot: string, projectId?: string): Promise<string> {
+  if (projectId !== undefined) return resolve(workspaceRoot, DIRECTORY.artifacts, `artifact-manifest-${sha256(Buffer.from(projectId))}.json`);
   return await hasLibraryManifest(workspaceRoot)
     ? resolve(workspaceRoot, DIRECTORY.artifacts, ARTIFACT_MANIFEST_FILE_NAME)
     : resolve(workspaceRoot, WORKSPACE_CONTROL_DIRECTORY, ARTIFACT_MANIFEST_FILE_NAME);
@@ -287,14 +305,23 @@ function validateManifest(value: JsonValue): ArtifactManifestDocument {
   return { schemaVersion: ARTIFACT_MANIFEST_SCHEMA_VERSION, artifacts };
 }
 
-async function readManifest(workspaceRoot: string): Promise<ArtifactManifestDocument> {
-  const path = await manifestPath(workspaceRoot);
+async function readManifestIfPresent(workspaceRoot: string, projectId?: string): Promise<ArtifactManifestDocument | null> {
+  const path = await manifestPath(workspaceRoot, projectId);
   let stats;
   try {
     stats = await lstat(path);
   } catch (error) {
     if ((error as { code?: string }).code === "ENOENT") {
-      return { schemaVersion: ARTIFACT_MANIFEST_SCHEMA_VERSION, artifacts: [] };
+      // A never-created index is optional. A missing/inaccessible containing directory,
+      // or an index that disappeared during discovery, is not an empty store.
+      let names;
+      try {
+        names = await readdir(dirname(path));
+      } catch (directoryError) {
+        fail("ARTIFACT_MANIFEST_INVALID", `${ARTIFACT_MANIFEST_FILE_NAME}: ${String((directoryError as NodeJS.ErrnoException).code ?? directoryError)}`);
+      }
+      if (names.includes(basename(path))) fail("ARTIFACT_MANIFEST_INVALID", `${ARTIFACT_MANIFEST_FILE_NAME}: ENOENT`);
+      return null;
     }
     fail("ARTIFACT_MANIFEST_INVALID", `${ARTIFACT_MANIFEST_FILE_NAME}: ${String((error as { code?: string }).code ?? error)}`);
   }
@@ -309,6 +336,42 @@ async function readManifest(workspaceRoot: string): Promise<ArtifactManifestDocu
     fail("ARTIFACT_MANIFEST_INVALID", String(error));
   }
   return validateManifest(parsed);
+}
+
+async function readManifest(workspaceRoot: string, projectId?: string): Promise<ArtifactManifestDocument> {
+  return await readManifestIfPresent(workspaceRoot, projectId) ?? { schemaVersion: ARTIFACT_MANIFEST_SCHEMA_VERSION, artifacts: [] };
+}
+
+interface ArtifactReadSource {
+  readonly root: string;
+  readonly manifest: ArtifactManifestDocument;
+  readonly source: ArtifactSource;
+}
+
+async function artifactReadSources(workspace: string, projectId?: string): Promise<readonly ArtifactReadSource[]> {
+  const state = await materializeWorkspace(workspace);
+  const libraryLayout = await hasLibraryManifest(workspace);
+  if (!libraryLayout && projectId !== undefined) scopedWorkspaceState(state, projectId);
+  const sources: ArtifactReadSource[] = [];
+  // Old-layout workspaces are read-only and have only the original library index.
+  const scopes = projectId !== undefined && libraryLayout ? [projectId, undefined] : [undefined];
+  for (const scope of scopes) {
+    const manifest = await readManifestIfPresent(workspace, scope);
+    // A project must still resolve its configured root when its own index is empty:
+    // an unavailable device binding must never silently fall back to library data.
+    if (manifest === null && scope === undefined && projectId !== undefined && libraryLayout) continue;
+    const root = await assertGeneratedArtifactsRoot(workspace, artifactsSettingOf(scopedWorkspaceState(state, scope)));
+    sources.push({
+      root,
+      manifest: manifest ?? { schemaVersion: ARTIFACT_MANIFEST_SCHEMA_VERSION, artifacts: [] },
+      source: {
+        scope: scope === undefined ? "library" : "project",
+        projectId: scope ?? null,
+        manifest: relative(workspace, await manifestPath(workspace, scope)).split(sep).join("/"),
+      },
+    });
+  }
+  return sources;
 }
 
 // Atomic in the same directory, then read back: a rename inside one directory is the
@@ -330,7 +393,7 @@ async function writeAtomic(path: string, content: Buffer): Promise<void> {
   }
 }
 
-async function writeManifest(workspaceRoot: string, document: ArtifactManifestDocument): Promise<void> {
+async function writeManifest(workspaceRoot: string, document: ArtifactManifestDocument, projectId?: string): Promise<void> {
   const serialised = canonicalJson({
     schemaVersion: document.schemaVersion,
     artifacts: document.artifacts.map((entry) => ({
@@ -344,7 +407,7 @@ async function writeManifest(workspaceRoot: string, document: ArtifactManifestDo
   if (Buffer.byteLength(serialised, "utf8") > ARTIFACT_BYTES_MAX) {
     fail("ARTIFACT_MANIFEST_INVALID", `${ARTIFACT_MANIFEST_FILE_NAME} would exceed the ${String(ARTIFACT_BYTES_MAX)} byte ceiling`);
   }
-  const path = await manifestPath(workspaceRoot);
+  const path = await manifestPath(workspaceRoot, projectId);
   const staging = `${path}.tmp-${String(process.pid)}`;
   await rm(staging, { force: true });
   await writeFile(staging, serialised, "utf8");
@@ -403,7 +466,7 @@ const ARTIFACT_PUT_ATTEMPTS = 4;
  */
 export async function putArtifact(
   workspaceRootInput: string,
-  options: { readonly file: string; readonly at: string },
+  options: { readonly file: string; readonly at: string; readonly projectId?: string },
 ): Promise<ArtifactPutReceipt> {
   if (typeof workspaceRootInput !== "string" || workspaceRootInput.length === 0) {
     fail("ARTIFACT_INPUT_INVALID", "workspace root");
@@ -419,18 +482,18 @@ export async function putArtifact(
   let copied: CopiedArtifact | null = null;
   for (let attempt = 1; attempt <= ARTIFACT_PUT_ATTEMPTS; attempt += 1) {
     const state = await materializeWorkspace(workspace);
-    const root = await assertGeneratedArtifactsRoot(workspace, artifactsSettingOf(state));
+    const root = await assertGeneratedArtifactsRoot(workspace, artifactsSettingOf(scopedWorkspaceState(state, options.projectId)), undefined, true);
     if (copied === null || copied.root !== root) copied = await copyArtifactBlob(root, file);
     const blob = copied;
     const receipt = await withWorkspaceWriteLock(workspace, async (locked) => {
       if (!(await libraryUnchangedSince(state)) || !(await blobInPlace(blob))) return null;
-      return recordArtifact(locked, blob, at);
+      return recordArtifact(locked, blob, at, options.projectId);
     });
     if (receipt !== null) return receipt;
   }
   return withWorkspaceWriteLock(workspace, async (locked) => {
-    const root = await assertGeneratedArtifactsRoot(locked, await effectiveArtifactsSetting(locked));
-    return recordArtifact(locked, await copyArtifactBlob(root, file), at);
+    const root = await assertGeneratedArtifactsRoot(locked, await effectiveArtifactsSetting(locked, options.projectId), undefined, true);
+    return recordArtifact(locked, await copyArtifactBlob(root, file), at, options.projectId);
   });
 }
 
@@ -497,8 +560,8 @@ async function copyArtifactBlob(root: string, file: string): Promise<CopiedArtif
 }
 
 // The second half, under the lock (TCRN-CROSS-SUB-500): index the blob, replacing the manifest.
-async function recordArtifact(workspace: string, blob: CopiedArtifact, at: string): Promise<ArtifactPutReceipt> {
-  const manifest = await readManifest(workspace);
+async function recordArtifact(workspace: string, blob: CopiedArtifact, at: string, projectId?: string): Promise<ArtifactPutReceipt> {
+  const manifest = await readManifest(workspace, projectId);
   const entry: ArtifactManifestEntry = {
     sha256: blob.digest,
     bytes: blob.bytes,
@@ -508,7 +571,7 @@ async function recordArtifact(workspace: string, blob: CopiedArtifact, at: strin
   };
   const artifacts = [...manifest.artifacts.filter((candidate) => candidate.sha256 !== blob.digest), entry]
     .sort((left, right) => compareCanonicalText(left.sha256, right.sha256));
-  await writeManifest(workspace, { schemaVersion: ARTIFACT_MANIFEST_SCHEMA_VERSION, artifacts });
+  await writeManifest(workspace, { schemaVersion: ARTIFACT_MANIFEST_SCHEMA_VERSION, artifacts }, projectId);
 
   return {
     schemaVersion: ARTIFACT_PUT_SCHEMA_VERSION,
@@ -527,8 +590,9 @@ async function recordArtifact(workspace: string, blob: CopiedArtifact, at: strin
 export interface ArtifactListing {
   readonly schemaVersion: typeof ARTIFACT_LIST_SCHEMA_VERSION;
   readonly reasonCode: "ARTIFACT_LIST_READY";
-  readonly artifacts: readonly (ArtifactManifestEntry & { readonly present: boolean })[];
+  readonly artifacts: readonly (ArtifactManifestEntry & { readonly present: boolean; readonly source?: ArtifactSource })[];
   readonly unindexed: readonly string[];
+  readonly sources?: readonly { readonly source: ArtifactSource; readonly artifacts: number; readonly unindexed: readonly string[] }[];
 }
 
 /**
@@ -538,17 +602,32 @@ export interface ArtifactListing {
  * differs on every machine, and a receipt that carries one turns a portable manifest
  * into a machine-bound one the moment anybody stores the receipt.
  */
-export async function listArtifacts(workspaceRootInput: string): Promise<ArtifactListing> {
+export async function listArtifacts(workspaceRootInput: string, projectId?: string): Promise<ArtifactListing> {
   const workspace = await boundDirectory(workspaceRootInput);
-  const root = await assertGeneratedArtifactsRoot(workspace, await effectiveArtifactsSetting(workspace));
-  const manifest = await readManifest(workspace);
-  const onDisk = new Set((await readdir(root)).filter((name) => name.endsWith(BLOB_SUFFIX)));
-  const indexed = new Set(manifest.artifacts.map((entry) => `${entry.sha256}${BLOB_SUFFIX}`));
+  const indexes = await artifactReadSources(workspace, projectId);
+  const roots = new Map<string, { onDisk: Set<string>; indexed: Set<string> }>();
+  for (const index of indexes) {
+    let files = roots.get(index.root);
+    if (files === undefined) {
+      files = { onDisk: new Set((await readdir(index.root)).filter((name) => name.endsWith(BLOB_SUFFIX))), indexed: new Set() };
+      roots.set(index.root, files);
+    }
+    for (const entry of index.manifest.artifacts) files.indexed.add(`${entry.sha256}${BLOB_SUFFIX}`);
+  }
+  const unindexed = (root: string): readonly string[] => {
+    const files = roots.get(root)!;
+    return [...files.onDisk].filter((name) => !files.indexed.has(name)).sort(compareCanonicalText);
+  };
   return {
     schemaVersion: ARTIFACT_LIST_SCHEMA_VERSION,
     reasonCode: "ARTIFACT_LIST_READY",
-    artifacts: manifest.artifacts.map((entry) => ({ ...entry, present: onDisk.has(`${entry.sha256}${BLOB_SUFFIX}`) })),
-    unindexed: [...onDisk].filter((name) => !indexed.has(name)).sort(compareCanonicalText),
+    artifacts: indexes.flatMap((index) => index.manifest.artifacts.map((entry) => ({
+      ...entry,
+      present: roots.get(index.root)!.onDisk.has(`${entry.sha256}${BLOB_SUFFIX}`),
+      ...(projectId === undefined ? {} : { source: index.source }),
+    }))),
+    unindexed: [...new Set([...roots.keys()].flatMap(unindexed))].sort(compareCanonicalText),
+    ...(projectId === undefined ? {} : { sources: indexes.map(index => ({ source: index.source, artifacts: index.manifest.artifacts.length, unindexed: unindexed(index.root) })) }),
   };
 }
 
@@ -557,6 +636,7 @@ export interface ArtifactVerification {
   readonly reasonCode: "ARTIFACT_VERIFIED" | "ARTIFACT_MISMATCH";
   readonly checked: number;
   readonly findings: readonly ArtifactVerifyFinding[];
+  readonly sources?: readonly { readonly source: ArtifactSource; readonly checked: number }[];
 }
 
 /**
@@ -566,10 +646,27 @@ export interface ArtifactVerification {
  * an operator one name when what they need is the extent of the damage. The reason code
  * carries the verdict, which is the same division `verifySnapshotManifest` makes.
  */
-export async function verifyArtifacts(workspaceRootInput: string): Promise<ArtifactVerification> {
+export async function verifyArtifacts(workspaceRootInput: string, projectId?: string): Promise<ArtifactVerification> {
   const workspace = await boundDirectory(workspaceRootInput);
-  const root = await assertGeneratedArtifactsRoot(workspace, await effectiveArtifactsSetting(workspace));
-  const manifest = await readManifest(workspace);
+  const indexes = await artifactReadSources(workspace, projectId);
+  const findings: ArtifactVerifyFinding[] = [];
+  let checked = 0;
+  for (const index of indexes) {
+    const result = await verifyArtifactManifest(index.root, index.manifest);
+    findings.push(...result.map(finding => ({ ...finding, ...(projectId === undefined ? {} : { source: index.source }) })));
+    // The same digest in two indexes may name different stored objects. Check both.
+    checked += index.manifest.artifacts.length;
+  }
+  return {
+    schemaVersion: ARTIFACT_VERIFY_SCHEMA_VERSION,
+    reasonCode: findings.length === 0 ? "ARTIFACT_VERIFIED" : "ARTIFACT_MISMATCH",
+    checked,
+    findings,
+    ...(projectId === undefined ? {} : { sources: indexes.map(index => ({ source: index.source, checked: index.manifest.artifacts.length })) }),
+  };
+}
+
+async function verifyArtifactManifest(root: string, manifest: ArtifactManifestDocument): Promise<readonly ArtifactVerifyFinding[]> {
   const findings: ArtifactVerifyFinding[] = [];
   for (const entry of manifest.artifacts) {
     const target = blobPath(root, entry.sha256);
@@ -610,10 +707,5 @@ export async function verifyArtifacts(workspaceRootInput: string): Promise<Artif
       findings.push({ sha256: entry.sha256, finding: "size-mismatch", detail: `content is ${String(readBack.plaintext.length)} bytes, manifest records ${String(entry.bytes)}` });
     }
   }
-  return {
-    schemaVersion: ARTIFACT_VERIFY_SCHEMA_VERSION,
-    reasonCode: findings.length === 0 ? "ARTIFACT_VERIFIED" : "ARTIFACT_MISMATCH",
-    checked: manifest.artifacts.length,
-    findings,
-  };
+  return findings;
 }

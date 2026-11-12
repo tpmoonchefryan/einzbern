@@ -15,6 +15,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 
 import { createProject, createWork, initializeLibrary, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
+import { withRecallObservation } from "../dist/build/packages/core/src/recall-observation.js";
 import { hookHost } from "../dist/build/packages/core/src/hook-recall.js";
 import { registerLibrary } from "../dist/build/packages/core/src/registry.js";
 import { deriveStableId } from "../dist/build/packages/protocol/src/index.js";
@@ -98,17 +99,21 @@ test("548-AC2: without EINZBERN_HOST, Claude Code and Codex get byte-for-byte th
   }
 });
 
-test("BL34: native SubagentStart recalls by its documented agent_type before first work", async (context) => {
+test("646: native SubagentStart role names produce navigation without task recall", async (context) => {
   const { directory, library } = await registeredProject(context);
   const { runHookEvent } = await import(pathToFileURL(join(repositoryRoot, "scripts/einzbern-hook.mjs")).href);
   for (const host of ["claude-code", "codex"]) {
     process.env.EINZBERN_HOST = host;
     // Both native interfaces provide agent_type, not the delegated task prompt.
     const payload = { hook_event_name: "SubagentStart", cwd: directory, agent_id: "agent-1", agent_type: "zebrafish" };
-    const answer = JSON.parse(await runHookEvent({ event: "subagent-start", payload, libraryPath: library, cwd: directory }));
+    const observed = await withRecallObservation(() => runHookEvent({ event: "subagent-start", payload, libraryPath: library, cwd: directory }));
+    const answer = JSON.parse(observed.value);
+    assert.equal(observed.observation.materializations, 0);
+    assert.equal(observed.observation.segmentReads, 0);
+    assert.equal(observed.observation.recallCalls, 0);
     assert.equal(answer.hookSpecificOutput.hookEventName, "SubagentStart");
     assert.match(answer.hookSpecificOutput.additionalContext, /Load and follow the Mana Orchestrate skill/u);
-    assert.match(answer.hookSpecificOutput.additionalContext, /Zebrafish tank · HOOK-STORY/u);
+    assert.doesNotMatch(answer.hookSpecificOutput.additionalContext, /Zebrafish tank · HOOK-STORY/u);
     const empty = JSON.parse(await runHookEvent({ event: "subagent-start", payload: { prompt: PROMPT }, libraryPath: library, cwd: directory }));
     assert.doesNotMatch(empty.hookSpecificOutput.additionalContext, /HOOK-STORY/u, "a made-up native prompt field is not treated as task evidence");
   }
@@ -148,4 +153,77 @@ test("retired SubagentStop is inert for all hosts including legacy marker payloa
   assert.equal(await runHookEvent({ event: "subagent-stop", payload: {}, libraryPath: library, cwd: directory }), null);
   process.env.EINZBERN_HOST = "dsh";
   assert.equal(await runHookEvent({ event: "subagent-stop", payload: {}, libraryPath: library, cwd: directory }), null);
+});
+
+test("644/646: native host role-only navigation and subsequent actual prompt outcomes stay distinct", async context => {
+  const { directory, library } = await registeredProject(context);
+  const old = process.env.EINZBERN_RECALL_OBSERVATION;
+  process.env.EINZBERN_RECALL_OBSERVATION = "1";
+  context.after(() => { if (old === undefined) delete process.env.EINZBERN_RECALL_OBSERVATION; else process.env.EINZBERN_RECALL_OBSERVATION = old; });
+  const { runHookEvent } = await import(pathToFileURL(join(repositoryRoot, "scripts/einzbern-hook.mjs")).href);
+  const { deviceHome } = await import("../dist/build/packages/core/src/device-home.js");
+  for (const host of ["claude-code", "codex", "dsh", "kiro"]) {
+    process.env.EINZBERN_HOST = host;
+    const role = await withRecallObservation(() => runHookEvent({ event: "subagent-start", payload: { agent_type: "zebrafish" }, libraryPath: library, cwd: directory }));
+    assert.ok(role.value.includes("Mana Orchestrate"), host);
+    assert.equal(role.observation.materializations, 0, host);
+    assert.equal(role.observation.segmentReads, 0, host);
+    assert.equal(role.observation.recallCalls, 0, host);
+    const answer = await runHookEvent({ event: "user-prompt-submit", payload: { prompt: PROMPT }, libraryPath: library, cwd: directory });
+    assert.ok(answer.includes("HOOK-STORY"), host);
+    assert.equal(await runHookEvent({ event: "user-prompt-submit", payload: { prompt: "" }, libraryPath: library, cwd: directory }), null);
+    assert.equal(await runHookEvent({ event: "user-prompt-submit", payload: { prompt: "unfindablexyzzyunfindable" }, libraryPath: library, cwd: directory }), null);
+  }
+  const { readdir, writeFile } = await import("node:fs/promises");
+  const stream = (await readdir(join(library, "akasha")))[0];
+  const folder = join(library, "akasha", stream);
+  const segment = (await readdir(folder)).find(name => name.endsWith(".ndjson"));
+  const file = join(folder, segment);
+  const original = await readFile(file);
+  const corrupt = Buffer.from(original); corrupt[corrupt.length - 2] ^= 1;
+  process.env.EINZBERN_HOST = "codex";
+  try {
+    await writeFile(file, corrupt);
+    await assert.rejects(runHookEvent({ event: "user-prompt-submit", payload: { prompt: PROMPT }, libraryPath: library, cwd: directory }));
+  } finally { await writeFile(file, original); }
+  const lines = (await readFile(join(deviceHome(), "log", "hook.ndjson"), "utf8")).trim().split("\n").map(JSON.parse).filter(line => line.observation);
+  for (const host of ["claude-code", "codex", "dsh", "kiro"]) {
+    const records = lines.filter(line => line.host === host);
+    for (const outcome of ["hit", "no-hit", "empty"]) assert.ok(records.some(line => line.outcome === outcome), `${host} ${outcome}`);
+    const empty = records.find(line => line.outcome === "empty");
+    assert.equal(empty.observation.materializations, 0);
+    assert.equal(empty.projectionVersion, "einzbern.cache-views.v1");
+    assert.ok(records.some(line => line.observation.stages.some(stage => typeof stage.cpuMicros === "number")));
+  }
+  assert.ok(lines.some(line => line.outcome === "refused-or-error" && line.observation.stages.length > 0));
+  assert.equal(JSON.stringify(lines).includes(PROMPT), false);
+});
+
+test("646: Kiro PromptSubmit uses real USER_PROMPT text and AgentSpawn remains navigation", async context => {
+  const { directory, library } = await registeredProject(context);
+  const previousPrompt = process.env.USER_PROMPT;
+  context.after(() => {
+    if (previousPrompt === undefined) delete process.env.USER_PROMPT;
+    else process.env.USER_PROMPT = previousPrompt;
+  });
+  process.env.EINZBERN_HOST = "kiro";
+  const { runHookEvent } = await import(pathToFileURL(join(repositoryRoot, "scripts/einzbern-hook.mjs")).href);
+  process.env.USER_PROMPT = PROMPT;
+  const answer = await withRecallObservation(() => runHookEvent({
+    event: "PromptSubmit", payload: { prompt: "unfindablexyzzyunfindable" }, libraryPath: library, cwd: directory,
+  }));
+  assert.match(answer.value, /HOOK-STORY/u);
+  assert.equal(answer.observation.materializations, 1);
+  assert.equal(answer.observation.segmentReads, 1);
+  assert.equal(answer.observation.recallCalls, 1);
+  const spawn = await withRecallObservation(() => runHookEvent({
+    event: "AgentSpawn", payload: { prompt: PROMPT, agent_type: "zebrafish" }, libraryPath: library, cwd: directory,
+  }));
+  assert.match(spawn.value, /Mana Orchestrate/u);
+  assert.doesNotMatch(spawn.value, /HOOK-STORY/u);
+  assert.equal(spawn.observation.materializations, 0);
+  assert.equal(spawn.observation.segmentReads, 0);
+  assert.equal(spawn.observation.recallCalls, 0);
+  process.env.USER_PROMPT = " \n\t ";
+  assert.equal(await runHookEvent({ event: "PromptSubmit", payload: { prompt: PROMPT }, libraryPath: library, cwd: directory }), null);
 });
