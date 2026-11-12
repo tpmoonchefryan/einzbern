@@ -282,6 +282,13 @@ const CLASSIFIED_P8_RELEASE_ENTRY_SOURCES = new Map([
   ["dist/release/einzbern-4.5.1.tar.gz/einzbern-4.5.1/scripts/einzbern-hook.mjs", "dist/build/packages/core/src/names.js"],
   ["dist/release/einzbern-4.5.1.tar.gz/einzbern-4.5.1/scripts/einzbern.mjs", "dist/build/packages/core/src/names.js"],
   ["dist/release/einzbern-4.5.1.tar.gz/einzbern-4.5.1/scripts/library-catalog-worker.mjs", "dist/build/packages/core/src/names.js"],
+  // The retained 4.6.0 diagnostic package (bc2b8b5140a9725c31fa77d3c3173cbf9e1b7a162d7edb14260bd868c272f337)
+  // carries the unchanged reviewed names.js owner field in exactly these four members.
+  // Value, whole-line and compiled-source checks remain the existing pinned checks.
+  ["dist/release/einzbern-4.6.0.tar.gz/einzbern-4.6.0/atelier/portal.mjs", "dist/build/packages/core/src/names.js"],
+  ["dist/release/einzbern-4.6.0.tar.gz/einzbern-4.6.0/scripts/einzbern-hook.mjs", "dist/build/packages/core/src/names.js"],
+  ["dist/release/einzbern-4.6.0.tar.gz/einzbern-4.6.0/scripts/einzbern.mjs", "dist/build/packages/core/src/names.js"],
+  ["dist/release/einzbern-4.6.0.tar.gz/einzbern-4.6.0/scripts/library-catalog-worker.mjs", "dist/build/packages/core/src/names.js"],
 ]);
 const CLASSIFIED_P8_RELEASE_MATCHES = new Set(
   [...CLASSIFIED_P8_RELEASE_ENTRY_SOURCES.entries()].map(([label, sourcePath]) => [
