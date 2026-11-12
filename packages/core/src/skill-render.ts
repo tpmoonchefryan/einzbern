@@ -80,8 +80,8 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   },
   {
     moment: "Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity)",
-    verbs: ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence"],
-    action: "Resolve host/category/rejection policy; not permission. Class fallback/hard limits; normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports, attempt association (`--binding`/`--prior`), unknown/cancel/finality/review: `specs/host-fallback-v1.md`. Dot model selection is host-managed. Codex only: independent main/economy peers, no collector; `collaboration.spawn_agent`; workers native final; coordinator reports to manifest.main; reports threadId/hostId/prompt only; authorized settings/query exits: `docs/codex-native-controller.md`. Kiro: `specs/kiro-host-v1.md`; Antigravity: `specs/antigravity-host-v1.md`. Other hosts keep their workflow.",
+    verbs: ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"],
+    action: "Host/category/rejection policy; not permission. Class fallback/hard limits; normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports, attempt association (`--binding`/`--prior`), unknown/cancel/finality/review: `specs/host-fallback-v1.md`. Dot model selection is host-managed. Codex only: independent main/economy peers, no collector; `collaboration.spawn_agent`; workers native final; coordinator reports to manifest.main; reports threadId/hostId/prompt only; authorized settings/query exits: `docs/codex-native-controller.md`. Kiro: `specs/kiro-host-v1.md`; Antigravity: `specs/antigravity-host-v1.md`, `docs/antigravity-swarm-controller.md`. Other hosts keep their workflow.",
   },
   {
     moment: "Shared submission",
@@ -91,12 +91,12 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Configuration backup or restore",
     verbs: ["config-backup-plan", "config-backup-create", "config-backup-prepare", "config-backup-commit", "config-backup-verify", "config-backup-list", "config-backup-resume", "config-backup-retire", "config-restore-plan", "config-restore-apply"],
-    action: "Allowlist; approved retention. Remote prepare/readback/commit; same-ID recovery, not authentication. Local unchanged. `specs/config-backup-v1.md`.",
+    action: "Allowlist, retention. Remote prepare/readback/commit; same-ID recovery, not auth. Local unchanged. `specs/config-backup-v1.md`.",
   },
   {
     moment: "Work is done",
     verbs: ["work-transition", "work-annotate"],
-    action: "Actual actor/readback. Pending is not complete. Compare original source, behavior and assertions; structure is not semantic acceptance. Dot/local consumption separately; unavailable remains unverified. `specs/batch-execution-v1.md`.",
+    action: "Actual actor/readback. Pending != complete. Compare original source, behavior and assertions; structure is not semantic acceptance. Dot/local consumption separately; unavailable remains unverified. `specs/batch-execution-v1.md`.",
   },
   {
     moment: "A decision is made",
@@ -111,7 +111,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Configuration / UI",
     verbs: ["settings-catalog", "variable-list"],
-    action: "AGENTS: principles only. Read scoped config and optional `design.authority`: `specs/configuration-contract-v1.md`.",
+    action: "AGENTS: principles only. Scoped config, optional `design.authority`: `specs/configuration-contract-v1.md`.",
   },
 ].map((entry) => Object.freeze({ ...entry, verbs: Object.freeze([...entry.verbs]) })));
 
@@ -165,7 +165,7 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "## Navigation",
     "",
-    `Root: nonempty abs \`${DEVICE_HOME_ENVIRONMENT_VARIABLE}\`, else \`~/${DIRECTORY.device}\`. \`node "<root>/${DEVICE_HOME_ENTRIES.engine}/${ENGINE_FILES.launcher}" <verb>\`; install if absent. \`library-resolve --cwd <cwd>\`: \`libraryPath\` for \`--workspace\`, work's \`projectId\` for \`--project-id\`. \`commands\`/\`<verb> --help\`: flags; UTC \`--at\`. Read engine bundle \`specs/\` beside \`scripts/\`, not this Skill.`,
+    `Root: nonempty abs \`${DEVICE_HOME_ENVIRONMENT_VARIABLE}\`, else \`~/${DIRECTORY.device}\`. \`node "<root>/${DEVICE_HOME_ENTRIES.engine}/${ENGINE_FILES.launcher}" <verb>\`; else install. \`library-resolve --cwd <cwd>\`: \`libraryPath\` for \`--workspace\`, work's \`projectId\` for \`--project-id\`. \`commands\`/\`<verb> --help\`: flags; UTC \`--at\`. Read engine bundle \`specs/\` beside \`scripts/\`, not this Skill.`,
     "",
     "Local writes queue together, not cross-device exclusion. Remote submission needs serial handoff. Dot installs no native hook, lifecycle manager or sync service.",
     "",
@@ -175,13 +175,13 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "Coding tasks: read `specs/coding-style-v1.md`.",
     "",
-    "Versions: compatible fixes/internal changes: patch; new public features: minor; public breaks: major. Explicit `--version`.",
+    "Versions: fixes/internal: patch; new features: minor; breaks: major. Explicit `--version`.",
     "",
     "## Three steps",
     "",
     "1. Install this skill: `npx skills add tpmoonchefryan/mana-orchestrate`.",
-    `2. Say "install ${BRAND.engine.name}". Traditional hooks or independent dot target: \`setup\`; approval: install.md.`,
-    "3. Installation, policy changes, restoration and publication retain their separate approvals. 20-minute patrol and daily 00:00 Asia/Shanghai backup are independent; unapproved policy forbids daily enablement; unknown stays unknown.",
+    `2. Say "install ${BRAND.engine.name}". Hooks or independent dot target: \`setup\`; approval: install.md.`,
+    "3. Installation, policy changes, restoration and publication retain their separate approvals. 20-minute patrol and 00:00 Asia/Shanghai backup: independent; unapproved policy forbids daily enablement; unknown stays unknown.",
     "",
     "## Install-type tasks",
     "",
@@ -200,7 +200,13 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
 export const HOST_SKILL_PROTOCOL_MARKER = "Execution protocol: tcrn.host-execution-request.v1.";
 export function checkHostSkillCompatibility(markdown: string, commandNames: readonly string[]): { readonly compatible: boolean; readonly missing: readonly string[]; readonly protocol: "host-native-v1" | "legacy" } {
   if (!markdown.includes(HOST_SKILL_PROTOCOL_MARKER)) return { compatible: true, missing: [], protocol: "legacy" };
-  const required = ["execution-host-prepare", "execution-host-record", "execution-host-evidence", ...(markdown.includes("`execution-codex-peer-record`") ? ["execution-codex-peer-record", "execution-codex-peer-evidence"] : [])];
+  const required = [
+    "execution-host-prepare",
+    "execution-host-record",
+    "execution-host-evidence",
+    ...(markdown.includes("`execution-codex-peer-record`") ? ["execution-codex-peer-record", "execution-codex-peer-evidence"] : []),
+    ...(markdown.includes("`execution-antigravity-swarm-record`") ? ["execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"] : []),
+  ];
   const missing = required.filter(name => !commandNames.includes(name));
   return { compatible: missing.length === 0, missing, protocol: "host-native-v1" };
 }

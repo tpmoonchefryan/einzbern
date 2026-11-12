@@ -223,7 +223,7 @@ test("Codex peer receipt commands are packaged without the retired collector run
   const hook = files.get("scripts/einzbern-hook.mjs").toString("utf8");
   for (const retired of ["CODEX_STOP_CAPABILITY_UNAVAILABLE", "EINZBERN_CODEX_NATIVE_HOOK_SOCKET", "runCodexCollectorWait"]) assert.equal(hook.includes(retired), false, retired);
   const cli = files.get("scripts/einzbern.mjs").toString("utf8");
-  for (const entry of ["execution-codex-peer-record", "execution-codex-peer-evidence", "tcrn.codex-peer-batch.v1"]) assert.ok(cli.includes(entry), entry);
+  for (const entry of ["execution-codex-peer-record", "execution-codex-peer-evidence", "tcrn.codex-peer-batch.v1", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence", "tcrn.antigravity-swarm-batch.v1"]) assert.ok(cli.includes(entry), entry);
 });
 
 test("605: every contract referenced by the shipped Skill resolves to manifest-verified archive bytes", async () => {
@@ -236,6 +236,7 @@ test("605: every contract referenced by the shipped Skill resolves to manifest-v
     for (const [reference] of bytes.toString("utf8").matchAll(/\b(?:specs|docs)\/[A-Za-z0-9._/-]+\.md\b/gu)) references.add(reference);
   }
   assert.ok(references.has("docs/codex-native-controller.md"));
+  assert.ok(references.has("docs/antigravity-swarm-controller.md"));
   assert.ok(references.has("specs/context-v1.md"));
   assert.ok(references.has("specs/work-content-v1.md"));
   assert.ok(references.has("specs/coding-style-v1.md"));
@@ -255,8 +256,8 @@ test("605: a packaging-list omission is refused from the actual Skill reference 
     const copy = join(base, `missing-${specification}`);
     await mkdir(join(copy, "scripts/lib"), { recursive: true });
     const mutated = reference.startsWith("specs/")
-      ? inputs.replace(`, "${specification}"`, "")
-      : inputs.replace(`"${reference}"`, "");
+      ? inputs.replace(`, "${specification}"`, "").replace(`"${specification}", `, "")
+      : inputs.replace(`, "${reference}"`, "").replace(`"${reference}", `, "").replace(`"${reference}"`, "");
     assert.notEqual(mutated, inputs);
     await writeFile(join(copy, "scripts/pack-release.mjs"), source);
     await writeFile(join(copy, "scripts/lib/release-package-inputs.mjs"), mutated);
@@ -361,7 +362,7 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
     "scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/library-catalog-worker.mjs", "launchers/einzbern.mjs", "launchers/hook.mjs",
     "atelier/portal.mjs", "atelier/ds-static-bridges.snapshot.js", "atelier/atelier-brand-mark.svg", "atelier/index.html", "atelier/locales.js", "atelier/tokens.css",
     "skill/mana-orchestrate/SKILL.md", ...template.map((path) => `skill/mana-orchestrate/${path}`),
-    ...SPECIFICATIONS.map(name => `specs/${name}`), "docs/codex-native-controller.md", "docs/design/memory-admission.md",
+    ...SPECIFICATIONS.map(name => `specs/${name}`), "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md",
     "scripts/lib/memory-budget.mjs", "scripts/lib/memory-worker-check.mjs", "scripts/lib/storage-location.mjs", "scripts/lib/memory-executors.json",
     ...readmes, "CHANGELOG.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "manifest.json",
   ];
@@ -378,7 +379,7 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
     "dot-execution-v1.md": ["actualCapabilityEvidenceRefs", "authorizationEvidenceRef", "occupancyObservation", "revisionBinding", "contextRead", "effectiveRoots", "exactDelegation"],
     "native-tool-evidence-v1.md": ["rawResponseValue", "statusPointer", "statusMapping", "terminalObservation", "providerPointers", "NativeRetryReconciliation", "--prior", "--retry-from", "--reconciliation"],
     "kiro-host-v1.md": ["SessionStart", "UserPromptSubmit", "PreToolUse", "KIRO_API_KEY", "mcp-startup-failure"],
-    "antigravity-host-v1.md": ["SessionStart", "PreInvocation", "PreToolUse", "ANTIGRAVITY_CONFIG_DIR", "invoke_subagent", "agy-run.mjs"],
+    "antigravity-host-v1.md": ["SessionStart", "PreInvocation", "PreToolUse", "ANTIGRAVITY_CONFIG_DIR", "invoke_subagent", "agy-run.mjs", "execution-antigravity-swarm-record", "docs/antigravity-swarm-controller.md"],
     "shared-submit-v1.md": ["completeInventoryDigest", "engineOutputMembers", "writerHandoff", "observedAt", "contentBase64", "memberSetDigest", "lastError"],
   })) for (const field of fields) assert.ok(byPath.get(`specs/${name}`).bytes.toString("utf8").includes(field), `${name} documents ${field}`);
   assert.ok(byPath.get("atelier/ds-static-bridges.snapshot.js").bytes.equals(await readFile(join(repositoryRoot, "portal/ds-static-bridges.snapshot.js"))), "the archive retains exact published bridge bytes");

@@ -412,6 +412,29 @@
 | `--result` | 可选 | `string` | `Actual Antigravity child process return JSON; omit only for a refused preflight.` |
 | `--output` | 必填 | `string` | `Create-new private Antigravity process evidence outside device/library roots.` |
 
+## `execution-antigravity-swarm-evidence`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--from-file` | 必填 | `string` |
+
+## `execution-antigravity-swarm-record`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 必填 | `string` |
+| `--manifest` | 必填 | `string` |
+| `--preparations` | 必填 | `string` |
+| `--observations` | 必填 | `string` |
+| `--prior` | 可选 | `string` |
+| `--output` | 必填 | `string` |
+
 ## `execution-codex-peer-evidence`
 
 - 可用范围：`cli`。

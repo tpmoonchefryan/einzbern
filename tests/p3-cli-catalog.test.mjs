@@ -661,3 +661,23 @@ test("INIT065 general-native catalog is separate from legacy closed roster", asy
     assert.equal((await invoke([entry.name, "--injected-admission", "true"])).reasonCode, "CLI_ARGUMENT_UNKNOWN");
   }
 });
+
+test("INIT092 antigravity swarm audit catalog entries have expected flags and strict help/unknown behavior", async () => {
+  const entries = COMMAND_CATALOG.filter(entry => entry.name.startsWith("execution-antigravity-swarm-"));
+  assert.deepEqual(entries.map(entry => entry.name), ["execution-antigravity-swarm-evidence", "execution-antigravity-swarm-record"]);
+  const recordEntry = entries.find(entry => entry.name === "execution-antigravity-swarm-record");
+  assert.deepEqual(recordEntry.flags.map(flag => [flag.name, flag.required]), [
+    ["workspace", true],
+    ["manifest", true],
+    ["preparations", true],
+    ["observations", true],
+    ["prior", false],
+    ["output", true],
+  ]);
+  const evidenceEntry = entries.find(entry => entry.name === "execution-antigravity-swarm-evidence");
+  assert.deepEqual(evidenceEntry.flags.map(flag => [flag.name, flag.required]), [["from-file", true]]);
+  for (const entry of entries) {
+    assert.equal((await invoke([entry.name, "--help"])).ok, true);
+    assert.equal((await invoke([entry.name, "--injected-admission", "true"])).reasonCode, "CLI_ARGUMENT_UNKNOWN");
+  }
+});

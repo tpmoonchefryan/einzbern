@@ -26,6 +26,7 @@ export const ANTIGRAVITY_CONFIG_DIR_REL = ".gemini/config" as const;
 export const ANTIGRAVITY_SKILL_ROOT = ".gemini/config/skills" as const;
 export const ANTIGRAVITY_OWNED_HOOK_GROUP = "einzbern" as const;
 export const ANTIGRAVITY_READ_MATCHER = "read_file|view_file" as const;
+export const ANTIGRAVITY_PRETOOL_MATCHER = "read_file|view_file|swarm" as const;
 export const ANTIGRAVITY_HOOK_TIMEOUT = 30;
 export const ANTIGRAVITY_HOOKS_SCHEMA_VERSION = "tcrn.antigravity-hooks-plan.v1" as const;
 
@@ -243,7 +244,7 @@ function wantedAntigravityGroup(request: AntigravityHooksRequest): AntigravityOw
   ];
   const preToolUse: readonly AntigravityMatcherGroup[] = [
     {
-      matcher: ANTIGRAVITY_READ_MATCHER,
+      matcher: ANTIGRAVITY_PRETOOL_MATCHER,
       hooks: [
         {
           type: "command",
@@ -314,7 +315,7 @@ function isOwnedPreToolUseGroups(value: unknown, platform: NodeJS.Platform): boo
   if (!isObject(group)) return false;
   const keys = Object.keys(group);
   if (keys.length !== 2 || !keys.every((key) => key === "matcher" || key === "hooks")) return false;
-  if (group.matcher !== ANTIGRAVITY_READ_MATCHER) return false;
+  if (group.matcher !== ANTIGRAVITY_PRETOOL_MATCHER && group.matcher !== ANTIGRAVITY_READ_MATCHER) return false;
   if (!Array.isArray(group.hooks) || group.hooks.length !== 1) return false;
   const handler = group.hooks[0];
   if (!isObject(handler)) return false;
