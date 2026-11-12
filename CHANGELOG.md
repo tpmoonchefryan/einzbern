@@ -5,6 +5,10 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+## 4.6.0
+
+Einzbern and Mana Orchestrate ship in lockstep at 4.6.0.
+
 ### Recall observations and request reuse
 
 - Correlate Hook and CLI calls, events, results and execution spans, and report
