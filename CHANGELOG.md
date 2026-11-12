@@ -5,6 +5,49 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+### Recall observations and request reuse
+
+- Correlate Hook and CLI calls, events, results and execution spans, and report
+  source reads, cache reads, CPU time and elapsed time as separate measurements.
+- Reuse validated library authority within one Recall request so knowledge
+  retrieval does not materialize the same library twice. Keep library identity,
+  project isolation, query results and rejection behavior intact.
+- Return role navigation for SubagentStart inputs without real task text instead
+  of performing a full Recall for an empty task.
+
+### Consolidation replay and source verification
+
+- Reuse validated consolidation replay checkpoints while retaining the original
+  source heads, version vectors, authorization and event-chain checks.
+- Reduce source-event reads on eligible macOS paths using device-local prior
+  verification records, held-file native identity checks and authenticated event
+  projections. Preserve complete source verification when eligibility or current
+  integrity cannot be proved; other platforms retain the complete reader.
+- Share identical authenticated decoded projections within one operation and
+  defer unused verification code. Small inputs use complete verification;
+  disposable, untrusted cost advice selects a reader without replacing source
+  validation. Small-input scheduling costs remain separate from large-input
+  gains, and the optimization requires no external credential service.
+
+### Project artifact directories
+
+- Accept project-scoped absolute artifact directories on another mounted volume.
+  Save device-local location bindings and resolve them in fresh processes for
+  generation and readback, preserving other projects' directories.
+- Report missing bindings, unavailable volumes and permission failures without
+  silently redirecting output. Preserve shared artifact history when a project
+  is registered, and verify shared and project-scoped artifacts together.
+
+### Antigravity host integration
+
+- Add separate Antigravity CLI, IDE and App capability observations, traditional
+  host hooks, owned Skill installation and maintenance, and doctor checks.
+  Preserve unrelated hook groups and user edits while retiring redundant owned
+  project hooks after user-scope installation.
+- Add the headless CLI runner and retain requested selection, process results
+  and native execution evidence separately. CLI discovery does not establish
+  the selected surface or the model actually used by a later session.
+
 ## 4.5.1
 
 Einzbern and Mana Orchestrate ship in lockstep at 4.5.1.
