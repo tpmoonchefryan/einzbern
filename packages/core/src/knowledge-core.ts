@@ -5568,7 +5568,7 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
     const trees = await Promise.all(roots.map(root => localTreeIdentity(root)));
     if (trees.some(tree => tree === null)) return null;
     const heads = await Promise.all(roots.map(root => currentCrestHeads(root)));
-    return projectionBinding({ cacheVersion: 2, projection: KNOWLEDGE_PROJECTION_VERSION, head: place.workspace.headEventHash, roots, trees, heads });
+    return projectionBinding({ cacheVersion: 3, projection: KNOWLEDGE_PROJECTION_VERSION, head: place.workspace.headEventHash, roots, trees, heads });
   };
   const binding = await boundary();
   if (binding === null) return full();
@@ -5582,6 +5582,9 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
       return unit;
     };
     observeCacheReason("crest-projection-hit");
+    // A valid protected projection still owes callers the ordinary disposable
+    // view repair (including paged indexes and surplus-page cleanup).
+    await projectKnowledgeView(libraryKnowledgeView(place.storePath, query), saved.index);
     return { ...saved, workspace: place.workspace, units: saved.units.map(restore),
       duplicates: saved.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(restore) })) };
   }

@@ -2,7 +2,9 @@
 // Neutral, generated calibration data. No private library or evaluation inputs.
 import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { createInterface } from "node:readline";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -14,17 +16,57 @@ import {
   createKnowledgeUnit, initializeKnowledgeStore, materializeLibrary, materializeWorkspaceFromGenesis,
   readAllStreams, cachePath, configureStorageLocation, lockPath, backupsPath,
   declareChainIdentity, consolidateLibraries, registerLibrary, recordMinutes,
+  listKnowledgeMetadata,
 } from "../dist/build/packages/core/src/index.js";
 import { withRecallObservation } from "../dist/build/packages/core/src/recall-observation.js";
 import { withWorkspaceWriteLock } from "../dist/build/packages/core/src/workspace.js";
 import { RecallIndex, recallPersistent, resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { canonicalJson, canonicalSha256, deriveStableId } from "../dist/build/packages/protocol/src/index.js";
+import { localIdentityContext } from "../dist/build/packages/core/src/local-file-identity.js";
 
 const at = "2026-11-13T00:00:00Z";
 const late = "2026-11-15T00:00:00Z";
 const libraryId = n => `library:${n.toString(16).padStart(24, "0")}`;
 const hits = o => o.verifiedSegmentsBySource.reduce((n, s) => n + s.segments, 0);
 const measure = root => withRecallObservation(() => materializeLibrary(root));
+
+// Touch the mapping before warming any proof. Later writes through that same
+// writable page need not change ctime. Restore even when the assertion fails.
+async function withWritableMapping(path, offset, operation) {
+  const original = await fs.readFile(path);
+  const python = spawn("python3", ["-u", "-c", `import hashlib,json,mmap,sys
+with open(sys.argv[1], 'r+b', buffering=0) as f:
+ with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE) as m:
+  offset=int(sys.argv[2]); original=m[offset]; m[offset]=original
+  print(json.dumps({'ready':True}),flush=True)
+  try:
+   if sys.stdin.readline().strip() != 'mutate': raise RuntimeError('expected mutate')
+   m[offset]=ord('X') if original != ord('X') else ord('Y')
+   print(json.dumps({'mutated':True}),flush=True)
+   sys.stdin.readline()
+  finally:
+   m[offset]=original
+   print(json.dumps({'restored':hashlib.sha256(m).hexdigest()}),flush=True)
+`, path, String(offset)], { stdio: ["pipe", "pipe", "pipe"] });
+  let stderr = "";
+  python.stderr.on("data", value => { stderr += value; });
+  const finished = new Promise((resolve, reject) => { python.once("error", reject); python.once("close", code => resolve(code)); });
+  const lines = createInterface({ input: python.stdout })[Symbol.asyncIterator]();
+  const next = async () => {
+    const line = await lines.next();
+    assert.equal(line.done, false, stderr);
+    return JSON.parse(line.value);
+  };
+  assert.equal((await next()).ready, true);
+  try {
+    return await operation(async () => { python.stdin.write("mutate\n"); assert.equal((await next()).mutated, true); });
+  } finally {
+    python.stdin.end("restore\n");
+    const restored = await next();
+    assert.equal(await finished, 0, stderr);
+    assert.equal(restored.restored, createHash("sha256").update(original).digest("hex"));
+  }
+}
 
 async function fixture(t) {
   const base = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "einzbern-init095-")));
@@ -63,7 +105,7 @@ function child(f, mode, queryAt = at, projectId, query = "P095-FRESH P095-MIN#D2
   return JSON.parse(p.stdout);
 }
 
-test("095: 220 segments, tail delta, in-place tampering, manifest tampering and unknown identity", { skip: process.platform !== "linux" }, async t => {
+test("095: 220 segments, tail delta, in-place tampering, manifest tampering and unknown identity", async t => {
   const f = await fixture(t);
   await setWorkspaceSetting(f.root, { key: "storage.segmentBytes", value: "4096", occurredAt: at });
   await appendEvents(f.root, Array.from({ length: 219 }, (_, n) => createWorkDelta({
@@ -73,16 +115,19 @@ test("095: 220 segments, tail delta, in-place tampering, manifest tampering and 
   const read = await readAllStreams(f.root);
   const stream = read.streams.find(s => s.manifest?.segments.length >= 220);
   assert.ok(stream);
+  const supported = await localIdentityContext(f.root) !== null;
   const first = await measure(f.root);
   const second = await measure(f.root);
-  assert.ok(hits(second.observation) >= 220);
-  assert.equal(second.observation.logicalEventBytes, 0);
+  if (supported) assert.ok(hits(second.observation) >= 220);
+  else assert.equal(hits(second.observation), 0);
+  assert.ok(second.observation.logicalEventBytes > 0, "attributes cannot replace current content verification");
   assert.deepEqual(second.value, await materializeWorkspaceFromGenesis(f.root));
   await appendEvents(f.root, [createWorkDelta({ projectId: f.projectId, externalKey: "P095-TAIL", kind: "Initiative", parentId: null, title: "Tail calibration", body: "Neutral tail. ".repeat(500), occurredAt: at })], { occurredAt: at });
   const delta = await measure(f.root);
-  assert.ok(hits(delta.observation) >= 220);
+  if (supported) assert.ok(hits(delta.observation) >= 220);
+  else assert.equal(hits(delta.observation), 0);
   assert.ok(delta.observation.logicalEventBytes > 0);
-  assert.ok(delta.observation.logicalEventBytes < first.observation.logicalEventBytes);
+  assert.ok(delta.value.version > first.value.version);
   assert.deepEqual(delta.value, await materializeWorkspaceFromGenesis(f.root));
   const strong = await withWorkspaceWriteLock(f.root, () => measure(f.root));
   assert.equal(hits(strong.observation), 0);
@@ -159,7 +204,8 @@ test("095: same-head cross-process Crest/FTS freshness and old projection recove
   const cold = child(f, "cli");
   const warm = child(f, "cli");
   assert.equal(warm.value, cold.value);
-  assert.ok(warm.observation.cacheReasons.includes("crest-projection-hit"));
+  assert.equal(warm.observation.cacheReasons.includes("crest-projection-hit"), await localIdentityContext(f.root) !== null);
+  assert.ok(warm.observation.logicalEventBytes > 0);
   assert.ok(warm.observation.cacheReasons.includes("fts-persistent-hit"));
   const hookCold = child(f, "hook"), hookWarm = child(f, "hook");
   assert.equal(hookWarm.value, hookCold.value);
@@ -235,6 +281,73 @@ test("095: persistent FTS updates only changed rows, and truncation/busy locks r
   assert.deepEqual(restored.records, delta.value.records, "same-size/mtime cache edits cannot authorize reuse");
 });
 
+test("095: an existing writable mapping cannot hide source damage from warmed segment projections", async t => {
+  const f = await fixture(t);
+  const stream = (await readAllStreams(f.root)).streams.find(stream => stream.manifest?.segments.length);
+  const path = join(f.root, "akasha", stream.deviceId, stream.manifest.segments[0].name);
+  const original = await fs.readFile(path);
+  const offset = original.indexOf("Calibration");
+  assert.ok(offset >= 0);
+  await withWritableMapping(path, offset, async mutate => {
+    await measure(f.root);
+    const warm = await measure(f.root);
+    if (await localIdentityContext(f.root) !== null) assert.ok(hits(warm.observation) > 0);
+    const before = await fs.stat(path, { bigint: true });
+    await mutate();
+    const after = await fs.stat(path, { bigint: true });
+    assert.notDeepEqual(await fs.readFile(path), original);
+    t.diagnostic(JSON.stringify({ mappedSourceCtimeUnchanged: before.ctimeNs === after.ctimeNs }));
+    for (const read of [materializeLibrary, materializeWorkspaceFromGenesis, readAllStreams]) {
+      await assert.rejects(read(f.root), { reasonCode: "AKASHA_EVENT_CORRUPT" });
+    }
+  });
+  assert.deepEqual(await materializeLibrary(f.root), await materializeWorkspaceFromGenesis(f.root));
+});
+
+test("095: Crest projection content proof rejects an existing mapped event write", async t => {
+  const f = await fixture(t);
+  await initializeKnowledgeStore(f.root, { disposableAcknowledged: true });
+  await createKnowledgeUnit(f.root, {
+    externalKey: "P095-MAPPED", scope: "project", projectId: f.projectId, roleScopes: [], category: "testing", kind: "fact",
+    subject: "Mapped sensor", summary: "Mapped sensor units", snippet: "Seven mapped units", tags: ["calibration"],
+    sourceReferences: [], sourceDigest: canonicalSha256("init095.mapped-sensor.v1"), linkedEvidenceIds: [], linkedWorkIds: [], linkedDecisionIds: [], linkedGateIds: [],
+    retrievalDisposition: "default", freshnessState: "fresh", lastVerified: at,
+    stalenessPolicy: { maximumAgeDays: null, unknownDisposition: "fail-closed" }, exportDisposition: "metadata-only", accountableOwnerId: "owner:calibration",
+    body: "The mapped sensor measures seven units.", lifecycle: "active", occurredAt: at,
+  });
+  const eventRoot = join(f.root, "crest", "events");
+  const device = (await fs.readdir(eventRoot))[0];
+  const folder = join(eventRoot, device);
+  const path = join(folder, (await fs.readdir(folder)).find(name => name.endsWith(".json")));
+  const offset = (await fs.readFile(path)).indexOf("Mapped sensor units");
+  assert.ok(offset >= 0);
+  await withWritableMapping(path, offset, async mutate => {
+    const query = () => listKnowledgeMetadata(f.root, { at });
+    await query();
+    const warm = await withRecallObservation(query);
+    assert.equal(warm.value.records.length, 1);
+    assert.equal(warm.observation.cacheReasons.includes("crest-projection-hit"), await localIdentityContext(f.root) !== null);
+    await mutate();
+    await assert.rejects(query(), { reasonCode: "KNOWLEDGE_RECORD_INVALID" });
+  });
+  assert.equal((await listKnowledgeMetadata(f.root, { at })).records[0].summary, "Mapped sensor units");
+});
+
+test("095: persistent FTS verifies a mapped database edit at the same checkpoint in one process", async t => {
+  const f = await fixture(t);
+  const docs = documents();
+  const request = { cacheKey: "init095.mapped-index.v1", checkpoint: "mapped-head", query: "alloy", documents: () => docs, tau: 0 };
+  const expected = (await recallPersistent(request, f.root)).records;
+  const path = join(cachePath(f.id), (await fs.readdir(cachePath(f.id))).find(name => name.startsWith("recall-") && name.endsWith(".sqlite")));
+  await withWritableMapping(path, 0, async mutate => {
+    await recallPersistent(request, f.root);
+    await mutate();
+    const repaired = await withRecallObservation(() => recallPersistent(request, f.root));
+    assert.deepEqual(repaired.value.records, expected);
+    assert.ok(repaired.observation.cacheReasons.includes("fts-persistent-invalid-or-busy"));
+  });
+});
+
 test("095: archived intrinsic scope survives a new-process projection without changing metadata", async t => {
   const f = await fixture(t);
   const other = join(f.base, "archive");
@@ -262,7 +375,8 @@ test("095: archived intrinsic scope survives a new-process projection without ch
   const target = { ...f, root: merged };
   const before = child(target, "list", at, sources[1].projectId);
   const after = child(target, "list", at, sources[1].projectId);
-  assert.ok(after.observation.cacheReasons.includes("crest-projection-hit"));
+  const supported = await localIdentityContext(merged) !== null;
+  assert.equal(after.observation.cacheReasons.includes("crest-projection-hit"), supported);
   assert.deepEqual(after.value, before.value);
   assert.deepEqual(after.value.records.map(r => r.externalKey), ["P095-LEFT"]);
   assert.equal(after.value.diagnostics.conflictPairCount, 0);
@@ -277,13 +391,15 @@ test("095: archived intrinsic scope survives a new-process projection without ch
   await fs.rm(cachePath(f.id), { recursive: true, force: true });
   assert.equal(child(target, "cli", at, sources[1].projectId, "P095-LEFT P095-RIGHT").value, cli.value);
   assert.equal(child(target, "hook", at, undefined, "P095-LEFT P095-RIGHT").value, hook.value);
-  if (process.platform === "linux") {
+  if (supported) {
     const projection = join(cachePath(f.id), "materialized.bin");
     assert.ok((await fs.stat(projection)).size > 0);
     await fs.writeFile(projection, "broken projection");
     const rebuilt = child(target, "list", at, sources[1].projectId);
     assert.deepEqual(rebuilt.value, after.value);
     assert.equal(rebuilt.observation.cacheReasons.includes("materialized-state-hit"), false);
+  }
+  {
     const sourceRead = await readAllStreams(merged);
     const source = sourceRead.consolidation.sources.find(entry => entry.read.streams.some(stream => stream.manifest?.segments.length));
     const stream = source.read.streams.find(entry => entry.manifest?.segments.length);

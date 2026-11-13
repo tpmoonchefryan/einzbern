@@ -153,7 +153,7 @@ test("runtime moves outside the source tree and a persistent device pointer sele
   const runtime = join(f.root, "cloud", "runtime");
   await configureStorageLocation(home, f.to, runtime, at, f.options.decidedIn, true);
   assert.equal(defaultSharedLibraryPath(home), f.to);
-  assert.ok(cachePath(f.sources[0].id).startsWith(runtime));
+  assert.ok(cachePath(f.sources[0].id).startsWith(join(home, "derived-cache")));
   assert.ok(lockPath(f.sources[0].id).startsWith(runtime));
   assert.equal(await readFile(join(runtime, "cache", "owned"), "utf8"), "runtime data");
   assert.equal(await readFile(join(home, "cache", "owned"), "utf8"), "runtime data", "historical evidence paths still resolve");
@@ -582,6 +582,7 @@ test("647: a new supported consolidation generation invalidates the previous bas
   const next = join(f.root, "next-shared");
   await consolidateLibraries({ primary: copies[0].path, sources: copies.map(source => ({ path: source.path, bindings: [{ projectPath: source.projectPath, projectId: source.projectId, role: source.role }] })) }, next, f.options);
   await writeCacheSnapshot(previous);
+  await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
   const changed = await withRecallObservation(() => materializeLibrary(next));
   assert.ok(changed.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"));
   assert.ok(changed.observation.replayedEvents > 0);
@@ -609,11 +610,15 @@ test("647: valid checkpoint payload paired with foreign or damaged coverage neve
     ["damaged projection shape", { ...valid, state: { ...valid.state, work: null } }],
   ]) {
     await writeCacheSnapshot(checkpoint);
+    // Exercise the replay checkpoint itself, without a separately attested
+    // materialized-state projection satisfying this read first.
+    await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
     const result = await withRecallObservation(() => materializeLibrary(f.to));
     assert.ok(result.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"), scenario);
     assert.deepEqual(result.value, expected, scenario);
   }
   await discardCacheSnapshot(f.sources[0].id);
+  await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
   assert.deepEqual(await materializeLibrary(f.to), expected, "missing checkpoint");
   const oldState = await readCacheSnapshot(f.sources[0].id);
   await setWorkspaceSetting(f.to, { key: "storage.snapshotEveryEvents", value: "13", occurredAt: at });
@@ -627,6 +632,7 @@ test("647: valid checkpoint payload paired with foreign or damaged coverage neve
     maxClock: Math.max(...advanced.events.map(entry => entry.clock)),
     streams: advanced.streams.filter(stream => stream.manifest?.headEventHash).map(({ manifest }) => ({ deviceId: manifest.deviceId, streamId: manifest.streamId, sequence: manifest.sequence, eventHash: manifest.headEventHash })),
   });
+  await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
   const repaired = await withRecallObservation(() => materializeLibrary(f.to));
   assert.ok(repaired.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"));
   assert.deepEqual(repaired.value, appended, "a valid old state cannot skip a newly committed event");
@@ -643,6 +649,7 @@ test("647/648: recomputing a snapshot checksum cannot attest a forged reducer pr
   for (const [mode, options] of [["checkpoint-full", { readFile }], ["native", {}]]) {
     const snapshot = await readCacheSnapshot(f.sources[0].id);
     await writeCacheSnapshot({ ...snapshot, state: { ...snapshot.state, projects: snapshot.state.projects.map((project, index) => index === 0 ? { ...project, name: "Forged cached projection" } : project) } });
+    await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
     assert.equal((await readCacheSnapshot(f.sources[0].id)).state.projects[0].name, "Forged cached projection", "the ordinary checksum is valid");
     const result = await withRecallObservation(() => materializeLibrary(f.to, options));
     assert.ok(result.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"), mode);

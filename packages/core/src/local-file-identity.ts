@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import type { BigIntStats } from "node:fs";
-import { lstatSync, readdirSync } from "node:fs";
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
 import { lstat, readFile, statfs } from "node:fs/promises";
 import { join, relative } from "node:path";
 
@@ -22,15 +22,10 @@ export interface LocalFileIdentity {
   readonly mode: string;
 }
 
-/** Linux 6.13+ ext4/tmpfs multigrain change time and inode birth identity.
- * FS_MGTIME makes the next write after a stat query visibly change ctime even
- * within one coarse clock tick. Older kernels cannot provide that contract.
- * See kernel.org/doc/html/latest/filesystems/multigrain-ts.html.
- * Unlike size/mtime, an unprivileged source writer cannot restore ctime after
- * changing bytes. Boot + mount + device + inode + birth bind the actual object,
- * including inode reuse. Remote/FUSE filesystems without this contract fail
- * closed to the ordinary SHA-256 reader. These observations only authorize
- * reuse when an independent local record binds a previous full verification. */
+/** Object observations, never proof of unchanged bytes: a writable mapping can
+ * change content without changing even multigrain ctime. Consumers must hash
+ * current content before reusing a previously verified projection. Keep the
+ * existing capability boundary; unknown filesystems use the ordinary reader. */
 export async function localIdentityContext(root: string): Promise<LocalIdentityContext | null> {
   if (process.platform !== "linux") return null;
   try {
@@ -61,22 +56,49 @@ export function localFileIdentity(info: BigIntStats, context: LocalIdentityConte
     birth: info.birthtimeNs.toString(), change: info.ctimeNs.toString(), length: info.size.toString(), mode: info.mode.toString() };
 }
 
-/** Source bytes are never read by this metadata inventory. Every file's change
- * identity is checked: directory times or a stream's last filename alone would
- * miss an in-place change to an older record. */
+/** Hash a held descriptor from offset zero without moving its read position.
+ * This covers repeated writes through an already writable mmap as well as
+ * ordinary writes, truncation and replacement. */
+export function fileContentDigest(fd: number): { readonly sha256: string; readonly bytes: number } {
+  const hash = createHash("sha256");
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let bytes = 0;
+  for (;;) {
+    const count = readSync(fd, buffer, 0, buffer.length, bytes);
+    if (count === 0) break;
+    hash.update(buffer.subarray(0, count));
+    bytes += count;
+  }
+  return { sha256: hash.digest("hex"), bytes };
+}
+
+/** Each source file contributes its actual content, including old records.
+ * Metadata is only an object/race check and never substitutes for the digest. */
 export async function localTreeIdentity(root: string): Promise<string | null> {
   const context = await localIdentityContext(root);
   if (context === null) return null;
   const observed = context;
-  const entries: [string, LocalFileIdentity][] = [];
+  const entries: [string, LocalFileIdentity, string | null][] = [];
   function visit(path: string): void {
     const info = lstatSync(path, { bigint: true });
     const identity = localFileIdentity(info, observed, info.isDirectory());
     if (identity === null) throw new Error("unprovable source identity");
-    entries.push([relative(root, path), identity]);
-    if (info.isDirectory()) for (const name of readdirSync(path)) visit(join(path, name));
+    if (info.isDirectory()) {
+      entries.push([relative(root, path), identity, null]);
+      for (const name of readdirSync(path)) visit(join(path, name));
+      return;
+    }
+    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const held = fstatSync(fd, { bigint: true });
+      if (JSON.stringify(localFileIdentity(held, observed)) !== JSON.stringify(identity)) throw new Error("source replaced");
+      const content = fileContentDigest(fd);
+      if (content.bytes !== Number(held.size) || JSON.stringify(localFileIdentity(lstatSync(path, { bigint: true }), observed)) !== JSON.stringify(identity)) throw new Error("source changed");
+      entries.push([relative(root, path), identity, content.sha256]);
+    } finally { closeSync(fd); }
   }
   try {
+    if (!lstatSync(root).isDirectory()) return null;
     visit(root);
     entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
     return createHash("sha256").update(JSON.stringify(entries)).digest("hex");

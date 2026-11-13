@@ -37,10 +37,8 @@ import { join } from "node:path";
 import { cachePath } from "./device-home.js";
 import { openLibrary } from "./ether-library.js";
 import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
-import { observeCacheReason } from "./recall-observation.js";
+import { observeAuthorityWork, observeCacheRead, observeCacheReason } from "./recall-observation.js";
 import { writeFileAtomic } from "./atomic-file.js";
-import { localIdentityContext, localFileIdentity } from "./local-file-identity.js";
-import type { LocalFileIdentity } from "./local-file-identity.js";
 
 import type { ObsoleteDecisionHint } from "./minutes.js";
 
@@ -1184,14 +1182,13 @@ export interface RecallResult {
  * resetRecallCache closes it; selecting another project does not evict its index.
  */
 const cachedIndexes = new Map<string, RecallIndex>();
-const PERSISTENT_RECALL_VERSION = "record-clause-fts-v10";
+const PERSISTENT_RECALL_VERSION = "record-clause-fts-v11";
 
 interface PersistentRecallProjection {
   readonly checkpoint: string;
   readonly sha256: string;
   readonly bytes: number;
   readonly state: RecallIndexState;
-  readonly databaseIdentity: LocalFileIdentity | null;
 }
 
 interface SerializableRecallProjection extends Omit<PersistentRecallProjection, "state"> {
@@ -1252,30 +1249,14 @@ function parseRecallProjection(packed: PackedRecallProjection): PersistentRecall
   } };
 }
 
-/** Issue a local identity only after hashing the actual published file, not a
- * temporary buffer that a concurrent publisher may already have superseded. */
-async function verifiedDatabaseIdentity(path: string, expected: string): Promise<LocalFileIdentity | null> {
-  const context = await localIdentityContext(path);
-  if (context === null) return null;
-  let file: number | undefined;
-  try {
-    file = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const before = fstatSync(file, { bigint: true });
-    const identity = localFileIdentity(before, context);
-    if (identity === null || createHash("sha256").update(readFileSync(file)).digest("hex") !== expected) return null;
-    const after = fstatSync(file, { bigint: true }), named = lstatSync(path, { bigint: true });
-    return named.dev === after.dev && named.ino === after.ino && JSON.stringify(identity) === JSON.stringify(localFileIdentity(after, context)) ? identity : null;
-  } catch { return null; }
-  finally { if (file !== undefined) closeSync(file); }
-}
-
 /** Ordinary CLI/Hook reads keep an immutable, checkpoint-bound SQLite artifact
  * on this device. A changed corpus is applied transactionally to a private copy
  * and atomically published. Readers never modify an index another process uses.
  * The independent projection record authenticates both SQLite bytes and maps. */
 export async function recallPersistent(request: RecallRequest, root: string): Promise<RecallResult> {
   const current = cachedIndexes.get(request.cacheKey);
-  if (current?.checkpoint === request.checkpoint) return recall(request);
+  // A retained SQLite connection is also exposed to external mapped writes.
+  // Reopen only after verifying current bytes, even within one process.
   if (current !== undefined) { current.close(); cachedIndexes.delete(request.cacheKey); }
   const library = await openLibrary(root);
   const name = `recall-${createHash("sha256").update(request.cacheKey).digest("hex")}`;
@@ -1297,14 +1278,11 @@ export async function recallPersistent(request: RecallRequest, root: string): Pr
         file = openSync(database, constants.O_RDONLY | constants.O_NOFOLLOW);
         const before = fstatSync(file, { bigint: true });
         if (!before.isFile() || before.nlink !== 1n) throw new Error("invalid index file");
-        const context = await localIdentityContext(database);
-        const identity = context === null ? null : localFileIdentity(before, context);
-        const verifiedIdentity = identity !== null && saved.databaseIdentity !== null
-          && JSON.stringify(identity) === JSON.stringify(saved.databaseIdentity);
-        if (!verifiedIdentity || saved.checkpoint !== request.checkpoint) {
-          bytes = readFileSync(file);
-          if (bytes.length !== saved.bytes || createHash("sha256").update(bytes).digest("hex") !== saved.sha256) throw new Error("damaged index");
-        } else observeCacheReason("fts-file-identity-reuse");
+        // ctime/inode equality cannot detect every mmap write. The independent
+        // projection authenticates the full SHA-256; verify it on every open.
+        bytes = readFileSync(file);
+        observeCacheRead(bytes.length);
+        if (bytes.length !== saved.bytes || observeAuthorityWork("cacheHash", () => createHash("sha256").update(bytes!).digest("hex")) !== saved.sha256) throw new Error("damaged index");
         index = new RecallIndex([], saved.checkpoint, database, saved.state);
         const after = lstatSync(database, { bigint: true });
         if (before.dev !== after.dev || before.ino !== after.ino || before.ctimeNs !== after.ctimeNs) throw new Error("index replaced during open");
@@ -1321,23 +1299,25 @@ export async function recallPersistent(request: RecallRequest, root: string): Pr
       return recall(request);
     }
     temporary = join(directory, `.tmp-${name}-${process.pid}-${crypto.randomUUID()}.sqlite`);
+    let moved;
     if (index !== undefined && bytes !== undefined) {
       await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
       index.writableCopy(temporary);
-      const moved = index.update(inputs(), request.checkpoint);
+      moved = index.update(inputs(), request.checkpoint);
       observeCacheReason(`fts-persistent-delta:${moved.inserted}:${moved.removed}`);
     } else {
       index = new RecallIndex(inputs(), request.checkpoint, temporary);
+      moved = { inserted: index.size, removed: 0 };
       observeCacheReason(`fts-persistent-build:${index.size}`);
     }
     const written = await index.publish(temporary, database);
     temporary = undefined;
     const sha256 = createHash("sha256").update(written).digest("hex");
     const projection: PersistentRecallProjection = { checkpoint: request.checkpoint, sha256, bytes: written.length,
-      state: index.projection(), databaseIdentity: await verifiedDatabaseIdentity(database, sha256) };
+      state: index.projection() };
     await writeProtectedProjection(library, name, binding, serializableRecallProjection(projection));
     cachedIndexes.set(request.cacheKey, index);
-    return recall(request);
+    return { ...recall(request), rebuilt: true, inserted: moved.inserted, removed: moved.removed };
   } catch {
     try { index?.close(); } catch { /* An unsuccessful open may already be closed. */ }
     cachedIndexes.delete(request.cacheKey);

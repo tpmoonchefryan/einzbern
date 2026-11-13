@@ -79,16 +79,16 @@ keep their existing locations and contracts. Missing or corrupt derived files
 are rebuilt from validated sources; source corruption remains a refusal.
 
 Ordinary reads can reuse a protected local verification only when the current
-validated manifests, segment SHA-256 values and observed file identities match.
-Linux 6.13+ ext4/tmpfs bind boot, mount, device, inode birth identity and the
-kernel's observed multigrain change time. Earlier kernels and unsupported
-filesystems use full content verification. A coarse timestamp alone cannot
-prove that two writes in the same clock tick were different. The kernel's
-[multigrain timestamp contract](https://www.kernel.org/doc/html/latest/filesystems/multigrain-ts.html)
-ensures a visible change after a stat observation on these supported filesystems.
-Darwin retains its native provider checks with bounded helper batches, without a
-library segment-count ceiling. Doctor, shared submission, genesis reads and
-reads while holding the write lock continue to validate full source bytes.
+validated manifests, segment SHA-256 values and observed file identities match,
+and the actual source content has been hashed for this read. Writable mappings
+can change bytes without changing even Linux multigrain ctime. Boot, mount,
+device, inode birth identity, generation and timestamps bind objects; none is
+proof of unchanged content. The existing Linux/Darwin capability checks select
+projection reuse, with complete content hashing before and after reuse. Unknown
+capabilities use the ordinary full source reader. There is no segment-count
+ceiling. Doctor, shared submission, genesis reads and reads while holding the
+write lock continue to validate full source bytes. This conservative fallback
+does not claim the zero historical-byte scan acceptance criterion is met.
 
 A consolidated Linux state projection retains the complete event history as a
 verified compressed payload, decoding it on demand. Crest projections bind chain
@@ -98,9 +98,10 @@ evaluated against the current query's `at`. The persistent local FTS5 projection
 binds its checkpoint and logic version; transactional copies update only changed
 record and clause rows. A damaged or busy SQLite artifact can be discarded and
 rebuilt without changing the source or weakening query selection.
-An independently protected record binds the database's full SHA-256 and proven
-file identity. The same identity can reuse that verification; unknown or changed
-identities require hashing the actual bytes before opening the database.
+An independently protected record binds the database's full SHA-256. Every open,
+including a repeated request in one process, hashes the actual database bytes.
+Crest tree bindings likewise include every file's content digest. A valid Crest
+projection still repairs its disposable index views and pages on every read.
 
 `node scripts/performance/read-cache-bench.mjs spec.json new-private-output.jsonl`
 runs the built candidate's normal CLI and Hook in separate new processes. The

@@ -2,7 +2,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants, fstatSync, lstatSync } from "node:fs";
+import { constants, closeSync, fstatSync, lstatSync, openSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
@@ -19,12 +19,12 @@ import { FRAMEWORK_VERSION } from "./framework-version.js";
 import { recordBoundary } from "./source-verification-records.js";
 import type { VerificationBoundary } from "./source-verification-records.js";
 import { observeAuthorityWork, observeCacheRead, observeCacheWrite, observeCacheReason, observeEventRead, observeVerificationHelper, observeVerificationRecord, observeVerifiedSegment } from "./recall-observation.js";
-import { localFileIdentity, localIdentityContext } from "./local-file-identity.js";
+import { fileContentDigest, localFileIdentity, localIdentityContext } from "./local-file-identity.js";
 import type { LocalFileIdentity, LocalIdentityContext } from "./local-file-identity.js";
 import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
 import type { WorkspaceState } from "./workspace.js";
 
-const SCHEMA = "einzbern.source-verification.v3";
+const SCHEMA = "einzbern.source-verification.v4";
 const PROJECTION = "einzbern.verified-segment-events.v1";
 const FILE_COMMON = 0x8a0c0006;
 const VOLUME = 0xc006d000;
@@ -44,7 +44,7 @@ interface DarwinIdentity {
   readonly extendedFlags: string;
   readonly provider: Readonly<Record<string, unknown>>;
 }
-type NativeIdentity = DarwinIdentity | LocalFileIdentity;
+type NativeIdentity = (DarwinIdentity | LocalFileIdentity) & { readonly sha256: string };
 interface SegmentBinding {
   readonly libraryId: string;
   readonly sourceId: string;
@@ -185,7 +185,7 @@ function nativeIdentity(value: unknown, boot: string, path: string): DarwinIdent
   };
 }
 
-async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (NativeIdentity | null)[] | null> {
+async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (DarwinIdentity | null)[] | null> {
   const session = active.getStore();
   if (session?.helperUnavailable === true) return null;
   let script: string;
@@ -218,6 +218,24 @@ async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (Nat
   }
 }
 
+/** Native attributes only select/bind objects. Actual bytes prove every reuse,
+ * including writes through an existing mapping whose attributes never change. */
+function contentProof(file: OpenSegment, identity: DarwinIdentity | LocalFileIdentity | null): NativeIdentity | null {
+  if (identity === null) return null;
+  let owned: number | undefined;
+  try {
+    const fd = file.handle?.fd ?? (owned = openSync(file.path, constants.O_RDONLY | constants.O_NOFOLLOW));
+    const held = fstatSync(fd, { bigint: true });
+    if (!held.isFile() || held.nlink !== 1n || held.ino.toString() !== identity.fileId || Number(held.dev) !== identity.device) return null;
+    const content = observeAuthorityWork("segmentHash", () => fileContentDigest(fd));
+    observeEventRead(content.bytes, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
+    const named = lstatSync(file.path, { bigint: true });
+    if (content.bytes !== file.segment.bytes || content.sha256 !== file.segment.sha256 || !named.isFile() || named.nlink !== 1n || named.ino !== held.ino || named.dev !== held.dev) return null;
+    return { ...identity, sha256: content.sha256 };
+  } catch { return null; }
+  finally { if (owned !== undefined) closeSync(owned); }
+}
+
 async function queryNative(files: readonly OpenSegment[]): Promise<readonly (NativeIdentity | null)[] | null> {
   if (process.platform === "linux") {
     const context = files[0] === undefined ? null : await localIdentityContext(files[0].path);
@@ -225,7 +243,7 @@ async function queryNative(files: readonly OpenSegment[]): Promise<readonly (Nat
     return files.map(file => {
       const info = file.handle === undefined ? lstatSync(file.path, { bigint: true }) : fstatSync(file.handle.fd, { bigint: true });
       file.stat ??= info;
-      return localFileIdentity(info, context);
+      return contentProof(file, localFileIdentity(info, context));
     });
   }
   if (process.platform !== "darwin") return null;
@@ -234,7 +252,7 @@ async function queryNative(files: readonly OpenSegment[]): Promise<readonly (Nat
   for (let offset = 0; offset < files.length; offset += 64) {
     const batch = await queryDarwin(files.slice(offset, offset + 64));
     if (batch === null) return null;
-    identities.push(...batch);
+    identities.push(...batch.map((identity, index) => contentProof(files[offset + index]!, identity)));
   }
   return identities;
 }
@@ -462,7 +480,7 @@ export async function withSourceVerification(library: Library, operation: () => 
     if (!await prepareFiles(session)) return (await operation()).value;
     const provable = process.platform === "linux" && library.manifest.consolidation !== undefined
       && [...session.files.values()].every(file => file.native != null);
-    const binding = provable ? canonicalSha256({ projection: "materialized-library-v6", metadata: session.metadata,
+    const binding = provable ? canonicalSha256({ projection: "materialized-library-v7", metadata: session.metadata,
       files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) }) : null;
     if (binding !== null) {
       const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);

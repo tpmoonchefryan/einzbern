@@ -246,7 +246,7 @@ const env={...process.env};const lease=await m.acquireMemoryBudget({deviceHome:h
 try {
 const target=join(directory,'project');await cp(root,target,{recursive:true,filter:p=>!['.git','dist'].some(n=>p===join(root,n)||p.startsWith(join(root,n)+'/'))});execFileSync('git',['init','-q',target],{stdio:['ignore','pipe','pipe']});const plan=await planGates({projectRoot:target,release:true,gates:[{name:'engine:format',root:'.',command:['corepack','pnpm@11.3.0','run','--silent','format:check'],covers:['**'],required:true,enabled:true,releaseOnly:false}]});
 const run=await runGates(plan,{libraryId:'workspace:'+ '1'.repeat(24),at:'2026-10-29T18:00:00Z',deviceHome:home,env});
-const diagnostic=await readFile(join(home,'cache','workspace-'+ '1'.repeat(24),'gate-runs',run.run.gates[0].outputFile),'utf8');assert.deepEqual(run.run.reds,[],JSON.stringify(run)+diagnostic);assert.equal(run.run.gates.length,1);assert.equal(run.run.gates[0].ok,true,JSON.stringify(run));assert.equal(run.run.gates[0].exitCode,0);console.log(JSON.stringify(run));
+const diagnostic=await readFile(join(home,'derived-cache','workspace-'+ '1'.repeat(24),'gate-runs',run.run.gates[0].outputFile),'utf8');assert.deepEqual(run.run.reds,[],JSON.stringify(run)+diagnostic);assert.equal(run.run.gates.length,1);assert.equal(run.run.gates[0].ok,true,JSON.stringify(run));assert.equal(run.run.gates[0].exitCode,0);console.log(JSON.stringify(run));
 } finally {lease.release()}
 `);
   assert.ok(output.includes("engine:format"));

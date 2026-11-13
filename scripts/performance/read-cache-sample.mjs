@@ -23,6 +23,21 @@ if (entry === "hook") {
   };
 }
 const { withRecallObservation } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/recall-observation.js`));
+// Read only current manifests around the measured entry. This is the same
+// source-head definition as materialization, not a cached replay checkpoint.
+const { openLibrary } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/ether-library.js`));
+const { listStreamDevices, readStreamManifest } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/akasha.js`));
+const { libraryHeadDigest } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/workspace.js`));
+const { canonicalSha256 } = await import(pathToFileURL(`${repository}/dist/build/packages/protocol/src/index.js`));
+async function sourceHead() {
+  const { manifest } = await openLibrary(library);
+  const streams = (await Promise.all((await listStreamDevices(library)).map(device => readStreamManifest(library, device)))).filter(Boolean);
+  const heads = streams.map(stream => ({ deviceId: stream.deviceId, headEventHash: stream.headEventHash }));
+  const live = libraryHeadDigest(heads);
+  return { headEventHash: manifest.consolidation === undefined ? live : canonicalSha256({ schemaVersion: "einzbern.shared-head.v1", provenance: manifest.consolidation.sha256, head: live }),
+    versionVector: Object.fromEntries(streams.map(stream => [stream.deviceId, stream.sequence])), consolidationSha256: manifest.consolidation?.sha256 ?? null };
+}
+const sourceBefore = await sourceHead();
 const write = process.stdout.write.bind(process.stdout);
 const hash = createHash("sha256");
 let bytes = 0, observation, effectiveArgv, error;
@@ -51,6 +66,8 @@ try {
   error = { name: caught.name, reasonCode: caught.reasonCode ?? null };
   process.exitCode = 1;
 } finally { process.stdout.write = write; }
+const sourceAfter = await sourceHead();
 write(`${JSON.stringify({ schemaVersion: "einzbern.read-cache-sample.v1", pid: process.pid, entry, effectiveArgv,
   library, cwd: spec.cwd, at: spec.at, query: spec.query, host: process.env.EINZBERN_HOST,
+  sourceBefore, sourceAfter, sourceHeadStable: JSON.stringify(sourceBefore) === JSON.stringify(sourceAfter),
   outputSha256: hash.digest("hex"), outputBytes: bytes, observation, error: error ?? null, exitCode: process.exitCode ?? 0 })}\n`);
