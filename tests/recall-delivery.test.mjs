@@ -111,6 +111,20 @@ test("common clauses in a small library do not suppress a matching card at zero 
   resetRecallCache();
 });
 
+test("a complete technical identifier remains a strong short query in a small shared-topic library", () => {
+  const inputs = { minutes: Array.from({ length: 7 }, (_, index) => ({ ...minutes,
+    id: `minutes:${String(index + 1).padStart(24, "0")}`, externalKey: `EVAL-SHARED-${index + 1}`,
+    conferenceTitle: "Codex hook contract", summary: "Codex hook contract",
+    decisions: [index < 2 ? "Codex hook SubagentStop delivery." : "Codex hook ordinary stream notes."],
+  })) };
+  const answer = recall({ cacheKey: "short-shared-topic", checkpoint: "frozen", query: "Codex hook SubagentStop", documents: () => recallDocuments(inputs) });
+  assert.ok(answer.records.length > 0);
+  assert.ok(recallContextLines(answer.records, 1600).some((line) => line.includes("SubagentStop") && line.includes("minutes-show --id")));
+  const negative = recall({ cacheKey: "short-shared-topic", checkpoint: "frozen", query: "Codex hook unrelated SubagentStop", documents: () => recallDocuments(inputs) });
+  assert.equal(negative.records.length, 0, "an unmatched constraint gets no identifier bonus");
+  resetRecallCache();
+});
+
 test("normal agent CLI delivers actual valid D8, excludes superseded D2 and marks historical reads", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "recall-delivery-"));
   t.after(async () => { resetRecallCache(); await rm(root, { recursive: true, force: true }); });
@@ -125,7 +139,7 @@ test("normal agent CLI delivers actual valid D8, excludes superseded D2 and mark
     await runCli(["recall", "--workspace", root, "--at", at, "--query", query, "--view", "agent", ...extra], { write(value) { raw = value; } });
     return JSON.parse(raw);
   };
-  const current = await read("DELIVERY-MIN-1#D8 SubagentStop");
+  const current = await read("SubagentStop");
   assert.equal(current.schemaVersion, "tcrn.recall-agent.v1");
   assert.ok(current.context.some((line) => line.includes("D8 现行有效") && line.includes("retires the collector slot")));
   assert.ok(current.context.every((line) => !line.includes("must retain the amber audit log")));

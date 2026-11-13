@@ -11,6 +11,9 @@ by conflict detection is unchanged.
 Identifier expansions use a separate index route so they cannot change unrelated
 prose scores through length normalization. Short clause queries must match their
 constraints together; a complete clause match receives a 1.1 multiplier.
+An exact technical identifier in a short query receives the existing body weight
+in record IDF units only when all query constraints match. A minutes record must
+carry that name in an eligible clause. Unmatched words receive no such bonus.
 
 Long prose queries use at most 48 informative terms. Without a title, summary or
 authored expansion anchor, their scores scale by coverage of the complete query,
@@ -46,7 +49,8 @@ for the expected D number, validity, excerpt, scope and complete expandable sour
 It separately reports record Top-3, actual clause delivery, budget omissions,
 ranked records without the expected clause, obsolete clauses injected as current,
 historical correctness, legal empty results, invalid empty results and unrelated
-false injections. The content-addressed manifest and existing threshold policy
+false injections. An invalid empty positive result refuses the gate independently
+of aggregate delivery. The content-addressed manifest and existing threshold policy
 bind the cases and floors before scoring. Byte drift and private text refuse by
 name. Recording and scoring run with the filesystem write tripwire over the
 fixture library, with before/after byte digests. Raw outputs stay in the caller's

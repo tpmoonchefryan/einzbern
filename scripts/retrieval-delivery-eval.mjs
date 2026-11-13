@@ -243,6 +243,7 @@ export async function evaluateDelivery({ splits = ["development", "tuning", "hol
     const m = report.metrics;
     const label = `${report.split}/${report.size}`;
     if (m.deliveryRate < fixture.floors.deliveryRate) failures.push(`${label}: delivery ${m.delivered}/${m.positives}`);
+    if (m.invalidVacuum > 0) failures.push(`${label}: invalid-empty ${m.invalidVacuum}/${m.positives}`);
     if (m.historical && m.historyCorrect / m.historical < fixture.floors.historyRate) failures.push(`${label}: history ${m.historyCorrect}/${m.historical}`);
     if (m.obsoleteCurrent > fixture.floors.obsoleteCurrent) failures.push(`${label}: obsolete-current ${m.obsoleteCurrent}/${m.cases}`);
     if (m.negatives && m.negativeInjected / m.negatives >= fixture.floors.negativeRateBelow) failures.push(`${label}: negative ${m.negativeInjected}/${m.negatives}`);

@@ -570,6 +570,10 @@ export class RecallIndex {
       hits.push(hitOf(document, RECALL_EXTERNAL_KEY_SCORE, query, this.#frequencies));
     }
     const allTokens = [...recallTextTokens(query)];
+    const identifiers = [...query.matchAll(/[A-Za-z][A-Za-z0-9_]*/gu)]
+      .map((match) => match[0])
+      .filter((token) => /[a-z][A-Z]|[A-Z][A-Z][a-z]|_/u.test(token))
+      .map((token) => token.toLowerCase());
     // Long prompts cannot collect unbounded evidence from incidental short words.
     // Keep the informative constraints; full identifiers remain query terms as well.
     const queryTerms = (values: readonly string[]): readonly string[] => values.length <= 48 ? values : [...values]
@@ -643,6 +647,16 @@ export class RecallIndex {
         const words = new Set(recallQueryTokens(decision.text));
         return allTokens.every((token) => words.has(token));
       });
+      const documentWords = new Set(recallQueryTokens(`${document.title} ${document.body} ${document.expansions}`));
+      const identifierSource = new Set(recallTextTokens(document.decisions === undefined
+        ? `${document.title} ${document.body} ${document.expansions}`
+        : document.decisions.map((decision) => decision.text).join(" ")));
+      // A complete technical name is a deliberate constraint, even in a small
+      // library where that name occurs in several records. Every short-query
+      // constraint must still match, and withheld clauses cannot supply the name.
+      const exactIdentifier = allTokens.length <= 6 && identifiers.some((identifier) => identifierSource.has(identifier))
+        && allTokens.every((token) => documentWords.has(token));
+      const identifierBonus = exactIdentifier ? RECALL_FIELD_WEIGHTS.body * recallScoreUnit(this.size) : 0;
       let coverage = 1;
       if (allTokens.length > 24) {
         const words = new Set(recallQueryTokens(`${document.title} ${document.body} ${document.tags} ${document.expansions}`));
@@ -653,7 +667,7 @@ export class RecallIndex {
         const anchored = allTokens.filter((token) => anchor.has(token)).length >= 2;
         coverage = anchored ? 1 : matched / total;
       }
-      hits.push(hitOf(document, -Number(row["score"]) * decay * coverage * (coherent ? 1.1 : 1), query, this.#frequencies));
+      hits.push(hitOf(document, (-Number(row["score"]) + identifierBonus) * decay * coverage * (coherent ? 1.1 : 1), query, this.#frequencies));
       if (hits.length >= maximumHits) break;
     }
     return [
