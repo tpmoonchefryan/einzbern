@@ -566,7 +566,12 @@ export class RecallIndex {
     const named = new Map<string, { document: RecallDocument; requested: number }>();
     for (const match of query.matchAll(RECORD_REFERENCE_CANDIDATE)) {
       const key = match[1]!;
-      const document = this.#rows.get(key)?.document ?? this.#byExternalKey.get(key.toUpperCase()) ?? this.#namedByFragment(key);
+      let document = this.#rows.get(key)?.document ?? this.#byExternalKey.get(key.toUpperCase()) ?? this.#namedByFragment(key);
+      if (document === undefined && key.includes(":")) {
+        // An unresolved namespace must not swallow a known key and its adjacent clause.
+        const suffix = key.slice(key.indexOf(":") + 1);
+        document = this.#byExternalKey.get(suffix.toUpperCase()) ?? this.#namedByFragment(suffix);
+      }
       if (document === undefined) continue;
       // Bind the adjacent #D through the same resolver as the record, before deduplication.
       if (!named.has(document.id) || named.get(document.id)!.requested === 0) {

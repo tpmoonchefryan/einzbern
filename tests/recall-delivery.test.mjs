@@ -172,6 +172,11 @@ test("agent CLI binds each explicit clause to its full key, unique fragment or n
   for (const [query, expected] of [
     [`${a.key}#D2`, [[a, 2]]],
     [`${b.key}#D8`, [[b, 8]]],
+    [`Please report ref=${b.key}#D8.`, [[b, 8]]],
+    [`Please report ref:${b.key}#D8.`, [[b, 8]]],
+    ["Please report ref:MIN-202#D8.", [[b, 8]]],
+    [`Please report ref:${b.key}#D8 and ${a.id}#D2.`, [[b, 8], [a, 2]]],
+    [`${b.key} and ref:MIN-202#D8 then ${b.id}#D8`, [[b, 8]]],
     [`Please report ${a.key}#D2 and ${b.key}#D8.`, [[a, 2], [b, 8]]],
     [`Please report ${b.key}#D8 and ${a.key}#D2.`, [[b, 8], [a, 2]]],
     ["MIN-202#D8", [[b, 8]]],
