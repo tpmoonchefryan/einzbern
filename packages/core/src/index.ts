@@ -629,7 +629,7 @@ export {
   resolveQueryLanguage,
 } from "./knowledge-language.js";
 export type { KnowledgeLanguageBundle, KnowledgeLanguageProvider } from "./knowledge-language.js";
-export { RECALL_DEFAULT_TAU, recall, recallDocuments } from "./recall.js";
+export { RECALL_DEFAULT_TAU, recall, recallPersistent, recallDocuments } from "./recall.js";
 // TCRN-CROSS-STORY-474 R1, R2: what recall indexes, read from a state, and how a hit reads as one
 // line; the verb builds its input here, as the prompt hook does.
 export { formatRecallLine, readRecallCards, recallContextLines, recallInputsFromState } from "./recall-inputs.js";

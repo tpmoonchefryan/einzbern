@@ -37,7 +37,7 @@ import { effectiveProjectState } from "./project-chain.js";
 import { NAVIGATION_LINES } from "./agents-sections.js";
 import { CODEX_HOOK_EVENTS, HOST_HOOK_EVENTS, HOST_HOOK_HOSTS, HOST_HOOK_POINTER_EVENTS } from "./host-hooks.js";
 import type { HostHookHost } from "./host-hooks.js";
-import { recall, recallDocuments } from "./recall.js";
+import { recallPersistent, recallDocuments } from "./recall.js";
 import { readRecallCards, recallContextLines, recallDecisionHints, recallInputsFromState } from "./recall-inputs.js";
 import { resolveLibrary } from "./registry.js";
 import type { ResolvedLibrary } from "./registry.js";
@@ -203,14 +203,14 @@ export async function promptRecallOutcome(request: PromptRecallRequest): Promise
   const tau = numericSetting(state, "retrieval.tau", (value) => Number.isFinite(value) && value >= 0);
   const scopeExcerptBytes = numericSetting(state, "retrieval.scopeExcerptBytes", (value) => Number.isSafeInteger(value) && value > 0);
   const perPromptBytes = numericSetting(state, "injection.perPromptBytes", (value) => Number.isSafeInteger(value) && value > 0);
-  const result = recall({
+  const result = await recallPersistent({
     // Its own index: the recall verb's documents are built another way and must not answer here.
     cacheKey: `prompt-hook:${state.metadata.workspaceId}:${state.configurationProjectId ?? "library"}`,
     checkpoint: `${state.headEventHash}:${digest}`,
     documents: () => recallDocuments(recallInputsFromState(state, cards, { scopeExcerptBytes, ...(projectId === undefined ? {} : { projectId }) })),
     query: prompt,
     tau,
-  });
+  }, library.libraryPath);
   // TCRN-CROSS-SUB-426 (MIN-239 D5, D6): the index holds valid decisions only, so the hook never
   // recalls an obsolete one; a work or card hit that points at one says which decision replaced it.
   const lines = recallContextLines(recallDecisionHints(state, cards, result.records), perPromptBytes);

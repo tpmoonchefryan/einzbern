@@ -42,11 +42,16 @@ export async function recordBoundary(library: Library, recordDirectory = RECORD_
     const device = await readDevice(home);
     if (device === null) return null;
     const root = await realpath(library.root);
+    if (inside(root, home)) return null;
     const storage = readStorageLocation(deviceHome());
     const records = join(home, recordDirectory, libraryDirectoryName(library.manifest.libraryId));
     const cache = join(cachePath(library.manifest.libraryId), "verified-segments");
     // Resolve existing ancestors, including relocated cache forwarding links.
-    const cacheRoot = await realpath(cachePath(library.manifest.libraryId)).catch(() => realpath(join(cachePath(library.manifest.libraryId), "..")));
+    const localCache = cachePath(library.manifest.libraryId);
+    await mkdir(localCache, { recursive: true, mode: 0o700 });
+    const cacheInfo = await lstat(localCache);
+    if (!cacheInfo.isDirectory() || cacheInfo.isSymbolicLink()) return null;
+    const cacheRoot = await realpath(localCache);
     const writerRoots = [root, cacheRoot];
     const existingCache = await lstat(cache).catch(error => { if (error.code === "ENOENT") return null; throw error; });
     if (existingCache !== null) writerRoots.push(await realpath(cache));

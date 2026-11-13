@@ -76,13 +76,13 @@ test("469-R3: every device path is inside the device directory", async (t) => {
   assert.equal(paths.device, join(home, DEVICE_HOME_ENTRIES.device));
   assert.equal(paths.registry, join(home, "registry.json"));
   assert.equal(paths.machineSettings, join(home, "machine-settings.json"));
-  assert.equal(paths.cache, join(home, "cache", "library-0123456789abcdef01234567"));
-  assert.equal(paths.importedCache, join(home, "cache", "workspace-89abcdef0123456789abcdef"));
+  assert.equal(paths.cache, join(home, "derived-cache", "library-0123456789abcdef01234567"));
+  assert.equal(paths.importedCache, join(home, "derived-cache", "workspace-89abcdef0123456789abcdef"));
   assert.equal(paths.lock, join(home, "locks", "library-0123456789abcdef01234567.lock"));
   assert.equal(paths.backups, join(home, "backups"));
   assert.equal(paths.engine, join(home, "engine"));
   // An explicit home argument takes the place of the environment for every path.
-  assert.equal(cachePath(LIBRARY, "/device"), join("/device", "cache", "library-0123456789abcdef01234567"));
+  assert.equal(cachePath(LIBRARY, "/device"), join("/device", "derived-cache", "library-0123456789abcdef01234567"));
   // The --home flag of the machine-settings verbs keeps naming the user's home.
   assert.equal(machineSettingsPath("/users/someone"), join("/users/someone", DIRECTORY.device, "machine-settings.json"));
 });

@@ -3671,19 +3671,23 @@ export async function materializeLibrary(libraryOrRoot: Library | string, option
   const library = typeof libraryOrRoot === "string" ? await openLibrary(libraryOrRoot) : libraryOrRoot;
   // Ordinary reads need no native callback or retained verification envelope.
   if (options.readFile !== undefined || options.timeoutMs !== undefined || options.archivedManifest !== undefined
-    || process.platform !== "darwin" || library.manifest.consolidation === undefined) {
+    || heldWriteLocks.getStore()?.has(library.root) === true
+    || (library.manifest.consolidation === undefined && (await listStreamDevices(library.root)).length === 0)
+    || (process.platform !== "linux" && (process.platform !== "darwin" || library.manifest.consolidation === undefined))) {
     const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
     const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
     observeCheckpoint(state.headEventHash);
     return state;
   }
   const { withSourceVerification } = await import("./source-verification.js");
-  return withSourceVerification(library, async () => {
+  const state = await withSourceVerification(library, async () => {
     const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
     const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
     observeCheckpoint(state.headEventHash);
     return { value: state, read, accepted: (state.library?.rejectedEvents.length ?? 0) === 0 };
   });
+  observeCheckpoint(state.headEventHash);
+  return state;
 }
 
 /** The keys a record was renamed from, and the records renamed away from its key (TCRN-CROSS-STORY-468 R5). */

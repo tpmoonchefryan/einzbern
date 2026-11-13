@@ -175,7 +175,7 @@ test("prior verification stays in the device home when runtime is relocated into
   provider(t);
   await warm(f);
   assert.ok((await fs.readdir(f.records)).length > 0);
-  assert.ok(cachePath(f.manifest.libraryId).startsWith(f.library));
+  assert.equal(cachePath(f.manifest.libraryId).startsWith(f.library), false);
   assert.equal(f.records.startsWith(f.library), false);
 });
 

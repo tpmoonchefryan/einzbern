@@ -148,7 +148,7 @@ import {
   languageProviderFromBundle,
   parseLanguageBundle,
   RECALL_DEFAULT_TAU,
-  recall,
+  recallPersistent,
   readRuntimeKnowledgeLanguagePolicy,
   recallContextLines,
   recallDocuments,
@@ -4064,8 +4064,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     // TCRN-CROSS-STORY-474 R1: what the index holds is decided in one place (recall-inputs.ts), so
     // the verb and the prompt hook cannot index differently: the Stories, Incidents, Initiatives and
     // Epics with their goal, body and parent titles, every minutes record, and the cards.
-    const inputs = recallInputsFromState(state, cards.cards, { scopeExcerptBytes, ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) });
-    const result = recall({
+    const result = await recallPersistent({
       // Library identity stays path-independent; project-specific corpus inputs must not share an index.
       cacheKey: `${state.metadata.workspaceId}:${values["project-id"] ?? ""}`,
       // The storage checkpoint: the chain head the records were replayed from, and the
@@ -4075,11 +4074,12 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // entry of the version vector. An index of another status of decisions is another corpus
       // at the same head, and names that status (the cards' status is in their digest).
       checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}`,
-      documents: () => recallDocuments(inputs),
+      documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes,
+        ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) })),
       query,
       tau,
       ...(limit === undefined ? {} : { limit }),
-    });
+    }, workspace);
     // TCRN-CROSS-SUB-425, TCRN-CROSS-SUB-426 R17 续作修订三 (STORY-514 AC1): a hit on a removed card, which
     // only --status removed or all reads, says so and carries the card's removal as knowledge-list
     // answers it: the reason, basis, actor and instant, the card that superseded it, and its event.

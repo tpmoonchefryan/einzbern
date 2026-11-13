@@ -23,6 +23,11 @@ export function inheritArchivedKnowledgeScope(source: KnowledgeUnitMetadata, tar
   if (archiveBindings.has(source)) archiveBindings.set(target, archiveBindings.get(source)!);
 }
 
+/** Serialize provenance beside a projection, preserving absent versus unresolved. */
+export function archivedKnowledgeScope(metadata: KnowledgeUnitMetadata): { readonly bound: boolean; readonly binding: KnowledgeArchiveBinding | null } {
+  return { bound: archiveBindings.has(metadata), binding: archiveBindings.get(metadata) ?? null };
+}
+
 /** A missing archive binding is different from a positively identified workspace source. */
 export function resolveIntrinsicKnowledgeScope(
   metadata: Pick<KnowledgeUnitMetadata, "scope" | "projectId">,

@@ -2,23 +2,29 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, fstatSync, lstatSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
+import { gzipSync, gunzipSync } from "node:zlib";
 import { canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import type { LibraryRead, StreamManifest, StreamSegment } from "./akasha.js";
 import type { EventRecord } from "../../protocol/src/index.js";
 import { readConsolidationIndex } from "./consolidation-format.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import type { Library, LibraryManifest } from "./ether-library.js";
+import { openLibrary } from "./ether-library.js";
 import { FRAMEWORK_VERSION } from "./framework-version.js";
 import { recordBoundary } from "./source-verification-records.js";
 import type { VerificationBoundary } from "./source-verification-records.js";
 import { observeAuthorityWork, observeCacheRead, observeCacheWrite, observeCacheReason, observeEventRead, observeVerificationHelper, observeVerificationRecord, observeVerifiedSegment } from "./recall-observation.js";
+import { localFileIdentity, localIdentityContext } from "./local-file-identity.js";
+import type { LocalFileIdentity, LocalIdentityContext } from "./local-file-identity.js";
+import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
+import type { WorkspaceState } from "./workspace.js";
 
-const SCHEMA = "einzbern.source-verification.v2";
+const SCHEMA = "einzbern.source-verification.v3";
 const PROJECTION = "einzbern.verified-segment-events.v1";
 const FILE_COMMON = 0x8a0c0006;
 const VOLUME = 0xc006d000;
@@ -26,7 +32,7 @@ const EXTENDED_FLAGS = 0x200;
 const DATA_LENGTH = 0x200;
 const active = new AsyncLocalStorage<VerificationSession>();
 
-interface NativeIdentity {
+interface DarwinIdentity {
   readonly boot: string;
   readonly mount: string;
   readonly volume: string;
@@ -38,6 +44,7 @@ interface NativeIdentity {
   readonly extendedFlags: string;
   readonly provider: Readonly<Record<string, unknown>>;
 }
+type NativeIdentity = DarwinIdentity | LocalFileIdentity;
 interface SegmentBinding {
   readonly libraryId: string;
   readonly sourceId: string;
@@ -76,9 +83,12 @@ interface VerificationSession extends VerificationBoundary {
   readonly projections: Map<string, readonly EventRecord[]>;
   helperUnavailable: boolean;
   readonly files: Map<string, OpenSegment>;
+  metadata: string;
+  readonly metadataFiles: Map<string, LocalFileIdentity>;
+  localContext?: LocalIdentityContext | null;
 }
 interface OpenSegment {
-  readonly handle: FileHandle;
+  handle?: FileHandle;
   readonly path: string;
   readonly segment: StreamSegment;
   readonly binding: SegmentBinding;
@@ -90,6 +100,18 @@ interface OpenSegment {
 export interface VerifiedSegment {
   readonly bytes?: Buffer;
   readonly events?: readonly EventRecord[];
+}
+
+type MaterializedWork = WorkspaceState["work"][number];
+interface CachedMaterializedWork {
+  readonly fields: Omit<MaterializedWork, "extensions" | "summary">;
+  readonly detailKeys: readonly string[];
+  readonly details: Buffer;
+}
+interface CachedMaterializedState {
+  readonly fields: Readonly<Record<string, Buffer>>;
+  readonly work: readonly CachedMaterializedWork[];
+  readonly events: Buffer;
 }
 
 function digest(bytes: Uint8Array): string {
@@ -127,7 +149,7 @@ function attributeString(bytes: Buffer, at: number): string | null {
 /** Apple attr.h's packed 4-byte layout, with exact returned and supported sets.
  * Native generation and resident-data flags apply even when Foundation omits
  * iCloud-only keys. Their absence is not a claim that no provider manages a file. */
-function nativeIdentity(value: unknown, boot: string, path: string): NativeIdentity | null {
+function nativeIdentity(value: unknown, boot: string, path: string): DarwinIdentity | null {
   if (!object(value) || value.resourceError !== null || !object(value.resources)) return null;
   const provider = value.resources;
   const ubiquitous = provider.NSURLIsUbiquitousItemKey === true || provider.NSURLIsUbiquitousItemKey === 1;
@@ -163,7 +185,7 @@ function nativeIdentity(value: unknown, boot: string, path: string): NativeIdent
   };
 }
 
-async function queryNative(files: readonly OpenSegment[]): Promise<readonly (NativeIdentity | null)[] | null> {
+async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (NativeIdentity | null)[] | null> {
   const session = active.getStore();
   if (session?.helperUnavailable === true) return null;
   let script: string;
@@ -196,6 +218,41 @@ async function queryNative(files: readonly OpenSegment[]): Promise<readonly (Nat
   }
 }
 
+async function queryNative(files: readonly OpenSegment[]): Promise<readonly (NativeIdentity | null)[] | null> {
+  if (process.platform === "linux") {
+    const context = files[0] === undefined ? null : await localIdentityContext(files[0].path);
+    if (context === null) return null;
+    return files.map(file => {
+      const info = file.handle === undefined ? lstatSync(file.path, { bigint: true }) : fstatSync(file.handle.fd, { bigint: true });
+      file.stat ??= info;
+      return localFileIdentity(info, context);
+    });
+  }
+  if (process.platform !== "darwin") return null;
+  const identities: (NativeIdentity | null)[] = [];
+  // Bound each helper request, not the library's segment count.
+  for (let offset = 0; offset < files.length; offset += 64) {
+    const batch = await queryDarwin(files.slice(offset, offset + 64));
+    if (batch === null) return null;
+    identities.push(...batch);
+  }
+  return identities;
+}
+
+async function authorityKey(session: VerificationSession): Promise<string> {
+  const { listStreamDevices, readStreamManifest } = await import("./akasha.js");
+  const metadata: unknown[] = [];
+  async function collect(root: string, source: LibraryManifest): Promise<void> {
+    const streams = [];
+    for (const device of await listStreamDevices(root)) streams.push(await readStreamManifest(root, device, { archivedManifest: source }));
+    const index = await readConsolidationIndex(root, source);
+    metadata.push({ root, source, streams, index });
+    for (const entry of index?.sources ?? []) await collect(join(root, entry.archive), entry.manifest);
+  }
+  await collect(session.library.root, session.library.manifest);
+  return canonicalSha256(metadata);
+}
+
 async function priorRecord(session: VerificationSession, file: OpenSegment, native: NativeIdentity): Promise<PriorVerification | null> {
   let handle;
   try {
@@ -221,40 +278,60 @@ async function priorRecord(session: VerificationSession, file: OpenSegment, nati
  * process twice per stream. The normal reader still validates current metadata. */
 async function prepareFiles(session: VerificationSession): Promise<boolean> {
   const { listStreamDevices, readStreamManifest } = await import("./akasha.js");
+  const metadata: unknown[] = [];
+  session.localContext = await localIdentityContext(session.library.root);
+  const watch = (path: string, directory = false): void => {
+    if (session.localContext == null) return;
+    const identity = localFileIdentity(lstatSync(path, { bigint: true }), session.localContext, directory);
+    if (identity === null) throw new Error("unprovable metadata identity");
+    session.metadataFiles.set(path, identity);
+  };
   async function collect(root: string, source: LibraryManifest): Promise<void> {
     const sourceRoot = await realpath(root);
     if (!inside(session.library.root, sourceRoot)) throw new Error("source outside library");
     const archive = relative(session.library.root, sourceRoot).split("\\").join("/");
+    const streams = [];
+    watch(join(sourceRoot, "akasha"), true);
     for (const deviceId of await listStreamDevices(sourceRoot)) {
+      watch(join(sourceRoot, "akasha", deviceId), true);
+      const manifestPath = join(sourceRoot, "akasha", deviceId, "manifest.json");
+      if (session.localContext != null) {
+        try { watch(manifestPath); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      }
       const manifest = await readStreamManifest(sourceRoot, deviceId, { archivedManifest: source });
+      streams.push(manifest);
       if (manifest === null) continue;
       for (const segment of manifest.segments) {
-        // Keep the complete batch below the native descriptor budget. Larger
-        // libraries use the original reader instead of dropping any checks.
-        if (session.files.size >= 128) throw new Error("native descriptor budget");
         const path = join(sourceRoot, "akasha", manifest.deviceId, segment.name);
         if (session.files.has(path)) throw new Error("aliased source descriptor");
-        const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const handle = process.platform === "linux" ? undefined : await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         const binding: SegmentBinding = { libraryId: session.library.manifest.libraryId, sourceId: source.libraryId, archive, streamId: manifest.streamId, deviceId: manifest.deviceId, identityScheme: manifest.identityScheme, segment, rootManifest: canonicalSha256(session.library.manifest), sourceManifest: canonicalSha256(source) };
-        session.files.set(path, { handle, path, segment, binding, key: canonicalSha256({ libraryId: binding.libraryId, sourceId: binding.sourceId, archive, streamId: binding.streamId, segment: segment.name }) });
+        session.files.set(path, { ...(handle === undefined ? {} : { handle }), path, segment, binding, key: canonicalSha256({ libraryId: binding.libraryId, sourceId: binding.sourceId, archive, streamId: binding.streamId, segment: segment.name }) });
       }
     }
+    if (source.consolidation !== undefined) watch(join(sourceRoot, source.consolidation.index));
     const index = await readConsolidationIndex(sourceRoot, source);
+    metadata.push({ root: sourceRoot, source, streams, index });
     for (const entry of index?.sources ?? []) await collect(join(sourceRoot, entry.archive), entry.manifest);
   }
   try {
+    watch(join(session.library.root, "manifest.json"));
+    if (canonicalSha256((await openLibrary(session.library.root)).manifest) !== canonicalSha256(session.library.manifest)) return false;
     await collect(session.library.root, session.library.manifest);
     const files = [...session.files.values()];
     if (files.length === 0) return false;
     const before = await active.run(session, () => queryNative(files));
     if (before === null || before.every(value => value === null)) return false;
     for (const [index, file] of files.entries()) {
-      const stat = await file.handle.stat({ bigint: true });
+      const stat = process.platform === "linux" ? file.stat! : await file.handle!.stat({ bigint: true });
       const native = before[index];
       file.stat = stat;
       file.native = stat.isFile() && stat.nlink === 1n && native !== undefined && native !== null
         && native.fileId === stat.ino.toString() && native.device === Number(stat.dev) && native.length === stat.size.toString() ? native : null;
     }
+    session.metadata = canonicalSha256(metadata);
+    if (!metadataUnchanged(session)) return false;
     return true;
   } catch {
     observeCacheReason("source-verification-native-preparation-failed");
@@ -262,18 +339,36 @@ async function prepareFiles(session: VerificationSession): Promise<boolean> {
   }
 }
 
-async function filesUnchanged(session: VerificationSession): Promise<boolean> {
-  const files = [...session.files.values()];
-  const after = await active.run(session, () => queryNative(files));
-  if (after === null) return false;
-  for (const [index, file] of files.entries()) {
-    if (file.native === null || file.native === undefined) continue;
-    const held = await file.handle.stat({ bigint: true });
-    const named = await lstat(file.path, { bigint: true });
-    const stat = file.stat!;
-    if (!named.isFile() || named.nlink !== 1n || held.nlink !== 1n || named.dev !== held.dev || named.ino !== held.ino || stat.dev !== held.dev || stat.ino !== held.ino || stat.size !== held.size || stat.mtimeNs !== held.mtimeNs || stat.ctimeNs !== held.ctimeNs || canonicalSha256(file.native) !== canonicalSha256(after[index])) return false;
+/** Full current metadata was parsed and hashed above. Its kernel change identity
+ * must still match after the operation; file/stream additions change a watched
+ * directory. This avoids re-reading unchanged manifests inside one request. */
+function metadataUnchanged(session: VerificationSession): boolean {
+  if (session.localContext == null) return true;
+  for (const [path, before] of session.metadataFiles) {
+    const info = lstatSync(path, { bigint: true });
+    if (JSON.stringify(before) !== JSON.stringify(localFileIdentity(info, session.localContext, info.isDirectory()))) return false;
   }
   return true;
+}
+
+async function filesUnchanged(session: VerificationSession): Promise<boolean> {
+  try {
+    const files = [...session.files.values()];
+    const after = await active.run(session, () => queryNative(files));
+    if (after === null) return false;
+    for (const [index, file] of files.entries()) {
+      if (file.native === null || file.native === undefined) continue;
+      if (file.handle === undefined) {
+        if (canonicalSha256(file.native) !== canonicalSha256(after[index])) return false;
+        continue;
+      }
+      const held = process.platform === "linux" ? fstatSync(file.handle.fd, { bigint: true }) : await file.handle.stat({ bigint: true });
+      const named = process.platform === "linux" ? lstatSync(file.path, { bigint: true }) : await lstat(file.path, { bigint: true });
+      const stat = file.stat!;
+      if (!named.isFile() || named.nlink !== 1n || held.nlink !== 1n || named.dev !== held.dev || named.ino !== held.ino || stat.dev !== held.dev || stat.ino !== held.ino || stat.size !== held.size || stat.mtimeNs !== held.mtimeNs || stat.ctimeNs !== held.ctimeNs || canonicalSha256(file.native) !== canonicalSha256(after[index])) return false;
+    }
+    return session.localContext == null ? session.metadata === await authorityKey(session) : metadataUnchanged(session);
+  } catch { return false; }
 }
 
 /** A local record authenticates the compressed, previously validated event
@@ -318,6 +413,7 @@ export async function verifiedStreamSegments(libraryRoot: string, manifest: Stre
       } catch { /* A missing or damaged projection uses the original reader. */ }
       finally { await cached?.close(); }
     }
+    file.handle ??= await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const bytes = await file.handle.readFile();
     observeEventRead(bytes.length, manifest.streamId, sourceManifest === undefined ? "live" : "archive");
     result.set(segment.name, { bytes });
@@ -358,18 +454,67 @@ function authorityMetadata(read: LibraryRead): unknown {
 
 /** Only the materializer enters this scope. Public source-event readers always
  * read source bytes. Issuance follows a successful full authority replay. */
-export async function withSourceVerification<T>(library: Library, operation: () => Promise<{ readonly value: T; readonly read: LibraryRead; readonly accepted: boolean }>): Promise<T> {
-  const boundary = process.platform !== "darwin" || library.manifest.consolidation === undefined ? null : await recordBoundary(library);
+export async function withSourceVerification(library: Library, operation: () => Promise<{ readonly value: WorkspaceState; readonly read: LibraryRead; readonly accepted: boolean }>): Promise<WorkspaceState> {
+  const boundary = await recordBoundary(library);
   if (boundary === null) return (await operation()).value;
-  const session: VerificationSession = { ...boundary, pending: [], reused: [], projections: new Map(), helperUnavailable: false, files: new Map() };
+  const session: VerificationSession = { ...boundary, pending: [], reused: [], projections: new Map(), helperUnavailable: false, files: new Map(), metadataFiles: new Map(), metadata: "" };
   try {
     if (!await prepareFiles(session)) return (await operation()).value;
+    const provable = process.platform === "linux" && library.manifest.consolidation !== undefined
+      && [...session.files.values()].every(file => file.native != null);
+    const binding = provable ? canonicalSha256({ projection: "materialized-library-v6", metadata: session.metadata,
+      files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) }) : null;
+    if (binding !== null) {
+      const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);
+      if (cached !== null && await filesUnchanged(session)) {
+        for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
+        observeCacheReason("materialized-state-hit");
+        // Keep the complete public event history, but decode it only when a
+        // consumer asks for it. Recall's state/Crest/index hits need the current
+        // records, not the historical payload graph. The enclosing protected
+        // projection authenticates all compressed bytes before returning state.
+        const state: Record<string, unknown> = {};
+        for (const [key, bytes] of Object.entries({ ...cached.fields, events: cached.events })) {
+          let decoded: { readonly value: unknown } | undefined;
+          let packed: Buffer | undefined = bytes;
+          Object.defineProperty(state, key, { enumerable: true, configurable: true, get() {
+            if (decoded === undefined) { decoded = { value: JSON.parse(gunzipSync(packed!).toString("utf8")) }; packed = undefined; }
+            return decoded.value;
+          } });
+        }
+        // Most warm Recall queries need work identities for obsolete-decision
+        // hints, but only the selected records' extensions. Keep every field
+        // available without decoding all unrelated work bodies for that lookup.
+        state["work"] = cached.work.map(stored => {
+          const record = { ...stored.fields };
+          let details: Record<string, unknown> | undefined;
+          for (const key of stored.detailKeys) Object.defineProperty(record, key, { enumerable: true, configurable: true, get() {
+            details ??= JSON.parse(gunzipSync(stored.details).toString("utf8")) as Record<string, unknown>;
+            return details[key];
+          } });
+          return record;
+        });
+        return state as unknown as WorkspaceState;
+      }
+    }
     const answer = await active.run(session, operation);
     if (!await filesUnchanged(session)) {
       observeCacheReason("source-verification-source-changed");
       return (await operation()).value;
     }
     for (const reused of session.reused) observeVerifiedSegment(reused.bytes, reused.streamId, reused.scope);
+    if (answer.accepted && binding !== null) {
+      const { events, work, ...state } = answer.value;
+      await writeProtectedProjection(library, "materialized", binding, {
+        fields: Object.fromEntries(Object.entries(state).map(([key, value]) => [key, gzipSync(JSON.stringify(value))])),
+        work: work.map(record => {
+          const { extensions, summary, ...fields } = record;
+          const details = { extensions, ...(summary === undefined ? {} : { summary }) };
+          return { fields, detailKeys: Object.keys(details), details: gzipSync(JSON.stringify(details)) };
+        }),
+        events: gzipSync(JSON.stringify(events)),
+      } satisfies CachedMaterializedState);
+    }
     if (answer.accepted && session.pending.length > 0) {
       try {
         // No source, index or cache value selects this device-local destination.
@@ -396,6 +541,6 @@ export async function withSourceVerification<T>(library: Library, operation: () 
     }
     return answer.value;
   } finally {
-    await Promise.all([...session.files.values()].map(file => file.handle.close().catch(() => undefined)));
+    await Promise.all([...session.files.values()].map(file => file.handle?.close().catch(() => undefined)));
   }
 }

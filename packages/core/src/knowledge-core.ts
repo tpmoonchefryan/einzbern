@@ -77,7 +77,10 @@ import { DIRECTORY, LEGACY_CONTROL_DIRECTORY, LEGACY_KNOWLEDGE_DIRECTORY } from 
 import { assertKnowledgeNotRecorded } from "./knowledge-duplicates.js";
 import { readRegistry } from "./registry.js";
 import { assessKnowledgePair, knowledgeTopicTokens } from "./knowledge-conflict.js";
-import { bindArchivedKnowledgeScope, inheritArchivedKnowledgeScope, intrinsicScopeMatchesProject, resolveIntrinsicKnowledgeScope } from "./knowledge-scope.js";
+import { archivedKnowledgeScope, bindArchivedKnowledgeScope, inheritArchivedKnowledgeScope, intrinsicScopeMatchesProject, resolveIntrinsicKnowledgeScope } from "./knowledge-scope.js";
+import { localTreeIdentity } from "./local-file-identity.js";
+import { projectionBinding, readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
+import { observeCacheReason } from "./recall-observation.js";
 
 const KNOWLEDGE_PROJECTION_VERSION = "intrinsic-scope-conflict-v2";
 
@@ -715,6 +718,7 @@ interface CrestScan {
   // Every body file the crest's device streams name, with its card: what a device clears from its own
   // stream once the card is removed. Empty for an old-layout store.
   readonly streamBodies: readonly CrestStreamBody[];
+  readonly sourceDigest?: string;
 }
 
 // The user crest, read: no library, no chain head and no links to check a card against beyond
@@ -2063,7 +2067,12 @@ function knowledgeIndex(marker: KnowledgeStoreMarker, metadata: readonly Knowled
 }
 
 // One value's canonical form as an entry of a canonical list: canonicalJson without its terminal LF.
+const projectedCanonicalTexts = new WeakMap<object, string>();
 function canonicalEntryText(value: JsonValue): string {
+  if (value !== null && typeof value === "object") {
+    const cached = projectedCanonicalTexts.get(value);
+    if (cached !== undefined) return cached;
+  }
   return canonicalJson(value).slice(0, -1);
 }
 
@@ -4185,10 +4194,14 @@ function crash(point: KnowledgeFaultPoint, selected?: KnowledgeFaultPoint): void
   }
 }
 
+// Cache only the immutable timestamp parse. Every card still evaluates its
+// policy against the supplied at; no freshness result crosses a query.
+let lastEvaluationInstant: { readonly text: string; readonly value: bigint } | undefined;
 function computeFreshness(metadata: KnowledgeUnitMetadata, at: string): KnowledgeFreshnessState {
   let now: bigint;
   try {
-    now = parseStrictInstant(at);
+    if (lastEvaluationInstant?.text !== at) lastEvaluationInstant = { text: at, value: parseStrictInstant(at) };
+    now = lastEvaluationInstant.value;
   } catch (error) {
     fail("KNOWLEDGE_INPUT_INVALID", String(error));
   }
@@ -5529,8 +5542,67 @@ export async function listKnowledgeMetadata(workspaceRoot: string, query: Knowle
   // TCRN-CROSS-INIT-053 R46 (I04): a library whose store was never created holds no card yet: an empty
   // inventory that says so, never a refusal.
   if (await libraryStoreNeverCreated(place)) return knowledgeListAnswer([], query, normalized, { ...ABSENT_STORE_DISCLOSURE, ...knowledgeReadEvidence(null, query, normalized, place.workspace) });
-  const scan = await scanKnowledgeStoreAt(place, query, false, "metadata-only", false, false);
+  const scan = await cachedKnowledgeListScan(place, query);
   return mergedCrestList(scan, query, normalized, trailingDisclosure(scan), scan.workspace);
+}
+
+type CachedCrestUnit = ReturnType<typeof snapshotUnitDocument> & {
+  readonly archiveScope: ReturnType<typeof archivedKnowledgeScope>;
+  readonly canonicalText: string;
+};
+type CachedLibraryCrest = Omit<KnowledgeStoreScan, "workspace" | "units" | "duplicates"> & {
+  readonly units: readonly CachedCrestUnit[];
+  readonly duplicates: readonly { readonly id: string; readonly externalKey: string; readonly versions: readonly CachedCrestUnit[] }[];
+};
+
+/** Cache the timeless projection. Selection below still evaluates query.at on
+ * every call, including a new process at the same chain head. */
+async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: KnowledgeListQuery): Promise<KnowledgeStoreScan> {
+  const full = (): Promise<KnowledgeStoreScan> => scanKnowledgeStoreAt(place, query, false, "metadata-only", false, false);
+  if (query.beforeDescriptorReadForTest !== undefined || query.afterDescriptorOpenForTest !== undefined || !await hasLibraryManifest(place.workspaceRoot)) return full();
+  const library = await openLibrary(place.workspaceRoot);
+  const roots = [place.storePath, ...(place.workspace.library?.consolidation?.sources ?? [])
+    .filter(source => source.manifest.libraryId !== place.workspace.metadata.workspaceId && source.inventory.some(file => file.path === "crest/store.json"))
+    .map(source => join(place.workspaceRoot, source.archive, "crest"))];
+  const boundary = async (): Promise<string | null> => {
+    const trees = await Promise.all(roots.map(root => localTreeIdentity(root)));
+    if (trees.some(tree => tree === null)) return null;
+    const heads = await Promise.all(roots.map(root => currentCrestHeads(root)));
+    return projectionBinding({ cacheVersion: 2, projection: KNOWLEDGE_PROJECTION_VERSION, head: place.workspace.headEventHash, roots, trees, heads });
+  };
+  const binding = await boundary();
+  if (binding === null) return full();
+  const saved = await readProtectedProjection<CachedLibraryCrest>(library, "crest", binding);
+  if (saved !== null && binding === await boundary()) {
+    const restore = (stored: CachedCrestUnit): CrestUnit => {
+      const { archiveScope, canonicalText, ...fields } = stored;
+      const unit = { ...fields, body: null } as unknown as CrestUnit;
+      if (archiveScope.bound) bindArchivedKnowledgeScope(unit.metadata, archiveScope.binding);
+      projectedCanonicalTexts.set(unit.metadata, canonicalText);
+      return unit;
+    };
+    observeCacheReason("crest-projection-hit");
+    return { ...saved, workspace: place.workspace, units: saved.units.map(restore),
+      duplicates: saved.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(restore) })) };
+  }
+  const scan = await full();
+  if (binding === await boundary()) {
+    const save = (unit: CrestUnit): CachedCrestUnit => ({ ...snapshotUnitDocument(unit), archiveScope: archivedKnowledgeScope(unit.metadata),
+      canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue) });
+    const { workspace: _workspace, ...fields } = scan;
+    await writeProtectedProjection(library, "crest", binding, { ...fields, sourceDigest: crestSourceDigest(scan), units: scan.units.map(save),
+      duplicates: scan.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(save) })) } satisfies CachedLibraryCrest);
+    observeCacheReason("crest-projection-build");
+  }
+  return scan;
+}
+
+function crestSourceDigest(scan: CrestScan | null): string {
+  return canonicalListSha256([
+    canonicalJson(scan?.marker ?? null), canonicalJson(scan?.eventHeads ?? []),
+    ...(scan === null ? [] : crestRecords(scan)).map(unit => canonicalJson({ digest: unit.storedDigest, scope: resolveIntrinsicKnowledgeScope(unit.metadata) })),
+    canonicalJson(scan === null ? [] : [...scan.removals]), canonicalJson(scan?.unresolvedConflicts ?? []),
+  ]);
 }
 
 /** Counts use the scoped active records before search/pagination, independently of selection.
@@ -5585,11 +5657,7 @@ function knowledgeReadEvidence(
     workspaceId: workspace?.metadata.workspaceId ?? scan?.marker.workspaceId ?? USER_CREST_ID,
     version: workspace?.version ?? scan?.marker.version ?? 0,
     headEventHash: workspace?.headEventHash ?? null,
-    crestDigest: canonicalListSha256([
-      canonicalJson(scan?.marker ?? null), canonicalJson(scan?.eventHeads ?? []),
-      ...records.map((unit) => canonicalJson({ digest: unit.storedDigest, scope: resolveIntrinsicKnowledgeScope(unit.metadata) })),
-      canonicalJson(scan === null ? [] : [...scan.removals]), canonicalJson(scan?.unresolvedConflicts ?? []),
-    ]),
+    crestDigest: scan?.sourceDigest ?? crestSourceDigest(scan),
   };
   const snapshot = canonicalSha256({
     sourceVersion, effectiveScope, projectionVersion: KNOWLEDGE_PROJECTION_VERSION, at: query.at,

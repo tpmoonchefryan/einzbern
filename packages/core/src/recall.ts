@@ -24,12 +24,23 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // FTS5 and bm25 are compiled into it. Nothing is downloaded, nothing is built natively,
 // and the offline boundary does not move.
 //
-// WHY THE INDEX IS DERIVED AND NEVER STORED. It is rebuilt from the chain and the
-// knowledge store, so it can be thrown away at any moment without losing a fact. What
-// it costs to rebuild is what the checkpoint cache below exists to avoid paying twice.
+// The index is disposable derived data. CLI/Hook persist its verified projection
+// on this device; pure in-process users can still use an in-memory index. Both are
+// rebuilt from the current chain and knowledge corpus without losing a fact.
 
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { serialize, deserialize } from "node:v8";
+import { constants, rmSync, closeSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { cachePath } from "./device-home.js";
+import { openLibrary } from "./ether-library.js";
+import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
+import { observeCacheReason } from "./recall-observation.js";
+import { writeFileAtomic } from "./atomic-file.js";
+import { localIdentityContext, localFileIdentity } from "./local-file-identity.js";
+import type { LocalFileIdentity } from "./local-file-identity.js";
 
 import type { ObsoleteDecisionHint } from "./minutes.js";
 
@@ -378,26 +389,115 @@ interface IndexedRow {
   readonly rowId: number;
   readonly digest: string;
   readonly document: RecallDocument;
+  readonly lexicon: DocumentLexicon;
+  readonly deliveryDocument?: RecallDocument;
 }
 
-function hitOf(document: RecallDocument, score: number, query: string, frequencies: ReadonlyMap<string, number>, requested: number = 0): RecallHit {
-  const historical = recallQueryIsHistorical(query);
+interface ClauseLexicon {
+  readonly words: Uint32Array;
+  readonly passages: readonly { readonly text: string; readonly words: Uint32Array }[];
+}
+interface DocumentLexicon {
+  readonly words: Uint32Array;
+  readonly identifiers: Uint32Array;
+  readonly coverage: Uint32Array;
+  readonly anchor: Uint32Array;
+  readonly clauses: readonly ClauseLexicon[];
+}
+
+function wordIds(words: Iterable<string>, vocabulary: Map<string, number>): Uint32Array {
+  return new Uint32Array([...new Set(Array.from(words, word => {
+    let id = vocabulary.get(word);
+    if (id === undefined) { id = vocabulary.size + 1; vocabulary.set(word, id); }
+    return id;
+  }))].sort((a, b) => a - b));
+}
+
+function hasWord(words: Uint32Array, id: number | undefined): boolean {
+  if (id === undefined) return false;
+  let low = 0, high = words.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    if (words[middle]! < id) low = middle + 1;
+    else high = middle;
+  }
+  return words[low] === id;
+}
+
+function documentLexicon(document: RecallDocument, vocabulary: Map<string, number>): DocumentLexicon {
+  return {
+    words: wordIds(recallQueryTokens(`${document.title} ${document.body} ${document.expansions}`), vocabulary),
+    identifiers: wordIds(recallTextTokens(document.decisions === undefined ? `${document.title} ${document.body} ${document.expansions}` : document.decisions.map(decision => decision.text).join(" ")), vocabulary),
+    coverage: wordIds(recallQueryTokens(`${document.title} ${document.body} ${document.tags} ${document.expansions}`), vocabulary),
+    anchor: wordIds(recallQueryTokens(`${document.title} ${document.summary} ${document.expansions}`), vocabulary),
+    clauses: (document.decisions ?? []).map(clause => ({ words: wordIds(recallQueryTokens(clause.text), vocabulary),
+      passages: clause.text.split(/(?<=[。；;!?])\s*|(?<=\.)\s+/u).filter(part => part.trim().length > 0)
+        .map(text => ({ text, words: wordIds(recallQueryTokens(text), vocabulary) })) })),
+  };
+}
+
+interface RecallIndexState {
+  readonly rows: Map<string, Pick<IndexedRow, "rowId" | "digest" | "document">>;
+  readonly byExternalKey: Map<string, string>;
+  readonly keyRuns: Map<string, readonly string[]>;
+  readonly frequencies: Map<string, number>;
+  readonly clauses: Map<number, { readonly documentId: string; readonly words: Uint32Array; readonly originalWords: Uint32Array }>;
+  readonly vocabulary: Map<string, number>;
+  readonly clauseRows: Map<string, readonly number[]>;
+  readonly clauseFrequencies: Map<string, number>;
+  readonly nextRowId: number;
+  readonly nextClauseId: number;
+  readonly packedTerms?: PackedRecallTerms;
+}
+
+interface PackedRecallTerms {
+  readonly text: Buffer;
+  // Sorted UTF-8 terms: byte offset, length, token id, record frequency, clause frequency.
+  readonly entries: Uint32Array;
+}
+interface RecallTerm { readonly id: number; readonly frequency: number; readonly clauseFrequency: number }
+type WordLookup = Pick<ReadonlyMap<string, number>, "get">;
+
+function findPackedTerm(terms: PackedRecallTerms, word: string): RecallTerm | null {
+  const bytes = Buffer.from(word);
+  let low = 0, high = terms.entries.length / 5;
+  while (low < high) {
+    const middle = (low + high) >>> 1, offset = middle * 5;
+    const compared = Buffer.compare(terms.text.subarray(terms.entries[offset]!, terms.entries[offset]! + terms.entries[offset + 1]!), bytes);
+    if (compared < 0) low = middle + 1;
+    else if (compared > 0) high = middle;
+    else return { id: terms.entries[offset + 2]!, frequency: terms.entries[offset + 3]!, clauseFrequency: terms.entries[offset + 4]! };
+  }
+  return null;
+}
+
+function hitMetadata(document: RecallDocument, score: number, query: string): RecallHit {
+  return { kind: document.kind, key: document.key, id: document.id, status: document.status, title: document.title,
+    summary: document.summary, score, recordKind: document.recordKind, parentChain: document.parentChain, lead: document.lead,
+    ...(recallQueryIsHistorical(query) ? { historical: true } : {}),
+    ...(document.scope === undefined ? {} : { scope: document.scope }),
+    ...(document.involvedProjects === undefined ? {} : { involvedProjects: document.involvedProjects }) };
+}
+
+function hitOf(document: RecallDocument, lexicon: DocumentLexicon, vocabulary: WordLookup, score: number, query: string, frequencies: WordLookup, requested: number = 0): RecallHit {
   const tokens = recallQueryTokens(query);
   const clauses = document.decisions ?? [];
   const selected = clauses.map((clause, index) => {
-    const words = new Set(recallQueryTokens(clause.text));
-    const matches = tokens.filter((token) => words.has(token));
+    const words = lexicon.clauses[index]!.words;
+    const matches = tokens.filter((token) => hasWord(words, vocabulary.get(token)));
     const weight = matches.reduce((sum, token) => sum + 1 / (frequencies.get(token) ?? 1), 0);
     return { clause, index, weight: requested === clause.number ? Number.POSITIVE_INFINITY : weight };
   }).sort((a, b) => b.weight - a.weight || a.index - b.index)[0]?.clause;
-  const passages = selected?.text.split(/(?<=[。；;!?])\s*|(?<=\.)\s+/u).filter((part) => part.trim().length > 0) ?? [];
+  const selectedIndex = clauses.findIndex(clause => clause === selected);
+  const passageWords = lexicon.clauses[selectedIndex]?.passages ?? [];
+  const passages = passageWords.map(passage => passage.text);
   const snippets = passages.length === 0 ? [] : [excerpt(passages[0]!, 240)];
   const covered = new Set(recallQueryTokens(snippets.join(" ")));
   const used = new Set([0]);
   let matchedText = snippets[0] ?? selected?.text ?? "";
   for (let count = 0; count < 2; count += 1) {
     const next = passages.map((text, index) => ({ text, index,
-      weight: used.has(index) ? 0 : tokens.filter((token) => !covered.has(token) && new Set(recallQueryTokens(text)).has(token))
+      weight: used.has(index) ? 0 : tokens.filter((token) => !covered.has(token) && hasWord(passageWords[index]!.words, vocabulary.get(token)))
         .reduce((sum, token) => sum + 1 / (frequencies.get(token) ?? 1), 0),
     })).sort((a, b) => b.weight - a.weight || a.index - b.index)[0];
     if (next === undefined || next.weight === 0) break;
@@ -412,20 +512,9 @@ function hitOf(document: RecallDocument, score: number, query: string, frequenci
     excerpt: passages.length <= 1 ? selected.text : snippets.join(" … "),
   };
   return {
-    kind: document.kind,
-    key: document.key,
-    id: document.id,
-    status: document.status,
-    title: document.title,
-    summary: document.summary,
-    score,
-    recordKind: document.recordKind,
-    parentChain: document.parentChain,
+    ...hitMetadata(document, score, query),
     lead: requested > 0 && selected?.number !== requested ? "" : decision === undefined ? document.lead : `D${decision.number} ${decision.text}`,
     ...(decision === undefined || requested > 0 && selected?.number !== requested ? {} : { decision }),
-    ...(historical ? { historical: true } : {}),
-    ...(document.scope === undefined ? {} : { scope: document.scope }),
-    ...(document.involvedProjects === undefined ? {} : { involvedProjects: document.involvedProjects }),
   };
 }
 
@@ -437,25 +526,120 @@ function hitOf(document: RecallDocument, score: number, query: string, frequenci
 export class RecallIndex {
   #database: DatabaseSync;
   #rows = new Map<string, IndexedRow>();
-  #byExternalKey = new Map<string, RecallDocument>();
+  #byExternalKey = new Map<string, string>();
   #keyRuns = new Map<string, readonly string[]>();
   #frequencies = new Map<string, number>();
-  #clauses = new Map<number, RecallDocument>();
+  #clauses = new Map<number, { readonly document: RecallDocument; readonly words: Uint32Array; readonly originalWords: Uint32Array }>();
+  #vocabulary = new Map<string, number>();
+  #clauseRows = new Map<string, readonly number[]>();
   #clauseFrequencies = new Map<string, number>();
   #nextRowId = 1;
+  #nextClauseId = 1;
   #checkpoint: string;
+  #cleanup: (() => void) | undefined;
+  #requested = new WeakMap<RecallHit, number>();
+  #packedTerms: PackedRecallTerms | undefined;
+  #termCache = new Map<string, RecallTerm | null>();
+  #wordLookup: WordLookup = { get: word => this.#term(word, "id") };
+  #frequencyLookup: WordLookup = { get: word => this.#term(word, "frequency") };
+  #clauseFrequencyLookup: WordLookup = { get: word => this.#term(word, "clauseFrequency") };
 
-  constructor(documents: readonly RecallDocument[], checkpoint: string) {
-    this.#database = new DatabaseSync(":memory:");
+  #term(word: string, field: keyof RecallTerm): number | undefined {
+    if (this.#packedTerms === undefined) return (field === "id" ? this.#vocabulary : field === "frequency" ? this.#frequencies : this.#clauseFrequencies).get(word);
+    if (!this.#termCache.has(word)) this.#termCache.set(word, findPackedTerm(this.#packedTerms, word));
+    const term = this.#termCache.get(word);
+    return term == null || field !== "id" && term[field] === 0 ? undefined : term[field];
+  }
+
+  #restoreAllTerms(): void {
+    const terms = this.#packedTerms;
+    if (terms === undefined) return;
+    for (let offset = 0; offset < terms.entries.length; offset += 5) {
+      const word = terms.text.subarray(terms.entries[offset]!, terms.entries[offset]! + terms.entries[offset + 1]!).toString("utf8");
+      this.#vocabulary.set(word, terms.entries[offset + 2]!);
+      if (terms.entries[offset + 3]! > 0) this.#frequencies.set(word, terms.entries[offset + 3]!);
+      if (terms.entries[offset + 4]! > 0) this.#clauseFrequencies.set(word, terms.entries[offset + 4]!);
+    }
+    this.#packedTerms = undefined;
+    this.#termCache.clear();
+  }
+
+  constructor(documents: readonly RecallDocument[], checkpoint: string, database = ":memory:", restored?: RecallIndexState) {
+    this.#database = new DatabaseSync(database, { readOnly: restored !== undefined });
+    this.#checkpoint = checkpoint;
+    if (restored !== undefined) {
+      this.#rows = new Map<string, IndexedRow>([...restored.rows].map(([id, row]) => {
+        let projection: Pick<IndexedRow, "document" | "lexicon"> | undefined;
+        const load = (): Pick<IndexedRow, "document" | "lexicon"> => {
+          if (projection === undefined) {
+            const saved = this.#database.prepare("SELECT projection FROM recall_documents WHERE id = ?").get(id);
+            projection = deserialize(saved!["projection"] as Uint8Array) as Pick<IndexedRow, "document" | "lexicon">;
+          }
+          return projection;
+        };
+        return [id, { ...row, get deliveryDocument() { return load().document; }, get lexicon() { return load().lexicon; } }];
+      }));
+      this.#byExternalKey = restored.byExternalKey;
+      this.#keyRuns = restored.keyRuns;
+      this.#frequencies = restored.frequencies;
+      const rows = this.#rows;
+      this.#clauses = new Map([...restored.clauses].map(([id, clause]) => [id, {
+        words: clause.words, originalWords: clause.originalWords, document: rows.get(clause.documentId)!.document,
+      }]));
+      this.#vocabulary = restored.vocabulary;
+      this.#clauseRows = restored.clauseRows;
+      this.#clauseFrequencies = restored.clauseFrequencies;
+      this.#nextRowId = restored.nextRowId;
+      this.#nextClauseId = restored.nextClauseId;
+      this.#packedTerms = restored.packedTerms;
+      // Exercise the actual database now, so locked/truncated artifacts recover
+      // before recall tries to return a result from them.
+      try { this.#database.exec("BEGIN"); this.#database.prepare("SELECT count(*) FROM recall_index").get(); }
+      catch (error) { this.#database.close(); throw error; }
+      return;
+    }
     // The fifth column serves key queries. The four-column projection preserves
     // prose BM25 statistics: a zero weight would still count key tokens in length.
     this.#database.exec(
       "CREATE VIRTUAL TABLE recall_index USING fts5(title, body, tags, expansions, externalKey, tokenize='unicode61');"
         + "CREATE VIRTUAL TABLE recall_prose USING fts5(title, body, tags, expansions, tokenize='unicode61');"
-        + "CREATE VIRTUAL TABLE recall_clauses USING fts5(body, tokenize='unicode61')",
+        + "CREATE VIRTUAL TABLE recall_clauses USING fts5(body, tokenize='unicode61');"
+        + "CREATE TABLE recall_documents(id TEXT PRIMARY KEY, projection BLOB NOT NULL)",
     );
-    this.#checkpoint = checkpoint;
     this.#apply(documents);
+  }
+
+  projection(): RecallIndexState {
+    this.#restoreAllTerms();
+    // SQLite holds each row's display/lexical projection. A new process restores
+    // only this catalogue and loads records actually matched by the query.
+    return { rows: new Map([...this.#rows].map(([id, row]) => {
+      const { decisions: _decisions, ...document } = row.document;
+      return [id, { rowId: row.rowId, digest: row.digest, document: { ...document, body: "", tags: "", expansions: "" } }];
+    })),
+      byExternalKey: this.#byExternalKey,
+      keyRuns: this.#keyRuns, frequencies: this.#frequencies,
+      clauses: new Map([...this.#clauses].map(([id, clause]) => [id, { words: clause.words, originalWords: clause.originalWords, documentId: clause.document.id }])),
+      clauseRows: this.#clauseRows, clauseFrequencies: this.#clauseFrequencies,
+      nextRowId: this.#nextRowId, nextClauseId: this.#nextClauseId, vocabulary: this.#vocabulary };
+  }
+
+  /** A private copy permits a transaction without modifying a published index. */
+  writableCopy(database: string): void {
+    this.#database.close();
+    this.#database = new DatabaseSync(database);
+  }
+
+  async publish(temporary: string, destination: string): Promise<Buffer> {
+    this.#database.close();
+    const bytes = await readFile(temporary);
+    await writeFileAtomic(destination, bytes);
+    // Keep querying exactly the artifact whose maps we just built. Another
+    // process may atomically publish a newer head at destination at any time.
+    this.#database = new DatabaseSync(temporary, { readOnly: true });
+    this.#cleanup = () => { this.#database.close(); rmSync(temporary, { force: true }); };
+    process.once("exit", this.#cleanup);
+    return bytes;
   }
 
   get checkpoint(): string {
@@ -477,67 +661,95 @@ export class RecallIndex {
   }
 
   #apply(documents: readonly RecallDocument[]): { readonly inserted: number; readonly removed: number } {
-    const insert = this.#database.prepare(
-      "INSERT INTO recall_index(rowid, title, body, tags, expansions, externalKey) VALUES (?, ?, ?, ?, ?, ?)",
-    );
-    const insertProse = this.#database.prepare(
-      "INSERT INTO recall_prose(rowid, title, body, tags, expansions) VALUES (?, ?, ?, ?, ?)",
-    );
-    const remove = this.#database.prepare("DELETE FROM recall_index WHERE rowid = ?");
-    const removeProse = this.#database.prepare("DELETE FROM recall_prose WHERE rowid = ?");
-    const incoming = new Map<string, RecallDocument>();
-    for (const document of documents) incoming.set(document.id, document);
-    let removed = 0;
-    for (const [id, row] of [...this.#rows]) {
-      const next = incoming.get(id);
-      if (next !== undefined && documentDigest(next) === row.digest) continue;
-      remove.run(row.rowId);
-      removeProse.run(row.rowId);
-      this.#rows.delete(id);
-      removed += 1;
-    }
-    let inserted = 0;
-    for (const [id, document] of incoming) {
-      if (this.#rows.has(id)) continue;
-      const rowId = this.#nextRowId;
-      this.#nextRowId += 1;
-      const fields = [
-        segmentForIndex(document.title),
-        segmentForIndex(document.body),
-        segmentForIndex(document.tags),
-        segmentForIndex(document.expansions),
-      ];
-      insert.run(rowId, ...fields, externalKeyTokens(document.key).join(" "));
-      // Identifier expansions have their own route: they must not change every
-      // prose score through FTS length normalization.
-      insertProse.run(rowId, ...[document.title, document.body, document.tags, document.expansions].map(segmentProse));
-      this.#rows.set(id, { rowId, digest: documentDigest(document), document });
-      inserted += 1;
-    }
-    this.#byExternalKey = new Map();
-    this.#keyRuns = new Map();
-    this.#frequencies = new Map();
-    this.#clauses = new Map();
-    this.#clauseFrequencies = new Map();
-    this.#database.exec("DELETE FROM recall_clauses");
-    const insertClause = this.#database.prepare("INSERT INTO recall_clauses(rowid, body) VALUES (?, ?)");
-    for (const row of this.#rows.values()) {
-      for (const token of new Set(recallQueryTokens(`${row.document.title} ${row.document.body} ${row.document.tags} ${row.document.expansions}`))) {
-        this.#frequencies.set(token, (this.#frequencies.get(token) ?? 0) + 1);
-      }
-      for (const decision of row.document.decisions ?? []) {
-        const clauseId = this.#clauses.size + 1;
-        insertClause.run(clauseId, segmentForIndex(decision.text));
-        this.#clauses.set(clauseId, row.document);
-        for (const token of new Set(recallQueryTokens(decision.text))) {
-          this.#clauseFrequencies.set(token, (this.#clauseFrequencies.get(token) ?? 0) + 1);
+    this.#restoreAllTerms();
+    this.#database.exec("BEGIN IMMEDIATE");
+    try {
+      const insert = this.#database.prepare(
+        "INSERT INTO recall_index(rowid, title, body, tags, expansions, externalKey) VALUES (?, ?, ?, ?, ?, ?)",
+      );
+      const insertProse = this.#database.prepare(
+        "INSERT INTO recall_prose(rowid, title, body, tags, expansions) VALUES (?, ?, ?, ?, ?)",
+      );
+      const remove = this.#database.prepare("DELETE FROM recall_index WHERE rowid = ?");
+      const removeProse = this.#database.prepare("DELETE FROM recall_prose WHERE rowid = ?");
+      const removeClause = this.#database.prepare("DELETE FROM recall_clauses WHERE rowid = ?");
+      const insertClause = this.#database.prepare("INSERT INTO recall_clauses(rowid, body) VALUES (?, ?)");
+      const removeProjection = this.#database.prepare("DELETE FROM recall_documents WHERE id = ?");
+      const insertProjection = this.#database.prepare("INSERT INTO recall_documents(id, projection) VALUES (?, ?)");
+      const incoming = new Map<string, RecallDocument>();
+      for (const document of documents) incoming.set(document.id, document);
+      let removed = 0;
+      for (const [id, row] of [...this.#rows]) {
+        const next = incoming.get(id);
+        if (next !== undefined && documentDigest(next) === row.digest) continue;
+        remove.run(row.rowId);
+        removeProse.run(row.rowId);
+        removeProjection.run(id);
+        for (const clauseId of this.#clauseRows.get(id) ?? []) {
+          removeClause.run(clauseId);
+          this.#clauses.delete(clauseId);
         }
+        this.#clauseRows.delete(id);
+        this.#rows.delete(id);
+        removed += 1;
       }
-      if (row.document.key.length === 0) continue;
-      this.#byExternalKey.set(row.document.key.toUpperCase(), row.document);
-      this.#keyRuns.set(row.document.id, keyTokenRun(row.document.key));
+      let inserted = 0;
+      for (const [id, document] of incoming) {
+        if (this.#rows.has(id)) continue;
+        const rowId = this.#nextRowId;
+        this.#nextRowId += 1;
+        const fields = [
+          segmentForIndex(document.title),
+          segmentForIndex(document.body),
+          segmentForIndex(document.tags),
+          segmentForIndex(document.expansions),
+        ];
+        insert.run(rowId, ...fields, externalKeyTokens(document.key).join(" "));
+        // Identifier expansions have their own route: they must not change every
+        // prose score through FTS length normalization.
+        insertProse.run(rowId, ...[document.title, document.body, document.tags, document.expansions].map(segmentProse));
+        // Persist these timeless token sets with the row. Profiles showed that
+        // re-tokenizing every matched historical clause dominated warm queries.
+        this.#rows.set(id, { rowId, digest: documentDigest(document), document, lexicon: documentLexicon(document, this.#vocabulary) });
+        insertProjection.run(id, serialize({ document: { ...document, body: "", tags: "", expansions: "" }, lexicon: this.#rows.get(id)!.lexicon }));
+        const clauseIds: number[] = [];
+        for (const [position, decision] of (document.decisions ?? []).entries()) {
+          const clauseId = this.#nextClauseId++;
+          const indexed = segmentForIndex(decision.text);
+          insertClause.run(clauseId, indexed);
+          this.#clauses.set(clauseId, { document, words: wordIds(recallQueryTokens(indexed), this.#vocabulary),
+            originalWords: this.#rows.get(id)!.lexicon.clauses[position]!.words });
+          clauseIds.push(clauseId);
+        }
+        this.#clauseRows.set(id, clauseIds);
+        inserted += 1;
+      }
+      this.#byExternalKey = new Map();
+      this.#keyRuns = new Map();
+      this.#frequencies = new Map();
+      this.#clauseFrequencies = new Map();
+      const vocabulary = new Map([...this.#vocabulary].map(([word, id]) => [id, word]));
+      for (const row of this.#rows.values()) {
+        for (const id of row.lexicon.coverage) {
+          const token = vocabulary.get(id)!;
+          this.#frequencies.set(token, (this.#frequencies.get(token) ?? 0) + 1);
+        }
+        for (const clause of row.lexicon.clauses) {
+          for (const id of clause.words) {
+            const token = vocabulary.get(id)!;
+            this.#clauseFrequencies.set(token, (this.#clauseFrequencies.get(token) ?? 0) + 1);
+          }
+        }
+        if (row.document.key.length === 0) continue;
+        this.#byExternalKey.set(row.document.key.toUpperCase(), row.document.id);
+        this.#keyRuns.set(row.document.id, keyTokenRun(row.document.key));
+      }
+      this.#database.exec("COMMIT");
+      return { inserted, removed };
+    } catch (error) {
+      this.#database.exec("ROLLBACK");
+      throw error;
     }
-    return { inserted, removed };
   }
 
   /**
@@ -560,17 +772,30 @@ export class RecallIndex {
   }
 
   /** The ranked answer, before any threshold. The records the prompt names, by key or fragment, lead. */
-  search(query: string, limit: number = RECALL_CANDIDATE_LIMIT): readonly RecallHit[] {
+  search(query: string, limit: number = RECALL_CANDIDATE_LIMIT, details = true): readonly RecallHit[] {
+    const makeHit = (document: RecallDocument, score: number, requested = 0): RecallHit => {
+      if (details) {
+        const row = this.#rows.get(document.id)!;
+        return hitOf(row.deliveryDocument ?? document, row.lexicon, this.#wordLookup, score, query, this.#frequencyLookup, requested);
+      }
+      const hit = hitMetadata(document, score, query);
+      this.#requested.set(hit, requested);
+      return hit;
+    };
     const hits: RecallHit[] = [];
     const seen = new Set<string>();
+    const byKey = (key: string): RecallDocument | undefined => {
+      const id = this.#byExternalKey.get(key.toUpperCase());
+      return id === undefined ? undefined : this.#rows.get(id)?.document;
+    };
     const named = new Map<string, { document: RecallDocument; requested: number }>();
     for (const match of query.matchAll(RECORD_REFERENCE_CANDIDATE)) {
       const key = match[1]!;
-      let document = this.#rows.get(key)?.document ?? this.#byExternalKey.get(key.toUpperCase()) ?? this.#namedByFragment(key);
+      let document = this.#rows.get(key)?.document ?? byKey(key) ?? this.#namedByFragment(key);
       if (document === undefined && key.includes(":")) {
         // An unresolved namespace must not swallow a known key and its adjacent clause.
         const suffix = key.slice(key.indexOf(":") + 1);
-        document = this.#byExternalKey.get(suffix.toUpperCase()) ?? this.#namedByFragment(suffix);
+        document = byKey(suffix) ?? this.#namedByFragment(suffix);
       }
       if (document === undefined) continue;
       // Bind the adjacent #D through the same resolver as the record, before deduplication.
@@ -580,7 +805,7 @@ export class RecallIndex {
     }
     for (const { document, requested } of named.values()) {
       seen.add(document.id);
-      hits.push(hitOf(document, RECALL_EXTERNAL_KEY_SCORE, query, this.#frequencies, requested));
+      hits.push(makeHit(document, RECALL_EXTERNAL_KEY_SCORE, requested));
     }
     const allTokens = [...recallTextTokens(query)];
     const identifiers = [...query.matchAll(/[A-Za-z][A-Za-z0-9_]*/gu)]
@@ -590,14 +815,14 @@ export class RecallIndex {
     // Long prompts cannot collect unbounded evidence from incidental short words.
     // Keep the informative constraints; full identifiers remain query terms as well.
     const queryTerms = (values: readonly string[]): readonly string[] => values.length <= 48 ? values : [...values]
-      .sort((a, b) => (this.#frequencies.get(a) ?? Number.MAX_SAFE_INTEGER) - (this.#frequencies.get(b) ?? Number.MAX_SAFE_INTEGER)
+      .sort((a, b) => (this.#frequencyLookup.get(a) ?? Number.MAX_SAFE_INTEGER) - (this.#frequencyLookup.get(b) ?? Number.MAX_SAFE_INTEGER)
         || b.length - a.length || values.indexOf(a) - values.indexOf(b))
       .slice(0, 48);
     const tokens = queryTerms(allTokens);
     const keyExpression = externalKeyExpression(query);
     if (tokens.length === 0 && keyExpression.length === 0) return hits;
-    const byRowId = new Map<number, RecallDocument>();
-    for (const row of this.#rows.values()) byRowId.set(row.rowId, row.document);
+    const byRowId = new Map<number, IndexedRow>();
+    for (const row of this.#rows.values()) byRowId.set(row.rowId, row);
     const weights = RECALL_FIELD_WEIGHTS;
     const rows: Record<string, unknown>[] = [];
     const searches = [
@@ -633,16 +858,16 @@ export class RecallIndex {
       // Use the query's actual record/clauses frequencies, including common terms.
       // A unit-only ratio would inflate common words in a one- or two-clause corpus.
       const clauseTokens = recallQueryTokens(query);
-      const information = (size: number, frequencies: ReadonlyMap<string, number>): number => clauseTokens.reduce((sum, token) => {
+      const information = (size: number, frequencies: WordLookup): number => clauseTokens.reduce((sum, token) => {
         const count = frequencies.get(token) ?? 0;
         return sum + Math.max(1e-6, Math.log((size - count + 0.5) / (count + 0.5)));
       }, 0);
-      const scale = information(this.size, this.#frequencies) / information(this.#clauses.size, this.#clauseFrequencies);
-      const statement = this.#database.prepare("SELECT rowid AS clauseId, body, bm25(recall_clauses, 3) AS score FROM recall_clauses WHERE recall_clauses MATCH ? ORDER BY score LIMIT ?");
+      const scale = information(this.size, this.#frequencyLookup) / information(this.#clauses.size, this.#clauseFrequencyLookup);
+      const statement = this.#database.prepare("SELECT rowid AS clauseId, bm25(recall_clauses, 3) AS score FROM recall_clauses WHERE recall_clauses MATCH ? ORDER BY score LIMIT ?");
       for (const row of statement.all(matchExpression(clauseTokens), limit) as Record<string, unknown>[]) {
-        const words = new Set(recallQueryTokens(String(row["body"])));
-        if (!clauseTokens.every((token) => words.has(token))) continue;
-        const document = this.#clauses.get(Number(row["clauseId"]));
+        const clause = this.#clauses.get(Number(row["clauseId"]));
+        if (clause === undefined || !clauseTokens.every((token) => hasWord(clause.words, this.#wordLookup.get(token)))) continue;
+        const document = clause.document;
         const rowId = document === undefined ? undefined : this.#rows.get(document.id)?.rowId;
         if (rowId !== undefined) rows.push({ rowId, score: Number(row["score"]) * scale });
       }
@@ -652,35 +877,30 @@ export class RecallIndex {
     rows.sort((left, right) => Number(left["score"]) - Number(right["score"]));
     const maximumHits = limit < 0 ? Number.POSITIVE_INFINITY : hits.length + limit;
     for (const row of rows) {
-      const document = byRowId.get(Number(row["rowId"]));
+      const document = byRowId.get(Number(row["rowId"]))?.document;
       if (document === undefined || seen.has(document.id)) continue;
       seen.add(document.id);
+      const indexed = this.#rows.get(document.id)!;
       const decay = document.currentContract && ["done", "cancelled"].includes(document.status) && !recallQueryIsHistorical(query) ? 0.85 : 1;
-      const coherent = allTokens.length >= 2 && allTokens.length <= 6 && (document.decisions ?? []).some((decision) => {
-        const words = new Set(recallQueryTokens(decision.text));
-        return allTokens.every((token) => words.has(token));
-      });
-      const documentWords = new Set(recallQueryTokens(`${document.title} ${document.body} ${document.expansions}`));
-      const identifierSource = new Set(recallTextTokens(document.decisions === undefined
-        ? `${document.title} ${document.body} ${document.expansions}`
-        : document.decisions.map((decision) => decision.text).join(" ")));
+      const coherent = allTokens.length >= 2 && allTokens.length <= 6
+        && (this.#clauseRows.get(document.id) ?? []).some(id => allTokens.every(token => hasWord(this.#clauses.get(id)!.originalWords, this.#wordLookup.get(token))));
       // A complete technical name is a deliberate constraint, even in a small
       // library where that name occurs in several records. Every short-query
       // constraint must still match, and withheld clauses cannot supply the name.
-      const exactIdentifier = allTokens.length <= 6 && identifiers.some((identifier) => identifierSource.has(identifier))
-        && allTokens.every((token) => documentWords.has(token));
+      const exactIdentifier = allTokens.length <= 6 && identifiers.some((identifier) => hasWord(indexed.lexicon.identifiers, this.#wordLookup.get(identifier)))
+        && allTokens.every((token) => hasWord(indexed.lexicon.words, this.#wordLookup.get(token)));
       const identifierBonus = exactIdentifier ? RECALL_FIELD_WEIGHTS.body * recallScoreUnit(this.size) : 0;
       let coverage = 1;
       if (allTokens.length > 24) {
-        const words = new Set(recallQueryTokens(`${document.title} ${document.body} ${document.tags} ${document.expansions}`));
-        const weight = (token: string): number => 1 + Math.log((this.size + 1) / ((this.#frequencies.get(token) ?? 0) + 1));
+        const words = indexed.lexicon.coverage;
+        const weight = (token: string): number => 1 + Math.log((this.size + 1) / ((this.#frequencyLookup.get(token) ?? 0) + 1));
         const total = allTokens.reduce((sum, token) => sum + weight(token), 0);
-        const matched = allTokens.filter((token) => words.has(token)).reduce((sum, token) => sum + weight(token), 0);
-        const anchor = new Set(recallQueryTokens(`${document.title} ${document.summary} ${document.expansions}`));
-        const anchored = allTokens.filter((token) => anchor.has(token)).length >= 2;
+        const matched = allTokens.filter((token) => hasWord(words, this.#wordLookup.get(token))).reduce((sum, token) => sum + weight(token), 0);
+        const anchor = indexed.lexicon.anchor;
+        const anchored = allTokens.filter((token) => hasWord(anchor, this.#wordLookup.get(token))).length >= 2;
         coverage = anchored ? 1 : matched / total;
       }
-      hits.push(hitOf(document, (-Number(row["score"]) + identifierBonus) * decay * coverage * (coherent ? 1.1 : 1), query, this.#frequencies));
+      hits.push(makeHit(document, (-Number(row["score"]) + identifierBonus) * decay * coverage * (coherent ? 1.1 : 1)));
       if (hits.length >= maximumHits) break;
     }
     return [
@@ -689,8 +909,18 @@ export class RecallIndex {
     ];
   }
 
+  deliver(hit: RecallHit, query: string): RecallHit {
+    const row = this.#rows.get(hit.id)!;
+    return hitOf(row.deliveryDocument ?? row.document, row.lexicon, this.#wordLookup, hit.score, query, this.#frequencyLookup, this.#requested.get(hit) ?? 0);
+  }
+
   close(): void {
-    this.#database.close();
+    if (this.#cleanup !== undefined) {
+      const cleanup = this.#cleanup;
+      this.#cleanup = undefined;
+      process.removeListener("exit", cleanup);
+      cleanup();
+    } else this.#database.close();
   }
 }
 
@@ -954,6 +1184,172 @@ export interface RecallResult {
  * resetRecallCache closes it; selecting another project does not evict its index.
  */
 const cachedIndexes = new Map<string, RecallIndex>();
+const PERSISTENT_RECALL_VERSION = "record-clause-fts-v10";
+
+interface PersistentRecallProjection {
+  readonly checkpoint: string;
+  readonly sha256: string;
+  readonly bytes: number;
+  readonly state: RecallIndexState;
+  readonly databaseIdentity: LocalFileIdentity | null;
+}
+
+interface SerializableRecallProjection extends Omit<PersistentRecallProjection, "state"> {
+  readonly state: {
+    readonly rows: readonly (readonly [string, Pick<IndexedRow, "rowId" | "digest" | "document">])[];
+    readonly byExternalKey: readonly (readonly [string, string])[];
+    readonly keyRuns: readonly (readonly [string, readonly string[]])[];
+    readonly clauseRows: readonly (readonly [string, readonly number[]])[];
+    readonly clauses: readonly (readonly [number, string, number, number, number])[];
+    readonly nextRowId: number;
+    readonly nextClauseId: number;
+  };
+}
+
+interface PackedRecallProjection {
+  readonly metadata: string;
+  readonly words: Uint32Array;
+  readonly terms: PackedRecallTerms;
+}
+
+function serializableRecallProjection(value: PersistentRecallProjection): PackedRecallProjection {
+  const state = value.state;
+  const vocabulary = [...state.vocabulary].map(([word, id]) => ({ word, bytes: Buffer.from(word), id })).sort((left, right) => Buffer.compare(left.bytes, right.bytes));
+  const entries = new Uint32Array(vocabulary.length * 5);
+  let byteOffset = 0;
+  for (const [position, term] of vocabulary.entries()) {
+    entries.set([byteOffset, term.bytes.length, term.id, state.frequencies.get(term.word) ?? 0, state.clauseFrequencies.get(term.word) ?? 0], position * 5);
+    byteOffset += term.bytes.length;
+  }
+  const terms: PackedRecallTerms = { text: Buffer.concat(vocabulary.map(term => term.bytes)), entries };
+  const words = new Uint32Array([...state.clauses.values()].reduce((size, clause) => size + clause.words.length + clause.originalWords.length, 0));
+  let offset = 0;
+  const clauses = [...state.clauses].map(([id, clause]) => {
+    const start = offset;
+    words.set(clause.words, offset);
+    offset += clause.words.length;
+    words.set(clause.originalWords, offset);
+    offset += clause.originalWords.length;
+    return [id, clause.documentId, start, clause.words.length, clause.originalWords.length] as const;
+  });
+  const metadata: SerializableRecallProjection = { ...value, state: { ...state,
+    rows: [...state.rows], byExternalKey: [...state.byExternalKey], keyRuns: [...state.keyRuns],
+    clauseRows: [...state.clauseRows],
+    clauses,
+  } };
+  return { metadata: JSON.stringify(metadata), words, terms };
+}
+
+function parseRecallProjection(packed: PackedRecallProjection): PersistentRecallProjection {
+  const saved = JSON.parse(packed.metadata) as SerializableRecallProjection;
+  const state = saved.state;
+  return { ...saved, state: { ...state,
+    rows: new Map(state.rows), byExternalKey: new Map(state.byExternalKey), keyRuns: new Map(state.keyRuns),
+    frequencies: new Map(), vocabulary: new Map(), packedTerms: packed.terms,
+    clauseRows: new Map(state.clauseRows), clauseFrequencies: new Map(),
+    clauses: new Map(state.clauses.map(([id, documentId, start, count, originals]) => [id, { documentId,
+      words: packed.words.subarray(start, start + count), originalWords: packed.words.subarray(start + count, start + count + originals) }])),
+  } };
+}
+
+/** Issue a local identity only after hashing the actual published file, not a
+ * temporary buffer that a concurrent publisher may already have superseded. */
+async function verifiedDatabaseIdentity(path: string, expected: string): Promise<LocalFileIdentity | null> {
+  const context = await localIdentityContext(path);
+  if (context === null) return null;
+  let file: number | undefined;
+  try {
+    file = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = fstatSync(file, { bigint: true });
+    const identity = localFileIdentity(before, context);
+    if (identity === null || createHash("sha256").update(readFileSync(file)).digest("hex") !== expected) return null;
+    const after = fstatSync(file, { bigint: true }), named = lstatSync(path, { bigint: true });
+    return named.dev === after.dev && named.ino === after.ino && JSON.stringify(identity) === JSON.stringify(localFileIdentity(after, context)) ? identity : null;
+  } catch { return null; }
+  finally { if (file !== undefined) closeSync(file); }
+}
+
+/** Ordinary CLI/Hook reads keep an immutable, checkpoint-bound SQLite artifact
+ * on this device. A changed corpus is applied transactionally to a private copy
+ * and atomically published. Readers never modify an index another process uses.
+ * The independent projection record authenticates both SQLite bytes and maps. */
+export async function recallPersistent(request: RecallRequest, root: string): Promise<RecallResult> {
+  const current = cachedIndexes.get(request.cacheKey);
+  if (current?.checkpoint === request.checkpoint) return recall(request);
+  if (current !== undefined) { current.close(); cachedIndexes.delete(request.cacheKey); }
+  const library = await openLibrary(root);
+  const name = `recall-${createHash("sha256").update(request.cacheKey).digest("hex")}`;
+  const binding = PERSISTENT_RECALL_VERSION;
+  let temporary: string | undefined;
+  let index: RecallIndex | undefined;
+  let documents: readonly RecallDocument[] | undefined;
+  const inputs = (): readonly RecallDocument[] => documents ??= request.documents();
+  try {
+    const directory = cachePath(library.manifest.libraryId);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const database = join(directory, `${name}.sqlite`);
+    const savedBytes = await readProtectedProjection<PackedRecallProjection>(library, name, binding);
+    const saved = savedBytes === null ? null : parseRecallProjection(savedBytes);
+    let bytes: Buffer | undefined;
+    if (saved !== null) {
+      let file: number | undefined;
+      try {
+        file = openSync(database, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const before = fstatSync(file, { bigint: true });
+        if (!before.isFile() || before.nlink !== 1n) throw new Error("invalid index file");
+        const context = await localIdentityContext(database);
+        const identity = context === null ? null : localFileIdentity(before, context);
+        const verifiedIdentity = identity !== null && saved.databaseIdentity !== null
+          && JSON.stringify(identity) === JSON.stringify(saved.databaseIdentity);
+        if (!verifiedIdentity || saved.checkpoint !== request.checkpoint) {
+          bytes = readFileSync(file);
+          if (bytes.length !== saved.bytes || createHash("sha256").update(bytes).digest("hex") !== saved.sha256) throw new Error("damaged index");
+        } else observeCacheReason("fts-file-identity-reuse");
+        index = new RecallIndex([], saved.checkpoint, database, saved.state);
+        const after = lstatSync(database, { bigint: true });
+        if (before.dev !== after.dev || before.ino !== after.ino || before.ctimeNs !== after.ctimeNs) throw new Error("index replaced during open");
+      } catch {
+        index?.close();
+        index = undefined;
+        bytes = undefined;
+        observeCacheReason("fts-persistent-invalid-or-busy");
+      } finally { if (file !== undefined) closeSync(file); }
+    }
+    if (index?.checkpoint === request.checkpoint) {
+      observeCacheReason("fts-persistent-hit");
+      cachedIndexes.set(request.cacheKey, index);
+      return recall(request);
+    }
+    temporary = join(directory, `.tmp-${name}-${process.pid}-${crypto.randomUUID()}.sqlite`);
+    if (index !== undefined && bytes !== undefined) {
+      await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
+      index.writableCopy(temporary);
+      const moved = index.update(inputs(), request.checkpoint);
+      observeCacheReason(`fts-persistent-delta:${moved.inserted}:${moved.removed}`);
+    } else {
+      index = new RecallIndex(inputs(), request.checkpoint, temporary);
+      observeCacheReason(`fts-persistent-build:${index.size}`);
+    }
+    const written = await index.publish(temporary, database);
+    temporary = undefined;
+    const sha256 = createHash("sha256").update(written).digest("hex");
+    const projection: PersistentRecallProjection = { checkpoint: request.checkpoint, sha256, bytes: written.length,
+      state: index.projection(), databaseIdentity: await verifiedDatabaseIdentity(database, sha256) };
+    await writeProtectedProjection(library, name, binding, serializableRecallProjection(projection));
+    cachedIndexes.set(request.cacheKey, index);
+    return recall(request);
+  } catch {
+    try { index?.close(); } catch { /* An unsuccessful open may already be closed. */ }
+    cachedIndexes.delete(request.cacheKey);
+    observeCacheReason("fts-persistent-fallback-memory");
+    return recall({ ...request, documents: inputs });
+  } finally {
+    if (temporary !== undefined) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      await rm(`${temporary}-journal`, { force: true }).catch(() => undefined);
+    }
+  }
+}
 
 /** A request recall cannot answer as asked. */
 export class RecallError extends Error {
@@ -980,7 +1376,7 @@ export function recall(request: RecallRequest): RecallResult {
   }
   cachedIndexes.delete(request.cacheKey);
   cachedIndexes.set(request.cacheKey, index);
-  const ranked = index.search(request.query);
+  const ranked = index.search(request.query, RECALL_CANDIDATE_LIMIT, false);
   const tau = request.tau ?? RECALL_STRONG_TAU;
   if (!Number.isFinite(tau) || tau < 0) {
     throw new RecallError("RECALL_TAU_INVALID", `recall tau must be a finite non-negative number, not ${String(tau)}`);
@@ -999,7 +1395,7 @@ export function recall(request: RecallRequest): RecallResult {
       relativeFloor,
       limit,
       quota: request.quota ?? null,
-    })
+    }).map(hit => index.deliver(hit, request.query))
     : [];
   return {
     reasonCode: strong ? "RECALL_READY" : "RECALL_NO_STRONG_HIT",
