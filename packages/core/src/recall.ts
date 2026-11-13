@@ -210,6 +210,7 @@ export const RECALL_EXTERNAL_KEY_SCORE = 99;
 const CJK_RUN = /[㐀-鿿豈-﫿]+/gu;
 const ASCII_TOKEN = /[a-z0-9][a-z0-9_.-]+/gu;
 const EXTERNAL_KEY_CANDIDATE = /[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+/gu;
+const RECORD_REFERENCE_CANDIDATE = new RegExp(`([a-z][a-z0-9-]+:[a-z0-9][a-z0-9._-]*|${EXTERNAL_KEY_CANDIDATE.source})(?:#D([1-9][0-9]*)\\b)?`, "giu");
 
 
 /**
@@ -308,7 +309,9 @@ export function recallQueryTokens(text: string): readonly string[] {
 }
 
 export function recallQueryIsHistorical(query: string): boolean {
-  return /^\s*历史(?:\s|上|问题)|历史原因|当初|曾经|旧版|退役原因|\bhistor(?:y|ical)\b|\bpreviously\b|\bused to\b/iu.test(query);
+  // A negated instruction can mention history without asking a historical question.
+  const intent = query.replace(/(?:请勿|不要|不得)[^，,。！？!?；;\n]*/gu, "");
+  return /^\s*历史(?:\s|上|问题)|历史原因|当初|曾经|旧版|退役原因|\bhistor(?:y|ical)\b|\bpreviously\b|\bused to\b/iu.test(intent);
 }
 
 /**
@@ -377,12 +380,9 @@ interface IndexedRow {
   readonly document: RecallDocument;
 }
 
-function hitOf(document: RecallDocument, score: number, query: string, frequencies: ReadonlyMap<string, number>): RecallHit {
+function hitOf(document: RecallDocument, score: number, query: string, frequencies: ReadonlyMap<string, number>, requested: number = 0): RecallHit {
   const historical = recallQueryIsHistorical(query);
   const tokens = recallQueryTokens(query);
-  // An explicit clause is meaningful only beside this record's key or id.
-  const named = query.toUpperCase().includes(document.key.toUpperCase()) || query.includes(document.id);
-  const requested = named ? Number(query.match(/#D([1-9][0-9]*)\b/iu)?.[1] ?? 0) : 0;
   const clauses = document.decisions ?? [];
   const selected = clauses.map((clause, index) => {
     const words = new Set(recallQueryTokens(clause.text));
@@ -563,11 +563,19 @@ export class RecallIndex {
   search(query: string, limit: number = RECALL_CANDIDATE_LIMIT): readonly RecallHit[] {
     const hits: RecallHit[] = [];
     const seen = new Set<string>();
-    for (const key of externalKeyCandidates(query)) {
-      const document = this.#byExternalKey.get(key) ?? this.#namedByFragment(key);
-      if (document === undefined || seen.has(document.id)) continue;
+    const named = new Map<string, { document: RecallDocument; requested: number }>();
+    for (const match of query.matchAll(RECORD_REFERENCE_CANDIDATE)) {
+      const key = match[1]!;
+      const document = this.#rows.get(key)?.document ?? this.#byExternalKey.get(key.toUpperCase()) ?? this.#namedByFragment(key);
+      if (document === undefined) continue;
+      // Bind the adjacent #D through the same resolver as the record, before deduplication.
+      if (!named.has(document.id) || named.get(document.id)!.requested === 0) {
+        named.set(document.id, { document, requested: Number(match[2] ?? 0) });
+      }
+    }
+    for (const { document, requested } of named.values()) {
       seen.add(document.id);
-      hits.push(hitOf(document, RECALL_EXTERNAL_KEY_SCORE, query, this.#frequencies));
+      hits.push(hitOf(document, RECALL_EXTERNAL_KEY_SCORE, query, this.#frequencies, requested));
     }
     const allTokens = [...recallTextTokens(query)];
     const identifiers = [...query.matchAll(/[A-Za-z][A-Za-z0-9_]*/gu)]

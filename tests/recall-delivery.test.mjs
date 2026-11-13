@@ -9,6 +9,7 @@ import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { createProject, createWork, initializeLibrary, recordMinutes } from "../dist/build/packages/core/src/index.js";
 import { RecallIndex, recall, recallDocuments, recallQueryTokens, resetRecallCache, segmentForIndex } from "../dist/build/packages/core/src/recall.js";
 import { formatRecallLine, recallContextLines, recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
+import { deriveStableId } from "../dist/build/packages/protocol/src/index.js";
 
 const decisions = ["Keep the unrelated orchard.", "Quasar gateway must retain the amber audit log.", "Keep the pond.", "Keep the lake.", "Keep the stream.", "Keep the oak.", "Keep the pine.", "SubagentStop retires the collector slot.", "UTF8 delivery must preserve the expandable source."];
 const minutes = { id: "minutes:111111111111111111111111", externalKey: "DELIVERY-MIN-1", conferenceTitle: "Gateway delivery contract", conferenceType: "", summary: "Gateway audit and handoff decisions", decisions, outcomeClass: "recorded", projectId: "project:111111111111111111111111" };
@@ -146,4 +147,76 @@ test("normal agent CLI delivers actual valid D8, excludes superseded D2 and mark
   const predecessor = state.minutes.find((r) => r.externalKey === minutes.externalKey);
   const historical = await read("历史 DELIVERY-MIN-1#D2", ["--status", "all"]);
   assert.ok(historical.context.some((line) => line.includes("D2 历史已失效") && line.includes(`${predecessor.id}#D2`) && line.includes("must retain")));
+});
+
+test("agent CLI binds each explicit clause to its full key, unique fragment or native ID", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "recall-clause-binding-"));
+  t.after(async () => { resetRecallCache(); await rm(root, { recursive: true, force: true }); });
+  await initializeLibrary({ root, createdAt: at });
+  const project = await createProject(root, { occurredAt: at, externalKey: "CLAUSE-BINDING-PROJECT", name: "Transport rules" });
+  const projectId = project.projects[0].id;
+  const sources = [101, 202].map((number) => {
+    const key = `CLAUSE-BINDING-MIN-${number}`;
+    return { key, id: deriveStableId("minutes", key), decisions: Array.from({ length: 9 }, (_, index) => `Transport ${number} retains frame ${index + 1}.`) };
+  });
+  for (const [index, source] of sources.entries()) {
+    const coexists = sources.slice(0, index).flatMap((other) => other.decisions.map((_, index) => `${other.id}#D${index + 1}`));
+    await recordMinutes(root, { occurredAt: at, projectId, externalKey: source.key, title: `Transport ${source.key}`, summary: "Frame retention rules", decisions: source.decisions, decidedBy: [], linkedWorkIds: [], coexists });
+  }
+  const [a, b] = sources;
+  const read = async (query, agent = true) => {
+    let raw = "";
+    await runCli(["recall", "--workspace", root, "--at", at, "--query", query, ...(agent ? ["--view", "agent"] : [])], { write(value) { raw += value; } });
+    return JSON.parse(raw);
+  };
+  for (const [query, expected] of [
+    [`${a.key}#D2`, [[a, 2]]],
+    [`${b.key}#D8`, [[b, 8]]],
+    [`Please report ${a.key}#D2 and ${b.key}#D8.`, [[a, 2], [b, 8]]],
+    [`Please report ${b.key}#D8 and ${a.key}#D2.`, [[b, 8], [a, 2]]],
+    ["MIN-202#D8", [[b, 8]]],
+    [`min-202#d8 and ${a.key}#D2`, [[b, 8], [a, 2]]],
+    [`${a.id}#D2 and ${b.key}#D8`, [[a, 2], [b, 8]]],
+    [`${b.key}#D8 and ${a.id}#D2`, [[b, 8], [a, 2]]],
+    [`${b.id}#D8`, [[b, 8]]],
+    [`${a.key}#D2 and MIN-101#D2`, [[a, 2]]],
+    [`${a.key} and ${b.key}#D8 then MIN-101#D2`, [[a, 2], [b, 8]]],
+  ]) {
+    await t.test(query, async () => {
+      const answer = await read(query);
+      const full = await read(query, false);
+      assert.deepEqual(full.records.map((record) => record.id), expected.map(([source]) => source.id));
+      assert.equal(answer.context.length, expected.length);
+      for (const [index, [source, number]] of expected.entries()) {
+        const line = answer.context[index];
+        assert.ok(line.includes(`D${number} 现行有效`), line);
+        assert.ok(line.includes(source.decisions[number - 1]), line);
+        assert.ok(line.includes(`minutes-show --id ${source.id}#D${number}`), line);
+      }
+      assert.ok(Buffer.byteLength(answer.context.join("\n")) <= 1600);
+    });
+  }
+  for (const [query, label] of [
+    [`当前 ${b.key}#D8 的有效决定是什么？`, "现行有效"],
+    [`当前 ${b.key}#D8 的有效决定是什么？请勿把历史原因当作现行动作。`, "现行有效"],
+    [`当前 ${b.key}#D8 的有效决定是什么？不要把旧版当作现行动作。`, "现行有效"],
+    [`历史问题 ${b.key}#D8 当初为什么这样选择？`, "历史问题；非现行行动"],
+    [`${b.key}#D8 的历史原因是什么？当前查询的是原因。`, "历史问题；非现行行动"],
+    [`请勿执行旧版。历史问题 ${b.key}#D8 当初为什么这样选择？`, "历史问题；非现行行动"],
+  ]) {
+    await t.test(query, async () => {
+      const answer = await read(query);
+      assert.equal(answer.context.length, 1);
+      assert.ok(answer.context[0].includes(`D8 ${label}`), answer.context[0]);
+      assert.ok(answer.context[0].includes(`minutes-show --id ${b.id}#D8`));
+    });
+  }
+  await t.test("a current question still labels a withdrawn clause as obsolete", () => {
+    const inputs = { minutes: [{ id: b.id, externalKey: b.key, conferenceTitle: "Transport rules", conferenceType: "", summary: "Frame retention rules", projectId, outcomeClass: "recorded", decisions: b.decisions, decisionStatuses: b.decisions.map((_, index) => index === 7 ? "obsolete" : "valid") }] };
+    const hits = search(inputs, `当前 ${b.key}#D8 的有效决定是什么？请勿把历史原因当作现行动作。`);
+    const lines = recallContextLines(hits, 1600);
+    assert.equal(lines.length, 1);
+    assert.ok(lines[0].includes("D8 历史已失效→撤回"), lines[0]);
+    assert.ok(!lines[0].includes("D8 现行有效"));
+  });
 });
