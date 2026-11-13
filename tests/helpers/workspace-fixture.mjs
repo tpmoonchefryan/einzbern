@@ -119,7 +119,7 @@ export async function appendHistoricalAttestationEnable(workspace, { occurredAt,
  * Release, TCRN-CROSS-STORY-472 R1), appended past the write path exactly as work-create wrote it
  * before, so replay alone judges it. Returns the appended record.
  */
-export async function appendHistoricalWorkCreate(workspace, { externalKey, projectId, kind, parentId = null, status = "planned", title = null, occurredAt, actorId }) {
+export async function appendHistoricalWorkCreate(workspace, { externalKey, projectId, kind, parentId = null, status = "planned", title = null, summary, occurredAt, actorId }) {
   const record = {
     schemaVersion: "tcrn.work.v1",
     id: deriveStableId("work", canonicalExternalKey(externalKey)),
@@ -134,6 +134,7 @@ export async function appendHistoricalWorkCreate(workspace, { externalKey, proje
     extensions: {},
     scopeDigest: canonicalSha256({}),
     title,
+    ...(summary === undefined ? {} : { summary }),
     createdAt: occurredAt,
     labels: [],
   };

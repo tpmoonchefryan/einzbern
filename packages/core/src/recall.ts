@@ -60,6 +60,8 @@ export interface RecallDocument {
   readonly recordKind: string;
   readonly parentChain: readonly string[];
   readonly lead: string;
+  readonly decisions?: readonly RecallDecision[];
+  readonly currentContract?: boolean;
   // A card's store (TCRN-CROSS-STORY-476 R5), shown beside the hit and never ranked.
   readonly scope?: RecallScope;
 }
@@ -93,6 +95,8 @@ export interface RecallHit {
   readonly recordKind: string;
   readonly parentChain: readonly string[];
   readonly lead: string;
+  readonly decision?: RecallDecision;
+  readonly historical?: boolean;
   readonly scope?: RecallScope;
   // TCRN-CROSS-SUB-426 (MIN-239 D5): the obsolete decisions the hit's record points at -- a work
   // record's decided-by minutes, a card's linked minutes and the decisions it names, and a minutes
@@ -103,6 +107,18 @@ export interface RecallHit {
   // TCRN-CROSS-SUB-426 R17 续作修订三 (STORY-514 AC1): a hit on a removed card, which only a recall
   // asked for removed cards has, carries the card's removal. Set after selection, never by the index.
   readonly removal?: RecallCardRemoval;
+}
+
+/** A clause keeps its number, validity and expandable source through ranking and delivery. */
+export interface RecallDecision {
+  readonly number: number;
+  readonly text: string;
+  readonly reference: string;
+  readonly scope: string;
+  readonly status: "valid" | "obsolete";
+  readonly excerpt?: string;
+  readonly matchedText?: string;
+  readonly supersededBy?: string | null;
 }
 
 export interface RecallSelectionOptions {
@@ -250,7 +266,16 @@ function bigrams(run: string): readonly string[] {
  * has no bigram and is kept whole rather than dropped.
  */
 export function segmentForIndex(text: string): string {
-  return String(text ?? "").replace(CJK_RUN, (run) => bigrams(run).join(" ") || run);
+  return String(text ?? "")
+    .replace(/[A-Za-z][A-Za-z0-9_.-]*/gu, (identifier) => {
+      const parts = externalKeyTokens(identifier);
+      return parts.length > 1 ? `${identifier} ${parts.join(" ")}` : identifier;
+    })
+    .replace(CJK_RUN, (run) => bigrams(run).join(" ") || run);
+}
+
+function segmentProse(text: string): string {
+  return text.replace(CJK_RUN, (run) => bigrams(run).join(" ") || run);
 }
 
 /**
@@ -274,7 +299,16 @@ export function recallTextTokens(text: string): ReadonlySet<string> {
 
 /** Query-side tokens: lowercased ASCII words and CJK bigrams, stop words and stop bigrams removed. */
 export function recallQueryTokens(text: string): readonly string[] {
-  return [...recallTextTokens(text)];
+  return [...new Set([
+    ...recallTextTokens(text),
+    ...[...String(text).matchAll(/[A-Za-z][A-Za-z0-9_.-]*/gu)]
+      .flatMap((match) => externalKeyTokens(match[0]))
+      .filter((part) => part.length >= 2 && !STOP_WORDS.has(part)),
+  ])];
+}
+
+export function recallQueryIsHistorical(query: string): boolean {
+  return /^\s*历史(?:\s|上|问题)|历史原因|当初|曾经|旧版|退役原因|\bhistor(?:y|ical)\b|\bpreviously\b|\bused to\b/iu.test(query);
 }
 
 /**
@@ -329,6 +363,7 @@ function documentDigest(document: RecallDocument): string {
     .update(`${document.key}\u0000${document.title}\u0000${document.body}\u0000${document.tags}\u0000${document.expansions}`
       + `\u0000${document.status}\u0000${document.summary}\u0000${document.recordKind}\u0000${document.parentChain.join("\u0001")}\u0000${document.lead}`
       + `\u0000${document.scope ?? ""}\u0000${JSON.stringify(document.involvedProjects ?? null)}`, "utf8")
+    .update(JSON.stringify([document.decisions ?? null, document.currentContract ?? false]))
     .digest("hex");
 }
 
@@ -342,7 +377,40 @@ interface IndexedRow {
   readonly document: RecallDocument;
 }
 
-function hitOf(document: RecallDocument, score: number): RecallHit {
+function hitOf(document: RecallDocument, score: number, query: string, frequencies: ReadonlyMap<string, number>): RecallHit {
+  const historical = recallQueryIsHistorical(query);
+  const tokens = recallQueryTokens(query);
+  // An explicit clause is meaningful only beside this record's key or id.
+  const named = query.toUpperCase().includes(document.key.toUpperCase()) || query.includes(document.id);
+  const requested = named ? Number(query.match(/#D([1-9][0-9]*)\b/iu)?.[1] ?? 0) : 0;
+  const clauses = document.decisions ?? [];
+  const selected = clauses.map((clause, index) => {
+    const words = new Set(recallQueryTokens(clause.text));
+    const matches = tokens.filter((token) => words.has(token));
+    const weight = matches.reduce((sum, token) => sum + 1 / (frequencies.get(token) ?? 1), 0);
+    return { clause, index, weight: requested === clause.number ? Number.POSITIVE_INFINITY : weight };
+  }).sort((a, b) => b.weight - a.weight || a.index - b.index)[0]?.clause;
+  const passages = selected?.text.split(/(?<=[。；;!?])\s*|(?<=\.)\s+/u).filter((part) => part.trim().length > 0) ?? [];
+  const snippets = passages.length === 0 ? [] : [excerpt(passages[0]!, 240)];
+  const covered = new Set(recallQueryTokens(snippets.join(" ")));
+  const used = new Set([0]);
+  let matchedText = snippets[0] ?? selected?.text ?? "";
+  for (let count = 0; count < 2; count += 1) {
+    const next = passages.map((text, index) => ({ text, index,
+      weight: used.has(index) ? 0 : tokens.filter((token) => !covered.has(token) && new Set(recallQueryTokens(text)).has(token))
+        .reduce((sum, token) => sum + 1 / (frequencies.get(token) ?? 1), 0),
+    })).sort((a, b) => b.weight - a.weight || a.index - b.index)[0];
+    if (next === undefined || next.weight === 0) break;
+    snippets.push(next.text);
+    matchedText = next.text;
+    used.add(next.index);
+    for (const token of recallQueryTokens(next.text)) covered.add(token);
+  }
+  const decision = selected === undefined ? undefined : {
+    ...selected,
+    matchedText,
+    excerpt: passages.length <= 1 ? selected.text : snippets.join(" … "),
+  };
   return {
     kind: document.kind,
     key: document.key,
@@ -353,7 +421,9 @@ function hitOf(document: RecallDocument, score: number): RecallHit {
     score,
     recordKind: document.recordKind,
     parentChain: document.parentChain,
-    lead: document.lead,
+    lead: requested > 0 && selected?.number !== requested ? "" : decision === undefined ? document.lead : `D${decision.number} ${decision.text}`,
+    ...(decision === undefined || requested > 0 && selected?.number !== requested ? {} : { decision }),
+    ...(historical ? { historical: true } : {}),
     ...(document.scope === undefined ? {} : { scope: document.scope }),
     ...(document.involvedProjects === undefined ? {} : { involvedProjects: document.involvedProjects }),
   };
@@ -369,6 +439,9 @@ export class RecallIndex {
   #rows = new Map<string, IndexedRow>();
   #byExternalKey = new Map<string, RecallDocument>();
   #keyRuns = new Map<string, readonly string[]>();
+  #frequencies = new Map<string, number>();
+  #clauses = new Map<number, RecallDocument>();
+  #clauseFrequencies = new Map<string, number>();
   #nextRowId = 1;
   #checkpoint: string;
 
@@ -378,7 +451,8 @@ export class RecallIndex {
     // prose BM25 statistics: a zero weight would still count key tokens in length.
     this.#database.exec(
       "CREATE VIRTUAL TABLE recall_index USING fts5(title, body, tags, expansions, externalKey, tokenize='unicode61');"
-        + "CREATE VIRTUAL TABLE recall_prose USING fts5(title, body, tags, expansions, tokenize='unicode61')",
+        + "CREATE VIRTUAL TABLE recall_prose USING fts5(title, body, tags, expansions, tokenize='unicode61');"
+        + "CREATE VIRTUAL TABLE recall_clauses USING fts5(body, tokenize='unicode61')",
     );
     this.#checkpoint = checkpoint;
     this.#apply(documents);
@@ -434,13 +508,31 @@ export class RecallIndex {
         segmentForIndex(document.expansions),
       ];
       insert.run(rowId, ...fields, externalKeyTokens(document.key).join(" "));
-      insertProse.run(rowId, ...fields);
+      // Identifier expansions have their own route: they must not change every
+      // prose score through FTS length normalization.
+      insertProse.run(rowId, ...[document.title, document.body, document.tags, document.expansions].map(segmentProse));
       this.#rows.set(id, { rowId, digest: documentDigest(document), document });
       inserted += 1;
     }
     this.#byExternalKey = new Map();
     this.#keyRuns = new Map();
+    this.#frequencies = new Map();
+    this.#clauses = new Map();
+    this.#clauseFrequencies = new Map();
+    this.#database.exec("DELETE FROM recall_clauses");
+    const insertClause = this.#database.prepare("INSERT INTO recall_clauses(rowid, body) VALUES (?, ?)");
     for (const row of this.#rows.values()) {
+      for (const token of new Set(recallQueryTokens(`${row.document.title} ${row.document.body} ${row.document.tags} ${row.document.expansions}`))) {
+        this.#frequencies.set(token, (this.#frequencies.get(token) ?? 0) + 1);
+      }
+      for (const decision of row.document.decisions ?? []) {
+        const clauseId = this.#clauses.size + 1;
+        insertClause.run(clauseId, segmentForIndex(decision.text));
+        this.#clauses.set(clauseId, row.document);
+        for (const token of new Set(recallQueryTokens(decision.text))) {
+          this.#clauseFrequencies.set(token, (this.#clauseFrequencies.get(token) ?? 0) + 1);
+        }
+      }
       if (row.document.key.length === 0) continue;
       this.#byExternalKey.set(row.document.key.toUpperCase(), row.document);
       this.#keyRuns.set(row.document.id, keyTokenRun(row.document.key));
@@ -475,9 +567,16 @@ export class RecallIndex {
       const document = this.#byExternalKey.get(key) ?? this.#namedByFragment(key);
       if (document === undefined || seen.has(document.id)) continue;
       seen.add(document.id);
-      hits.push(hitOf(document, RECALL_EXTERNAL_KEY_SCORE));
+      hits.push(hitOf(document, RECALL_EXTERNAL_KEY_SCORE, query, this.#frequencies));
     }
-    const tokens = recallQueryTokens(query);
+    const allTokens = [...recallTextTokens(query)];
+    // Long prompts cannot collect unbounded evidence from incidental short words.
+    // Keep the informative constraints; full identifiers remain query terms as well.
+    const queryTerms = (values: readonly string[]): readonly string[] => values.length <= 48 ? values : [...values]
+      .sort((a, b) => (this.#frequencies.get(a) ?? Number.MAX_SAFE_INTEGER) - (this.#frequencies.get(b) ?? Number.MAX_SAFE_INTEGER)
+        || b.length - a.length || values.indexOf(a) - values.indexOf(b))
+      .slice(0, 48);
+    const tokens = queryTerms(allTokens);
     const keyExpression = externalKeyExpression(query);
     if (tokens.length === 0 && keyExpression.length === 0) return hits;
     const byRowId = new Map<number, RecallDocument>();
@@ -495,6 +594,11 @@ export class RecallIndex {
         weights: [weights.title, weights.body, weights.tags, weights.expansions, weights.externalKey],
         expression: keyExpression.length === 0 ? "" : `externalKey : (${keyExpression})`,
       },
+      ...(/[a-z][A-Z]|[A-Z][A-Z][a-z]|_/u.test(query) ? [{
+        table: "recall_index",
+        weights: [weights.title, weights.body, weights.tags, weights.expansions, 0],
+        expression: `{title body tags expansions} : (${matchExpression(queryTerms(recallQueryTokens(query)))})`,
+      }] : []),
     ];
     for (const search of searches) {
       if (search.expression.length === 0) continue;
@@ -508,6 +612,24 @@ export class RecallIndex {
         throw new RecallError("RECALL_QUERY_FAILED", `the complete recall query could not be evaluated: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
+    if (tokens.length > 0 && allTokens.length <= 6 && this.#clauses.size > 0) {
+      // Use the query's actual record/clauses frequencies, including common terms.
+      // A unit-only ratio would inflate common words in a one- or two-clause corpus.
+      const clauseTokens = recallQueryTokens(query);
+      const information = (size: number, frequencies: ReadonlyMap<string, number>): number => clauseTokens.reduce((sum, token) => {
+        const count = frequencies.get(token) ?? 0;
+        return sum + Math.max(1e-6, Math.log((size - count + 0.5) / (count + 0.5)));
+      }, 0);
+      const scale = information(this.size, this.#frequencies) / information(this.#clauses.size, this.#clauseFrequencies);
+      const statement = this.#database.prepare("SELECT rowid AS clauseId, body, bm25(recall_clauses, 3) AS score FROM recall_clauses WHERE recall_clauses MATCH ? ORDER BY score LIMIT ?");
+      for (const row of statement.all(matchExpression(clauseTokens), limit) as Record<string, unknown>[]) {
+        const words = new Set(recallQueryTokens(String(row["body"])));
+        if (!clauseTokens.every((token) => words.has(token))) continue;
+        const document = this.#clauses.get(Number(row["clauseId"]));
+        const rowId = document === undefined ? undefined : this.#rows.get(document.id)?.rowId;
+        if (rowId !== undefined) rows.push({ rowId, score: Number(row["score"]) * scale });
+      }
+    }
     // Keep the strongest score for a record found by both routes, never sum them.
     // The prose route retains its original length and document-frequency statistics.
     rows.sort((left, right) => Number(left["score"]) - Number(right["score"]));
@@ -516,10 +638,28 @@ export class RecallIndex {
       const document = byRowId.get(Number(row["rowId"]));
       if (document === undefined || seen.has(document.id)) continue;
       seen.add(document.id);
-      hits.push(hitOf(document, -Number(row["score"])));
+      const decay = document.currentContract && ["done", "cancelled"].includes(document.status) && !recallQueryIsHistorical(query) ? 0.85 : 1;
+      const coherent = allTokens.length >= 2 && allTokens.length <= 6 && (document.decisions ?? []).some((decision) => {
+        const words = new Set(recallQueryTokens(decision.text));
+        return allTokens.every((token) => words.has(token));
+      });
+      let coverage = 1;
+      if (allTokens.length > 24) {
+        const words = new Set(recallQueryTokens(`${document.title} ${document.body} ${document.tags} ${document.expansions}`));
+        const weight = (token: string): number => 1 + Math.log((this.size + 1) / ((this.#frequencies.get(token) ?? 0) + 1));
+        const total = allTokens.reduce((sum, token) => sum + weight(token), 0);
+        const matched = allTokens.filter((token) => words.has(token)).reduce((sum, token) => sum + weight(token), 0);
+        const anchor = new Set(recallQueryTokens(`${document.title} ${document.summary} ${document.expansions}`));
+        const anchored = allTokens.filter((token) => anchor.has(token)).length >= 2;
+        coverage = anchored ? 1 : matched / total;
+      }
+      hits.push(hitOf(document, -Number(row["score"]) * decay * coverage * (coherent ? 1.1 : 1), query, this.#frequencies));
       if (hits.length >= maximumHits) break;
     }
-    return hits;
+    return [
+      ...hits.filter((hit) => hit.score === RECALL_EXTERNAL_KEY_SCORE),
+      ...hits.filter((hit) => hit.score !== RECALL_EXTERNAL_KEY_SCORE).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id)),
+    ];
   }
 
   close(): void {
@@ -594,6 +734,9 @@ export interface RecallMinutesInput {
   // D1..Dn -- recall indexes a record's valid decisions only, unless it was asked for the obsolete
   // ones too (R17 续作修订二), so the first one given can be D2.
   readonly decisionNumbers?: readonly number[];
+  readonly projectId?: string;
+  readonly decisionStatuses?: readonly ("valid" | "obsolete")[];
+  readonly decisionSuccessors?: readonly (string | null)[];
 }
 
 export interface RecallWorkInput {
@@ -611,6 +754,7 @@ export interface RecallWorkInput {
   readonly goal?: string | null;
   readonly body?: string | null;
   readonly parentChain?: readonly string[];
+  readonly contract?: string;
 }
 
 /**
@@ -697,6 +841,14 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       recordKind: "minutes",
       parentChain: [],
       lead: first === undefined ? "" : `D${String(firstNumber)} ${first}${minutes.decisions.length > 1 ? " …" : ""}`,
+      decisions: minutes.decisions.map((text, index) => ({
+        number: minutes.decisionNumbers?.[index] ?? index + 1,
+        text,
+        reference: `${minutes.id}#D${minutes.decisionNumbers?.[index] ?? index + 1}`,
+        scope: minutes.projectId ?? "本纪要",
+        status: minutes.decisionStatuses?.[index] ?? "valid",
+        ...(minutes.decisionSuccessors === undefined ? {} : { supersededBy: minutes.decisionSuccessors[index] ?? null }),
+      })),
     });
   }
   for (const record of inputs.work ?? []) {
@@ -712,7 +864,7 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
     const text = fullText
       ? [goal, record.body ?? ""].filter((part) => part.length > 0).join("\n\n")
       : goal;
-    const body = text.length > 0 ? text : fullText ? summary : (record.summary ?? "");
+    const body = record.contract ?? (text.length > 0 ? text : fullText ? summary : (record.summary ?? ""));
     if (title.length === 0 && body.length === 0) continue;
     documents.push({
       id: record.id,
@@ -722,12 +874,13 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       title,
       body,
       tags: `${record.kind} ${record.status} ${record.labels.join(" ")}`.trim(),
-      expansions: "",
+      expansions: record.contract === undefined ? "" : (record.summary ?? ""),
       summary: summary.length > 0 ? summary : goal,
       recordKind: record.kind,
       ...(record.involvedProjects === undefined ? {} : { involvedProjects: record.involvedProjects }),
       parentChain: record.parentChain ?? [],
       lead: "",
+      ...(record.contract === undefined ? {} : { currentContract: true }),
     });
   }
   return documents;

@@ -180,7 +180,7 @@ test("agent recall reports an oversized delivery without trimming the machine co
   const query = "Obsidian beacon";
   const title = `${query} ${'界"\\'.repeat(4800)}`;
   await createWork(workspace, {
-    occurredAt: at(40), projectId, externalKey: "RC-LARGE-CONTEXT", kind: "Initiative", parentId: null, title,
+    occurredAt: at(40), projectId, externalKey: "RC-LARGE-CONTEXT", kind: "Initiative", parentId: null, title, goal: "Deliver the Obsidian beacon contract.",
   });
   await setWorkspaceSetting(workspace, { occurredAt: at(41), key: "injection.perPromptBytes", value: "64000" });
   const args = ["--limit", "1", "--tau", "0"];

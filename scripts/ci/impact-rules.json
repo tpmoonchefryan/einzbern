@@ -49,7 +49,7 @@
     "tests/otel-privacy-guard.test.mjs": "fe4ecf9888fa7f19f12eff2d7ba3b387e3f05e8b9ef151437cbed4f670801818",
     "tests/p8-workflow-rc.test.mjs": "c619987f51386e50d27eee1b547e143d499538288051e6060e49cf79a969e4d1",
     "tests/pack-release.test.mjs": "4c064e8499be57beaee7d4c281b93c77c19680f73aad97248382211db1eb5c3b",
-    "tests/privacy-boundary.test.mjs": "3ffd68de4ae17a80ebd3984350eae0893f4459f37fa525271d3ad00cc08f93b7",
+    "tests/privacy-boundary.test.mjs": "95305ff8b06a4b1a69fe77929f9b3bff1f0a57427afbc13af8f1fc3163c6fcd8",
     "tests/privacy-git-metadata.test.mjs": "675a891f6f0066c29ea052a269219994ddf016536b20a74e9b682436c2427197",
     "tests/privacy-normalization.test.mjs": "8e3fcb3628b539022076d9389667ca45a67ae2e8bd0be05fa956634c16ad6914",
     "tests/readme-render.test.mjs": "2a150e521e2975a0d1008fa815f6f523219a309d6a7daf6bd518c2b7be51fb63",
@@ -161,12 +161,15 @@
       "scripts/policy/failure-pattern-register.json",
       "scripts/policy/gate-containment.json",
       "scripts/policy/offline-loopback-harness.json",
+      "scripts/policy/retrieval-eval-thresholds.json",
       "scripts/policy/story-rule-conservation.json",
       "scripts/policy/vendored-runtime.json",
       "scripts/push-gate.mjs",
       "scripts/release.mjs",
       "scripts/render-helper-docs.mjs",
       "scripts/render-readme.mjs",
+      "scripts/retrieval-delivery-eval.mjs",
+      "scripts/retrieval-eval.mjs",
       "scripts/review-evidence.mjs",
       "scripts/s253-class-alignment-proof.mjs",
       "scripts/story-rule-conservation.mjs",
@@ -232,6 +235,7 @@
       "tests/fixtures/retrieval-eval/holdout-preregistered.json",
       "tests/fixtures/retrieval-eval/incident-replay-frozen.json",
       "tests/fixtures/retrieval-eval/minutes-compact.json",
+      "tests/fixtures/retrieval-eval/strong-threshold.json",
       "tests/fixtures/retrieval-eval/work-compact.json",
       "tests/format-version.test.mjs",
       "tests/gates-cli.test.mjs",
@@ -325,6 +329,7 @@
       "tests/push-gate-p1-coverage.test.mjs",
       "tests/readme-render.test.mjs",
       "tests/recall-cli.test.mjs",
+      "tests/recall-delivery.test.mjs",
       "tests/recall-inputs.test.mjs",
       "tests/registry-resolve.test.mjs",
       "tests/release-lockstep.test.mjs",
@@ -335,6 +340,7 @@
       "tests/relocate.test.mjs",
       "tests/render-helper-docs.test.mjs",
       "tests/retired-settings-replay.test.mjs",
+      "tests/retrieval-delivery-eval.test.mjs",
       "tests/review-evidence.test.mjs",
       "tests/rules-cli.test.mjs",
       "tests/rules.test.mjs",
@@ -434,6 +440,7 @@
       "scripts/release.mjs",
       "scripts/render-helper-docs.mjs",
       "scripts/render-readme.mjs",
+      "scripts/retrieval-delivery-eval.mjs",
       "scripts/retrieval-eval-record.mjs",
       "scripts/retrieval-eval.mjs",
       "scripts/review-evidence.mjs",
@@ -505,6 +512,7 @@
       "tests/release-tooling-audit-boundaries.test.mjs",
       "tests/release-trust.test.mjs",
       "tests/render-helper-docs.test.mjs",
+      "tests/retrieval-delivery-eval.test.mjs",
       "tests/review-evidence.test.mjs",
       "tests/runtime-input-contract.test.mjs",
       "tests/skill-install-bootstrap.test.mjs",
@@ -569,6 +577,7 @@
       "tests/release-tooling-audit-boundaries.test.mjs",
       "tests/release-trust.test.mjs",
       "tests/render-helper-docs.test.mjs",
+      "tests/retrieval-delivery-eval.test.mjs",
       "tests/review-evidence.test.mjs",
       "tests/runtime-input-contract.test.mjs",
       "tests/skill-install-bootstrap.test.mjs",
@@ -630,6 +639,7 @@
       "tests/release-tooling-audit-boundaries.test.mjs",
       "tests/release-trust.test.mjs",
       "tests/render-helper-docs.test.mjs",
+      "tests/retrieval-delivery-eval.test.mjs",
       "tests/review-evidence.test.mjs",
       "tests/runtime-input-contract.test.mjs",
       "tests/skill-install-bootstrap.test.mjs",
@@ -702,6 +712,7 @@
   },
   "documentAudit": {
     "README.md": {
+      "portalTests": [],
       "readers": [
         ".github/workflows/ci.yml",
         "docs/implementation/configuration-inventory.json",
@@ -733,11 +744,14 @@
         "scripts/policy/failure-pattern-register.json",
         "scripts/policy/gate-containment.json",
         "scripts/policy/offline-loopback-harness.json",
+        "scripts/policy/retrieval-eval-thresholds.json",
         "scripts/policy/story-rule-conservation.json",
         "scripts/push-gate.mjs",
         "scripts/release.mjs",
         "scripts/render-helper-docs.mjs",
         "scripts/render-readme.mjs",
+        "scripts/retrieval-delivery-eval.mjs",
+        "scripts/retrieval-eval.mjs",
         "scripts/review-evidence.mjs",
         "scripts/story-rule-conservation.mjs",
         "scripts/task.mjs",
@@ -769,6 +783,7 @@
         "tests/fixtures/retrieval-eval/holdout-preregistered.json",
         "tests/fixtures/retrieval-eval/incident-replay-frozen.json",
         "tests/fixtures/retrieval-eval/minutes-compact.json",
+        "tests/fixtures/retrieval-eval/strong-threshold.json",
         "tests/fixtures/retrieval-eval/work-compact.json",
         "tests/gates-plan.test.mjs",
         "tests/gates-run.test.mjs",
@@ -800,6 +815,7 @@
         "tests/release-tooling-audit-boundaries.test.mjs",
         "tests/release-trust.test.mjs",
         "tests/render-helper-docs.test.mjs",
+        "tests/retrieval-delivery-eval.test.mjs",
         "tests/review-evidence.test.mjs",
         "tests/runtime-input-contract.test.mjs",
         "tests/skill-install-bootstrap.test.mjs",
@@ -858,6 +874,7 @@
         "tests/release-tooling-audit-boundaries.test.mjs",
         "tests/release-trust.test.mjs",
         "tests/render-helper-docs.test.mjs",
+        "tests/retrieval-delivery-eval.test.mjs",
         "tests/review-evidence.test.mjs",
         "tests/runtime-input-contract.test.mjs",
         "tests/skill-install-bootstrap.test.mjs",
@@ -866,10 +883,10 @@
         "tests/story-346-pg-disabled.test.mjs",
         "tests/story-378-incident-replay.test.mjs",
         "tests/story-rule-conservation.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Atelier.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -883,10 +900,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/CLI-Reference.md": {
+      "portalTests": [],
       "readers": [
         ".github/workflows/ci.yml",
         "docs/implementation/configuration-inventory.json",
@@ -918,11 +935,14 @@
         "scripts/policy/failure-pattern-register.json",
         "scripts/policy/gate-containment.json",
         "scripts/policy/offline-loopback-harness.json",
+        "scripts/policy/retrieval-eval-thresholds.json",
         "scripts/policy/story-rule-conservation.json",
         "scripts/push-gate.mjs",
         "scripts/release.mjs",
         "scripts/render-helper-docs.mjs",
         "scripts/render-readme.mjs",
+        "scripts/retrieval-delivery-eval.mjs",
+        "scripts/retrieval-eval.mjs",
         "scripts/review-evidence.mjs",
         "scripts/story-rule-conservation.mjs",
         "scripts/task.mjs",
@@ -955,6 +975,7 @@
         "tests/fixtures/retrieval-eval/holdout-preregistered.json",
         "tests/fixtures/retrieval-eval/incident-replay-frozen.json",
         "tests/fixtures/retrieval-eval/minutes-compact.json",
+        "tests/fixtures/retrieval-eval/strong-threshold.json",
         "tests/fixtures/retrieval-eval/work-compact.json",
         "tests/heavy-runs.test.mjs",
         "tests/helpers/ci-component-fixture.mjs",
@@ -984,6 +1005,7 @@
         "tests/release-tooling-audit-boundaries.test.mjs",
         "tests/release-trust.test.mjs",
         "tests/render-helper-docs.test.mjs",
+        "tests/retrieval-delivery-eval.test.mjs",
         "tests/review-evidence.test.mjs",
         "tests/runtime-input-contract.test.mjs",
         "tests/skill-install-bootstrap.test.mjs",
@@ -1042,6 +1064,7 @@
         "tests/release-tooling-audit-boundaries.test.mjs",
         "tests/release-trust.test.mjs",
         "tests/render-helper-docs.test.mjs",
+        "tests/retrieval-delivery-eval.test.mjs",
         "tests/review-evidence.test.mjs",
         "tests/runtime-input-contract.test.mjs",
         "tests/skill-install-bootstrap.test.mjs",
@@ -1052,10 +1075,10 @@
         "tests/story-rule-conservation.test.mjs",
         "tests/wiki-cli-reference.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Ether-Layout.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1069,10 +1092,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/FAQ.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1086,10 +1109,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Gates.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1105,10 +1128,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Glossary.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1125,10 +1148,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Home.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1144,10 +1167,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Install-Wizard.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1161,10 +1184,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Managed-Sections-and-Command-Spell.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1179,10 +1202,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Migrating-from-TCRN-Workflow.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1196,10 +1219,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Multi-Device-and-Cloud.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1213,10 +1236,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/Variables.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1230,10 +1253,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     },
     "docs/wiki/_Sidebar.md": {
+      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1247,8 +1270,7 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ],
-      "portalTests": []
+      ]
     }
   },
   "documentConsumers": {
@@ -1451,6 +1473,7 @@
     "tests/push-gate-p1-coverage.test.mjs",
     "tests/readme-render.test.mjs",
     "tests/recall-cli.test.mjs",
+    "tests/recall-delivery.test.mjs",
     "tests/recall-inputs.test.mjs",
     "tests/registry-resolve.test.mjs",
     "tests/release-lockstep.test.mjs",
@@ -1461,6 +1484,7 @@
     "tests/relocate.test.mjs",
     "tests/render-helper-docs.test.mjs",
     "tests/retired-settings-replay.test.mjs",
+    "tests/retrieval-delivery-eval.test.mjs",
     "tests/review-evidence.test.mjs",
     "tests/rules-cli.test.mjs",
     "tests/rules.test.mjs",
@@ -1591,6 +1615,7 @@
     "tests/release-tooling-audit-boundaries.test.mjs",
     "tests/release-trust.test.mjs",
     "tests/render-helper-docs.test.mjs",
+    "tests/retrieval-delivery-eval.test.mjs",
     "tests/review-evidence.test.mjs",
     "tests/runtime-input-contract.test.mjs",
     "tests/skill-install-bootstrap.test.mjs",
@@ -1776,10 +1801,10 @@
     "packages/core/src/project-chain.ts": "d520aca670e5344c59b9cea3e5aa6794a10e16a99a344895bf9dc20c5bd0d286",
     "packages/core/src/project-scope.ts": "4a5ea9f2b5d527d0755f5184b127eff9fb97f592ed85be3b4cf75aa61e77e644",
     "packages/core/src/recall-authority.ts": "dbde077289de8ba5ccdd318c54bcee4d33382ec093c462bd72220bfc4aa55fc8",
-    "packages/core/src/recall-inputs.ts": "0927809bfc3d7c58ff82719793257893f01eda4df51e0375aeb2d68cc6786693",
+    "packages/core/src/recall-inputs.ts": "02f2e158650c2627888caef3bee9088e0ad49428f8eba10ce31b5a5a8e151641",
     "packages/core/src/recall-observation-log.ts": "9805eea553fb008abeef88685c82724d9fc7b4969661d84472bebf106a4a139c",
     "packages/core/src/recall-observation.ts": "f5007aff3ff41c2945a3b6ff6787de5b9dabab51d73d5daaf4207a297f0768df",
-    "packages/core/src/recall.ts": "fa89ee1b3d4c3e9b01a71dcc50365e2ffc0991781ee7a2fe87f84cec463c4777",
+    "packages/core/src/recall.ts": "b63caac6f39d02d5aa4dfa6d66ef717e9cffdc01953c28259bdd13ee126a1998",
     "packages/core/src/reference-profiles.ts": "4f1dbb380af080e5920e17b1048bcc6159f13ddb887f7ebebd4962fd767391e1",
     "packages/core/src/registry.ts": "a97197ce4cf5dca49fc58bc8ca61ef1edff3fb8a334bf148bf067c5bfa84257d",
     "packages/core/src/relocate.ts": "a831043af5860dce52c0e078eaad85823efdc9dd5038f93392543a221358c9c7",
@@ -2014,7 +2039,7 @@
     "scripts/policy/knowledge-provenance.json": "9f79bd5914397bf18b32981eed16da91bc8ef37404b4fd27a50f8453d7008153",
     "scripts/policy/offline-loopback-harness.json": "c659c26fdfd215a1d26e31a51a3405f44e4a4ddfa75a9a21b2613f4a4c6c1708",
     "scripts/policy/portal-class-roots.json": "90c7f11ead7d2edaeee6c0f293cbfd6f62833473a48b0fb0815fafc990566039",
-    "scripts/policy/retrieval-eval-thresholds.json": "61afc0941cdc2408698bf2fecb5d8b7009750f15644f6fbce2153822792a9488",
+    "scripts/policy/retrieval-eval-thresholds.json": "6a3cfc88272a0e8e2c18c2106c9bf625be4dbd79c523fa7bee97db81ca6443d8",
     "scripts/policy/story-rule-conservation.json": "ae2f56af7765ccef9219b6d85f4d5fb034f851bc4fa92e8ba7b85d221327a843",
     "scripts/policy/test-wiring.json": "229f056d3df9e827b8efcee52b2da3adcab8dcb7df68ec84b40ca9e039d322e8",
     "scripts/policy/vendored-runtime.json": "4158fb518c6d4594ef080cd8efc38e598dbccc929ce313ec58e80f368ce9752a",
@@ -2025,8 +2050,9 @@
     "scripts/release.mjs": "6c429e92418b22bec2abaa00142c0fe74ef138721fc5f36f41f5b4f16e910cc0",
     "scripts/render-helper-docs.mjs": "5b8028393676b950901c167c0c023b73007e461a7f0b837a4d96f38f884723a4",
     "scripts/render-readme.mjs": "4ee47488f17ad5fa02bc5643cfb8cb82ea571feee19851aac2d08efb0f3f8449",
+    "scripts/retrieval-delivery-eval.mjs": "b8dcd6dfff549f6e1cac447ccafbd8cc7ff8cdc65a233257931eef895fd30eea",
     "scripts/retrieval-eval-record.mjs": "e95fce9f05325bac94ce45088ccafa3776b11bca7652b285220ed1dae14d87f8",
-    "scripts/retrieval-eval.mjs": "84ca69ad70f40f1153b25ec95bba7c9a6a6aa170f84c6f45bbbf5487f6c045db",
+    "scripts/retrieval-eval.mjs": "c3ae282f16bc20ac8e25df6a78fb93b89c2a5e9aa8fce31a32e5ae3fbf2f4b0a",
     "scripts/review-evidence.mjs": "c4add8c6c0928fb85fc15e96d972b07dfb0bed971a3fd4065d99b7288c9ea29c",
     "scripts/s253-class-alignment-proof.mjs": "e6cc243bc2927d52b4e5eebe49c42152e624f8b04f3c7070d9851af5c9ecc10a",
     "scripts/s278-component-coverage.mjs": "0213b4181a0519eae3d84c545f3dcc356cc70158cb232260a8acf1a3c28f89cf",
@@ -2088,7 +2114,7 @@
     "tests/ci-bootstrap.test.mjs": "14a10a6b284032b009c1f804503829074c14b9b691cde6bb204dc795b720ec8f",
     "tests/ci-evidence-retention.test.mjs": "6117785d60af019c3cbbe13269ca295c3492c6c6eb0890b54ebf45d9018834e1",
     "tests/ci-git-source-blobs.test.mjs": "12f8c7db61ee85a6cc2ff2145676af29581ba6198a5305e22c5b05c066bf076a",
-    "tests/ci-impact-plan.test.mjs": "0d2a7be57221ba407597e2fa72ff12f3fc25eebde9f0f71216761162e829a3be",
+    "tests/ci-impact-plan.test.mjs": "6fe5944f83be15c4758d14782a62219c60ffdb360e602f90a235e14c4abff11f",
     "tests/ci-light-contract.test.mjs": "b841fe04482417cdd1c863fd9cc41e797ca83acc3434410bc28bfae1c7f097e2",
     "tests/ci-light-evidence.test.mjs": "68c1ffbd093238578ff0558c12bd8258bbe1c7b2a18e0aac73697bc33437515f",
     "tests/ci-selective-runner.test.mjs": "e4e29e120653aa26fcff9989b044dec255ca34e2face2cca9fefa31849b30c87",
@@ -2121,7 +2147,7 @@
     "tests/coordination-managed-sections.test.mjs": "60d16b4f1855f9e88cc31cdad2c2882b2262ea2922031fce78dc41bba1be8827",
     "tests/cross-repo-privacy.test.mjs": "1d2431fc55050a31641e368ef4b41a4b756d508c1e11a9e961ab20f1c9cde057",
     "tests/decided-in-cli.test.mjs": "0067e35e7cf2bd1f41895d245ab1fae3d970c380acba51b792725cd247a0b7a6",
-    "tests/decision-lifecycle.test.mjs": "37829fb4caa0fd779993dce5716889af334f834a28e7f15f89590abae1957d9d",
+    "tests/decision-lifecycle.test.mjs": "c8f2e4615d97ee02b664e244ded7816b4f8c2b2b93113121ab720ee25950965e",
     "tests/dependency-materialization.test.mjs": "716ba4f51bf70582677f7e466a443c60e89c68115d248ae7cfedf46f097cdaf8",
     "tests/dependency-policy.test.mjs": "164b44c966d250ce2cdb7b6b53ad9750fe18c2f83304c79354790af5a2e8510a",
     "tests/dependency.test.mjs": "66fa68dd1acc5c33e5b1a739058befe64709b53cdb49665fd3d6dc278aa56666",
@@ -2183,6 +2209,8 @@
     "tests/fixtures/readme/einzbern-about.en.txt": "48038fe66949fefd658b505da3b0fa05790cde5bce43e338c0f8f98d3018f18e",
     "tests/fixtures/retrieval-eval/cards-compact.json": "47f6cd30f6650c9e7e1c428e9b3adad0d482968509ab883f64e1827bf8574ee5",
     "tests/fixtures/retrieval-eval/corpus-snapshot.json": "8c4fe40692a836635c90083dfff6815b968f2a44987e6638ab90a63095551942",
+    "tests/fixtures/retrieval-eval/decision-delivery-cases.json": "4000aaf8ab53a79c6f800819dcd6833bbdb229a54386606914c0f4fe702f2662",
+    "tests/fixtures/retrieval-eval/decision-delivery-freeze.json": "a2ec65d11fb48c8d888a89a96877afa6d12d64a3d7560ac26c682cd205c75e13",
     "tests/fixtures/retrieval-eval/gold-labels.json": "270486c81934321eee0c9bfa4e38249387463fc3c52d40f4d4325c648108b801",
     "tests/fixtures/retrieval-eval/holdout-preregistered.json": "0b74102cde0dea40c1c1fd4cdb25177e43d36331d2cd6457e3325a1aff6d1e74",
     "tests/fixtures/retrieval-eval/holdout-source.json": "9f5d06013b49147d717fa1417fe6bdd379af1ce7aa80b1c10c96cc50a5ef11f2",
@@ -2234,7 +2262,7 @@
     "tests/helpers/registry-control.mjs": "1c65dcbed418912cdc5eed25fb6c5f3c0120db2f3403adbe3426d245df606848",
     "tests/helpers/work-lease-fixture.mjs": "1523d26edff3cdc5269e69c75543150bf74a423716e3bcf31be71f82e35e13c3",
     "tests/helpers/work-lease-gates-fixture.mjs": "603d6c335b63de49b91878d4b6649741219cc7fd9059c30946a6a152165b4250",
-    "tests/helpers/workspace-fixture.mjs": "3dac378d1f3f0c91e859db3eb3cf5093b18e604a6bd45445f67b01e379056e5c",
+    "tests/helpers/workspace-fixture.mjs": "23ea6116e61f21d29591835f4438f5d1e43eec4d29d99ad82975bb50f975b56c",
     "tests/hook-host.test.mjs": "29ad7c1a978bef173e099c3ec22be145d1e19369e6257bfee493513e52dc542e",
     "tests/hook-launcher.test.mjs": "ddf0668defe6094ca09fcd1ed3112c068fabe13847e9fe34e9f5dae3f454ef7d",
     "tests/hook-read-guard.test.mjs": "b11a1cc85a2e98bc81236e71098fdecce58db2602bd791151d100bd15eaa8fd5",
@@ -2355,8 +2383,9 @@
     "tests/push-wiki.test.mjs": "817ca442c7b8ef8d402e3ff4f0eead94019b584d799870fd589c3e43b2fce2db",
     "tests/readme-render.test.mjs": "1673ed1eed02461bbe8c778db7eae4b9e4591ca880770f0197958b9c8b9cba07",
     "tests/recall-authority.test.mjs": "2789f5bf53d6aa9026fe3ea982c827bec2cc2c1bbc59f654ed5e18946bd3b84b",
-    "tests/recall-cli.test.mjs": "56925721eb29e2e670d358de4f56f17cc488e11e89db40097aabc2eea397fc6d",
-    "tests/recall-inputs.test.mjs": "cf2d8f27bcbf2f8fe3c265e64c479459937297944b39cbee41550c406e4a22a7",
+    "tests/recall-cli.test.mjs": "16987f3fd12db1b91c31b1ed900cc1251856b2f88d069edab726c0651338affb",
+    "tests/recall-delivery.test.mjs": "38a12fed9fb3d8bc708c6a06494bc368ea164b2c5ba5270fb00a02b61fd48f14",
+    "tests/recall-inputs.test.mjs": "b916d5b9845b6c8d9410210e8213c946786dc67dc3e20a72f5846ab95b499c1f",
     "tests/recall-observation.test.mjs": "b96792e358c76089acbce5767d20892d18a0dd6dbec5e0053b1d5ca98dce9299",
     "tests/recall-performance-runner.test.mjs": "81d8a4c63e71e68a44dfa6dafa6e7464be25f9ed54d74865b31f9584ecbf0526",
     "tests/recall-strong-hit.test.mjs": "777f65889a4a553c17ebbe3afafdf64a354f21a00fd83bf8ae3b36804346aa2b",
@@ -2369,6 +2398,7 @@
     "tests/relocate.test.mjs": "3cbc85c0aecf0cab6c65b238e8e7be11ea944ed4cfc4f9e6d2e5710dee2d544d",
     "tests/render-helper-docs.test.mjs": "4fb3c5ad889cee309bed89ffba09ae505f955c968b35417401b1cf1b8d33d678",
     "tests/retired-settings-replay.test.mjs": "254f9100bc325cae15b16a4fee28258d2749fd0288e3ad27e70621b1a6b56133",
+    "tests/retrieval-delivery-eval.test.mjs": "9db1c5c477ed051829f3a9dd501083c6b1ed9aea43b0a659fbbd8b0bc4200757",
     "tests/review-evidence.test.mjs": "be75297f1581d7cf8dbfe7a9cfd219bcd226989ef6a3a992c6100933a60e1416",
     "tests/root-boundaries.test.mjs": "bf6c8db606776dc5885e7764aad8703810e5006d83258cabad27a4e2329f1337",
     "tests/rules-catalog.test.mjs": "aa1da594899c4f65eb836498229b99109d0c0ea502cd63e2686c260a31fd351d",

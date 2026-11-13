@@ -29,6 +29,7 @@ import type { DecisionLedger, DecisionStatusFilter, ObsoleteDecisionHint } from 
 import type { RecallCardRemoval, RecallHit, RecallInputs, RecallKnowledgeInput, RecallMinutesInput, RecallScope, RecallWorkInput } from "./recall.js";
 import { RECALL_INDEXED_WORK_KINDS } from "./recall.js";
 import { storyFields } from "./story-fields.js";
+import { workContent } from "./work-content.js";
 import { decidedInOf } from "./work-relations.js";
 import type { WorkspaceState } from "./workspace.js";
 
@@ -441,12 +442,22 @@ export function recallInputsFromState(
     conferences: state.conferences.filter(entry => entry.projectId === options.projectId),
   };
   const byId = new Map(state.work.map((record) => [record.id, record]));
+  const ledger = decisionLedger(state);
   const work: RecallWorkInput[] = [];
   for (const record of state.work) {
     if (record.tombstone || !(RECALL_INDEXED_WORK_KINDS as readonly string[]).includes(record.kind)) continue;
     const fields = storyFields(record);
+    const content = workContent(record);
     const fullText = record.kind === "Story" || record.kind === "Incident";
     const scope = record.extensions["advisory:scope"]?.value;
+    const currentDecisions = decisionsOfMinutes(ledger, decidedInOf(record))
+      .map((reference) => ledger.decisions.get(reference))
+      .filter((decision) => decision?.status === "valid")
+      .map((decision) => decision!.text);
+    const contract = content === null
+      ? [currentWorkText(record.summary ?? ""), fields.goal, fields.acceptance, fullText ? currentWorkText(fields.body ?? "") : ""]
+      : [content.goal, ...content.requirements.filter((requirement) => requirement.disposition === "required").map((requirement) => requirement.text),
+        ...content.acceptance.map((acceptance) => acceptance.expected), ...content.constraints];
     work.push({
       id: record.id,
       externalKey: record.externalKey,
@@ -454,11 +465,12 @@ export function recallInputsFromState(
       kind: record.kind,
       status: record.status,
       title: record.title ?? null,
-      summary: record.summary ?? null,
+      summary: record.summary == null ? null : currentWorkText(record.summary),
       scope: typeof scope === "string" ? scope : "",
       labels: record.labels ?? [],
       goal: fields.goal,
-      body: fullText ? fields.body : null,
+      body: fullText ? currentWorkText(fields.body ?? "") : null,
+      contract: [...contract, ...currentDecisions].filter((text) => text != null && text.length > 0).join("\n"),
       parentChain: workParentChain(byId, record),
     });
   }
@@ -474,6 +486,9 @@ export function recallInputsFromState(
       decisions: entry.decisions.map((decision) => decision.text),
       outcomeClass: entry.kind === "conference-minutes" && historical !== undefined ? historical.outcomeClass : "recorded",
       externalKey: entry.externalKey,
+      projectId: entry.projectId,
+      decisionStatuses: entry.decisions.map((decision) => decision.status ?? "valid"),
+      decisionSuccessors: entry.decisions.map((decision) => decision.supersededBy?.decision ?? null),
       // Only when an obsolete decision left a gap, or the decisions given are not D1..Dn, so every other
       // input reads as it always did.
       ...(entry.withheldDecisions === undefined && entry.decisions.every((decision, index) => decision.number === index + 1)
@@ -487,6 +502,12 @@ export function recallInputsFromState(
     work,
     ...(options.scopeExcerptBytes === undefined ? {} : { scopeExcerptBytes: options.scopeExcerptBytes }),
   };
+}
+
+/** Legacy annotations remain readable through work-show, outside the current index. */
+export function currentWorkText(text: string): string {
+  const history = /^(?:#{1,6}\s+.*(?:历史|修订|流水|进度|History|Revision|Changelog|Progress)|【[^\n]*(?:历史|修订|进度|交付记录|验收记录))[^\n]*$/imu.exec(text);
+  return (history === null ? text : text.slice(0, history.index)).trim();
 }
 
 type HintState = Pick<WorkspaceState, "work" | "minutes" | "conferenceMinutes">;
@@ -561,6 +582,7 @@ function capBytes(text: string, maximumBytes: number): string {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= maximumBytes) return text;
   const ellipsis = "…";
+  if (maximumBytes < Buffer.byteLength(ellipsis)) return "";
   let end = maximumBytes - Buffer.byteLength(ellipsis, "utf8");
   while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
   return `${bytes.subarray(0, end).toString("utf8")}${ellipsis}`;
@@ -577,13 +599,38 @@ function capBytes(text: string, maximumBytes: number): string {
  * obsolete decisions carries its own after its lead (R17 续作修订二).
  */
 export function formatRecallLine(hit: RecallHit): string {
+  return formatRecallLineWithin(hit, RECALL_LINE_MAX_BYTES);
+}
+
+function formatRecallLineWithin(hit: RecallHit, maximumBytes: number): string {
   const flat = (text: string): string => text.replace(/\s+/gu, " ").trim();
   const hint = hit.obsoleteDecisions === undefined || hit.obsoleteDecisions.length === 0 ? "" : ` · ${hintText(hit.obsoleteDecisions)}`;
+  const title = flat(hit.title);
+  const bareTitle = title.length === 0 || title.toUpperCase() === hit.key.toUpperCase() || /^(?:(?:[A-Z0-9]+-)*[A-Z]+-)?\d+$/iu.test(title);
+  const removedEvidence = hit.status === "removed" && (hit.removal?.basis.trim().length ?? 0) > 0;
+  if (bareTitle || (!hit.summary.trim() && !hit.lead.trim() && !removedEvidence) || hit.kind === "minutes" && !hit.lead.trim()) return "";
   let line: string;
   if (hit.kind === "card") {
     line = `[卡片${hit.scope === "user" ? " 用户" : ""}${hit.status === "removed" ? " 已移除" : ""}] ${flat(hit.title)} · ${hit.id}${hint}`;
   } else if (hit.kind === "minutes") {
-    line = `[纪要 ${hit.key}] ${flat(hit.title)}${hit.lead.length > 0 ? ` · ${flat(hit.lead)}` : ""}${hint}`;
+    const decision = hit.decision;
+    if (decision === undefined) {
+      line = `[纪要 ${hit.key}] ${title} · ${flat(hit.lead)}${hint}`;
+    } else {
+      const validity = decision.status === "obsolete"
+        ? `历史已失效→${decision.supersededBy ?? "撤回"}`
+        : hit.historical ? "历史问题；非现行行动" : "现行有效";
+      const source = ` · 出处（minutes-show --id ${decision.reference}）`;
+      const prefix = `[纪要 ${hit.key}] ${title} · D${decision.number} ${validity} · 范围 ${decision.scope} · `;
+      // Reserve the complete locator before shortening prose. No partial source is delivered.
+      const room = Math.min(maximumBytes, RECALL_LINE_MAX_BYTES) - Buffer.byteLength(prefix + source + hint, "utf8");
+      const fullExcerpt = flat(decision.excerpt ?? decision.text);
+      const excerpt = maximumBytes < RECALL_LINE_MAX_BYTES && Buffer.byteLength(fullExcerpt, "utf8") > room
+        ? flat(decision.matchedText ?? fullExcerpt) : fullExcerpt;
+      const text = capBytes(excerpt, Math.min(room, 800));
+      if (text.length === 0) return "";
+      return prefix + text + source + hint;
+    }
   } else {
     const chain = hit.parentChain.length > 0 ? ` · ${hit.parentChain.map(flat).join(" ‹ ")}` : "";
     line = `[${hit.recordKind} ${hit.status}] ${flat(hit.title)} · ${hit.key} · ${hit.id}${hint}${chain}`;
@@ -593,15 +640,21 @@ export function formatRecallLine(hit: RecallHit): string {
 
 /**
  * The lines of an answer, in rank order, cut to `perPromptBytes` UTF-8 bytes at whole lines (one
- * newline between lines counts): the first line that does not fit ends the answer.
+ * newline between lines counts). An overlong candidate never blocks a later line.
  */
 export function recallContextLines(hits: readonly RecallHit[], perPromptBytes: number): readonly string[] {
   const lines: string[] = [];
   let used = 0;
   for (const hit of hits) {
-    const line = formatRecallLine(hit);
-    const cost = Buffer.byteLength(line, "utf8") + (lines.length === 0 ? 0 : 1);
-    if (used + cost > perPromptBytes) break;
+    let line = formatRecallLine(hit);
+    if (line.length === 0) continue;
+    const separator = lines.length === 0 ? 0 : 1;
+    if (used + Buffer.byteLength(line, "utf8") + separator > perPromptBytes && hit.decision !== undefined && Buffer.byteLength(hit.decision.text, "utf8") > 480) {
+      line = formatRecallLineWithin(hit, perPromptBytes - used - separator);
+      if (line.length === 0) continue;
+    }
+    const cost = Buffer.byteLength(line, "utf8") + separator;
+    if (used + cost > perPromptBytes) continue;
     lines.push(line);
     used += cost;
   }
