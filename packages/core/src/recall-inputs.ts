@@ -20,7 +20,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // this user's crest, and every card says which (scope "project" or "user") on its way to its hit,
 // whose line marks a user card 「用户」. A user card is recalled in every project.
 
-import type { WorkRecord } from "../../protocol/src/index.js";
+import type { JsonValue, WorkRecord } from "../../protocol/src/index.js";
 import { listKnowledgeMetadata } from "./knowledge-core.js";
 import type { KnowledgeStatusFilter, KnowledgeStoreScope } from "./knowledge-core.js";
 import { expansionsText } from "./knowledge-language.js";
@@ -181,6 +181,7 @@ export interface RecallCardStoreRead {
   readonly reasonCode: string;
   readonly digest: string;
   readonly cards: number;
+  readonly evidence: Readonly<Record<string, JsonValue>> | null;
   // TCRN-CROSS-SUB-310: the pairs of cards the store holds in unresolved conflict, which its
   // default selection left out of the cards counted above; empty for a store with none.
   readonly unresolvedConflicts: readonly (readonly string[])[];
@@ -296,8 +297,9 @@ function unresolvedScopeEntries(value: unknown): readonly RecallUnresolvedScopeE
  * or one whose project the chain no longer holds.
  */
 function withheldCardsDiagnostic(read: RecallCardStoreRead): RecallProjectCrestDegraded | null {
-  if (read.unresolvedConflicts.length === 0 && read.unresolvedDuplicates.length === 0 &&
-    read.awaitingChain.length === 0 && read.unresolvedScopes.length === 0) return null;
+  const count = Number(read.evidence?.["withheldCount"] ?? 0);
+  if (count === 0) return null;
+  const diagnostics = read.evidence?.["diagnostics"] as Readonly<Record<string, JsonValue>> | undefined;
   const duplicateIds = new Set(read.unresolvedDuplicates.map((duplicate) => duplicate.id));
   const cardIds = new Set([
     ...read.unresolvedConflicts.flat(),
@@ -310,16 +312,16 @@ function withheldCardsDiagnostic(read: RecallCardStoreRead): RecallProjectCrestD
     // project the chain no longer holds are KNOWLEDGE_LINK_INVALID, the refusal validate and a
     // checkpoint meet until a card supersedes them; records awaiting chain events alone are
     // KNOWLEDGE_HIGH_WATER_MISMATCH, the refusal validate, a checkpoint and a rebase meet while they wait.
-    reasonCode: read.unresolvedConflicts.length > 0
+    reasonCode: Number(diagnostics?.["conflictPairCount"] ?? read.unresolvedConflicts.length) > 0
       ? "KNOWLEDGE_POSSIBLE_CONFLICT"
-      : read.unresolvedDuplicates.length > 0
+      : Number(diagnostics?.["duplicateIdCount"] ?? read.unresolvedDuplicates.length) > 0
         ? "KNOWLEDGE_DUPLICATE"
-        : read.unresolvedScopes.length > 0 ? "KNOWLEDGE_LINK_INVALID" : "KNOWLEDGE_HIGH_WATER_MISMATCH",
+        : Number(diagnostics?.["unresolvedScopeCount"] ?? 0) + Number(diagnostics?.["unresolvedLegacyCount"] ?? 0) > 0 ? "KNOWLEDGE_LINK_INVALID" : "KNOWLEDGE_HIGH_WATER_MISMATCH",
     ...(read.unresolvedConflicts.length === 0 ? {} : { unresolvedConflicts: read.unresolvedConflicts }),
     ...(read.unresolvedDuplicates.length === 0 ? {} : { unresolvedDuplicates: read.unresolvedDuplicates }),
     ...(read.awaitingChain.length === 0 ? {} : { awaitingChain: read.awaitingChain }),
     ...(read.unresolvedScopes.length === 0 ? {} : { unresolvedScopes: read.unresolvedScopes }),
-    withheldCards: cardIds.size + read.unresolvedDuplicates.reduce((count, duplicate) => count + duplicate.versions.length, 0),
+    withheldCards: read.evidence === null ? cardIds.size + read.unresolvedDuplicates.reduce((count, duplicate) => count + duplicate.versions.length, 0) : count,
   };
 }
 
@@ -389,6 +391,7 @@ export async function readRecallCards(workspaceRoot: string, options: RecallCard
           reasonCode: String(answer["reasonCode"] ?? ""),
           digest: String(answer["resultDigest"] ?? ""),
           cards: cards.length,
+          evidence: Object.fromEntries(["effectiveScope", "sourceVersion", "projectionVersion", "snapshot", "activeCount", "eligibleCount", "withheldCount", "ineligibleCount", "diagnostics"].map((key) => [key, answer[key] ?? null])),
           unresolvedConflicts: conflictPairs(answer["unresolvedConflicts"]),
           unresolvedDuplicates: duplicateEntries(answer["unresolvedDuplicates"]),
           awaitingChain: awaitingChainEntries(answer["awaitingChain"]),
@@ -398,7 +401,7 @@ export async function readRecallCards(workspaceRoot: string, options: RecallCard
     } catch (error) {
       const reasonCode = (error as { readonly reasonCode?: unknown }).reasonCode;
       if (typeof reasonCode !== "string") throw error;
-      return { cards: [], store: { reasonCode, digest: "absent", cards: 0, unresolvedConflicts: [], unresolvedDuplicates: [], awaitingChain: [], unresolvedScopes: [] } };
+      return { cards: [], store: { reasonCode, digest: "absent", cards: 0, evidence: null, unresolvedConflicts: [], unresolvedDuplicates: [], awaitingChain: [], unresolvedScopes: [] } };
     }
   };
   const project = await read("project");

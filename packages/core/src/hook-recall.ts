@@ -35,7 +35,6 @@ import { effectiveProjectState } from "./project-chain.js";
 // the entry notes the failure's own reasonCode before passing it on.
 
 import { NAVIGATION_LINES } from "./agents-sections.js";
-import { isSharedLibrary } from "./chain-identity.js";
 import { CODEX_HOOK_EVENTS, HOST_HOOK_EVENTS, HOST_HOOK_HOSTS, HOST_HOOK_POINTER_EVENTS } from "./host-hooks.js";
 import type { HostHookHost } from "./host-hooks.js";
 import { recall, recallDocuments } from "./recall.js";
@@ -197,7 +196,7 @@ export async function promptRecallOutcome(request: PromptRecallRequest): Promise
   const at = request.at ?? currentInstant();
   const { state: rawState, authority } = await readRecallAuthority(library.libraryPath);
   const state = await effectiveProjectState(rawState, library.entry.projectId);
-  const projectId = isSharedLibrary(state) ? library.entry.projectId : undefined;
+  const projectId = library.entry.projectId;
   // TCRN-CROSS-SUB-425 (MIN-239 D6): the prompt hook recalls valid cards only, always; no prompt asks
   // it for a removed one.
   const { cards, digest } = await readRecallCards(library.libraryPath, { at, allowTrailing: true, status: "valid", ...(projectId === undefined ? {} : { projectId }) }, authority);

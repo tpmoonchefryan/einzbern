@@ -160,7 +160,7 @@ test("agent recall keeps the full context and identifies degraded knowledge with
     awaitingChain: 0,
   });
   assert.equal(Object.hasOwn(agent, "records"), false);
-  assert.ok(!raw.includes(card.id), "the compact result contains counts only");
+  assert.deepEqual(agent.knowledgeStores.project.diagnostics.idExamples, [card.id], "the compact result has bounded ID evidence");
   const { knowledgeReasonCode, knowledgeStores, projectCrestDegraded } = full;
   assert.equal(agent.diagnostics.knowledgeSha256, canonicalSha256({ knowledgeReasonCode, knowledgeStores, projectCrestDegraded }));
   assert.match(agent.diagnostics.projectSnapshotDigest, /^[a-f0-9]{64}$/u);

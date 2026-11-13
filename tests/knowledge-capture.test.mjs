@@ -90,21 +90,21 @@ async function cliJson(argv) {
   return JSON.parse(output);
 }
 
-test("STORY-365 GWT2/GWT3: the same subject twice is scored, refused, and released by supersedes", async () => {
+test("STORY-365 GWT2/GWT3: a same-subject contradictory rule is refused and released by supersedes", async () => {
   const fixture = await containerFixture("FIXTURE-CAPTURE-CONFLICT");
   try {
     const subject = "guard-check 运行期间不要并发编辑";
-    const first = await captureKnowledgeUnit(fixture.workspace, lessonCard(subject), { allowTrailing: true });
+    const first = await captureKnowledgeUnit(fixture.workspace, lessonCard(subject, { summary: "Enable cache" }), { allowTrailing: true });
     assert.equal(Object.hasOwn(first, "promotionState"), false);
 
-    const refusal = await captureKnowledgeUnit(fixture.workspace, lessonCard(subject, { body: "第二次写入" }), { allowTrailing: true })
+    const refusal = await captureKnowledgeUnit(fixture.workspace, lessonCard(subject, { body: "第二次写入", summary: "Disable cache" }), { allowTrailing: true })
       .then(() => null, (error) => error);
-    assert.equal(refusal?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "the same subject twice is a possible conflict");
+    assert.equal(refusal?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "the same-domain opposite assertion is a conflict");
     assert.deepEqual(refusal.details.conflicts, [first.id], "the refusal hands back the hit list, not just a verdict");
 
     const replacement = await captureKnowledgeUnit(
       fixture.workspace,
-      lessonCard(subject, { body: "第二次写入", supersedes: first.id }),
+      lessonCard(subject, { body: "第二次写入", supersedes: first.id, summary: "Disable cache" }),
       { allowTrailing: true },
     );
     assert.equal(replacement.superseded, first.id, "the receipt names what was replaced");
@@ -123,10 +123,10 @@ test("STORY-365 coexist admits the write and records what it stands beside", asy
   const fixture = await containerFixture("FIXTURE-CAPTURE-COEXIST");
   try {
     const subject = "策略 JSON 按键定位 不按行号";
-    const first = await captureKnowledgeUnit(fixture.workspace, lessonCard(subject), { allowTrailing: true });
+    const first = await captureKnowledgeUnit(fixture.workspace, lessonCard(subject, { summary: "Enable cache" }), { allowTrailing: true });
     const second = await captureKnowledgeUnit(
       fixture.workspace,
-      lessonCard(subject, { body: "另一面", coexist: true }),
+      lessonCard(subject, { body: "另一面", summary: "Disable cache", coexist: true }),
       { allowTrailing: true },
     );
     assert.deepEqual(second.conflicts, [first.id]);
@@ -260,15 +260,15 @@ test("INC-282: a captured card naming a source is active and in default recall a
   }
 });
 
-test("BL33 deferred: preserve existing single-character and contiguous Chinese token scoring", () => {
+test("654: conflict candidates reject single Han tokens while retrieval ranking retains its separate compatibility formula", () => {
   const card = { id: "knowledge:boundary", subject: "中文", summary: "", snippet: "", tags: [], lifecycle: "active", extensions: {} };
   assert.equal(knowledgeRelevanceScore(card, "中"), 8, "one Han character remains a scoring token");
   assert.equal(knowledgeRelevanceScore(card, "文"), 8, "matching is substring-based, not word-boundary segmentation");
   assert.equal(knowledgeRelevanceScore(card, "中文"), 8, "a contiguous Han run remains one token");
   assert.equal(knowledgeRelevanceScore(card, "中 文"), 16, "separated Han runs remain separate tokens");
   assert.deepEqual(knowledgeConflictHits([card], "中"), []);
-  assert.deepEqual(knowledgeConflictHits([card], "中 文"), [card.id]);
-  assert.deepEqual(knowledgeConflictHits([{ ...card, subject: "中中" }], "中"), [card.id], "repeated single-character matches retain existing threshold behavior; this repair does not tune BL33");
+  assert.deepEqual(knowledgeConflictHits([card], "中 文"), []);
+  assert.deepEqual(knowledgeConflictHits([{ ...card, subject: "中中" }], "中"), [], "conflict candidates no longer use repeated single-character substrings");
 });
 
 // PR24-1: exercise the shipped source launcher, not runCli or the capture core API.

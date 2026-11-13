@@ -391,6 +391,7 @@ export {
   KNOWLEDGE_CORE_VERSION,
   KNOWLEDGE_LIMITS,
   KNOWLEDGE_METADATA_SCHEMA_VERSION,
+  KNOWLEDGE_PROJECTION_VERSION,
   KNOWLEDGE_PROVENANCE_POLICY,
   KNOWLEDGE_REASON_CODES,
   KNOWLEDGE_REMOVAL_REASONS,
@@ -410,6 +411,8 @@ export {
   knowledgeConflictHits,
   knowledgeLinkIndexCountsForTest,
   knowledgeRelevanceScore,
+  resolveIntrinsicKnowledgeScope,
+  intrinsicScopesIntersect,
   listKnowledgeMetadata,
   readKnowledgeBody,
   readKnowledgeSnippet,
@@ -445,6 +448,7 @@ export type {
   KnowledgeStoreScope,
   KnowledgeUnitExtensions,
   KnowledgeUnitMetadata,
+  IntrinsicKnowledgeScope,
 } from "./knowledge-core.js";
 export {
   COLLECTION_ATTRIBUTION_NOTE,

@@ -20,6 +20,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, stat, writ
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { assertRecallStore } from "./helpers/knowledge-evidence.mjs";
 
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import {
@@ -95,9 +96,10 @@ function refusalOf(operation) {
 
 // A card of the library's crest: scope workspace, so it names no project or work.
 function card(externalKey, subject, overrides = {}) {
+  const target = subject.split(",")[0].replace(/\b(?:survey|census|check|measure)$/u, "").trim();
   return {
     occurredAt: instant(5), externalKey, scope: "workspace", projectId: null, roleScopes: [],
-    category: "workflow", kind: "fact", tags: ["devices"], subject, summary: `${subject}, in brief`,
+    category: "workflow", kind: "fact", tags: ["devices"], subject, summary: `${target} must use only ${externalKey.toLowerCase()}`,
     snippet: `${subject}, the line to recall`, accountableOwnerId: OWNER, sourceReferences: [], sourceDigest: null,
     linkedWorkIds: [], linkedDecisionIds: [], linkedGateIds: [], linkedEvidenceIds: [], retrievalDisposition: "default",
     freshnessState: "fresh", lastVerified: null, stalenessPolicy: { maximumAgeDays: null, unknownDisposition: "fail-closed" },
@@ -259,7 +261,7 @@ test("SUB-414: a CLI chain write leaves store.json, the claim and every crest fi
     "--tags", "lesson", "--accountable-owner-id", OWNER, "--body", "Written after three chain writes."]);
   assert.deepEqual([written.reasonCode, written.version], ["KNOWLEDGE_UNIT_CREATED", 2]);
   const recalled = await cli(fx.homeA, ["recall", "--workspace", fx.workspace, "--at", AT, "--query", "chain writes leave the crest alone", "--tau", "0"]);
-  assert.deepEqual(recalled.knowledgeStores.project, { reasonCode: "KNOWLEDGE_LIST_READY", cards: 2 });
+  assertRecallStore(recalled.knowledgeStores.project, 2);
   assert.equal(recalled.records.some((record) => record.id === captured.id), true);
   assert.deepEqual(await readFile(join(fx.store, "store.json")), manifest, "and store.json is still the bytes initialization wrote");
 });
@@ -436,7 +438,7 @@ test("SUB-414: a pair two devices wrote about one thing, and one key both wrote,
     assert.deepEqual(recalled.projectCrestDegraded, withheld, "the pair's two cards and the key's two versions");
     const answer = await cli(fx.homeB, ["recall", "--workspace", fx.workspace, "--at", AT, "--query", "gull nesting cliff", "--tau", "0"]);
     assert.deepEqual(answer.projectCrestDegraded, withheld);
-    assert.deepEqual(answer.knowledgeStores.project, { reasonCode: "KNOWLEDGE_LIST_READY", cards: 1 });
+    assertRecallStore(answer.knowledgeStores.project, 1);
     assert.equal(Object.hasOwn(answer, "userCrestDegraded"), false, "the user crest withheld nothing");
     const unrelated = await createKnowledgeUnit(fx.workspace, card("SUB-414-UNRELATED", "Otter slide angle", { occurredAt: instant(10) }));
     assert.equal(unrelated.reasonCode, "KNOWLEDGE_UNIT_CREATED");
@@ -604,15 +606,26 @@ test("SUB-414: recall names every card the library's crest withheld at its top, 
   assert.deepEqual(listed.records.map((record) => record.id), [own.id]);
   assert.deepEqual(listed.unresolvedConflicts, [[gullA.id, gullB.id].sort()]);
   assert.deepEqual(listed.unresolvedDuplicates.map((entry) => entry.id), [keyA.id]);
-  assert.deepEqual(listed.awaitingChain.map((entry) => [entry.id, entry.deviceId]), [[gullA.id, DEVICE_A], [keyA.id, DEVICE_A]].sort(), "both of A's cards await its chain");
+  assert.equal(listed.awaitingChain.length, 1, "default diagnostics carry one bounded chain example");
+  assert.equal(listed.diagnostics.awaitingChainCount, 2, "the total includes both waiting cards");
+  assert.equal(listed.diagnostics.truncated, true);
+  const detail = await as(fx.homeB, () => listKnowledgeMetadata(fx.workspace, { at: AT, diagnostics: "ids" }));
+  assert.deepEqual(detail.diagnosticPage.records.filter((entry) => entry.reasons.includes("awaiting-chain")).map((entry) => entry.id), [gullA.id, keyA.id].sort());
   const withheld = {
     reasonCode: "KNOWLEDGE_POSSIBLE_CONFLICT", unresolvedConflicts: listed.unresolvedConflicts, unresolvedDuplicates: listed.unresolvedDuplicates,
     awaitingChain: listed.awaitingChain, withheldCards: 4,
   };
   assert.deepEqual((await as(fx.homeB, () => readRecallCards(fx.workspace, { at: AT }))).projectCrestDegraded, withheld, "the pair's two cards and the key's two versions, each once");
   const answer = await recallOnB();
-  assert.deepEqual(answer.projectCrestDegraded, withheld);
-  assert.deepEqual([answer.knowledgeReasonCode, answer.knowledgeStores.project], ["KNOWLEDGE_LIST_READY", { reasonCode: "KNOWLEDGE_LIST_READY", cards: 1 }]);
+  assert.deepEqual(answer.projectCrestDegraded, {
+    reasonCode: "KNOWLEDGE_POSSIBLE_CONFLICT", withheldCards: 4,
+    conflictPairs: 1, duplicateIds: 1, unresolvedScopes: 0, awaitingChain: 2, truncated: true,
+  }, "CLI bounds repeated version/chain details while preserving exact totals");
+  assert.equal(answer.knowledgeStores.project.diagnostics.awaitingChainCount, 2);
+  assert.deepEqual(answer.knowledgeStores.project.diagnostics.conflictExamples, listed.unresolvedConflicts);
+  assert.ok(Buffer.byteLength(JSON.stringify(answer), "utf8") < 4096);
+  assert.equal(answer.knowledgeReasonCode, "KNOWLEDGE_LIST_READY");
+  assertRecallStore(answer.knowledgeStores.project, 1);
   assert.equal(Object.hasOwn(answer, "userCrestDegraded"), false, "the user crest withheld nothing");
   // A's chain arrives: the pair and the duplicate stay withheld, and nothing awaits.
   await fx.deliverChain(fx.homeA);
@@ -769,8 +782,8 @@ function assertGoneProjectNamed(answers, { orphan, entries, kept }) {
   const withheld = { reasonCode: "KNOWLEDGE_LINK_INVALID", unresolvedScopes: entries, withheldCards: 1 };
   assert.deepEqual(answers.recalled.projectCrestDegraded, withheld);
   assert.deepEqual(answers.recall.projectCrestDegraded, withheld, "recall names it at the top of its answer");
-  assert.deepEqual([answers.recall.knowledgeReasonCode, answers.recall.knowledgeStores.project],
-    ["KNOWLEDGE_LIST_READY", { reasonCode: "KNOWLEDGE_LIST_READY", cards: kept.length }], "the crest is read, not refused");
+  assert.equal(answers.recall.knowledgeReasonCode, "KNOWLEDGE_LIST_READY", "the crest is read, not refused");
+  assertRecallStore(answers.recall.knowledgeStores.project, kept.length);
   assert.equal(Object.hasOwn(answers.recall, "userCrestDegraded"), false, "the user crest is not touched");
   const details = { unresolvedScopes: entries, remedy: `write a card with knowledge-create --supersedes ${orphan}` };
   assert.deepEqual(answers.validate, { reasonCode: "KNOWLEDGE_LINK_INVALID", message: `${orphan}:scope`, details }, "validate refuses, naming the card and the remedy");

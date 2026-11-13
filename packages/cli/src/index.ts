@@ -13,7 +13,6 @@ import type { HostExecutionRequest } from "../../core/src/execution-fallback.js"
 import { readEngineModelPolicyFile } from "../../core/src/engine-model-policy.js";
 import { recommendHostFallbacks, validateHostExecutionRequest } from "../../core/src/execution-fallback.js";
 import { deviceHome } from "../../core/src/device-home.js";
-import { isSharedLibrary } from "../../core/src/chain-identity.js";
 import { readFile } from "node:fs/promises";
 import { configureStorageLocation } from "../../core/src/storage-configure.js";
 import { consolidateStorage, refreshLibraryReadme } from "../../core/src/storage-consolidate.js";
@@ -1045,13 +1044,14 @@ function recallStatusOption(value: string | undefined): { readonly status?: Reca
 }
 
 function recallCrestSummary(degraded: RecallUserCrestDegraded, store: RecallCardStoreRead): Readonly<Record<string, JsonValue>> {
+  const diagnostics = store.evidence?.["diagnostics"] as Readonly<Record<string, JsonValue>> | undefined;
   return {
     reasonCode: degraded.reasonCode,
     withheldCards: degraded.withheldCards ?? null,
-    conflictPairs: store.unresolvedConflicts.length,
-    duplicateIds: store.unresolvedDuplicates.length,
-    unresolvedScopes: store.unresolvedScopes.length,
-    awaitingChain: store.awaitingChain.length,
+    conflictPairs: diagnostics?.["conflictPairCount"] ?? store.unresolvedConflicts.length,
+    duplicateIds: diagnostics?.["duplicateIdCount"] ?? store.unresolvedDuplicates.length,
+    unresolvedScopes: diagnostics?.["unresolvedScopeCount"] ?? store.unresolvedScopes.length,
+    awaitingChain: diagnostics?.["awaitingChainCount"] ?? store.awaitingChain.length,
   };
 }
 
@@ -1839,7 +1839,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   { name: "knowledge-create", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "host", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "external-key", required: true, valueKind: "string" }, { name: "scope", required: true, valueKind: "string" }, { name: "project-id", required: true, valueKind: "string", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "role-scopes", required: true, valueKind: "list" }, { name: "category", required: true, valueKind: "string" }, { name: "kind", required: true, valueKind: "string" }, { name: "tags", required: true, valueKind: "list" }, { name: "subject", required: true, valueKind: "string" }, { name: "summary", required: true, valueKind: "string" }, { name: "snippet", required: true, valueKind: "string" }, { name: "accountable-owner-id", required: true, valueKind: "string" }, { name: "source-references", required: true, valueKind: "list" }, { name: "source-digest", required: false, valueKind: "string" }, { name: "supersedes", required: false, valueKind: "string", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "work-ids", required: false, valueKind: "list" }, { name: "decision-ids", required: false, valueKind: "list" }, { name: "gate-ids", required: false, valueKind: "list" }, { name: "evidence-ids", required: false, valueKind: "list" }, { name: "coexist", required: false, valueKind: "boolean" }, { name: "lifecycle", required: false, valueKind: "string" }, { name: "retrieval", required: true, valueKind: "string" }, { name: "freshness", required: true, valueKind: "string" }, { name: "last-verified", required: true, valueKind: "instant", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "stale-days", required: true, valueKind: "integer", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "export", required: true, valueKind: "string" }, { name: "body", required: true, valueKind: "string" }, { name: "language-bundle", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "knowledge-freshness", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "allow-trailing", required: false, valueKind: "boolean" }] },
   { name: "knowledge-init", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "acknowledge-disposable", required: false, valueKind: "boolean" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "knowledge-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "scope", required: false, valueKind: "string" }, { name: "selection", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "role-scope", required: false, valueKind: "string" }, { name: "category", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "tag", required: false, valueKind: "string" }, { name: "freshness", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }, { name: "allow-trailing", required: false, valueKind: "boolean" }] },
+  { name: "knowledge-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "scope", required: false, valueKind: "string" }, { name: "selection", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "role-scope", required: false, valueKind: "string" }, { name: "category", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "tag", required: false, valueKind: "string" }, { name: "freshness", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }, { name: "diagnostics", required: false, valueKind: "string", valueShape: "summary (default), ids, conflicts, or audit" }, { name: "diagnostic-limit", required: false, valueKind: "integer" }, { name: "diagnostic-offset", required: false, valueKind: "integer" }, { name: "snapshot", required: false, valueKind: "string", valueShape: "SHA-256 from the first page; required for diagnostic continuation" }, { name: "allow-trailing", required: false, valueKind: "boolean" }] },
   { name: "knowledge-rebase", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "knowledge-recover", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "scope", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "knowledge-remove", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "reason", required: true, valueKind: "string" }, { name: "basis", required: true, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "superseded-by", required: false, valueKind: "string" }, { name: "scope", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
@@ -3881,7 +3881,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     // selected, and --scope user lists this user's crest instead of the library's. TCRN-CROSS-SUB-425:
     // left out, or valid, the valid cards; --status removed the removed cards alone and all every card,
     // each removed one as it is kept.
-    const values = parseArguments(rest, ["workspace", "at", "scope", "selection", "status", "project-id", "role-scope", "category", "kind", "tag", "freshness", "search", "limit", "offset", "allow-trailing"]);
+    const values = parseArguments(rest, ["workspace", "at", "scope", "selection", "status", "project-id", "role-scope", "category", "kind", "tag", "freshness", "search", "limit", "offset", "diagnostics", "diagnostic-limit", "diagnostic-offset", "snapshot", "allow-trailing"]);
     required(values, ["workspace", "at"]);
     io.write(canonicalJson(await listKnowledgeMetadata(values.workspace ?? "", {
       at: values.at ?? "",
@@ -3904,6 +3904,10 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // floor would pre-empt half of it while silently keeping the ceiling.
       ...(values.limit !== undefined ? { limit: integerValue(values, "limit") } : {}),
       ...(values.offset !== undefined ? { offset: integerValue(values, "offset") } : {}),
+      ...(values.diagnostics !== undefined ? { diagnostics: values.diagnostics as "summary" | "ids" | "conflicts" | "audit" } : {}),
+      ...(values["diagnostic-limit"] !== undefined ? { diagnosticLimit: integerValue(values, "diagnostic-limit") } : {}),
+      ...(values["diagnostic-offset"] !== undefined ? { diagnosticOffset: integerValue(values, "diagnostic-offset") } : {}),
+      ...(values.snapshot !== undefined ? { snapshot: values.snapshot } : {}),
     })));
     return;
   }
@@ -4020,8 +4024,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     if (limit !== undefined && (limit < 1 || !Number.isSafeInteger(limit))) fail("CLI_ARGUMENT_MALFORMED", "limit");
     const { state: rawState, authority } = await readRecallAuthority(workspace, true);
     const state = await effectiveProjectState(rawState, values["project-id"]);
-    // Legacy project selection chooses configuration only; shared libraries also isolate corpora.
-    const projectId = isSharedLibrary(state) ? values["project-id"] : undefined;
+    const projectId = values["project-id"];
     const settingValue = (key: string): string | undefined => state.settings.find((entry) => entry.key === key)?.value;
     // The flag wins over the setting, the setting over the recorded default: the same
     // order work-list's scope-bytes already uses.
@@ -4101,8 +4104,8 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       knowledgeReasonCode: cards.stores.project.reasonCode,
       // Both stores' reads: each one's reason code and how many cards it gave.
       knowledgeStores: {
-        project: { reasonCode: cards.stores.project.reasonCode, cards: cards.stores.project.cards },
-        user: { reasonCode: cards.stores.user.reasonCode, cards: cards.stores.user.cards },
+        project: { reasonCode: cards.stores.project.reasonCode, cards: cards.stores.project.cards, ...cards.stores.project.evidence },
+        user: { reasonCode: cards.stores.user.reasonCode, cards: cards.stores.user.cards, ...cards.stores.user.evidence },
       },
       // TCRN-CROSS-SUB-310 (MIN-235 D7): a user crest that gave fewer cards than it holds says so at
       // the top of the answer -- its read refused (the refusal's reasonCode), or cards withheld in
@@ -4120,6 +4123,13 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // refused read stays knowledgeReasonCode.
       ...(cards.projectCrestDegraded === null ? {} : { projectCrestDegraded: cards.projectCrestDegraded as unknown as JsonValue }),
     };
+    // Both stores can be degraded at once. Reserve envelope space and avoid duplicating their
+    // bounded examples in the legacy disclosure when that would exceed the empty-response budget.
+    // Snapshot totals and ID examples remain in knowledgeStores; explicit list pages retain detail.
+    if (Buffer.byteLength(JSON.stringify(knowledge), "utf8") > 3000) {
+      if (cards.userCrestDegraded !== null) knowledge.userCrestDegraded = { ...recallCrestSummary(cards.userCrestDegraded, cards.stores.user), truncated: true };
+      if (cards.projectCrestDegraded !== null) knowledge.projectCrestDegraded = { ...recallCrestSummary(cards.projectCrestDegraded, cards.stores.project), truncated: true };
+    }
     if (values.view === "agent") {
       const summary = {
         schemaVersion: "tcrn.recall-agent.v1",
