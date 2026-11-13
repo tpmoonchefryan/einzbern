@@ -96,6 +96,13 @@ test("configuration inventory retains exact command flags including capture host
   assert.deepEqual(inventory, configurationContract(COMMAND_CATALOG));
   const capture = inventory.runtimeInputs.commandCatalog.find((command) => command.name === "knowledge-capture");
   assert.deepEqual(capture.flags.find((flag) => flag.name === "host"), { name: "host", required: false, valueKind: "string", valueShape: "Explicit host for configured artifact-language model policy; required by that policy, not inferred." });
+  const list = inventory.runtimeInputs.commandCatalog.find((command) => command.name === "knowledge-list");
+  assert.deepEqual(list.flags.filter((flag) => ["diagnostics", "diagnostic-limit", "diagnostic-offset", "snapshot"].includes(flag.name)), [
+    { name: "diagnostics", required: false, valueKind: "string", valueShape: "summary (default), ids, conflicts, or audit" },
+    { name: "diagnostic-limit", required: false, valueKind: "integer" },
+    { name: "diagnostic-offset", required: false, valueKind: "integer" },
+    { name: "snapshot", required: false, valueKind: "string", valueShape: "SHA-256 from the first page; required for diagnostic continuation" },
+  ]);
 });
 
 test("configuration backup and restore identify authority inputs, not projection or identity ownership", () => {

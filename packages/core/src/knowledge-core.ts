@@ -78,10 +78,8 @@ import { assertKnowledgeNotRecorded } from "./knowledge-duplicates.js";
 import { readRegistry } from "./registry.js";
 import { assessKnowledgePair, knowledgeTopicTokens } from "./knowledge-conflict.js";
 import { bindArchivedKnowledgeScope, inheritArchivedKnowledgeScope, intrinsicScopeMatchesProject, resolveIntrinsicKnowledgeScope } from "./knowledge-scope.js";
-export { intrinsicScopesIntersect, resolveIntrinsicKnowledgeScope } from "./knowledge-scope.js";
-export type { IntrinsicKnowledgeScope } from "./knowledge-scope.js";
 
-export const KNOWLEDGE_PROJECTION_VERSION = "intrinsic-scope-conflict-v2";
+const KNOWLEDGE_PROJECTION_VERSION = "intrinsic-scope-conflict-v2";
 
 export const KNOWLEDGE_CORE_VERSION = "tcrn.knowledge-core.v1" as const;
 export const KNOWLEDGE_STORE_SCHEMA_VERSION = "tcrn.knowledge-store.v1" as const;

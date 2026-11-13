@@ -9992,6 +9992,28 @@
             "valueKind": "integer"
           },
           {
+            "name": "diagnostics",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "summary (default), ids, conflicts, or audit"
+          },
+          {
+            "name": "diagnostic-limit",
+            "required": false,
+            "valueKind": "integer"
+          },
+          {
+            "name": "diagnostic-offset",
+            "required": false,
+            "valueKind": "integer"
+          },
+          {
+            "name": "snapshot",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "SHA-256 from the first page; required for diagnostic continuation"
+          },
+          {
             "name": "allow-trailing",
             "required": false,
             "valueKind": "boolean"

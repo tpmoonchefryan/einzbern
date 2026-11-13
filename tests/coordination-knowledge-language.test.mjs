@@ -292,14 +292,35 @@ test("543-GWT3 (fresh processes): a project library that records zh-CN and no ec
 
 test("545: article creates can explicitly coexist or supersede a conflicting card", async (context) => {
   const fixture = await library(context, "coordination");
-  const original = await captureKnowledgeUnit(fixture.root, { ...englishCard, occurredAt: at(), externalKey: "ARTICLE-CONFLICT-ORIGINAL" });
-  const input = { occurredAt: at(), path: "coexist.md", category: "workflow", title: englishCard.subject,
-    summary: englishCard.summary, content: englishCard.body, accountableOwnerId: OWNER,
+  const original = await captureKnowledgeUnit(fixture.root, { ...englishCard, subject: "Cache policy", summary: "Enable cache", snippet: "Enable cache", body: "Enable cache", occurredAt: at(), externalKey: "ARTICLE-CONFLICT-ORIGINAL" });
+  const input = { occurredAt: at(), path: "coexist.md", category: "workflow", title: "Cache policy",
+    summary: "Disable cache", content: "Disable cache", accountableOwnerId: OWNER,
     linkedEvidenceIds: [deriveStableId("evidence", "ARTICLE-CONFLICT")] };
-  await assert.rejects(createKnowledgeArticle(fixture.root, input), error => error.reasonCode === "KNOWLEDGE_POSSIBLE_CONFLICT");
+  await assert.rejects(createKnowledgeArticle(fixture.root, input), error => {
+    assert.equal(error.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
+    assert.deepEqual(error.details.conflicts, [original.id]);
+    return true;
+  });
+  assert.deepEqual((await records(fixture.root)).map(card => card.id), [original.id], "rejection commits no article");
   const beside = await createKnowledgeArticle(fixture.root, { ...input, occurredAt: at(), coexist: true });
   assert.equal(beside.reasonCode, "KNOWLEDGE_ARTICLE_CREATED");
   const replacement = await createKnowledgeArticle(fixture.root, { ...input, occurredAt: at(), path: "replacement.md", supersedes: original.id });
   assert.equal(replacement.reasonCode, "KNOWLEDGE_ARTICLE_CREATED");
   assert.equal((await records(fixture.root)).find(card => card.id === replacement.id).supersedes, original.id);
+});
+
+test("545: same-text and supplemental articles coexist without an explicit override", async (context) => {
+  const fixture = await library(context, "coordination");
+  const original = await captureKnowledgeUnit(fixture.root, { ...englishCard, subject: "Cache policy", summary: "Enable cache", snippet: "Enable cache", body: "Enable cache", occurredAt: at(), externalKey: "ARTICLE-RELATED-ORIGINAL" });
+  const ids = [original.id];
+  for (const [path, summary] of [["same.md", "Enable cache"], ["supplement.md", "Record cache hit rates"]]) {
+    const article = await createKnowledgeArticle(fixture.root, { occurredAt: at(), path, category: "workflow", title: "Cache policy",
+      summary, content: summary, accountableOwnerId: OWNER, linkedEvidenceIds: [deriveStableId("evidence", "ARTICLE-RELATED")] });
+    assert.equal(article.reasonCode, "KNOWLEDGE_ARTICLE_CREATED");
+    ids.push(article.id);
+  }
+  const listed = await listKnowledgeMetadata(fixture.root, { at: at(), selection: "all" });
+  assert.deepEqual(listed.records.map(card => card.id).sort(), ids.sort());
+  assert.equal(listed.withheldCount, 0);
+  assert.equal(listed.diagnostics.conflictPairCount, 0);
 });

@@ -94,7 +94,9 @@ export async function walkFiles(root = repositoryRoot) {
     const entries = await readdir(directory, { withFileTypes: true });
     entries.sort((left, right) => compareCanonicalText(left.name, right.name));
     for (const entry of entries) {
-      if (entry.isDirectory() && excludedDirectories.has(entry.name)) {
+      // Git uses a directory in a checkout and a management file in a linked
+      // worktree. Both are administrative entries outside the source surface.
+      if (entry.isDirectory() && excludedDirectories.has(entry.name) || entry.isFile() && entry.name === ".git") {
         continue;
       }
       // Compatibility identity, old-directory recognition (TCRN-CROSS-STORY-466 R14): the old

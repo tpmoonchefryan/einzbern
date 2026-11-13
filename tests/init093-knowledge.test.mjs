@@ -8,8 +8,9 @@ import test from "node:test";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import {
   createKnowledgeUnit, createProject, initializeKnowledgeStore, initializeLibrary,
-  listKnowledgeMetadata, readKnowledgeBody, resolveIntrinsicKnowledgeScope, intrinsicScopesIntersect, setWorkspaceSetting, applyMachineSettingSet,
+  listKnowledgeMetadata, readKnowledgeBody, setWorkspaceSetting, applyMachineSettingSet,
 } from "../dist/build/packages/core/src/index.js";
+import { resolveIntrinsicKnowledgeScope, intrinsicScopesIntersect } from "../dist/build/packages/core/src/knowledge-scope.js";
 import { promptRecallOutcome } from "../dist/build/packages/core/src/hook-recall.js";
 import { registerLibrary } from "../dist/build/packages/core/src/registry.js";
 import { knowledgeProjectionConflict } from "../dist/build/packages/core/src/knowledge-core.js";

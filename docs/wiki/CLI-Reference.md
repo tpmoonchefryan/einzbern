@@ -935,23 +935,27 @@
 - 可用范围：`cli`。
 - 是否写入：否。
 
-| 旗标 | 必填 | 取值类型 |
-| --- | --- | --- |
-| `--workspace` | 可选 | `string` |
-| `--at` | 必填 | `instant` |
-| `--scope` | 可选 | `string` |
-| `--selection` | 可选 | `string` |
-| `--status` | 可选 | `string` |
-| `--project-id` | 可选 | `string` |
-| `--role-scope` | 可选 | `string` |
-| `--category` | 可选 | `string` |
-| `--kind` | 可选 | `string` |
-| `--tag` | 可选 | `string` |
-| `--freshness` | 可选 | `string` |
-| `--search` | 可选 | `string` |
-| `--limit` | 可选 | `integer` |
-| `--offset` | 可选 | `integer` |
-| `--allow-trailing` | 可选 | `boolean` |
+| 旗标 | 必填 | 取值类型 | 写法 |
+| --- | --- | --- | --- |
+| `--workspace` | 可选 | `string` |  |
+| `--at` | 必填 | `instant` |  |
+| `--scope` | 可选 | `string` |  |
+| `--selection` | 可选 | `string` |  |
+| `--status` | 可选 | `string` |  |
+| `--project-id` | 可选 | `string` |  |
+| `--role-scope` | 可选 | `string` |  |
+| `--category` | 可选 | `string` |  |
+| `--kind` | 可选 | `string` |  |
+| `--tag` | 可选 | `string` |  |
+| `--freshness` | 可选 | `string` |  |
+| `--search` | 可选 | `string` |  |
+| `--limit` | 可选 | `integer` |  |
+| `--offset` | 可选 | `integer` |  |
+| `--diagnostics` | 可选 | `string` | `summary (default), ids, conflicts, or audit` |
+| `--diagnostic-limit` | 可选 | `integer` |  |
+| `--diagnostic-offset` | 可选 | `integer` |  |
+| `--snapshot` | 可选 | `string` | `SHA-256 from the first page; required for diagnostic continuation` |
+| `--allow-trailing` | 可选 | `boolean` |  |
 
 ## `knowledge-rebase`
 

@@ -223,6 +223,7 @@ const target=join(directory,'target');await mkdir(target);await symlink(target,j
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 const alias=join(directory,'alias');await symlink(target,alias,'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home,EINZBERN_HEAVY_LOCK_DIR:alias},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
+if(process.platform==='linux'&&process.getuid?.()>0&&process.getuid()===process.getgid?.()){await chmod(target,0o775);const lease=await m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}});lease.release();}
 await chmod(target,0o777);await assert.rejects(m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 `);
 });
