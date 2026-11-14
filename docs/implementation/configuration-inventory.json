@@ -5959,6 +5959,279 @@
         "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
         "editing": "dedicated invocation only; not a generic settings-editor field",
         "consumption": "wired",
+        "key": "cli:execution-antigravity-swarm-evidence:from-file",
+        "kind": "cli-argument",
+        "name": "--from-file",
+        "command": "execution-antigravity-swarm-evidence",
+        "catalogReference": "COMMAND_CATALOG[execution-antigravity-swarm-evidence].flags[from-file]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-antigravity-swarm-evidence --from-file",
+          "required; no inferred value"
+        ],
+        "semanticType": "path",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Resolved by the owning consumer; no guessed target or authority.",
+        "defaultDescription": "required; no inferred value",
+        "scope": "one Antigravity swarm batch receipt",
+        "effect": "Validates swarm membership, bound preparations, quota/escalation switches and isolated-workspace landings; stages local PreToolUse guard state and keeps actual.* unknown.",
+        "flag": {
+          "name": "from-file",
+          "required": true,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
+        "sensitivity": "local-path",
+        "pathBase": "process cwd for relative path; owning consumer validates",
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "cli:execution-antigravity-swarm-record:workspace",
+        "kind": "cli-argument",
+        "name": "--workspace",
+        "command": "execution-antigravity-swarm-record",
+        "catalogReference": "COMMAND_CATALOG[execution-antigravity-swarm-record].flags[workspace]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-antigravity-swarm-record --workspace",
+          "required; no inferred value"
+        ],
+        "semanticType": "path",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Resolved by the owning consumer; no guessed target or authority.",
+        "defaultDescription": "required; no inferred value",
+        "scope": "one Antigravity swarm batch receipt",
+        "effect": "Validates swarm membership, bound preparations, quota/escalation switches and isolated-workspace landings; stages local PreToolUse guard state and keeps actual.* unknown.",
+        "flag": {
+          "name": "workspace",
+          "required": true,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
+        "sensitivity": "context-may-contain-private-data",
+        "pathBase": "process cwd for relative path; owning consumer validates",
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "cli:execution-antigravity-swarm-record:manifest",
+        "kind": "cli-argument",
+        "name": "--manifest",
+        "command": "execution-antigravity-swarm-record",
+        "catalogReference": "COMMAND_CATALOG[execution-antigravity-swarm-record].flags[manifest]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-antigravity-swarm-record --manifest",
+          "required; no inferred value"
+        ],
+        "semanticType": "path",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Resolved by the owning consumer; no guessed target or authority.",
+        "defaultDescription": "required; no inferred value",
+        "scope": "one Antigravity swarm batch receipt",
+        "effect": "Validates swarm membership, bound preparations, quota/escalation switches and isolated-workspace landings; stages local PreToolUse guard state and keeps actual.* unknown.",
+        "flag": {
+          "name": "manifest",
+          "required": true,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
+        "sensitivity": "context-may-contain-private-data",
+        "pathBase": "process cwd for relative path; owning consumer validates",
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "cli:execution-antigravity-swarm-record:preparations",
+        "kind": "cli-argument",
+        "name": "--preparations",
+        "command": "execution-antigravity-swarm-record",
+        "catalogReference": "COMMAND_CATALOG[execution-antigravity-swarm-record].flags[preparations]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-antigravity-swarm-record --preparations",
+          "required; no inferred value"
+        ],
+        "semanticType": "path",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Resolved by the owning consumer; no guessed target or authority.",
+        "defaultDescription": "required; no inferred value",
+        "scope": "one Antigravity swarm batch receipt",
+        "effect": "Validates swarm membership, bound preparations, quota/escalation switches and isolated-workspace landings; stages local PreToolUse guard state and keeps actual.* unknown.",
+        "flag": {
+          "name": "preparations",
+          "required": true,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
+        "sensitivity": "context-may-contain-private-data",
+        "pathBase": "process cwd for relative path; owning consumer validates",
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "cli:execution-antigravity-swarm-record:observations",
+        "kind": "cli-argument",
+        "name": "--observations",
+        "command": "execution-antigravity-swarm-record",
+        "catalogReference": "COMMAND_CATALOG[execution-antigravity-swarm-record].flags[observations]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-antigravity-swarm-record --observations",
+          "required; no inferred value"
+        ],
+        "semanticType": "path",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Resolved by the owning consumer; no guessed target or authority.",
+        "defaultDescription": "required; no inferred value",
+        "scope": "one Antigravity swarm batch receipt",
+        "effect": "Validates swarm membership, bound preparations, quota/escalation switches and isolated-workspace landings; stages local PreToolUse guard state and keeps actual.* unknown.",
+        "flag": {
+          "name": "observations",
+          "required": true,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
+        "sensitivity": "context-may-contain-private-data",
+        "pathBase": "process cwd for relative path; owning consumer validates",
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "cli:execution-antigravity-swarm-record:prior",
+        "kind": "cli-argument",
+        "name": "--prior",
+        "command": "execution-antigravity-swarm-record",
+        "catalogReference": "COMMAND_CATALOG[execution-antigravity-swarm-record].flags[prior]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-antigravity-swarm-record --prior",
+          "absent; no fabricated evidence, identity, approval or revision"
+        ],
+        "semanticType": "path",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Resolved by the owning consumer; no guessed target or authority.",
+        "defaultDescription": "absent; no fabricated evidence, identity, approval or revision",
+        "scope": "one Antigravity swarm batch receipt",
+        "effect": "Validates swarm membership, bound preparations, quota/escalation switches and isolated-workspace landings; stages local PreToolUse guard state and keeps actual.* unknown.",
+        "flag": {
+          "name": "prior",
+          "required": false,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
+        "sensitivity": "context-may-contain-private-data",
+        "pathBase": "process cwd for relative path; owning consumer validates",
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "cli:execution-antigravity-swarm-record:output",
+        "kind": "cli-argument",
+        "name": "--output",
+        "command": "execution-antigravity-swarm-record",
+        "catalogReference": "COMMAND_CATALOG[execution-antigravity-swarm-record].flags[output]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-antigravity-swarm-record --output",
+          "required; no inferred value"
+        ],
+        "semanticType": "path",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Resolved by the owning consumer; no guessed target or authority.",
+        "defaultDescription": "required; no inferred value",
+        "scope": "one Antigravity swarm batch receipt",
+        "effect": "Validates swarm membership, bound preparations, quota/escalation switches and isolated-workspace landings; stages local PreToolUse guard state and keeps actual.* unknown.",
+        "flag": {
+          "name": "output",
+          "required": true,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
+        "sensitivity": "context-may-contain-private-data",
+        "pathBase": "process cwd for relative path; owning consumer validates",
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
         "key": "cli:execution-codex-peer-evidence:from-file",
         "kind": "cli-argument",
         "name": "--from-file",
@@ -8463,6 +8736,55 @@
             "required": true,
             "valueKind": "string",
             "valueShape": "Create-new private Antigravity process evidence outside device/library roots."
+          }
+        ]
+      },
+      {
+        "name": "execution-antigravity-swarm-evidence",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "from-file",
+            "required": true,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
+        "name": "execution-antigravity-swarm-record",
+        "availability": "cli",
+        "mutates": true,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "manifest",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "preparations",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "observations",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "prior",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "output",
+            "required": true,
+            "valueKind": "string"
           }
         ]
       },

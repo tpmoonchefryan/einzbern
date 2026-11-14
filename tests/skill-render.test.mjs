@@ -95,7 +95,7 @@ test("479-AC1: every verb the navigation table names is a verb of the current co
     ["recall", "rule-list"],
     ["work-draft"],
     ["work-show", "work-content-context", "minutes-show", "work-project-context", "execution-prepare", "execution-record", "execution-evidence"],
-    ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence"],
+    ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"],
     ["shared-submit-plan", "shared-submit-evidence", "shared-submit-advisory-read", "shared-submit-advisory-write"],
     ["config-backup-plan", "config-backup-create", "config-backup-prepare", "config-backup-commit", "config-backup-verify", "config-backup-list", "config-backup-resume", "config-backup-retire", "config-restore-plan", "config-restore-apply"],
     ["work-transition", "work-annotate"],
@@ -315,12 +315,14 @@ test("INIT065 generated normal Skill directs each native host to matching versio
   assert.ok(markdown.includes(HOST_SKILL_PROTOCOL_MARKER));
   assert.ok(markdown.includes("Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity)"));
   assert.ok(markdown.includes("Antigravity: `specs/antigravity-host-v1.md`"));
+  assert.ok(markdown.includes("docs/antigravity-swarm-controller.md"));
   assert.ok(markdown.includes("Parent reads before dispatch, child reads before work"));
   assert.ok(markdown.includes("targets=[]"));
   assert.ok(!markdown.includes("stop its dispatch"));
   assert.equal(checkHostSkillCompatibility(markdown, catalogNames).compatible, true);
   assert.deepEqual(checkHostSkillCompatibility(markdown, catalogNames.filter(name => name !== "execution-host-record")).missing, ["execution-host-record"]);
   assert.deepEqual(checkHostSkillCompatibility(markdown, catalogNames.filter(name => !name.startsWith("execution-codex-peer-"))).missing, ["execution-codex-peer-record", "execution-codex-peer-evidence"]);
+  assert.deepEqual(checkHostSkillCompatibility(markdown, catalogNames.filter(name => !name.startsWith("execution-antigravity-swarm-"))).missing, ["execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"]);
   assert.equal(checkHostSkillCompatibility("Historical skill", []).protocol, "legacy");
 });
 
