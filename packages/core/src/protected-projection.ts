@@ -26,7 +26,7 @@ function regularBytes(path: string): Buffer {
 
 /** A checksum in a disposable cache cannot attest itself. The independent
  * device record binds the exact bytes, source boundary and logical version. */
-export async function readProtectedProjection<T>(library: Library, name: string, binding: string): Promise<T | null> {
+export async function readProtectedProjection<T>(library: Library, name: string, binding: string | (() => Promise<string | null>)): Promise<T | null> {
   return observeStage(`projection:${name}`, async () => {
     try {
       const boundary = await recordBoundary(library, "derived-projections");
@@ -34,8 +34,10 @@ export async function readProtectedProjection<T>(library: Library, name: string,
       const proof = await regularBytes(join(boundary.records, `${name}.json`));
       observeVerificationRecord(proof.length);
       const record = JSON.parse(proof.toString("utf8"));
-      if (record.schemaVersion !== SCHEMA || record.binding !== binding || record.engine !== FRAMEWORK_VERSION
+      if (record.schemaVersion !== SCHEMA || record.engine !== FRAMEWORK_VERSION
         || record.device !== boundary.deviceIdentity || record.root !== boundary.library.root || typeof record.sha256 !== "string") return null;
+      const expected = typeof binding === "function" ? await binding() : binding;
+      if (expected === null || record.binding !== expected) return null;
       const bytes = await regularBytes(join(cachePath(library.manifest.libraryId), `${name}.bin`));
       observeCacheRead(bytes.length);
       if (bytes.length !== record.bytes || hash(bytes) !== record.sha256) return null;

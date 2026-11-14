@@ -434,12 +434,20 @@ function documentLexicon(document: RecallDocument, vocabulary: Map<string, numbe
   };
 }
 
+interface PackedRecallClauses {
+  readonly docIds: readonly string[];
+  // 6 uint32s per clause sorted by id: id, docIndex, wordsOffset, wordsLength, originalOffset, originalLength.
+  readonly meta: Uint32Array;
+  readonly words: Uint32Array;
+}
+
 interface RecallIndexState {
   readonly rows: Map<string, Pick<IndexedRow, "rowId" | "digest" | "document">>;
   readonly byExternalKey: Map<string, string>;
   readonly keyRuns: Map<string, readonly string[]>;
   readonly frequencies: Map<string, number>;
   readonly clauses: Map<number, { readonly documentId: string; readonly words: Uint32Array; readonly originalWords: Uint32Array }>;
+  readonly packedClauses?: PackedRecallClauses;
   readonly vocabulary: Map<string, number>;
   readonly clauseRows: Map<string, readonly number[]>;
   readonly clauseFrequencies: Map<string, number>;
@@ -524,10 +532,13 @@ function hitOf(document: RecallDocument, lexicon: DocumentLexicon, vocabulary: W
 export class RecallIndex {
   #database: DatabaseSync;
   #rows = new Map<string, IndexedRow>();
+  #rowProjections = new Map<string, Pick<IndexedRow, "document" | "lexicon">>();
   #byExternalKey = new Map<string, string>();
   #keyRuns = new Map<string, readonly string[]>();
   #frequencies = new Map<string, number>();
   #clauses = new Map<number, { readonly document: RecallDocument; readonly words: Uint32Array; readonly originalWords: Uint32Array }>();
+  #restoredClauses: Map<number, { readonly documentId: string; readonly words: Uint32Array; readonly originalWords: Uint32Array }> | undefined;
+  #packedClauses: PackedRecallClauses | undefined;
   #vocabulary = new Map<string, number>();
   #clauseRows = new Map<string, readonly number[]>();
   #clauseFrequencies = new Map<string, number>();
@@ -541,6 +552,70 @@ export class RecallIndex {
   #wordLookup: WordLookup = { get: word => this.#term(word, "id") };
   #frequencyLookup: WordLookup = { get: word => this.#term(word, "frequency") };
   #clauseFrequencyLookup: WordLookup = { get: word => this.#term(word, "clauseFrequency") };
+
+  #rowProjection(id: string): Pick<IndexedRow, "document" | "lexicon"> {
+    let projection = this.#rowProjections.get(id);
+    if (projection === undefined) {
+      const saved = this.#database.prepare("SELECT projection FROM recall_documents WHERE id = ?").get(id);
+      projection = deserialize(saved!["projection"] as Uint8Array) as Pick<IndexedRow, "document" | "lexicon">;
+      this.#rowProjections.set(id, projection);
+    }
+    return projection;
+  }
+
+  #clause(id: number): { readonly document: RecallDocument; readonly words: Uint32Array; readonly originalWords: Uint32Array } | undefined {
+    if (this.#packedClauses !== undefined) {
+      const { docIds, meta, words } = this.#packedClauses;
+      let low = 0, high = meta.length / 6;
+      while (low < high) {
+        const mid = (low + high) >>> 1, off = mid * 6, cur = meta[off]!;
+        if (cur < id) low = mid + 1;
+        else if (cur > id) high = mid;
+        else {
+          const row = this.#rows.get(docIds[meta[off + 1]!]!);
+          if (row === undefined) return undefined;
+          const ws = meta[off + 2]!, wl = meta[off + 3]!, os = meta[off + 4]!, ol = meta[off + 5]!;
+          return { document: row.document, words: words.subarray(ws, ws + wl), originalWords: words.subarray(os, os + ol) };
+        }
+      }
+      return undefined;
+    }
+    if (this.#restoredClauses !== undefined) {
+      const clause = this.#restoredClauses.get(id);
+      if (clause === undefined) return undefined;
+      const row = this.#rows.get(clause.documentId);
+      return row === undefined ? undefined : { document: row.document, words: clause.words, originalWords: clause.originalWords };
+    }
+    return this.#clauses.get(id);
+  }
+
+  #clauseCount(): number {
+    return this.#packedClauses !== undefined ? this.#packedClauses.meta.length / 6
+      : this.#restoredClauses !== undefined ? this.#restoredClauses.size : this.#clauses.size;
+  }
+
+  #materializeClauses(): void {
+    if (this.#packedClauses !== undefined) {
+      const { docIds, meta, words } = this.#packedClauses;
+      this.#clauses = new Map();
+      for (let off = 0; off < meta.length; off += 6) {
+        const row = this.#rows.get(docIds[meta[off + 1]!]!);
+        if (row !== undefined) {
+          const ws = meta[off + 2]!, wl = meta[off + 3]!, os = meta[off + 4]!, ol = meta[off + 5]!;
+          this.#clauses.set(meta[off]!, { document: row.document, words: words.subarray(ws, ws + wl), originalWords: words.subarray(os, os + ol) });
+        }
+      }
+      this.#packedClauses = undefined;
+      return;
+    }
+    if (this.#restoredClauses === undefined) return;
+    this.#clauses = new Map();
+    for (const [id, clause] of this.#restoredClauses) {
+      const row = this.#rows.get(clause.documentId);
+      if (row !== undefined) this.#clauses.set(id, { document: row.document, words: clause.words, originalWords: clause.originalWords });
+    }
+    this.#restoredClauses = undefined;
+  }
 
   #term(word: string, field: keyof RecallTerm): number | undefined {
     if (this.#packedTerms === undefined) return (field === "id" ? this.#vocabulary : field === "frequency" ? this.#frequencies : this.#clauseFrequencies).get(word);
@@ -566,24 +641,12 @@ export class RecallIndex {
     this.#database = new DatabaseSync(database, { readOnly: restored !== undefined });
     this.#checkpoint = checkpoint;
     if (restored !== undefined) {
-      this.#rows = new Map<string, IndexedRow>([...restored.rows].map(([id, row]) => {
-        let projection: Pick<IndexedRow, "document" | "lexicon"> | undefined;
-        const load = (): Pick<IndexedRow, "document" | "lexicon"> => {
-          if (projection === undefined) {
-            const saved = this.#database.prepare("SELECT projection FROM recall_documents WHERE id = ?").get(id);
-            projection = deserialize(saved!["projection"] as Uint8Array) as Pick<IndexedRow, "document" | "lexicon">;
-          }
-          return projection;
-        };
-        return [id, { ...row, get deliveryDocument() { return load().document; }, get lexicon() { return load().lexicon; } }];
-      }));
+      this.#rows = restored.rows as Map<string, IndexedRow>;
       this.#byExternalKey = restored.byExternalKey;
       this.#keyRuns = restored.keyRuns;
       this.#frequencies = restored.frequencies;
-      const rows = this.#rows;
-      this.#clauses = new Map([...restored.clauses].map(([id, clause]) => [id, {
-        words: clause.words, originalWords: clause.originalWords, document: rows.get(clause.documentId)!.document,
-      }]));
+      if (restored.packedClauses !== undefined) this.#packedClauses = restored.packedClauses;
+      else this.#restoredClauses = restored.clauses;
       this.#vocabulary = restored.vocabulary;
       this.#clauseRows = restored.clauseRows;
       this.#clauseFrequencies = restored.clauseFrequencies;
@@ -609,6 +672,7 @@ export class RecallIndex {
 
   projection(): RecallIndexState {
     this.#restoreAllTerms();
+    this.#materializeClauses();
     // SQLite holds each row's display/lexical projection. A new process restores
     // only this catalogue and loads records actually matched by the query.
     return { rows: new Map([...this.#rows].map(([id, row]) => {
@@ -660,6 +724,7 @@ export class RecallIndex {
 
   #apply(documents: readonly RecallDocument[]): { readonly inserted: number; readonly removed: number } {
     this.#restoreAllTerms();
+    this.#materializeClauses();
     this.#database.exec("BEGIN IMMEDIATE");
     try {
       const insert = this.#database.prepare(
@@ -728,11 +793,12 @@ export class RecallIndex {
       this.#clauseFrequencies = new Map();
       const vocabulary = new Map([...this.#vocabulary].map(([word, id]) => [id, word]));
       for (const row of this.#rows.values()) {
-        for (const id of row.lexicon.coverage) {
+        const lexicon = row.lexicon ?? this.#rowProjection(row.document.id).lexicon;
+        for (const id of lexicon.coverage) {
           const token = vocabulary.get(id)!;
           this.#frequencies.set(token, (this.#frequencies.get(token) ?? 0) + 1);
         }
-        for (const clause of row.lexicon.clauses) {
+        for (const clause of lexicon.clauses) {
           for (const id of clause.words) {
             const token = vocabulary.get(id)!;
             this.#clauseFrequencies.set(token, (this.#clauseFrequencies.get(token) ?? 0) + 1);
@@ -852,7 +918,7 @@ export class RecallIndex {
         throw new RecallError("RECALL_QUERY_FAILED", `the complete recall query could not be evaluated: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    if (tokens.length > 0 && allTokens.length <= 6 && this.#clauses.size > 0) {
+    if (tokens.length > 0 && allTokens.length <= 6 && this.#clauseCount() > 0) {
       // Use the query's actual record/clauses frequencies, including common terms.
       // A unit-only ratio would inflate common words in a one- or two-clause corpus.
       const clauseTokens = recallQueryTokens(query);
@@ -860,10 +926,10 @@ export class RecallIndex {
         const count = frequencies.get(token) ?? 0;
         return sum + Math.max(1e-6, Math.log((size - count + 0.5) / (count + 0.5)));
       }, 0);
-      const scale = information(this.size, this.#frequencyLookup) / information(this.#clauses.size, this.#clauseFrequencyLookup);
+      const scale = information(this.size, this.#frequencyLookup) / information(this.#clauseCount(), this.#clauseFrequencyLookup);
       const statement = this.#database.prepare("SELECT rowid AS clauseId, bm25(recall_clauses, 3) AS score FROM recall_clauses WHERE recall_clauses MATCH ? ORDER BY score LIMIT ?");
       for (const row of statement.all(matchExpression(clauseTokens), limit) as Record<string, unknown>[]) {
-        const clause = this.#clauses.get(Number(row["clauseId"]));
+        const clause = this.#clause(Number(row["clauseId"]));
         if (clause === undefined || !clauseTokens.every((token) => hasWord(clause.words, this.#wordLookup.get(token)))) continue;
         const document = clause.document;
         const rowId = document === undefined ? undefined : this.#rows.get(document.id)?.rowId;
@@ -879,22 +945,23 @@ export class RecallIndex {
       if (document === undefined || seen.has(document.id)) continue;
       seen.add(document.id);
       const indexed = this.#rows.get(document.id)!;
+      const lexicon = indexed.lexicon ?? this.#rowProjection(document.id).lexicon;
       const decay = document.currentContract && ["done", "cancelled"].includes(document.status) && !recallQueryIsHistorical(query) ? 0.85 : 1;
       const coherent = allTokens.length >= 2 && allTokens.length <= 6
-        && (this.#clauseRows.get(document.id) ?? []).some(id => allTokens.every(token => hasWord(this.#clauses.get(id)!.originalWords, this.#wordLookup.get(token))));
+        && (this.#clauseRows.get(document.id) ?? []).some(id => allTokens.every(token => hasWord(this.#clause(id)!.originalWords, this.#wordLookup.get(token))));
       // A complete technical name is a deliberate constraint, even in a small
       // library where that name occurs in several records. Every short-query
       // constraint must still match, and withheld clauses cannot supply the name.
-      const exactIdentifier = allTokens.length <= 6 && identifiers.some((identifier) => hasWord(indexed.lexicon.identifiers, this.#wordLookup.get(identifier)))
-        && allTokens.every((token) => hasWord(indexed.lexicon.words, this.#wordLookup.get(token)));
+      const exactIdentifier = allTokens.length <= 6 && identifiers.some((identifier) => hasWord(lexicon.identifiers, this.#wordLookup.get(identifier)))
+        && allTokens.every((token) => hasWord(lexicon.words, this.#wordLookup.get(token)));
       const identifierBonus = exactIdentifier ? RECALL_FIELD_WEIGHTS.body * recallScoreUnit(this.size) : 0;
       let coverage = 1;
       if (allTokens.length > 24) {
-        const words = indexed.lexicon.coverage;
+        const words = lexicon.coverage;
         const weight = (token: string): number => 1 + Math.log((this.size + 1) / ((this.#frequencyLookup.get(token) ?? 0) + 1));
         const total = allTokens.reduce((sum, token) => sum + weight(token), 0);
         const matched = allTokens.filter((token) => hasWord(words, this.#wordLookup.get(token))).reduce((sum, token) => sum + weight(token), 0);
-        const anchor = indexed.lexicon.anchor;
+        const anchor = lexicon.anchor;
         const anchored = allTokens.filter((token) => hasWord(anchor, this.#wordLookup.get(token))).length >= 2;
         coverage = anchored ? 1 : matched / total;
       }
@@ -909,7 +976,8 @@ export class RecallIndex {
 
   deliver(hit: RecallHit, query: string): RecallHit {
     const row = this.#rows.get(hit.id)!;
-    return hitOf(row.deliveryDocument ?? row.document, row.lexicon, this.#wordLookup, hit.score, query, this.#frequencyLookup, this.#requested.get(hit) ?? 0);
+    const projection = row.lexicon !== undefined ? row : this.#rowProjection(hit.id);
+    return hitOf(row.deliveryDocument ?? projection.document, projection.lexicon, this.#wordLookup, hit.score, query, this.#frequencyLookup, this.#requested.get(hit) ?? 0);
   }
 
   close(): void {
@@ -1182,7 +1250,7 @@ export interface RecallResult {
  * resetRecallCache closes it; selecting another project does not evict its index.
  */
 const cachedIndexes = new Map<string, RecallIndex>();
-const PERSISTENT_RECALL_VERSION = "record-clause-fts-v11";
+const PERSISTENT_RECALL_VERSION = "record-clause-fts-v13";
 
 interface PersistentRecallProjection {
   readonly checkpoint: string;
@@ -1191,21 +1259,19 @@ interface PersistentRecallProjection {
   readonly state: RecallIndexState;
 }
 
-interface SerializableRecallProjection extends Omit<PersistentRecallProjection, "state"> {
+interface PackedRecallProjection {
+  readonly checkpoint: string;
+  readonly sha256: string;
+  readonly bytes: number;
   readonly state: {
-    readonly rows: readonly (readonly [string, Pick<IndexedRow, "rowId" | "digest" | "document">])[];
-    readonly byExternalKey: readonly (readonly [string, string])[];
-    readonly keyRuns: readonly (readonly [string, readonly string[]])[];
-    readonly clauseRows: readonly (readonly [string, readonly number[]])[];
-    readonly clauses: readonly (readonly [number, string, number, number, number])[];
+    readonly rows: Map<string, Pick<IndexedRow, "rowId" | "digest" | "document">>;
+    readonly byExternalKey: Map<string, string>;
+    readonly keyRuns: Map<string, readonly string[]>;
+    readonly clauseRows: Map<string, readonly number[]>;
+    readonly packedClauses: PackedRecallClauses;
     readonly nextRowId: number;
     readonly nextClauseId: number;
   };
-}
-
-interface PackedRecallProjection {
-  readonly metadata: string;
-  readonly words: Uint32Array;
   readonly terms: PackedRecallTerms;
 }
 
@@ -1219,33 +1285,42 @@ function serializableRecallProjection(value: PersistentRecallProjection): Packed
     byteOffset += term.bytes.length;
   }
   const terms: PackedRecallTerms = { text: Buffer.concat(vocabulary.map(term => term.bytes)), entries };
-  const words = new Uint32Array([...state.clauses.values()].reduce((size, clause) => size + clause.words.length + clause.originalWords.length, 0));
-  let offset = 0;
-  const clauses = [...state.clauses].map(([id, clause]) => {
-    const start = offset;
-    words.set(clause.words, offset);
-    offset += clause.words.length;
-    words.set(clause.originalWords, offset);
-    offset += clause.originalWords.length;
-    return [id, clause.documentId, start, clause.words.length, clause.originalWords.length] as const;
-  });
-  const metadata: SerializableRecallProjection = { ...value, state: { ...state,
-    rows: [...state.rows], byExternalKey: [...state.byExternalKey], keyRuns: [...state.keyRuns],
-    clauseRows: [...state.clauseRows],
-    clauses,
-  } };
-  return { metadata: JSON.stringify(metadata), words, terms };
+  const sortedClauses = [...state.clauses.entries()].sort(([a], [b]) => a - b);
+  const docIndex = new Map<string, number>();
+  const docIds: string[] = [];
+  let totalWords = 0;
+  for (const [, clause] of sortedClauses) {
+    if (!docIndex.has(clause.documentId)) { docIndex.set(clause.documentId, docIds.length); docIds.push(clause.documentId); }
+    totalWords += clause.words.length + clause.originalWords.length;
+  }
+  const meta = new Uint32Array(sortedClauses.length * 6);
+  const words = new Uint32Array(totalWords);
+  let wordOffset = 0;
+  for (let i = 0; i < sortedClauses.length; i += 1) {
+    const [id, clause] = sortedClauses[i]!;
+    const off = i * 6;
+    meta[off] = id;
+    meta[off + 1] = docIndex.get(clause.documentId)!;
+    meta[off + 2] = wordOffset;
+    meta[off + 3] = clause.words.length;
+    words.set(clause.words, wordOffset);
+    wordOffset += clause.words.length;
+    meta[off + 4] = wordOffset;
+    meta[off + 5] = clause.originalWords.length;
+    words.set(clause.originalWords, wordOffset);
+    wordOffset += clause.originalWords.length;
+  }
+  return { checkpoint: value.checkpoint, sha256: value.sha256, bytes: value.bytes, state: {
+    rows: state.rows, byExternalKey: state.byExternalKey, keyRuns: state.keyRuns,
+    clauseRows: state.clauseRows, packedClauses: { docIds, meta, words },
+    nextRowId: state.nextRowId, nextClauseId: state.nextClauseId,
+  }, terms };
 }
 
 function parseRecallProjection(packed: PackedRecallProjection): PersistentRecallProjection {
-  const saved = JSON.parse(packed.metadata) as SerializableRecallProjection;
-  const state = saved.state;
-  return { ...saved, state: { ...state,
-    rows: new Map(state.rows), byExternalKey: new Map(state.byExternalKey), keyRuns: new Map(state.keyRuns),
-    frequencies: new Map(), vocabulary: new Map(), packedTerms: packed.terms,
-    clauseRows: new Map(state.clauseRows), clauseFrequencies: new Map(),
-    clauses: new Map(state.clauses.map(([id, documentId, start, count, originals]) => [id, { documentId,
-      words: packed.words.subarray(start, start + count), originalWords: packed.words.subarray(start + count, start + count + originals) }])),
+  return { checkpoint: packed.checkpoint, sha256: packed.sha256, bytes: packed.bytes, state: {
+    ...packed.state, clauses: new Map(), packedClauses: packed.state.packedClauses,
+    frequencies: new Map(), vocabulary: new Map(), packedTerms: packed.terms, clauseFrequencies: new Map(),
   } };
 }
 

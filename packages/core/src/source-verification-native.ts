@@ -236,14 +236,16 @@ function contentProof(file: OpenSegment, identity: DarwinIdentity | LocalFileIde
   finally { if (owned !== undefined) closeSync(owned); }
 }
 
-async function queryNative(files: readonly OpenSegment[]): Promise<readonly (NativeIdentity | null)[] | null> {
+async function queryNative(files: readonly OpenSegment[], verifyContent = true): Promise<readonly (NativeIdentity | null)[] | null> {
   if (process.platform === "linux") {
     const context = files[0] === undefined ? null : await localIdentityContext(files[0].path);
     if (context === null) return null;
     return files.map(file => {
       const info = file.handle === undefined ? lstatSync(file.path, { bigint: true }) : fstatSync(file.handle.fd, { bigint: true });
       file.stat ??= info;
-      return contentProof(file, localFileIdentity(info, context));
+      const identity = localFileIdentity(info, context);
+      if (identity === null) return null;
+      return verifyContent ? contentProof(file, identity) : { ...identity, sha256: file.segment.sha256 };
     });
   }
   if (process.platform !== "darwin") return null;
@@ -304,7 +306,9 @@ async function prepareFiles(session: VerificationSession): Promise<boolean> {
     if (identity === null) throw new Error("unprovable metadata identity");
     session.metadataFiles.set(path, identity);
   };
+  const rootManifest = canonicalSha256(session.library.manifest);
   async function collect(root: string, source: LibraryManifest): Promise<void> {
+    const sourceManifest = canonicalSha256(source);
     const sourceRoot = await realpath(root);
     if (!inside(session.library.root, sourceRoot)) throw new Error("source outside library");
     const archive = relative(session.library.root, sourceRoot).split("\\").join("/");
@@ -324,7 +328,7 @@ async function prepareFiles(session: VerificationSession): Promise<boolean> {
         const path = join(sourceRoot, "akasha", manifest.deviceId, segment.name);
         if (session.files.has(path)) throw new Error("aliased source descriptor");
         const handle = process.platform === "linux" ? undefined : await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-        const binding: SegmentBinding = { libraryId: session.library.manifest.libraryId, sourceId: source.libraryId, archive, streamId: manifest.streamId, deviceId: manifest.deviceId, identityScheme: manifest.identityScheme, segment, rootManifest: canonicalSha256(session.library.manifest), sourceManifest: canonicalSha256(source) };
+        const binding: SegmentBinding = { libraryId: session.library.manifest.libraryId, sourceId: source.libraryId, archive, streamId: manifest.streamId, deviceId: manifest.deviceId, identityScheme: manifest.identityScheme, segment, rootManifest, sourceManifest };
         session.files.set(path, { ...(handle === undefined ? {} : { handle }), path, segment, binding, key: canonicalSha256({ libraryId: binding.libraryId, sourceId: binding.sourceId, archive, streamId: binding.streamId, segment: segment.name }) });
       }
     }
@@ -339,7 +343,7 @@ async function prepareFiles(session: VerificationSession): Promise<boolean> {
     await collect(session.library.root, session.library.manifest);
     const files = [...session.files.values()];
     if (files.length === 0) return false;
-    const before = await active.run(session, () => queryNative(files));
+    const before = await active.run(session, () => queryNative(files, false));
     if (before === null || before.every(value => value === null)) return false;
     for (const [index, file] of files.entries()) {
       const stat = process.platform === "linux" ? file.stat! : await file.handle!.stat({ bigint: true });

@@ -5570,10 +5570,8 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
     const heads = await Promise.all(roots.map(root => currentCrestHeads(root)));
     return projectionBinding({ cacheVersion: 3, projection: KNOWLEDGE_PROJECTION_VERSION, head: place.workspace.headEventHash, roots, trees, heads });
   };
-  const binding = await boundary();
-  if (binding === null) return full();
-  const saved = await readProtectedProjection<CachedLibraryCrest>(library, "crest", binding);
-  if (saved !== null && binding === await boundary()) {
+  const saved = await readProtectedProjection<CachedLibraryCrest>(library, "crest", boundary);
+  if (saved !== null) {
     const restore = (stored: CachedCrestUnit): CrestUnit => {
       const { archiveScope, canonicalText, ...fields } = stored;
       const unit = { ...fields, body: null } as unknown as CrestUnit;
@@ -5589,7 +5587,8 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
       duplicates: saved.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(restore) })) };
   }
   const scan = await full();
-  if (binding === await boundary()) {
+  const binding = await boundary();
+  if (binding !== null && binding === await boundary()) {
     const save = (unit: CrestUnit): CachedCrestUnit => ({ ...snapshotUnitDocument(unit), archiveScope: archivedKnowledgeScope(unit.metadata),
       canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue) });
     const { workspace: _workspace, ...fields } = scan;

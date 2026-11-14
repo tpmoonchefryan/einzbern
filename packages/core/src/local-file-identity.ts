@@ -56,12 +56,14 @@ export function localFileIdentity(info: BigIntStats, context: LocalIdentityConte
     birth: info.birthtimeNs.toString(), change: info.ctimeNs.toString(), length: info.size.toString(), mode: info.mode.toString() };
 }
 
+const CONTENT_DIGEST_BUFFER = Buffer.allocUnsafe(1024 * 1024);
+
 /** Hash a held descriptor from offset zero without moving its read position.
  * This covers repeated writes through an already writable mmap as well as
  * ordinary writes, truncation and replacement. */
 export function fileContentDigest(fd: number): { readonly sha256: string; readonly bytes: number } {
   const hash = createHash("sha256");
-  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  const buffer = CONTENT_DIGEST_BUFFER;
   let bytes = 0;
   for (;;) {
     const count = readSync(fd, buffer, 0, buffer.length, bytes);
@@ -70,6 +72,12 @@ export function fileContentDigest(fd: number): { readonly sha256: string; readon
     bytes += count;
   }
   return { sha256: hash.digest("hex"), bytes };
+}
+
+function sameIdentity(left: LocalFileIdentity | null, right: LocalFileIdentity | null): boolean {
+  return left !== null && right !== null && left.boot === right.boot && left.mount === right.mount
+    && left.device === right.device && left.fileId === right.fileId && left.birth === right.birth
+    && left.change === right.change && left.length === right.length && left.mode === right.mode;
 }
 
 /** Each source file contributes its actual content, including old records.
@@ -91,9 +99,9 @@ export async function localTreeIdentity(root: string): Promise<string | null> {
     const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const held = fstatSync(fd, { bigint: true });
-      if (JSON.stringify(localFileIdentity(held, observed)) !== JSON.stringify(identity)) throw new Error("source replaced");
+      if (!sameIdentity(localFileIdentity(held, observed), identity)) throw new Error("source replaced");
       const content = fileContentDigest(fd);
-      if (content.bytes !== Number(held.size) || JSON.stringify(localFileIdentity(lstatSync(path, { bigint: true }), observed)) !== JSON.stringify(identity)) throw new Error("source changed");
+      if (content.bytes !== Number(held.size) || !sameIdentity(localFileIdentity(lstatSync(path, { bigint: true }), observed), identity)) throw new Error("source changed");
       entries.push([relative(root, path), identity, content.sha256]);
     } finally { closeSync(fd); }
   }
