@@ -1,3 +1,4 @@
+import { libraryHeadDigest } from "./library-head-digest.js";
 import { validateSettingValue } from "./settings.js";
 import { observeMaterialization, observeStage, observeCheckpoint, observeCacheReason, observeReplay } from "./recall-observation.js";
 import { WORK_CONTENT_KEY, workContent, validateWorkContent, contentFail } from "./work-content.js";
@@ -3287,7 +3288,7 @@ export async function initializeLibrary(options: InitializeLibraryOptions): Prom
 // TCRN-CROSS-STORY-468 R4, STORY-469: a library's metadata in the shape the reducer reads. A
 // library has no roots to bind and no external key of its own; its id is the workspace id
 // every record and receipt reports.
-export const LIBRARY_HEAD_SCHEMA_VERSION = "einzbern.library-head.v1" as const;
+export { LIBRARY_HEAD_SCHEMA_VERSION, libraryHeadDigest } from "./library-head-digest.js";
 
 export function libraryWorkspaceMetadata(library: Library): WorkspaceMetadata {
   const identity = library.manifest.libraryId.slice(library.manifest.libraryId.indexOf(":") + 1);
@@ -3302,15 +3303,6 @@ export function libraryWorkspaceMetadata(library: Library): WorkspaceMetadata {
     segmentEventLimit: AKASHA_SEGMENT_BYTES_DEFAULT,
     roots: [{ kind: "workspace", path: library.root, canonicalPath: library.root, portableIdentity: rootPortableIdentity(library.root) }],
   };
-}
-
-/** A library's head: one digest over every stream's head, so it moves whenever any stream does. */
-export function libraryHeadDigest(streams: readonly Pick<LibraryStreamHead, "deviceId" | "headEventHash">[]): string | null {
-  const heads = streams
-    .filter((stream) => stream.headEventHash !== null)
-    .map((stream) => [stream.deviceId, stream.headEventHash as string])
-    .sort((left, right) => compareCanonicalText(left[0] as string, right[0] as string));
-  return heads.length === 0 ? null : canonicalSha256({ schemaVersion: LIBRARY_HEAD_SCHEMA_VERSION, heads });
 }
 
 function streamHead(manifest: StreamManifest): LibraryStreamHead {

@@ -27,7 +27,7 @@ const { withRecallObservation } = await import(pathToFileURL(`${repository}/dist
 // source-head definition as materialization, not a cached replay checkpoint.
 const { openLibrary } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/ether-library.js`));
 const { listStreamDevices, readStreamManifest } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/akasha.js`));
-const { libraryHeadDigest } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/workspace.js`));
+const { libraryHeadDigest } = await import(pathToFileURL(`${repository}/dist/build/packages/core/src/library-head-digest.js`));
 const { canonicalSha256 } = await import(pathToFileURL(`${repository}/dist/build/packages/protocol/src/index.js`));
 async function sourceHead() {
   const { manifest } = await openLibrary(library);
