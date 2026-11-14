@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createInterface } from "node:readline";
+import syncFs from "node:fs";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
@@ -22,13 +23,156 @@ import { withRecallObservation } from "../dist/build/packages/core/src/recall-ob
 import { withWorkspaceWriteLock } from "../dist/build/packages/core/src/workspace.js";
 import { RecallIndex, preparePersistentRecall, recallPersistent, resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { canonicalJson, canonicalSha256, deriveStableId } from "../dist/build/packages/protocol/src/index.js";
-import { localIdentityContext } from "../dist/build/packages/core/src/local-file-identity.js";
+import { fileContentDigest, localIdentityContext, localTreeIdentity } from "../dist/build/packages/core/src/local-file-identity.js";
 
 const at = "2026-11-13T00:00:00Z";
 const late = "2026-11-15T00:00:00Z";
 const libraryId = n => `library:${n.toString(16).padStart(24, "0")}`;
 const hits = o => o.verifiedSegmentsBySource.reduce((n, s) => n + s.segments, 0);
 const measure = root => withRecallObservation(() => materializeLibrary(root));
+const treeTestOptions = { skip: await localIdentityContext(tmpdir()) === null };
+
+async function treeFixture(t) {
+  const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "einzbern-crest-tree-")));
+  t.after(async () => { t.mock.restoreAll(); syncBuiltinESMExports(); await fs.rm(root, { recursive: true, force: true }); });
+  assert.notEqual(await localIdentityContext(root), null, "this fixture must exercise an admitted filesystem");
+  return root;
+}
+
+test("095: full fd digest covers partial reads through EOF without moving the descriptor position", treeTestOptions, async t => {
+  const root = await treeFixture(t), path = join(root, "content");
+  const bytes = Buffer.alloc(1024 * 1024 + 31, 0x61);
+  bytes[bytes.length - 1] = 0x62;
+  await fs.writeFile(path, bytes);
+  const fd = syncFs.openSync(path, "r"), read = syncFs.readSync;
+  const scratch = Buffer.alloc(3);
+  read(fd, scratch, 0, scratch.length, null);
+  t.mock.method(syncFs, "readSync", (file, buffer, offset, length, position) => read(file, buffer, offset, Math.min(length, 8191), position));
+  syncBuiltinESMExports();
+  try {
+    const expected = { bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") };
+    assert.deepEqual(fileContentDigest(fd), expected);
+    assert.deepEqual(fileContentDigest(fd), expected);
+    assert.equal(read(fd, scratch, 0, scratch.length, null), 3);
+    assert.deepEqual(scratch, bytes.subarray(3, 6));
+  } finally { syncFs.closeSync(fd); }
+});
+
+test("095: tree proof hashes small, empty and large files, including existing mapped final-byte writes", treeTestOptions, async t => {
+  const root = await treeFixture(t);
+  await fs.mkdir(join(root, "nested"));
+  await fs.writeFile(join(root, "empty"), "");
+  for (const size of [137, 1024 * 1024 + 31]) {
+    const path = join(root, "nested", String(size));
+    await fs.writeFile(path, Buffer.alloc(size, 0x61));
+    await withWritableMapping(path, size - 1, async mutate => {
+      const before = await localTreeIdentity(root);
+      assert.notEqual(before, null);
+      assert.equal(await localTreeIdentity(root), before);
+      const info = await fs.stat(path);
+      await mutate();
+      await fs.utimes(path, info.atime, info.mtime);
+      assert.notEqual(await localTreeIdentity(root), before);
+    });
+  }
+});
+
+test("095: tree proof refuses symbolic links, multiply linked files and unknown capabilities", treeTestOptions, async t => {
+  const root = await treeFixture(t), path = join(root, "file"), link = join(root, "link");
+  await fs.writeFile(path, "content");
+  await fs.symlink(path, link);
+  assert.equal(await localTreeIdentity(root), null);
+  await fs.unlink(link);
+  await fs.link(path, link);
+  assert.equal(await localTreeIdentity(root), null);
+  await fs.unlink(link);
+  await fs.mkdir(join(root, "dir"));
+  await fs.symlink(join(root, "dir"), link);
+  assert.equal(await localTreeIdentity(root), null);
+  await fs.unlink(link);
+  const statfs = fs.statfs;
+  t.mock.method(fs, "statfs", async (...args) => ({ ...await statfs(...args), type: 0x65735546n }));
+  syncBuiltinESMExports();
+  assert.equal(await localTreeIdentity(root), null);
+});
+
+for (const failure of ["before-open-replacement", "nonregular", "held-stat", "read", "length", "current-name-replacement", "directory-addition", "directory-removal"]) {
+  test(`095: tree ${failure} refuses reuse and releases the opened fd`, treeTestOptions, async t => {
+    const root = await treeFixture(t), path = join(root, "file");
+    await fs.writeFile(path, "content");
+    const info = await fs.stat(path);
+    const open = syncFs.openSync, read = syncFs.readSync, stat = syncFs.fstatSync;
+    let opened, changed = false;
+    const replace = () => {
+      syncFs.renameSync(path, join(root, "previous"));
+      syncFs.writeFileSync(path, "CONTENT");
+      syncFs.utimesSync(path, info.atime, info.mtime);
+    };
+    t.mock.method(syncFs, "openSync", (name, ...args) => {
+      if (name === path && failure === "before-open-replacement") replace();
+      if (name === path && failure === "nonregular") {
+        syncFs.unlinkSync(path);
+        const fifo = spawnSync("mkfifo", [path], { encoding: "utf8" });
+        assert.equal(fifo.status, 0, fifo.stderr);
+      }
+      const fd = open(name, ...args);
+      if (name === path) opened = fd;
+      return fd;
+    });
+    t.mock.method(syncFs, "fstatSync", (fd, ...args) => {
+      if (fd === opened && failure === "held-stat") throw new Error("injected held stat failure");
+      return stat(fd, ...args);
+    });
+    t.mock.method(syncFs, "readSync", (fd, ...args) => {
+      if (fd === opened && failure === "read") throw new Error("injected read failure");
+      if (fd === opened && failure === "length") return 0;
+      const count = read(fd, ...args);
+      if (fd === opened && count > 0 && !changed) {
+        changed = true;
+        if (failure === "current-name-replacement") replace();
+        if (failure === "directory-addition") syncFs.writeFileSync(join(root, "added"), "new member");
+        if (failure === "directory-removal") syncFs.unlinkSync(path);
+      }
+      return count;
+    });
+    syncBuiltinESMExports();
+    assert.equal(await localTreeIdentity(root), null);
+    assert.ok(Number.isInteger(opened));
+    assert.throws(() => stat(opened), { code: "EBADF" });
+  });
+}
+
+test("095: a failed large-file async read closes its handle", treeTestOptions, async t => {
+  const root = await treeFixture(t), path = join(root, "large");
+  await fs.writeFile(path, Buffer.alloc(256 * 1024 + 1));
+  const open = fs.open;
+  let opened;
+  t.mock.method(fs, "open", async (...args) => {
+    const handle = await open(...args);
+    opened = handle.fd;
+    handle.read = async () => { throw new Error("injected asynchronous read failure"); };
+    return handle;
+  });
+  syncBuiltinESMExports();
+  assert.equal(await localTreeIdentity(root), null);
+  assert.throws(() => syncFs.fstatSync(opened), { code: "EBADF" });
+});
+
+test("095: tree file batches service a pending event-loop callback before finishing", treeTestOptions, async t => {
+  const root = await treeFixture(t);
+  for (let i = 0; i < 64; i += 1) await fs.writeFile(join(root, String(i)), "content");
+  const read = syncFs.readSync;
+  let filesRead = 0, servicedAt = null;
+  t.mock.method(syncFs, "readSync", (...args) => {
+    const count = read(...args);
+    if (count > 0 && ++filesRead === 1) setImmediate(() => { servicedAt = filesRead; });
+    return count;
+  });
+  syncBuiltinESMExports();
+  assert.notEqual(await localTreeIdentity(root), null);
+  assert.ok(servicedAt > 0 && servicedAt < 64, `serviced after ${servicedAt} files`);
+  assert.equal(filesRead, 64);
+});
 
 // Touch the mapping before warming any proof. Later writes through that same
 // writable page need not change ctime. Restore even when the assertion fails.
