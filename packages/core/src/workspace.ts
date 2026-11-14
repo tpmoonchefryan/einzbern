@@ -3644,8 +3644,10 @@ async function replayLibraryResultThroughCache(library: Library, read: LibraryRe
 }
 
 async function replayLibraryThroughCache(library: Library, read: LibraryRead): Promise<WorkspaceState> {
-  const forceAuthorityReplay = read.consolidation !== undefined && (await import("./source-verification.js")).hasPendingSourceVerification();
-  return (await replayLibraryResultThroughCache(library, read, forceAuthorityReplay)).state;
+  // A newly validated segment does not invalidate an independently attested
+  // reducer prefix. Source heads and exact prefix coverage are checked before
+  // resuming it; a proof miss still forces every source through authority replay.
+  return (await replayLibraryResultThroughCache(library, read)).state;
 }
 
 /** Read every stream of a library and replay them merged, through this device's cache. */

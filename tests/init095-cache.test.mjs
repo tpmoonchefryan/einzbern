@@ -454,3 +454,67 @@ test("095: archived intrinsic scope survives a new-process projection without ch
     assert.deepEqual((await measure(merged)).value, await materializeWorkspaceFromGenesis(merged));
   }
 });
+
+
+test("095: authenticated consolidated prefix replays only a new tail segment across processes", async t => {
+  const f = await fixture(t);
+  const sources = [{ path: f.root, id: f.id, projectId: f.projectId, role: "coordination" }];
+  const other = join(f.base, "archive");
+  await initializeLibrary({ root: other, createdAt: at, libraryId: libraryId(95003) });
+  const archived = await createProject(other, { externalKey: "P095-PREFIX-ARCHIVE", name: "Prefix calibration", occurredAt: at });
+  sources.push({ path: other, id: libraryId(95003), projectId: archived.projects[0].id, role: "project" });
+  for (const [n, source] of sources.entries()) {
+    await declareChainIdentity(source.path, { role: source.role, coordinationLibraryId: f.id, ...(n ? { primaryProjectId: source.projectId } : {}) }, { occurredAt: at });
+    await setWorkspaceSetting(source.path, { key: "storage.segmentBytes", value: "4096", occurredAt: at });
+    await appendEvents(source.path, Array.from({ length: 110 }, (_, i) => createWorkDelta({
+      projectId: source.projectId, externalKey: `P095-PREFIX-${n}-${i}`, kind: "Initiative", parentId: null,
+      title: `Prefix calibration ${n} ${i}`, body: "Neutral spectral readings. ".repeat(240), occurredAt: at,
+    })), { occurredAt: at });
+    source.projectPath = join(f.base, `prefix-project-${n}`);
+    await fs.mkdir(source.projectPath);
+    await registerLibrary({ projectPath: source.projectPath, projectId: source.projectId, libraryPath: source.path, registeredAt: at, gitRemote: null });
+  }
+  const root = join(f.base, "prefix-merged");
+  await consolidateLibraries({ primary: f.root, sources: sources.map(source => ({ path: source.path, bindings: [{ projectPath: source.projectPath, projectId: source.projectId, role: source.role }] })) }, root,
+    { at, actor: "agent:codex", decidedIn: `minutes:${"0".repeat(23)}1#D1`, yes: true });
+  const stateModule = new URL("../dist/build/packages/core/src/workspace.js", import.meta.url).href;
+  const observer = new URL("../dist/build/packages/core/src/recall-observation.js", import.meta.url).href;
+  const protocol = new URL("../dist/build/packages/protocol/src/index.js", import.meta.url).href;
+  const freshRead = () => {
+    const source = `import {materializeLibrary} from ${JSON.stringify(stateModule)};
+      import {withRecallObservation} from ${JSON.stringify(observer)};
+      import {canonicalSha256} from ${JSON.stringify(protocol)};
+      const {value,observation}=await withRecallObservation(()=>materializeLibrary(process.argv[1]));
+      console.log(JSON.stringify({pid:process.pid,digest:canonicalSha256(value),observation}));`;
+    const child = spawnSync(process.execPath, ["--input-type=module", "-e", source, root], { encoding: "utf8", env: process.env, timeout: 30_000 });
+    assert.equal(child.status, 0, child.stderr);
+    return JSON.parse(child.stdout);
+  };
+  const first = freshRead();
+  const warm = freshRead();
+  assert.notEqual(first.pid, warm.pid);
+  assert.equal(warm.observation.replayedEvents, 0);
+  assert.equal(warm.digest, canonicalSha256(await materializeWorkspaceFromGenesis(root)));
+  await appendEvents(root, [createWorkDelta({
+    projectId: f.projectId, externalKey: "P095-PREFIX-TAIL", kind: "Initiative", parentId: null,
+    title: "Prefix tail calibration", body: "Neutral tail reading. ".repeat(300), occurredAt: at,
+  })], { occurredAt: at });
+  const tail = freshRead();
+  const genesis = await materializeWorkspaceFromGenesis(root);
+  assert.equal(tail.digest, canonicalSha256(genesis));
+  assert.ok(tail.observation.logicalEventBytes > 0, "current source SHA-256 remains mandatory");
+  assert.ok(tail.observation.cacheReasons.includes("consolidation-checkpoint-validated"));
+  assert.equal(tail.observation.replayedEvents, 1, "a new segment does not invalidate the authenticated reducer prefix");
+  const read = await readAllStreams(root);
+  const segments = read.streams.reduce((n, stream) => n + (stream.manifest?.segments.length ?? 0), 0)
+    + read.consolidation.sources.reduce((n, source) => n + source.read.streams.reduce((m, stream) => m + (stream.manifest?.segments.length ?? 0), 0), 0);
+  assert.equal(segments, 334);
+  t.diagnostic(JSON.stringify({ segments, first: first.observation, warm: warm.observation, tail: tail.observation }));
+  // Even a checksum-valid snapshot cannot replace the independent device proof.
+  await fs.rm(join(f.home, "replay-projections", f.id.replace(":", "-"), "projection.json"));
+  await fs.rm(join(cachePath(f.id), "materialized.bin"), { force: true });
+  const withoutProof = freshRead();
+  assert.equal(withoutProof.digest, canonicalSha256(genesis));
+  assert.ok(withoutProof.observation.replayedEvents > 1);
+  assert.ok(withoutProof.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"));
+});
