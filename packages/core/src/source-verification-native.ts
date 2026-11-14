@@ -25,6 +25,10 @@ import { readProtectedProjection, readProtectedProjectionSync, writeProtectedPro
 import { buildPrecomputedDecisionHints, PRECOMPUTED_DECISION_HINTS } from "./recall-inputs.js";
 import type { PrecomputedDecisionHints } from "./recall-inputs.js";
 import type { WorkspaceState } from "./workspace.js";
+import { beginSourceAttestation } from "./source-attestor-client.js";
+import type { SourceAttestation } from "./source-attestor-client.js";
+import { ATTESTOR_SCHEMA } from "./source-attestor-protocol.js";
+import type { AttestorFile } from "./source-attestor-protocol.js";
 
 const SCHEMA = "einzbern.source-verification.v4";
 const PROJECTION = "einzbern.verified-segment-events.v1";
@@ -88,6 +92,7 @@ interface VerificationSession extends VerificationBoundary {
   metadata: string;
   readonly metadataFiles: Map<string, LocalFileIdentity>;
   localContext?: LocalIdentityContext | null;
+  attestation?: SourceAttestation;
 }
 interface OpenSegment {
   handle?: FileHandle;
@@ -459,6 +464,16 @@ function metadataUnchanged(session: VerificationSession): boolean {
 
 async function filesUnchanged(session: VerificationSession): Promise<boolean> {
   try {
+    if (session.attestation !== undefined) {
+      const proof = session.attestation;
+      delete session.attestation;
+      try {
+        const boundary = await recordBoundary(session.library);
+        if (boundary === null || boundary.deviceIdentity !== session.deviceIdentity || boundary.home !== session.home
+          || !metadataUnchanged(session) || session.metadata !== await authorityKey(session)) return false;
+        return await proof.finish();
+      } finally { proof.close(); }
+    }
     const files = [...session.files.values()];
     const after = await active.run(session, () => queryNative(files, true, session.localContext));
     if (after === null) return false;
@@ -475,6 +490,32 @@ async function filesUnchanged(session: VerificationSession): Promise<boolean> {
     }
     return session.localContext == null ? session.metadata === await authorityKey(session) : metadataUnchanged(session);
   } catch { return false; }
+}
+
+/** The existing metadata/event reader remains authoritative. The helper proves
+ * only continuity of a complete current declared byte set. Its first leased
+ * SHA is never an event validation receipt or a materialized state issuer. */
+async function prepareAttestation(session: VerificationSession): Promise<void> {
+  if (process.env.EINZBERN_SOURCE_ATTESTOR_ROOT !== session.library.root) return;
+  try {
+    const files: AttestorFile[] = [...session.files.values()].map(file => ({ path: file.path, bytes: file.segment.bytes, sha256: file.segment.sha256,
+      metadata: false, streamId: file.binding.streamId, scope: file.binding.archive === "" ? "live" : "archive" }));
+    const directories: string[] = [];
+    for (const path of session.metadataFiles.keys()) {
+      const info = await lstat(path);
+      if (info.isDirectory()) { directories.push(path); continue; }
+      const bytes = await readFile(path);
+      files.push({ path, bytes: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), metadata: true });
+    }
+    const proof = await beginSourceAttestation({ schema: ATTESTOR_SCHEMA, root: session.library.root, directories, files,
+      binding: canonicalSha256({ schema: SCHEMA, engine: FRAMEWORK_VERSION, device: session.deviceIdentity, metadata: session.metadata,
+        segments: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) }) }, session.home);
+    if (proof === null) return;
+    // Re-enumerate/parse after the leases and directory guards exist. This
+    // catches preparation gaps, added streams and a partially declared set.
+    if (!metadataUnchanged(session) || session.metadata !== await authorityKey(session)) { proof.close(); return; }
+    session.attestation = proof;
+  } catch { observeCacheReason("source-attestor-preparation-full-sha256"); }
 }
 
 /** A local record authenticates the compressed, previously validated event
@@ -601,18 +642,21 @@ export async function tryReadVerifiedMaterializedState(library: Library): Promis
   const boundary = await recordBoundary(library);
   if (boundary === null) return null;
   const session: VerificationSession = { ...boundary, pending: [], reused: [], projections: new Map(), helperUnavailable: false, files: new Map(), metadataFiles: new Map(), metadata: "" };
-  if (!await prepareFiles(session)) return null;
-  if (![...session.files.values()].every(file => file.native != null)) return null;
-  const binding = canonicalSha256({ projection: "materialized-library-v9", metadata: session.metadata,
-    files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) });
-  const [cached, unchanged] = await Promise.all([
-    readProtectedProjection<CachedMaterializedState>(library, "materialized", binding),
-    filesUnchanged(session),
-  ]);
-  if (cached === null || !unchanged) return null;
-  for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
-  observeCacheReason("materialized-state-hit");
-  return hydrateMaterializedState(cached, library, binding);
+  try {
+    if (!await prepareFiles(session)) return null;
+    await prepareAttestation(session);
+    if (![...session.files.values()].every(file => file.native != null)) return null;
+    const binding = canonicalSha256({ projection: "materialized-library-v9", metadata: session.metadata,
+      files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) });
+    const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);
+    if (cached === null || !await filesUnchanged(session)) return null;
+    for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
+    observeCacheReason("materialized-state-hit");
+    return hydrateMaterializedState(cached, library, binding);
+  } finally {
+    session.attestation?.close();
+    await Promise.all([...session.files.values()].map(file => file.handle?.close().catch(() => undefined)));
+  }
 }
 
 /** Only the materializer enters this scope. Public source-event readers always
@@ -623,16 +667,14 @@ export async function withSourceVerification(library: Library, operation: () => 
   const session: VerificationSession = { ...boundary, pending: [], reused: [], projections: new Map(), helperUnavailable: false, files: new Map(), metadataFiles: new Map(), metadata: "" };
   try {
     if (!await prepareFiles(session)) return (await operation()).value;
+    await prepareAttestation(session);
     const provable = process.platform === "linux" && library.manifest.consolidation !== undefined
       && [...session.files.values()].every(file => file.native != null);
     const binding = provable ? canonicalSha256({ projection: "materialized-library-v9", metadata: session.metadata,
       files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) }) : null;
     if (binding !== null) {
-      const [cached, unchanged] = await Promise.all([
-        readProtectedProjection<CachedMaterializedState>(library, "materialized", binding),
-        filesUnchanged(session),
-      ]);
-      if (cached !== null && unchanged) {
+      const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);
+      if (cached !== null && await filesUnchanged(session)) {
         for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
         observeCacheReason("materialized-state-hit");
         return hydrateMaterializedState(cached, library, binding);
@@ -683,6 +725,7 @@ export async function withSourceVerification(library: Library, operation: () => 
     }
     return answer.value;
   } finally {
+    session.attestation?.close();
     await Promise.all([...session.files.values()].map(file => file.handle?.close().catch(() => undefined)));
   }
 }

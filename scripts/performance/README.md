@@ -2,6 +2,12 @@
 
 This is a partial implementation, not an INIT-090 completion or release receipt.
 
+The INIT-090/648 descriptions below are historical. The subsequent optional
+INIT-095 continuous-lease candidate is documented in
+[continuous-source-attestor.md](../../docs/design/continuous-source-attestor.md).
+Its default/missing-capability path still performs full SHA-256; fixture results
+do not establish current shared-library or rclone performance.
+
 ## Behavior
 
 - 644: opt-in `EINZBERN_RECALL_OBSERVATION=1` adds request correlation,

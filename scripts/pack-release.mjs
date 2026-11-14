@@ -239,6 +239,11 @@ async function packRelease({ version: requested, out }) {
     const tree = join(stage, name);
     await writeStaged(tree, "scripts/einzbern.mjs", (await bundleEntry(join(repositoryRoot, "scripts", "einzbern.mjs"))).code);
     await writeStaged(tree, "scripts/einzbern-hook.mjs", (await bundleEntry(join(repositoryRoot, "scripts", "einzbern-hook.mjs"))).code);
+    // Portable release: optional native source/tooling, no architecture-specific
+    // binary, install hook or source lease service is implicitly enabled.
+    await copyStaged(tree, "scripts/source-attestor-host.mjs", join(repositoryRoot, "dist/build/packages/core/src/source-attestor-host.mjs"));
+    await copyStaged(tree, "scripts/build-source-lease.mjs", join(repositoryRoot, "scripts/build-source-lease.mjs"));
+    await copyStaged(tree, "native/linux-source-lease.c", join(repositoryRoot, "native/linux-source-lease.c"));
     for (const name of ["memory-budget.mjs", "memory-worker-check.mjs", "storage-location.mjs"]) await copyStaged(tree, `scripts/lib/${name}`, join(repositoryRoot, "scripts", "lib", name));
     await writeStaged(tree, "scripts/lib/memory-executors.json", `${JSON.stringify(createMemoryExecutorContract(repositoryRoot))}\n`);
     await copyStaged(tree, "launchers/einzbern.mjs", join(repositoryRoot, "scripts", "einzbern-launcher.mjs"));
@@ -256,6 +261,7 @@ async function packRelease({ version: requested, out }) {
     if (JSON.parse(rendered).reasonCode !== "SKILL_RENDERED") fail("PACK_INTERNAL_ERROR", "skill-render did not render the skill");
     for (const specification of SPECIFICATIONS) await copyStaged(tree, `specs/${specification}`, join(repositoryRoot, "specs", specification));
     await copyStaged(tree, "docs/design/memory-admission.md", join(repositoryRoot, "docs/design/memory-admission.md"));
+    await copyStaged(tree, "docs/design/continuous-source-attestor.md", join(repositoryRoot, "docs/design/continuous-source-attestor.md"));
     for (const document of CONTRACT_DOCUMENTS) await copyStaged(tree, document, join(repositoryRoot, document));
     await verifySkillSpecifications(tree, `skill/${BRAND.helper.id}`);
     const documents = [...(await readdir(repositoryRoot)).filter((file) => README.test(file)).sort(), ...DOCUMENTS];

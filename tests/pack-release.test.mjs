@@ -267,7 +267,7 @@ test("605: a packaging-list omission is refused from the actual Skill reference 
     for (const name of await readdir(join(repositoryRoot, "scripts"))) {
       if (name !== "pack-release.mjs" && name !== "lib") await symlink(join(repositoryRoot, "scripts", name), join(copy, "scripts", name));
     }
-    for (const name of ["package.json", "packages", "dist", "portal", "specs", "docs"]) await symlink(join(repositoryRoot, name), join(copy, name));
+    for (const name of ["package.json", "packages", "dist", "portal", "specs", "docs", "native"]) await symlink(join(repositoryRoot, name), join(copy, name));
     const out = join(copy, "out");
     const run = node([join(copy, "scripts/pack-release.mjs"), "--out", out]);
     assert.equal(run.status, 1, safeDiagnostic(run.stderr));
@@ -360,6 +360,7 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
   const template = await filesUnder(join(repositoryRoot, "skill/mana-orchestrate"));
   const expected = [
     "scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/library-catalog-worker.mjs", "launchers/einzbern.mjs", "launchers/hook.mjs",
+    "scripts/source-attestor-host.mjs", "scripts/build-source-lease.mjs", "native/linux-source-lease.c", "docs/design/continuous-source-attestor.md",
     "atelier/portal.mjs", "atelier/ds-static-bridges.snapshot.js", "atelier/atelier-brand-mark.svg", "atelier/index.html", "atelier/locales.js", "atelier/tokens.css",
     "skill/mana-orchestrate/SKILL.md", ...template.map((path) => `skill/mana-orchestrate/${path}`),
     ...SPECIFICATIONS.map(name => `specs/${name}`), "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md",
@@ -399,6 +400,35 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
   const header = gunzipSync(archive).subarray(0, 512);
   assert.equal(header.subarray(136, 148).toString("latin1"), "00000000000\0");
   assert.equal(header.subarray(108, 124).toString("latin1"), "0000000\0".repeat(2));
+});
+
+test("optional source lease builds outside a relocated release and the packaged CLI reuses live proof", { skip: process.platform !== "linux" }, async t => {
+  const { tree } = await packedRelease();
+  const isolated = await environment("optional-source-lease");
+  const native = join(isolated.root, "source-lease.node");
+  const build = node([join(tree, "scripts/build-source-lease.mjs"), join(tree, "native/linux-source-lease.c"), native], { env: isolated.env });
+  assert.equal(build.status, 0, build.stderr);
+  const library = join(isolated.root, "library"), entry = join(tree, "scripts/einzbern.mjs"), at = "2026-11-13T00:00:00Z";
+  const env = { ...isolated.env, EINZBERN_SOURCE_ATTESTOR_ROOT: library, EINZBERN_SOURCE_LEASE_MODULE: native, EINZBERN_RECALL_OBSERVATION: "1" };
+  const saved = { root: process.env.EINZBERN_SOURCE_ATTESTOR_ROOT, module: process.env.EINZBERN_SOURCE_LEASE_MODULE };
+  t.after(async () => {
+    process.env.EINZBERN_SOURCE_ATTESTOR_ROOT = library; process.env.EINZBERN_SOURCE_LEASE_MODULE = native;
+    const { controlSourceAttestor } = await import("../dist/build/packages/core/src/source-attestor-client.js");
+    await controlSourceAttestor(library, env.EINZBERN_HOME, "stop").catch(() => undefined);
+    if (saved.root === undefined) delete process.env.EINZBERN_SOURCE_ATTESTOR_ROOT; else process.env.EINZBERN_SOURCE_ATTESTOR_ROOT = saved.root;
+    if (saved.module === undefined) delete process.env.EINZBERN_SOURCE_LEASE_MODULE; else process.env.EINZBERN_SOURCE_LEASE_MODULE = saved.module;
+  });
+  const invoke = args => { const r = node([entry, ...args], { env, cwd: isolated.cwd }); assert.equal(r.status, 0, r.stderr); return r; };
+  invoke(["init", "--workspace", library, "--project", isolated.cwd, "--at", at]);
+  invoke(["project-create", "--workspace", library, "--external-key", "PACK-ATTEST", "--name", "Calibration", "--at", at]);
+  const args = ["recall", "--workspace", library, "--view", "agent", "--at", at, "--query", "PACK-ATTEST", "--allow-trailing", "true"];
+  const first = invoke(args), warm = invoke(args); assert.equal(warm.stdout, first.stdout);
+  const logs = (await readFile(join(env.EINZBERN_HOME, "log/hook.ndjson"), "utf8")).trim().split("\n").map(JSON.parse);
+  const observation = logs.at(-1).observation;
+  assert.equal(observation.logicalEventBytes, 0);
+  assert.ok(observation.cacheReasons.includes("source-attestor-finish-valid"), JSON.stringify(observation.cacheReasons));
+  assert.equal(existsSync(join(tree, "dist")), false);
+  assert.equal(existsSync(join(tree, "native/linux-source-lease.node")), false);
 });
 
 test("481-AC1: unpacked where there is only Node.js, the engine lists its commands, creates a library and reads it", async () => {
@@ -603,7 +633,7 @@ test("R45 U11: a registry-lock bridge whose lock or device-home re-export is not
       if (entry !== "registry-lock.mjs") await symlink(join(repositoryRoot, "scripts/lib", entry), join(copy, "scripts/lib", entry));
     }
     await writeFile(join(copy, "scripts/lib/registry-lock.mjs"), mutated);
-    for (const path of ["scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern-launcher.mjs", "scripts/einzbern-hook-launcher.mjs", "scripts/task.mjs", "scripts/verify-portal.mjs", "scripts/portal-tests.mjs", "scripts/release.mjs", "scripts/test-controller-bootstrap.mjs", "scripts/test-controller-child-policy.mjs", "portal/portal.mjs", "dist", "packages", "package.json"]) {
+    for (const path of ["scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern-launcher.mjs", "scripts/einzbern-hook-launcher.mjs", "scripts/task.mjs", "scripts/build-source-lease.mjs", "native", "scripts/verify-portal.mjs", "scripts/portal-tests.mjs", "scripts/release.mjs", "scripts/test-controller-bootstrap.mjs", "scripts/test-controller-child-policy.mjs", "portal/portal.mjs", "dist", "packages", "package.json"]) {
       await symlink(join(repositoryRoot, path), join(copy, path));
     }
     const out = join(copy, "out");

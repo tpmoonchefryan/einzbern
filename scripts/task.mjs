@@ -654,6 +654,9 @@ async function build() {
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/storage-location.mjs", storageLocation);
   const sourceIdentity = await readSourceFile(resolve(repositoryRoot, "packages/core/src/darwin-source-identity.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/packages/core/src/darwin-source-identity.mjs", sourceIdentity);
+  const { bundleEntry } = await import("./lib/bundle.mjs");
+  const sourceAttestor = await bundleEntry(resolve(repositoryRoot, "scripts/source-attestor-host.mjs"));
+  await safeWriteOutput(repositoryRoot, "dist/build/packages/core/src/source-attestor-host.mjs", sourceAttestor.code);
   const memoryBudget = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-budget.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-budget.mjs", memoryBudget);
   const memoryWorkerCheck = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-worker-check.mjs"));
