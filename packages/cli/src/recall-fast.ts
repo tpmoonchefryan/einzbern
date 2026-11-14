@@ -4,10 +4,11 @@ import { canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import type { JsonValue } from "../../protocol/src/index.js";
 import { withRecallObservation } from "../../core/src/recall-observation.js";
 import type { RecallObservation } from "../../core/src/recall-observation.js";
+import { openLibrary } from "../../core/src/ether-library.js";
 import { readRecallAuthority } from "../../core/src/recall-authority.js";
 import { effectiveProjectState } from "../../core/src/project-state-read.js";
 import { readRuntimeKnowledgeLanguagePolicy, resolveQueryLanguage } from "../../core/src/knowledge-language.js";
-import { RECALL_DEFAULT_TAU, recallDocuments, recallPersistent } from "../../core/src/recall.js";
+import { RECALL_DEFAULT_TAU, preparePersistentRecall, recallDocuments, recallPersistent } from "../../core/src/recall.js";
 import { formatRecallLine, readRecallCards, recallContextLines, recallDecisionHints, recallInputsFromState } from "../../core/src/recall-inputs.js";
 import type { RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { DecisionStatusFilter } from "../../core/src/minutes.js";
@@ -60,64 +61,53 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   if (query.trim().length === 0 || query.length > RUNTIME_CAPACITY.stringCodeUnits || !query.isWellFormed()) fail("CLI_ARGUMENT_MALFORMED", "query");
   const limit = values.limit === undefined ? undefined : integerValue(values, "limit");
   if (limit !== undefined && (limit < 1 || !Number.isSafeInteger(limit))) fail("CLI_ARGUMENT_MALFORMED", "limit");
-  const { state: rawState, authority } = await readRecallAuthority(workspace, true);
-  const state = await effectiveProjectState(rawState, values["project-id"]);
+  const allowTrailing = booleanValue(values["allow-trailing"], "allow-trailing");
   const projectId = values["project-id"];
-  const settingValue = (key: string): string | undefined => state.settings.find((entry) => entry.key === key)?.value;
-  // The flag wins over the setting, the setting over the recorded default: the same
-  // order work-list's scope-bytes already uses.
-  const configuredTau = Number(settingValue("retrieval.tau") ?? String(RECALL_DEFAULT_TAU));
-  const tau = values.tau === undefined
-    ? (Number.isFinite(configuredTau) && configuredTau >= 0 ? configuredTau : RECALL_DEFAULT_TAU)
-    : Number(values.tau);
-  if (!Number.isFinite(tau) || tau < 0) fail("CLI_ARGUMENT_MALFORMED", "tau");
-  // TCRN-CROSS-STORY-364 requirement 4: a prompt whose language is outside the recorded
-  // prompt languages is answered, and the answer says the translation is owed and which
-  // model owes it. The engine calls no model; the hook holding it translates and asks
-  // again. Read-side is fail-open, unlike the write path, because a session with no
-  // answer is worse than an answer ranked in the wrong language.
-  const languageAnswer = resolveQueryLanguage(query, await readRuntimeKnowledgeLanguagePolicy(state.settings, values.host));
-  const scopeBytes = Number(settingValue("retrieval.scopeExcerptBytes") ?? "512");
-  const scopeExcerptBytes = Number.isSafeInteger(scopeBytes) && scopeBytes > 0 ? scopeBytes : 512;
-  // The byte budget of one prompt's answer (TCRN-CROSS-STORY-474 R2): the hit lines are cut to it
-  // at whole lines, which is what a host puts in front of the prompt.
-  const promptBytes = Number(settingValue("injection.perPromptBytes") ?? "1600");
-  const perPromptBytes = Number.isSafeInteger(promptBytes) && promptBytes > 0 ? promptBytes : 1600;
-  // TCRN-CROSS-STORY-476 R5 (TCRN-CROSS-SUB-311): the cards come from two stores, the library's
-  // crest and this user's crest, each read whole as an explicit search corpus (explicit-only
-  // article index cards admitted, the complete corpus before scoring so bm25 keeps its baseline)
-  // and each card labelled with its store. A store with no cards to give -- none initialized, or
-  // one trailing the chain while the caller did not admit a trailing read -- still leaves the
-  // work records and minutes to recall, and its reason code is reported rather than swallowed,
-  // so "no cards" is never indistinguishable from "no card matched". knowledgeReasonCode stays
-  // the library store's, as it always was.
-  // Each store answers the card status as knowledge-list does: removed, the removed cards alone; all,
-  // every card.
-  const cards = await readRecallCards(workspace, {
+  const authorityPromise = readRecallAuthority(workspace, true);
+  const cardsPromise = readRecallCards(workspace, {
     ...(projectId === undefined ? {} : { projectId }),
     at: values.at ?? "",
-    allowTrailing: booleanValue(values["allow-trailing"], "allow-trailing"),
+    allowTrailing,
     ...(cardStatus === "valid" ? {} : { status: cardStatus }),
-  }, authority);
-  // TCRN-CROSS-STORY-474 R1: what the index holds is decided in one place (recall-inputs.ts), so
-  // the verb and the prompt hook cannot index differently: the Stories, Incidents, Initiatives and
-  // Epics with their goal, body and parent titles, every minutes record, and the cards.
-  const result = await recallPersistent({
-    // Library identity stays path-independent; project-specific corpus inputs must not share an index.
-    cacheKey: `${state.metadata.workspaceId}:${values["project-id"] ?? ""}`,
-    // The storage checkpoint: the chain head the records were replayed from, and the
-    // digests of the two knowledge answers they were read with. Any one moving is a
-    // different corpus, and the index is rebuilt from the rows that actually changed.
-    // A library's head is one digest over every stream's head, so it moves with any
-    // entry of the version vector. An index of another status of decisions is another corpus
-    // at the same head, and names that status (the cards' status is in their digest).
-    checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}`,
-    documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes,
-      ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) })),
-    query,
-    tau,
-    ...(limit === undefined ? {} : { limit }),
-  }, workspace);
+  }, authorityPromise.then((resolved) => resolved.authority));
+  const preparedPromise = openLibrary(workspace)
+    .then((library) => preparePersistentRecall(`${library.manifest.libraryId}:${projectId ?? ""}`, workspace))
+    .catch(() => undefined);
+  const [{ state: rawState }, cards, prepared] = await Promise.all([authorityPromise, cardsPromise, preparedPromise]).catch(async (error: unknown) => {
+    await (await preparedPromise)?.handle.close().catch(() => {});
+    throw error;
+  });
+  let result;
+  let state: Awaited<ReturnType<typeof effectiveProjectState>>;
+  let languageAnswer;
+  let scopeExcerptBytes = 512;
+  let perPromptBytes = 1600;
+  try {
+    state = await effectiveProjectState(rawState, projectId);
+    const settingValue = (key: string): string | undefined => state.settings.find((entry) => entry.key === key)?.value;
+    const configuredTau = Number(settingValue("retrieval.tau") ?? String(RECALL_DEFAULT_TAU));
+    const tau = values.tau === undefined
+      ? (Number.isFinite(configuredTau) && configuredTau >= 0 ? configuredTau : RECALL_DEFAULT_TAU)
+      : Number(values.tau);
+    if (!Number.isFinite(tau) || tau < 0) fail("CLI_ARGUMENT_MALFORMED", "tau");
+    languageAnswer = resolveQueryLanguage(query, await readRuntimeKnowledgeLanguagePolicy(state.settings, values.host));
+    const scopeBytes = Number(settingValue("retrieval.scopeExcerptBytes") ?? "512");
+    scopeExcerptBytes = Number.isSafeInteger(scopeBytes) && scopeBytes > 0 ? scopeBytes : 512;
+    const promptBytes = Number(settingValue("injection.perPromptBytes") ?? "1600");
+    perPromptBytes = Number.isSafeInteger(promptBytes) && promptBytes > 0 ? promptBytes : 1600;
+    result = await recallPersistent({
+      cacheKey: `${state.metadata.workspaceId}:${values["project-id"] ?? ""}`,
+      checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}`,
+      documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes,
+        ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) })),
+      query,
+      tau,
+      ...(limit === undefined ? {} : { limit }),
+    }, workspace, prepared);
+  } catch (error) {
+    await prepared?.handle.close().catch(() => {});
+    throw error;
+  }
   // TCRN-CROSS-SUB-425, TCRN-CROSS-SUB-426 R17 续作修订三 (STORY-514 AC1): a hit on a removed card, which
   // only --status removed or all reads, says so and carries the card's removal as knowledge-list
   // answers it: the reason, basis, actor and instant, the card that superseded it, and its event.

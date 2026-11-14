@@ -372,7 +372,7 @@ export interface RecallCardReadOptions {
  * cards alone, "all" every card. A removed card is indexed by what it keeps, its subject; it carries its
  * removal, as the list gave it, and its id is named in `removedCardIds`.
  */
-export async function readRecallCards(workspaceRoot: string, options: RecallCardReadOptions, authority?: RecallAuthority): Promise<RecallCardRead> {
+export async function readRecallCards(workspaceRoot: string, options: RecallCardReadOptions, authority?: RecallAuthority | Promise<RecallAuthority>): Promise<RecallCardRead> {
   const read = async (scope: KnowledgeStoreScope): Promise<{ readonly cards: readonly RecallKnowledgeInput[]; readonly store: RecallCardStoreRead }> => {
     try {
       const answer = await listKnowledgeMetadataFast(workspaceRoot, {

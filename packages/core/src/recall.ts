@@ -33,8 +33,10 @@ import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { serialize, deserialize } from "node:v8";
 import { deflateRawSync, inflateRawSync } from "node:zlib";
+import type { BigIntStats } from "node:fs";
 import { constants, rmSync, closeSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import type { FileHandle } from "node:fs/promises";
+import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { cachePath } from "./device-home.js";
 import { openLibrary } from "./ether-library.js";
@@ -1626,7 +1628,36 @@ function parseRecallProjection(packed: PackedRecallProjection): PersistentRecall
  * on this device. A changed corpus is applied transactionally to a private copy
  * and atomically published. Readers never modify an index another process uses.
  * The independent projection record authenticates both SQLite bytes and maps. */
-export async function recallPersistent(request: RecallRequest, root: string): Promise<RecallResult> {
+export interface PreparedPersistentRecall {
+  readonly cacheKey: string;
+  readonly database: string;
+  readonly slimSaved: SlimRecallHeader;
+  readonly handle: FileHandle;
+  readonly before: BigIntStats;
+}
+
+export async function preparePersistentRecall(cacheKey: string, root: string): Promise<PreparedPersistentRecall | undefined> {
+  let handle: FileHandle | undefined;
+  try {
+    const library = await openLibrary(root);
+    const name = `recall-${createHash("sha256").update(cacheKey).digest("hex")}`;
+    const slimSaved = await readProtectedProjection<SlimRecallHeader>(library, name, PERSISTENT_RECALL_VERSION);
+    if (slimSaved === null) return undefined;
+    const database = join(cachePath(library.manifest.libraryId), `${name}.sqlite`);
+    handle = await open(database, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const before = await handle.stat({ bigint: true });
+    if (!before.isFile() || before.nlink !== 1n || before.size !== BigInt(slimSaved.bytes)) {
+      await handle.close();
+      return undefined;
+    }
+    return { cacheKey, database, slimSaved, handle, before };
+  } catch {
+    if (handle !== undefined) await handle.close().catch(() => {});
+    return undefined;
+  }
+}
+
+export async function recallPersistent(request: RecallRequest, root: string, prepared?: PreparedPersistentRecall): Promise<RecallResult> {
   const current = cachedIndexes.get(request.cacheKey);
   // A retained SQLite connection is also exposed to external mapped writes.
   // Reopen only after verifying current bytes, even within one process.
@@ -1638,13 +1669,41 @@ export async function recallPersistent(request: RecallRequest, root: string): Pr
   let index: RecallIndex | undefined;
   let documents: readonly RecallDocument[] | undefined;
   const inputs = (): readonly RecallDocument[] => documents ??= request.documents();
+  let preparedHandle = prepared?.handle;
   try {
     const directory = cachePath(library.manifest.libraryId);
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const database = join(directory, `${name}.sqlite`);
-    const slimSaved = await readProtectedProjection<SlimRecallHeader>(library, name, binding);
+    if (
+      prepared !== undefined
+      && prepared.cacheKey === request.cacheKey
+      && prepared.database === database
+      && prepared.slimSaved.checkpoint === request.checkpoint
+    ) {
+      try {
+        // Preparation overlaps the authority read. A mapping can change bytes
+        // during that await without changing ctime; prove them at consumption.
+        const digest = observeAuthorityWork("cacheHash", () => fileContentDigest(prepared.handle.fd));
+        observeCacheRead(digest.bytes);
+        if (digest.bytes !== prepared.slimSaved.bytes || digest.sha256 !== prepared.slimSaved.sha256) throw new Error("damaged index");
+        const after = lstatSync(database, { bigint: true });
+        if (prepared.before.dev !== after.dev || prepared.before.ino !== after.ino || prepared.before.ctimeNs !== after.ctimeNs) throw new Error("index replaced during open");
+        index = new RecallIndex([], prepared.slimSaved.checkpoint, database, undefined, prepared.slimSaved);
+      } catch {
+        index?.close();
+        index = undefined;
+        observeCacheReason("fts-persistent-invalid-or-busy");
+      } finally {
+        await preparedHandle?.close().catch(() => {});
+        preparedHandle = undefined;
+      }
+    } else if (preparedHandle !== undefined) {
+      await preparedHandle.close().catch(() => {});
+      preparedHandle = undefined;
+    }
+    const slimSaved = index === undefined ? await readProtectedProjection<SlimRecallHeader>(library, name, binding) : null;
     let bytes: Buffer | undefined;
-    if (slimSaved !== null) {
+    if (index === undefined && slimSaved !== null) {
       let file: number | undefined;
       try {
         file = openSync(database, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -1719,6 +1778,7 @@ export async function recallPersistent(request: RecallRequest, root: string): Pr
     observeCacheReason("fts-persistent-fallback-memory");
     return recall({ ...request, documents: inputs });
   } finally {
+    await preparedHandle?.close().catch(() => {});
     if (temporary !== undefined) {
       await rm(temporary, { force: true }).catch(() => undefined);
       await rm(`${temporary}-journal`, { force: true }).catch(() => undefined);

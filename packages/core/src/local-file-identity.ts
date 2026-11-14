@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import type { BigIntStats } from "node:fs";
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, readdirSync } from "node:fs";
-import { lstat, readFile, statfs } from "node:fs/promises";
+import { constants, readSync } from "node:fs";
+import type { FileHandle } from "node:fs/promises";
+import { lstat, open, readdir, readFile, statfs } from "node:fs/promises";
 import { join, relative } from "node:path";
 
 export interface LocalIdentityContext {
@@ -74,6 +75,18 @@ export function fileContentDigest(fd: number): { readonly sha256: string; readon
   return { sha256: hash.digest("hex"), bytes };
 }
 
+export async function fileHandleContentDigest(handle: FileHandle, buffer = Buffer.allocUnsafe(1024 * 1024)): Promise<{ readonly sha256: string; readonly bytes: number }> {
+  const hash = createHash("sha256");
+  let bytes = 0;
+  for (;;) {
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, bytes);
+    if (bytesRead === 0) break;
+    hash.update(buffer.subarray(0, bytesRead));
+    bytes += bytesRead;
+  }
+  return { sha256: hash.digest("hex"), bytes };
+}
+
 function sameIdentity(left: LocalFileIdentity | null, right: LocalFileIdentity | null): boolean {
   return left !== null && right !== null && left.boot === right.boot && left.mount === right.mount
     && left.device === right.device && left.fileId === right.fileId && left.birth === right.birth
@@ -87,27 +100,41 @@ export async function localTreeIdentity(root: string): Promise<string | null> {
   if (context === null) return null;
   const observed = context;
   const entries: [string, LocalFileIdentity, string | null][] = [];
-  function visit(path: string): void {
-    const info = lstatSync(path, { bigint: true });
+  const files: { readonly path: string; readonly identity: LocalFileIdentity }[] = [];
+  async function visit(path: string): Promise<void> {
+    const info = await lstat(path, { bigint: true });
     const identity = localFileIdentity(info, observed, info.isDirectory());
     if (identity === null) throw new Error("unprovable source identity");
     if (info.isDirectory()) {
       entries.push([relative(root, path), identity, null]);
-      for (const name of readdirSync(path)) visit(join(path, name));
+      const names = await readdir(path);
+      await Promise.all(names.map((name) => visit(join(path, name))));
       return;
     }
-    const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    try {
-      const held = fstatSync(fd, { bigint: true });
-      if (!sameIdentity(localFileIdentity(held, observed), identity)) throw new Error("source replaced");
-      const content = fileContentDigest(fd);
-      if (content.bytes !== Number(held.size) || !sameIdentity(localFileIdentity(lstatSync(path, { bigint: true }), observed), identity)) throw new Error("source changed");
-      entries.push([relative(root, path), identity, content.sha256]);
-    } finally { closeSync(fd); }
+    files.push({ path, identity });
   }
   try {
-    if (!lstatSync(root).isDirectory()) return null;
-    visit(root);
+    if (!(await lstat(root)).isDirectory()) return null;
+    await visit(root);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(16, files.length) }, async () => {
+      const buffer = Buffer.allocUnsafe(256 * 1024);
+      for (;;) {
+        const index = cursor;
+        cursor += 1;
+        if (index >= files.length) return;
+        const { path, identity } = files[index]!;
+        const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        try {
+          const held = await handle.stat({ bigint: true });
+          if (!sameIdentity(localFileIdentity(held, observed), identity)) throw new Error("source replaced");
+          const content = await fileHandleContentDigest(handle, buffer);
+          if (content.bytes !== Number(held.size) || !sameIdentity(localFileIdentity(await lstat(path, { bigint: true }), observed), identity)) throw new Error("source changed");
+          entries.push([relative(root, path), identity, content.sha256]);
+        } finally { await handle.close(); }
+      }
+    });
+    await Promise.all(workers);
     entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
     const hash = createHash("sha256");
     for (const [rel, id, sha] of entries) {

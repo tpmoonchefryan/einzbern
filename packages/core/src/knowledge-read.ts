@@ -105,9 +105,13 @@ function explicitlySelectable(metadata: KnowledgeUnitMetadata, at: string): bool
     && computeFreshness(metadata, at) !== "stale";
 }
 
-export function crestMetaBoundary(roots: readonly string[], headEventHash: string | null): () => Promise<string | null> {
+export function crestMetaBoundary(
+  roots: readonly string[],
+  headEventHash: string | null,
+  treesPromise?: Promise<readonly (string | null)[]>,
+): () => Promise<string | null> {
   return async (): Promise<string | null> => {
-    const trees = await Promise.all(roots.map((root) => localTreeIdentity(root)));
+    const trees = await (treesPromise ?? Promise.all(roots.map((root) => localTreeIdentity(root))));
     if (trees.some((tree) => tree === null)) return null;
     return createHash("sha256")
       .update(`10\0${KNOWLEDGE_PROJECTION_VERSION}\0${headEventHash}\0${roots.join("\0")}\0${trees.join("\0")}`)
@@ -302,7 +306,7 @@ function buildCachedProjectAnswer(
 export async function listKnowledgeMetadataFast(
   workspaceRoot: string,
   query: KnowledgeListQuery,
-  authority?: RecallAuthority,
+  authority?: RecallAuthority | Promise<RecallAuthority>,
 ): Promise<Readonly<Record<string, JsonValue>>> {
   assertStrictInstant(query.at);
   if (query.scope === "user") {
@@ -312,7 +316,7 @@ export async function listKnowledgeMetadataFast(
       return buildEmptyUserAnswer(query);
     }
     const { listKnowledgeMetadata } = await import("./knowledge-core.js");
-    return listKnowledgeMetadata(workspaceRoot, query, authority);
+    return listKnowledgeMetadata(workspaceRoot, query, await authority);
   }
   if (
     authority === undefined
@@ -322,23 +326,32 @@ export async function listKnowledgeMetadataFast(
     || (query.diagnostics ?? "summary") !== "summary"
     || (query.status ?? "valid") !== "valid"
     || query.search !== undefined
-    || !(await hasLibraryManifest(workspaceRoot))
   ) {
     const { listKnowledgeMetadata } = await import("./knowledge-core.js");
-    return listKnowledgeMetadata(workspaceRoot, query, authority);
+    return listKnowledgeMetadata(workspaceRoot, query, await authority);
   }
-  const workspace = await recallAuthorityState(workspaceRoot, authority);
-  const library = await openLibrary(workspaceRoot);
+  const hasManifestPromise = hasLibraryManifest(workspaceRoot);
   const storePath = join(workspaceRoot, "crest");
-  const roots = [storePath, ...(workspace.library?.consolidation?.sources ?? [])
+  const [resolvedAuthority, hasManifest] = await Promise.all([authority, hasManifestPromise]);
+  if (!hasManifest) {
+    const { listKnowledgeMetadata } = await import("./knowledge-core.js");
+    return listKnowledgeMetadata(workspaceRoot, query, resolvedAuthority);
+  }
+  const workspace = await recallAuthorityState(workspaceRoot, resolvedAuthority);
+  const library = await openLibrary(workspaceRoot);
+  const archiveRoots = (workspace.library?.consolidation?.sources ?? [])
     .filter((source) => source.manifest.libraryId !== workspace.metadata.workspaceId && source.inventory.some((file) => file.path === "crest/store.json"))
-    .map((source) => join(workspaceRoot, source.archive, "crest"))];
-  const boundary = crestMetaBoundary(roots, workspace.headEventHash);
+    .map((source) => join(workspaceRoot, source.archive, "crest"));
+  const roots = [storePath, ...archiveRoots];
+  // Source proofs belong to this resolved authority, not an earlier speculative
+  // read whose bytes may have changed while materialization was pending.
+  const treesPromise = Promise.all(roots.map((root) => localTreeIdentity(root)));
+  const boundary = crestMetaBoundary(roots, workspace.headEventHash, treesPromise);
   const saved = await readProtectedProjection<CachedCrestMeta>(library, "crest-meta", boundary);
   if (saved !== null) {
     observeCacheReason("crest-projection-hit");
     return buildCachedProjectAnswer(saved, workspace, query);
   }
   const { listKnowledgeMetadata } = await import("./knowledge-core.js");
-  return listKnowledgeMetadata(workspaceRoot, query, authority);
+  return listKnowledgeMetadata(workspaceRoot, query, resolvedAuthority);
 }

@@ -20,7 +20,7 @@ import {
 } from "../dist/build/packages/core/src/index.js";
 import { withRecallObservation } from "../dist/build/packages/core/src/recall-observation.js";
 import { withWorkspaceWriteLock } from "../dist/build/packages/core/src/workspace.js";
-import { RecallIndex, recallPersistent, resetRecallCache } from "../dist/build/packages/core/src/recall.js";
+import { RecallIndex, preparePersistentRecall, recallPersistent, resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { canonicalJson, canonicalSha256, deriveStableId } from "../dist/build/packages/protocol/src/index.js";
 import { localIdentityContext } from "../dist/build/packages/core/src/local-file-identity.js";
 
@@ -37,17 +37,18 @@ async function withWritableMapping(path, offset, operation) {
   const python = spawn("python3", ["-u", "-c", `import hashlib,json,mmap,sys
 with open(sys.argv[1], 'r+b', buffering=0) as f:
  with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE) as m:
-  offset=int(sys.argv[2]); original=m[offset]; m[offset]=original
+  offsets=json.loads(sys.argv[2]); original=[m[offset] for offset in offsets]
+  for offset,value in zip(offsets,original): m[offset]=value
   print(json.dumps({'ready':True}),flush=True)
   try:
    if sys.stdin.readline().strip() != 'mutate': raise RuntimeError('expected mutate')
-   m[offset]=ord('X') if original != ord('X') else ord('Y')
+   for offset,value in zip(offsets,original): m[offset]=ord('X') if value != ord('X') else ord('Y')
    print(json.dumps({'mutated':True}),flush=True)
    sys.stdin.readline()
   finally:
-   m[offset]=original
+   for offset,value in zip(offsets,original): m[offset]=value
    print(json.dumps({'restored':hashlib.sha256(m).hexdigest()}),flush=True)
-`, path, String(offset)], { stdio: ["pipe", "pipe", "pipe"] });
+`, path, JSON.stringify(Array.isArray(offset) ? offset : [offset])], { stdio: ["pipe", "pipe", "pipe"] });
   let stderr = "";
   python.stderr.on("data", value => { stderr += value; });
   const finished = new Promise((resolve, reject) => { python.once("error", reject); python.once("close", code => resolve(code)); });
@@ -346,6 +347,43 @@ test("095: persistent FTS verifies a mapped database edit at the same checkpoint
     const repaired = await withRecallObservation(() => recallPersistent(request, f.root));
     assert.deepEqual(repaired.value.records, expected);
     assert.ok(repaired.observation.cacheReasons.includes("fts-persistent-invalid-or-busy"));
+  });
+});
+
+test("095: prepared FTS revalidates bytes changed through an existing mapping before use", async t => {
+  const f = await fixture(t);
+  const request = { cacheKey: "init095.prepared-index.v1", checkpoint: "prepared-head", query: "P095-SENSOR", documents, tau: 0 };
+  const expected = (await recallPersistent(request, f.root)).records;
+  resetRecallCache();
+  const path = join(cachePath(f.id), (await fs.readdir(cachePath(f.id))).find(name => name.startsWith("recall-") && name.endsWith(".sqlite")));
+  const database = new DatabaseSync(path, { readOnly: true });
+  let meta;
+  try { meta = Buffer.from(database.prepare("SELECT meta FROM recall_documents WHERE id = ?").get(expected[0].id).meta); }
+  finally { database.close(); }
+  const bytes = await fs.readFile(path);
+  const summaryOffset = meta.indexOf("Seven alloy units", meta.indexOf("summary"));
+  assert.ok(summaryOffset >= 0);
+  const offsets = [];
+  for (let start = 0; ;) {
+    const found = bytes.indexOf(meta, start);
+    if (found < 0) break;
+    offsets.push(found + summaryOffset);
+    start = found + meta.length;
+  }
+  assert.ok(offsets.length > 0);
+  await withWritableMapping(path, offsets, async mutate => {
+    const prepared = await preparePersistentRecall(request.cacheKey, f.root);
+    assert.ok(prepared);
+    try {
+      const before = await fs.stat(path, { bigint: true });
+      await mutate();
+      const after = await fs.stat(path, { bigint: true });
+      t.diagnostic(JSON.stringify({ preparedMappedCtimeUnchanged: before.ctimeNs === after.ctimeNs }));
+      assert.notEqual(createHash("sha256").update(await fs.readFile(path)).digest("hex"), prepared.slimSaved.sha256);
+      const repaired = await withRecallObservation(() => recallPersistent(request, f.root, prepared));
+      assert.deepEqual(repaired.value.records, expected);
+      assert.ok(repaired.observation.cacheReasons.includes("fts-persistent-invalid-or-busy"));
+    } finally { await prepared.handle.close(); }
   });
 });
 
