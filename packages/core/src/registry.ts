@@ -1,6 +1,5 @@
 import { loadPath, storePath } from "./stored-path.js";
 import { localProbeTimeout } from "./io-policy.js";
-import { materializeWorkspace } from "./workspace.js";
 import { chainIdentity } from "./chain-identity.js";
 import { projectLineage } from "./project-scope.js";
 // SPDX-License-Identifier: Apache-2.0
@@ -243,7 +242,7 @@ export async function registerLibrary(input: RegisterLibraryInput, home?: string
       ? (previous?.libraryId === library.manifest.libraryId ? previous.migratedFrom : undefined)
       : resolve(input.migratedFrom);
     const projectId = input.projectId ?? (previous?.libraryId === library.manifest.libraryId ? previous.projectId : undefined);
-    const state = await materializeWorkspace(library.root);
+    const state = await (await import("./workspace.js")).materializeWorkspace(library.root);
     if (projectId !== undefined) projectLineage(state, projectId);
     const role = chainIdentity(state, projectId)?.role;
     const entry: RegistryEntry = {

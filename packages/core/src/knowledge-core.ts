@@ -5,6 +5,8 @@ import { scopedWorkspaceState } from "./project-scope.js";
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash, randomBytes } from "node:crypto";
+import { deserialize, serialize } from "node:v8";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { constants, readFileSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import {
@@ -49,8 +51,7 @@ import {
 } from "./knowledge-language.js";
 import type { KnowledgeExpansions, KnowledgeLanguagePolicy, KnowledgeLanguageProvider } from "./knowledge-language.js";
 import { chainIdentity, isSharedLibrary } from "./chain-identity.js";
-import { activeWorkspaceRoot, materializeWorkspace, withWorkspaceWriteLock } from "./workspace.js";
-import type { ProjectRecord, WorkspaceState } from "./workspace.js";
+import type { ProjectRecord, WorkspaceMetadata, WorkspaceState } from "./workspace.js";
 import { SETTINGS_CATALOG, resolveKnowledgeArticlesPath } from "./settings.js";
 import { hasLibraryManifest, openLibrary } from "./ether-library.js";
 import {
@@ -75,11 +76,10 @@ import type { FileLock } from "./file-lock.js";
 import { readUserCrestPath } from "./machine-settings.js";
 import { DIRECTORY, LEGACY_CONTROL_DIRECTORY, LEGACY_KNOWLEDGE_DIRECTORY } from "./names.js";
 import { assertKnowledgeNotRecorded } from "./knowledge-duplicates.js";
-import { readRegistry } from "./registry.js";
 import { assessKnowledgePair, knowledgeTopicTokens } from "./knowledge-conflict.js";
 import { archivedKnowledgeScope, bindArchivedKnowledgeScope, inheritArchivedKnowledgeScope, intrinsicScopeMatchesProject, resolveIntrinsicKnowledgeScope } from "./knowledge-scope.js";
 import { localTreeIdentity } from "./local-file-identity.js";
-import { projectionBinding, readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
+import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
 import { observeCacheReason } from "./recall-observation.js";
 
 const KNOWLEDGE_PROJECTION_VERSION = "intrinsic-scope-conflict-v2";
@@ -833,6 +833,7 @@ function sourceReferenceIsFile(reference: string): boolean {
 async function sourceRoots(workspaceRoot: string, workspace: WorkspaceState): Promise<readonly string[]> {
   const roots = workspace.metadata.roots.map((root) => root.canonicalPath);
   const projectId = (workspace as WorkspaceState & { readonly configurationProjectId?: string | null }).configurationProjectId ?? undefined;
+  const { readRegistry } = await import("./registry.js");
   const registered = (await readRegistry()).entries.filter((entry) => entry.libraryId === workspace.metadata.workspaceId && entry.projectId === projectId);
   const articlesRoot = resolveKnowledgeArticlesPath(workspaceRoot, articleSettingValue(workspace));
   return [...new Set([articlesRoot, ...registered.map((entry) => entry.projectPath), workspaceRoot, ...roots])];
@@ -1221,6 +1222,7 @@ function libraryKnowledgeView(storeRoot: string, options: KnowledgeReadOptions =
  */
 export async function withCrestWriteLock<T>(workspaceRoot: string, operation: () => Promise<T>): Promise<T> {
   if (!(await hasLibraryManifest(resolve(workspaceRoot)))) return operation();
+  const { withWorkspaceWriteLock } = await import("./workspace.js");
   return withWorkspaceWriteLock(workspaceRoot, () => operation());
 }
 
@@ -2307,11 +2309,11 @@ interface KnowledgeViewPlace {
 // bytes differ is written again, the pages before the head, and a page file past the pages the head
 // names is removed. It is a cache, so nothing here fails the read, or the committed write, that asks
 // for it: what cannot be projected is left for the next read to project again.
-async function projectKnowledgeView(place: KnowledgeViewPlace, index: KnowledgeIndex): Promise<void> {
+async function projectKnowledgeView(place: KnowledgeViewPlace, index: KnowledgeIndex, precomputedFiles?: readonly KnowledgeViewFile[]): Promise<void> {
   try {
     const folder = await place.folder();
     if (folder === null) return;
-    const files = knowledgeViewFiles(index);
+    const files = precomputedFiles ?? knowledgeViewFiles(index);
     for (const file of files) {
       const backend = place.file(file.name);
       const cached = await backend.readKnowledgeView().then((bytes) => bytes.toString("utf8"), () => null);
@@ -2335,9 +2337,17 @@ interface KnowledgeStorePlace {
   readonly storePath: string;
 }
 
+function activeWorkspaceRoot(metadata: WorkspaceMetadata): string | undefined {
+  let binding = metadata.roots;
+  for (const entry of metadata.relocations ?? []) {
+    if (entry.stage === "adopted") binding = entry.to;
+  }
+  return binding.find((root) => root.kind === "workspace")?.canonicalPath;
+}
+
 async function knowledgeStorePlace(workspaceRootInput: string, authority?: RecallAuthority): Promise<KnowledgeStorePlace> {
   // Recall may reuse only its raw authority read, never a project-derived state.
-  const workspace = authority === undefined ? await materializeWorkspace(workspaceRootInput) : await recallAuthorityState(workspaceRootInput, authority);
+  const workspace = authority === undefined ? await (await import("./workspace.js")).materializeWorkspace(workspaceRootInput) : await recallAuthorityState(workspaceRootInput, authority);
   if ("configurationProjectId" in workspace) fail("KNOWLEDGE_PATH_INVALID", "knowledge requires raw authority state");
   const workspaceRoot = await boundDirectory(workspaceRootInput);
   // WSR-1: read the ACTIVE binding, not the raw roots array, so this stays the
@@ -4144,7 +4154,7 @@ async function recoverKnowledgeStoreUnlocked(workspaceRoot: string, options: Kno
   if (claim !== null) await assertKnowledgeWritable(workspaceRoot);
   if (claim !== null && processIsAlive(claim.pid)) fail("KNOWLEDGE_LOCKED", "knowledge mutation claim belongs to a live process");
   const publications = await hasLibraryManifest(workspaceRoot)
-    ? await recoverCrestPublications(claimedRoot, deviceHome(), await materializeWorkspace(workspaceRoot)) : 0;
+    ? await recoverCrestPublications(claimedRoot, deviceHome(), await (await import("./workspace.js")).materializeWorkspace(workspaceRoot)) : 0;
   if (claim === null) {
     if (publications > 0) {
       if (await crestInitializationIncomplete(claimedRoot, false)) {
@@ -4430,7 +4440,7 @@ export async function initializeKnowledgeStore(workspaceRootInput: string, optio
 }
 
 async function initializeKnowledgeStoreUnlocked(workspaceRootInput: string, options: { readonly disposableAcknowledged?: boolean } = {}): Promise<Readonly<Record<string, JsonValue>>> {
-  const workspace = await materializeWorkspace(workspaceRootInput);
+  const workspace = await (await import("./workspace.js")).materializeWorkspace(workspaceRootInput);
   // WSC-1: the store is a disposable derived index that is never the system of record, and
   // every initialization acknowledges that explicitly. Old-layout FIXTURE- workspaces used to be
   // admitted implicitly; a library has no workspace key to carry that mark, and an old-layout
@@ -4597,7 +4607,7 @@ async function createUserCrestEvent(
 ): Promise<Readonly<Record<string, JsonValue>>> {
   assertBoundedString(input.body, KNOWLEDGE_LIMITS.maximumBodyBytes, "body");
   const body = Buffer.from(input.body, "utf8");
-  const workspace = await materializeWorkspace(workspaceRoot);
+  const workspace = await (await import("./workspace.js")).materializeWorkspace(workspaceRoot);
   const sourceDigest = input.sourceDigest && input.sourceDigest.length > 0
     ? input.sourceDigest
     : await calculateKnowledgeSourceDigest(workspaceRoot, scopedWorkspaceState(workspace, input.projectId ?? undefined), input.sourceReferences, input.body);
@@ -4827,7 +4837,7 @@ async function createLibraryCrestEvent(
   assertBoundedString(input.body, KNOWLEDGE_LIMITS.maximumBodyBytes, "body");
   await assertKnowledgeWritable(resolve(workspaceRoot));
   const body = Buffer.from(input.body, "utf8");
-  const workspace = await materializeWorkspace(workspaceRoot);
+  const workspace = await (await import("./workspace.js")).materializeWorkspace(workspaceRoot);
   const sourceDigest = input.sourceDigest && input.sourceDigest.length > 0
     ? input.sourceDigest
     : await calculateKnowledgeSourceDigest(workspaceRoot, scopedWorkspaceState(workspace, input.projectId ?? undefined), input.sourceReferences, input.body);
@@ -5099,7 +5109,7 @@ export async function createKnowledgeArticle(
     try { assertProtocolId(evidenceId); } catch (error) { fail("KNOWLEDGE_PROVENANCE_INVALID", String(error)); }
     if (!evidenceId.startsWith("evidence:")) fail("KNOWLEDGE_PROVENANCE_INVALID", evidenceId);
   }
-  const workspace = scopedWorkspaceState(await materializeWorkspace(workspaceRoot), input.projectId);
+  const workspace = scopedWorkspaceState(await (await import("./workspace.js")).materializeWorkspace(workspaceRoot), input.projectId);
   const article = await articlePathFor(workspaceRoot, workspace, input.path);
   const markdown = articleMarkdown(input.category, input.title, input.content);
   const body = articleIndexBody(input.title, input.summary, input.path);
@@ -5542,7 +5552,7 @@ export async function listKnowledgeMetadata(workspaceRoot: string, query: Knowle
   // TCRN-CROSS-INIT-053 R46 (I04): a library whose store was never created holds no card yet: an empty
   // inventory that says so, never a refusal.
   if (await libraryStoreNeverCreated(place)) return knowledgeListAnswer([], query, normalized, { ...ABSENT_STORE_DISCLOSURE, ...knowledgeReadEvidence(null, query, normalized, place.workspace) });
-  const scan = await cachedKnowledgeListScan(place, query);
+  const scan = await cachedKnowledgeListScan(place, query, authority !== undefined);
   return mergedCrestList(scan, query, normalized, trailingDisclosure(scan), scan.workspace);
 }
 
@@ -5550,14 +5560,17 @@ type CachedCrestUnit = ReturnType<typeof snapshotUnitDocument> & {
   readonly archiveScope: ReturnType<typeof archivedKnowledgeScope>;
   readonly canonicalText: string;
 };
-type CachedLibraryCrest = Omit<KnowledgeStoreScan, "workspace" | "units" | "duplicates"> & {
-  readonly units: readonly CachedCrestUnit[];
-  readonly duplicates: readonly { readonly id: string; readonly externalKey: string; readonly versions: readonly CachedCrestUnit[] }[];
+type CachedLibraryCrest = Omit<KnowledgeStoreScan, "workspace" | "units" | "duplicates" | "index"> & {
+  readonly packedUnits: Buffer;
+};
+type CachedLibraryCrestView = {
+  readonly index: KnowledgeIndex;
+  readonly viewFiles: readonly KnowledgeViewFile[];
 };
 
 /** Cache the timeless projection. Selection below still evaluates query.at on
  * every call, including a new process at the same chain head. */
-async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: KnowledgeListQuery): Promise<KnowledgeStoreScan> {
+async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: KnowledgeListQuery, skipViewRepair = false): Promise<KnowledgeStoreScan> {
   const full = (): Promise<KnowledgeStoreScan> => scanKnowledgeStoreAt(place, query, false, "metadata-only", false, false);
   if (query.beforeDescriptorReadForTest !== undefined || query.afterDescriptorOpenForTest !== undefined || !await hasLibraryManifest(place.workspaceRoot)) return full();
   const library = await openLibrary(place.workspaceRoot);
@@ -5568,32 +5581,86 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
     const trees = await Promise.all(roots.map(root => localTreeIdentity(root)));
     if (trees.some(tree => tree === null)) return null;
     const heads = await Promise.all(roots.map(root => currentCrestHeads(root)));
-    return projectionBinding({ cacheVersion: 3, projection: KNOWLEDGE_PROJECTION_VERSION, head: place.workspace.headEventHash, roots, trees, heads });
+    return createHash("sha256")
+      .update(`7\0${KNOWLEDGE_PROJECTION_VERSION}\0${place.workspace.headEventHash}\0${roots.join("\0")}\0${trees.join("\0")}\0${heads.join("\0")}`)
+      .digest("hex");
   };
   const saved = await readProtectedProjection<CachedLibraryCrest>(library, "crest", boundary);
   if (saved !== null) {
     const restore = (stored: CachedCrestUnit): CrestUnit => {
       const { archiveScope, canonicalText, ...fields } = stored;
-      const unit = { ...fields, body: null } as unknown as CrestUnit;
+      const unit = { ...fields, body: null, streamBody: null } as unknown as CrestUnit;
       if (archiveScope.bound) bindArchivedKnowledgeScope(unit.metadata, archiveScope.binding);
       projectedCanonicalTexts.set(unit.metadata, canonicalText);
       return unit;
     };
     observeCacheReason("crest-projection-hit");
-    // A valid protected projection still owes callers the ordinary disposable
-    // view repair (including paged indexes and surplus-page cleanup).
-    await projectKnowledgeView(libraryKnowledgeView(place.storePath, query), saved.index);
-    return { ...saved, workspace: place.workspace, units: saved.units.map(restore),
-      duplicates: saved.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(restore) })) };
+    let index: KnowledgeIndex;
+    if (skipViewRepair) {
+      index = { schemaVersion: "einzbern.knowledge-index.v1" } as unknown as KnowledgeIndex;
+    } else {
+      const view = await readProtectedProjection<CachedLibraryCrestView>(library, "crest-view", boundary);
+      if (view !== null) {
+        index = view.index;
+        // A valid protected projection still owes callers the ordinary disposable
+        // view repair (including paged indexes and surplus-page cleanup).
+        await projectKnowledgeView(libraryKnowledgeView(place.storePath, query), view.index, view.viewFiles);
+      } else {
+        const scan = await full();
+        return scan;
+      }
+    }
+    const { packedUnits, ...rest } = saved;
+    const decoded = deserialize(inflateRawSync(packedUnits)) as {
+      readonly units: readonly CachedCrestUnit[];
+      readonly duplicates: readonly { readonly id: string; readonly externalKey: string; readonly versions: readonly CachedCrestUnit[] }[];
+    };
+    return { ...rest, index, workspace: place.workspace, units: decoded.units.map(restore),
+      duplicates: decoded.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(restore) })) };
   }
   const scan = await full();
   const binding = await boundary();
+  const metaBinding = await (await import("./knowledge-read.js")).crestMetaBoundary(roots, place.workspace.headEventHash)();
   if (binding !== null && binding === await boundary()) {
-    const save = (unit: CrestUnit): CachedCrestUnit => ({ ...snapshotUnitDocument(unit), archiveScope: archivedKnowledgeScope(unit.metadata),
-      canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue) });
-    const { workspace: _workspace, ...fields } = scan;
-    await writeProtectedProjection(library, "crest", binding, { ...fields, sourceDigest: crestSourceDigest(scan), units: scan.units.map(save),
-      duplicates: scan.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(save) })) } satisfies CachedLibraryCrest);
+    const save = (unit: CrestUnit): CachedCrestUnit => {
+      const { streamBody: _sb, ...doc } = snapshotUnitDocument(unit);
+      return { ...doc, streamBody: null, archiveScope: archivedKnowledgeScope(unit.metadata),
+        canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue) };
+    };
+    const { workspace: _workspace, index, units, duplicates, ...fields } = scan;
+    const packedUnits = deflateRawSync(serialize({
+      units: units.map(save),
+      duplicates: duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(save) })),
+    }));
+    const sourceDigest = crestSourceDigest(scan);
+    if (metaBinding !== null) {
+      await writeProtectedProjection(library, "crest-meta", metaBinding, {
+      layout: scan.layout,
+      marker: scan.marker,
+      sourceDigest,
+      units: units.map(unit => ({
+        metadata: unit.metadata,
+        canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue),
+        archiveScope: archivedKnowledgeScope(unit.metadata),
+      })),
+      removedIds: [...scan.removals.keys()],
+      unresolvedConflicts: scan.unresolvedConflicts,
+      duplicates: duplicates.map(duplicate => ({
+        id: duplicate.id,
+        externalKey: duplicate.externalKey,
+        versions: duplicate.versions.map(version => ({
+          ...recordIdentity(version),
+          metadata: version.metadata,
+          canonicalText: canonicalEntryText(version.metadata as unknown as JsonValue),
+          archiveScope: archivedKnowledgeScope(version.metadata),
+        })),
+      })),
+      awaitingChain: scan.awaitingChain,
+      unresolvedScopes: scan.unresolvedScopes,
+    } satisfies import("./knowledge-read.js").CachedCrestMeta);
+    }
+    await writeProtectedProjection(library, "crest-view", binding, { index, viewFiles: knowledgeViewFiles(index) } satisfies CachedLibraryCrestView);
+    await writeProtectedProjection(library, "crest", binding, { ...fields, sourceDigest, packedUnits } satisfies CachedLibraryCrest);
     observeCacheReason("crest-projection-build");
   }
   return scan;

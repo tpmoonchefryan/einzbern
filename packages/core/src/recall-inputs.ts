@@ -21,7 +21,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // whose line marks a user card 「用户」. A user card is recalled in every project.
 
 import type { JsonValue, WorkRecord } from "../../protocol/src/index.js";
-import { listKnowledgeMetadata } from "./knowledge-core.js";
+import { listKnowledgeMetadataFast } from "./knowledge-read.js";
 import type { KnowledgeStatusFilter, KnowledgeStoreScope } from "./knowledge-core.js";
 import { expansionsText } from "./knowledge-language.js";
 import { decisionLedger, decisionsNamedIn, decisionsOfMinutes, minutesView, obsoleteDecisionHints } from "./minutes.js";
@@ -375,7 +375,7 @@ export interface RecallCardReadOptions {
 export async function readRecallCards(workspaceRoot: string, options: RecallCardReadOptions, authority?: RecallAuthority): Promise<RecallCardRead> {
   const read = async (scope: KnowledgeStoreScope): Promise<{ readonly cards: readonly RecallKnowledgeInput[]; readonly store: RecallCardStoreRead }> => {
     try {
-      const answer = await listKnowledgeMetadata(workspaceRoot, {
+      const answer = await listKnowledgeMetadataFast(workspaceRoot, {
         at: options.at,
         ...(options.allowTrailing === undefined ? {} : { allowTrailing: options.allowTrailing }),
         ...(options.status === undefined ? {} : { status: options.status }),
@@ -405,8 +405,7 @@ export async function readRecallCards(workspaceRoot: string, options: RecallCard
       return { cards: [], store: { reasonCode, digest: "absent", cards: 0, evidence: null, unresolvedConflicts: [], unresolvedDuplicates: [], awaitingChain: [], unresolvedScopes: [] } };
     }
   };
-  const project = await read("project");
-  const user = await read("user");
+  const [project, user] = await Promise.all([read("project"), read("user")]);
   const cards = mergeRecallCards(project.cards, user.cards);
   return {
     cards,
@@ -547,12 +546,99 @@ export function workObsoleteDecisions(state: Pick<WorkspaceState, "minutes" | "c
  * with the decision that superseded it or with null, withdrawn -- what minutes-show's explicit read
  * says of it.
  */
+export const PRECOMPUTED_DECISION_HINTS = Symbol.for("einzbern.precomputedDecisionHints");
+
+export interface PrecomputedDecisionHints {
+  readonly anyObsolete: boolean;
+  readonly obsoleteDecisions: readonly (readonly [string, string | null])[];
+  readonly obsoleteByMinutesId: readonly (readonly [string, readonly string[]])[];
+  readonly minutesKeys: readonly (readonly [string, string])[];
+  readonly minutesIds: readonly string[];
+}
+
+export function buildPrecomputedDecisionHints(state: Pick<WorkspaceState, "minutes" | "conferenceMinutes">): PrecomputedDecisionHints {
+  const ledger = decisionLedger(state);
+  const obsoleteDecisions = [...ledger.decisions.entries()]
+    .filter(([, entry]) => entry.status === "obsolete")
+    .map(([address, entry]) => [address, entry.supersededBy] as const);
+  const anyObsolete = obsoleteDecisions.length > 0;
+  if (!anyObsolete) {
+    return { anyObsolete: false, obsoleteDecisions: [], obsoleteByMinutesId: [], minutesKeys: [], minutesIds: [] };
+  }
+  const obsoleteSet = new Set(obsoleteDecisions.map(([address]) => address));
+  const obsoleteByMinutesId = [...ledger.records.entries()]
+    .map(([id, entries]) => [id, entries.filter((entry) => obsoleteSet.has(entry.decision)).map((entry) => entry.decision)] as const)
+    .filter(([, list]) => list.length > 0);
+  const minutesKeys = state.minutes.filter((record) => !record.tombstone).map((record) => [record.externalKey, record.id] as const);
+  return { anyObsolete: true, obsoleteDecisions, obsoleteByMinutesId, minutesKeys, minutesIds: [...ledger.records.keys()] };
+}
+
+const PRECOMPUTED_NAMED_DECISION = /(minutes:[a-z0-9][a-z0-9._-]*|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)\s*#?\s*D([1-9][0-9]*)(?![0-9])/gu;
+
 export function recallDecisionHints(
   state: HintState,
   cards: readonly RecallKnowledgeInput[],
   hits: readonly RecallHit[],
   options: Pick<RecallInputOptions, "decisions"> = {},
 ): readonly RecallHit[] {
+  const precomputed = (state as { [PRECOMPUTED_DECISION_HINTS]?: PrecomputedDecisionHints })[PRECOMPUTED_DECISION_HINTS];
+  if (precomputed !== undefined) {
+    if (!precomputed.anyObsolete) return hits;
+    const obsoleteMap = new Map(precomputed.obsoleteDecisions);
+    const byMinutesId = new Map(precomputed.obsoleteByMinutesId);
+    const minutesIdSet = new Set(precomputed.minutesIds);
+    const keyMap = new Map(precomputed.minutesKeys);
+    const ownDecisions = (options.decisions ?? "valid") !== "valid";
+    const work = new Map(state.work.map((record) => [record.id, record]));
+    const cardsById = new Map(cards.map((card) => [card.id, card]));
+    const collectForMinutes = (ids: readonly string[]): string[] => ids.flatMap((id) => byMinutesId.get(id) ?? []);
+    const hintsFor = (addresses: readonly string[]): ObsoleteDecisionHint[] => {
+      const out: ObsoleteDecisionHint[] = [];
+      const seen = new Set<string>();
+      for (const address of addresses) {
+        if (seen.has(address)) continue;
+        const supersededBy = obsoleteMap.get(address);
+        if (supersededBy === undefined) continue;
+        seen.add(address);
+        out.push({ decision: address, supersededBy });
+      }
+      return out;
+    };
+    return hits.map((hit) => {
+      const record = hit.kind === "work" ? work.get(hit.id) : undefined;
+      const card = hit.kind === "card" ? cardsById.get(hit.id) : undefined;
+      let addresses: readonly string[];
+      if (record !== undefined) {
+        addresses = collectForMinutes(decidedInOf(record));
+      } else if (card !== undefined) {
+        const references = card.sourceReferences ?? [];
+        const minutesIds = references
+          .map((reference) => (minutesIdSet.has(reference) ? reference : keyMap.get(reference.toUpperCase())))
+          .filter((minutesId): minutesId is string => minutesId !== undefined);
+        const named: string[] = [];
+        const text = [card.subject, card.summary, card.snippet, ...references].join("\n");
+        for (const match of text.matchAll(PRECOMPUTED_NAMED_DECISION)) {
+          const name = match[1] ?? "";
+          let minutesId: string | undefined;
+          if (name.startsWith("minutes:")) minutesId = name;
+          else {
+            const key = name.toUpperCase();
+            const exact = precomputed.minutesKeys.find(([externalKey]) => externalKey === key);
+            const tails = precomputed.minutesKeys.filter(([externalKey]) => externalKey.endsWith(`-${key}`));
+            minutesId = exact?.[1] ?? (tails.length === 1 ? tails[0]?.[1] : undefined);
+          }
+          if (minutesId === undefined) continue;
+          const address = `${minutesId}#D${Number(match[2])}`;
+          if (obsoleteMap.has(address) && !named.includes(address)) named.push(address);
+        }
+        addresses = [...collectForMinutes(minutesIds), ...named];
+      } else {
+        addresses = ownDecisions && hit.kind === "minutes" ? collectForMinutes([hit.id]) : [];
+      }
+      const hints = hintsFor(addresses);
+      return hints.length === 0 ? hit : { ...hit, obsoleteDecisions: hints };
+    });
+  }
   const ledger = decisionLedger(state);
   if (![...ledger.decisions.values()].some((entry) => entry.status === "obsolete")) return hits;
   const ownDecisions = (options.decisions ?? "valid") !== "valid";

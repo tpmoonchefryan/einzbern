@@ -222,6 +222,7 @@ test("095: same-head cross-process Crest/FTS freshness and old projection recove
   assert.equal(expiredCold.value, expired.value);
   assert.equal(child(f, "hook", late).value, hookExpired.value);
   await fs.writeFile(join(cachePath(f.id), "crest.bin"), "broken crest projection");
+  await fs.writeFile(join(cachePath(f.id), "crest-meta.bin"), "broken crest projection");
   const crestRebuilt = child(f, "cli", late);
   assert.equal(crestRebuilt.value, expiredCold.value);
   assert.equal(crestRebuilt.observation.cacheReasons.includes("crest-projection-hit"), false);

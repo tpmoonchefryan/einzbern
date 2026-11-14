@@ -71,7 +71,6 @@ import type {
   ParsedSection,
 } from "./managed-sections.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
-import { BRAND } from "./names.js";
 import { gitTopLevel, readRegistry, resolveLibrary } from "./registry.js";
 import type { ResolutionPath } from "./registry.js";
 import { BUILT_IN_RULES, builtInRule, ruleBody } from "./rules-catalog.js";
@@ -126,10 +125,8 @@ export interface AgentsSection {
 /** CLAUDE.md's one section: the import of AGENTS.md, written only while CLAUDE.md does not import it (R5). */
 export const CLAUDE_IMPORT_SECTION: AgentsSection = Object.freeze({ id: "claude-import", file: CLAUDE_FILE, body: "@AGENTS.md\n" });
 
-/** One Skill entry shared by managed navigation and fallback pointer hooks. */
-export const NAVIGATION_LINES: readonly string[] = Object.freeze([
-  `This workspace uses ${BRAND.engine.name}. Load and follow the ${BRAND.helper.name} skill for applicable work.`,
-]);
+import { NAVIGATION_LINES } from "./navigation-lines.js";
+export { NAVIGATION_LINES };
 
 /** AGENTS.md's navigation section, written only on a device whose agents.navigation is written. */
 export const NAVIGATION_SECTION: AgentsSection = Object.freeze({ id: "navigation", file: AGENTS_FILE, body: `${NAVIGATION_LINES.join("\n")}\n` });

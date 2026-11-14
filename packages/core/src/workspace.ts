@@ -313,17 +313,8 @@ export type WorkspaceCrashPoint =
   | "before-write"
   | "after-event-commit";
 
-export class WorkspaceError extends Error {
-  readonly reasonCode: WorkspaceReasonCode;
-  readonly details: Readonly<Record<string, string>> | undefined;
-
-  constructor(reasonCode: WorkspaceReasonCode, message: string, details?: Readonly<Record<string, string>>) {
-    super(message);
-    this.name = "WorkspaceError";
-    this.reasonCode = reasonCode;
-    this.details = details;
-  }
-}
+import { WorkspaceError } from "./workspace-error.js";
+export { WorkspaceError };
 
 // WSR-1: the relocation ledger. An APPEND-ONLY record of address rebindings that
 // travels inside the control tree it describes. It is a TENTH, OPTIONAL metadata

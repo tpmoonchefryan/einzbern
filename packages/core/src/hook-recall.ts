@@ -1,5 +1,5 @@
 import { readRecallAuthority } from "./recall-authority.js";
-import { effectiveProjectState } from "./project-chain.js";
+import { effectiveProjectState } from "./project-state-read.js";
 // SPDX-License-Identifier: Apache-2.0
 
 // TCRN-CROSS-STORY-477 R2, AC3 and STORY-474 R2, R3 (MIN-227 D5, D7): what the one Einzbern hook
@@ -34,7 +34,7 @@ import { effectiveProjectState } from "./project-chain.js";
 // writes that code into log/hook.ndjson in the device directory; a failure is still thrown, and
 // the entry notes the failure's own reasonCode before passing it on.
 
-import { NAVIGATION_LINES } from "./agents-sections.js";
+import { NAVIGATION_LINES } from "./navigation-lines.js";
 import { CODEX_HOOK_EVENTS, HOST_HOOK_EVENTS, HOST_HOOK_HOSTS, HOST_HOOK_POINTER_EVENTS } from "./host-hooks.js";
 import type { HostHookHost } from "./host-hooks.js";
 import { recallPersistent, recallDocuments } from "./recall.js";

@@ -9,7 +9,7 @@ import { writeFileAtomic } from "./atomic-file.js";
 import { cachePath } from "./device-home.js";
 import type { Library } from "./ether-library.js";
 import { FRAMEWORK_VERSION } from "./framework-version.js";
-import { recordBoundary } from "./source-verification-records.js";
+import { recordBoundary, recordBoundarySync } from "./source-verification-records.js";
 import { observeCacheRead, observeCacheWrite, observeVerificationRecord, observeStage } from "./recall-observation.js";
 
 const SCHEMA = "einzbern.protected-projection.v1";
@@ -44,6 +44,24 @@ export async function readProtectedProjection<T>(library: Library, name: string,
       return deserialize(bytes) as T;
     } catch { return null; }
   });
+}
+
+export function readProtectedProjectionSync<T>(library: Library, name: string, binding: string | (() => string | null)): T | null {
+  try {
+    const boundary = recordBoundarySync(library, "derived-projections");
+    if (boundary === null) return null;
+    const proof = regularBytes(join(boundary.records, `${name}.json`));
+    observeVerificationRecord(proof.length);
+    const record = JSON.parse(proof.toString("utf8"));
+    if (record.schemaVersion !== SCHEMA || record.engine !== FRAMEWORK_VERSION
+      || record.device !== boundary.deviceIdentity || record.root !== boundary.library.root || typeof record.sha256 !== "string") return null;
+    const expected = typeof binding === "function" ? binding() : binding;
+    if (expected === null || record.binding !== expected) return null;
+    const bytes = regularBytes(join(cachePath(library.manifest.libraryId), `${name}.bin`));
+    observeCacheRead(bytes.length);
+    if (bytes.length !== record.bytes || hash(bytes) !== record.sha256) return null;
+    return deserialize(bytes) as T;
+  } catch { return null; }
 }
 
 export async function writeProtectedProjection(library: Library, name: string, binding: string, value: unknown): Promise<void> {

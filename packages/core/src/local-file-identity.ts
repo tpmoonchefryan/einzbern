@@ -109,7 +109,12 @@ export async function localTreeIdentity(root: string): Promise<string | null> {
     if (!lstatSync(root).isDirectory()) return null;
     visit(root);
     entries.sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0);
-    return createHash("sha256").update(JSON.stringify(entries)).digest("hex");
+    const hash = createHash("sha256");
+    for (const [rel, id, sha] of entries) {
+      hash.update(rel);
+      hash.update(`\0${id.boot}:${id.mount}:${id.device}:${id.fileId}:${id.birth}:${id.change}:${id.length}:${id.mode}:${sha ?? ""}\n`);
+    }
+    return hash.digest("hex");
   } catch {
     return null;
   }

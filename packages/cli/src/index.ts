@@ -1,6 +1,4 @@
 import { isProjectArtifactBinding, resolveProjectArtifactBinding } from "../../core/src/portable-path.js";
-import { withRecallObservation } from "../../core/src/recall-observation.js";
-import { readRecallAuthority } from "../../core/src/recall-authority.js";
 import { MEMORY_LEASE_VARIABLE } from "../../../scripts/lib/memory-budget.mjs";
 import { readWorkContentImpact } from "../../core/src/work-requirements.js";
 import { workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
@@ -11,18 +9,11 @@ import { readDotExtensionSource } from "../../core/src/dot-agents.js";
 import type { HostExecutionRequest } from "../../core/src/execution-fallback.js";
 
 import { readEngineModelPolicyFile } from "../../core/src/engine-model-policy.js";
-import { recommendHostFallbacks, validateHostExecutionRequest } from "../../core/src/execution-fallback.js";
 import { deviceHome } from "../../core/src/device-home.js";
 import { readFile } from "node:fs/promises";
-import { configureStorageLocation } from "../../core/src/storage-configure.js";
-import { consolidateStorage, refreshLibraryReadme } from "../../core/src/storage-consolidate.js";
-import { consolidateLibraries, cleanConsolidatedSources } from "../../core/src/consolidate.js";
 import type { ConsolidationMapping } from "../../core/src/consolidate.js";
 // SPDX-License-Identifier: Apache-2.0
-import { prepareDispatch, recordDispatch, writeDispatchArtifact } from "../../core/src/dispatch-workflow.js";
-import { normalizeDispatchAdmissionEvidence } from "../../core/src/dispatch-evidence.js";
-import { discardRelocationPreparation } from "../../core/src/relocate.js";
-import { planConfigurationProjectionRefresh, refreshConfigurationProjections, diagnoseLegacySharedPaths } from "../../core/src/configuration-projections.js";
+import type { normalizeDispatchAdmissionEvidence } from "../../core/src/dispatch-evidence.js";
 import { CONFIG_BACKUP_COMMAND_CATALOG, runConfigBackupCommand } from "./config-backup-commands.js";
 import type { ConfigBackupCommandContext } from "./config-backup-commands.js";
 import type { ConfigBackupSource, ConfigBackupSourceVersion, ConfigBackupRetainedContainer } from "../../core/src/config-backup.js";
@@ -36,14 +27,11 @@ import { readDevice } from "../../core/src/device-identity.js";
 import { CONFIG_BACKUP_LOCAL_BINDING_DIRECTORY, validateConfigBackupRetentionPolicy } from "../../core/src/config-backup-retention.js";
 import { NATIVE_TOOL_COMMAND_CATALOG, runNativeToolCommand } from "./native-tool-commands.js";
 import type { DotExecutionRequest } from "../../core/src/dot-execution.js";
-import { AGENT_OUTPUT_MAX_BYTES } from "../../core/src/runtime-input-contract.js";
 import type { RuntimeCommandCatalogEntry, RuntimeCommandFlag } from "../../core/src/runtime-input-contract.js";
-import type { RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { ExecutionAdmissionRequest } from "../../core/src/execution-admission.js";
 import { readMachineSettings } from "../../core/src/machine-settings.js";
 import { configurationContract, annotateConfigValue } from "../../core/src/configuration-contract.js";
 import { evaluateExecutionQuota, resolveExecutionConcurrency } from "../../core/src/execution-policy.js";
-import { ensureSetupProjectBinding } from "../../core/src/setup-fresh.js";
 import { DOT_AGENTS_TEMPLATE_VERSION, DOT_INSTALLATION_TARGET, SETUP_EXECUTION_TARGETS, dotEnabledRuleSources } from "../../core/src/dot-agents.js";
 import type { SetupExecutionTarget } from "../../core/src/dot-agents.js";
 import { resolveEngineExecutionPolicy, engineModelPolicyCatalogFromSnapshot } from "../../core/src/engine-model-policy.js";
@@ -134,7 +122,6 @@ import {
   KNOWLEDGE_STORE_SCOPES,
   knowledgeHintFor,
   readKnowledgeHintCards,
-  readRecallCards,
   assertDoneGates,
   listGates,
   approveProposal,
@@ -147,14 +134,6 @@ import {
   setGate,
   languageProviderFromBundle,
   parseLanguageBundle,
-  RECALL_DEFAULT_TAU,
-  recallPersistent,
-  readRuntimeKnowledgeLanguagePolicy,
-  recallContextLines,
-  recallDocuments,
-  recallInputsFromState,
-  formatRecallLine,
-  resolveQueryLanguage,
   templateBindingFromWorkRecord,
   probeHost,
   validateTemplateDocument,
@@ -200,7 +179,6 @@ import {
   minutesView,
   recordMinutes,
   DECISION_STATUS_FILTERS,
-  recallDecisionHints,
   workObsoleteDecisions,
   BRAND,
   SKILL_COPIES_FILES,
@@ -277,32 +255,23 @@ export const RELEASE_REQUIRED_ARGUMENTS = [
 export type ReleaseRequiredArgument =
   (typeof RELEASE_REQUIRED_ARGUMENTS)[number];
 
+import {
+  WorkflowCliError,
+  booleanValue,
+  fail,
+  integerValue,
+  parseArguments,
+  required,
+} from "./cli-args.js";
+import type { CliIo } from "./cli-args.js";
+import { runRecallCli, runRecallCommand } from "./recall-fast.js";
+
+export { WorkflowCliError, type CliIo };
+
 export function missingReleaseArguments(
   supplied: Readonly<Record<string, string | undefined>>,
 ): readonly ReleaseRequiredArgument[] {
   return RELEASE_REQUIRED_ARGUMENTS.filter((name) => !supplied[name]);
-}
-
-export class WorkflowCliError extends Error {
-  readonly reasonCode: string;
-  // TCRN-CROSS-INC-378: string facts a caller needs beside the code, such as whether the
-  // event was committed; the bin prints the keys it allows on stderr.
-  readonly details: Readonly<Record<string, string>> | undefined;
-
-  constructor(reasonCode: string, message: string, details?: Readonly<Record<string, string>>) {
-    super(message);
-    this.name = "WorkflowCliError";
-    this.reasonCode = reasonCode;
-    this.details = details;
-  }
-}
-
-export interface CliIo {
-  write(value: string): void;
-}
-
-function fail(reasonCode: string, message: string): never {
-  throw new WorkflowCliError(reasonCode, message);
 }
 
 const EXACTLY_ONE_FLAGS = {
@@ -324,62 +293,6 @@ function requireExactlyOne(command: ExactlyOneCommand, values: Readonly<Record<s
   if ((values[first.name] === undefined) === (values[second.name] === undefined)) {
     fail("CLI_ARGUMENT_MALFORMED", `${command} takes exactly one of --${first.name} and --${second.name}`);
   }
-}
-
-function parseArguments(arguments_: readonly string[], allowed: readonly string[]): Readonly<Record<string, string>> {
-  const values: Record<string, string> = {};
-  let index = 0;
-  while (index < arguments_.length) {
-    const token = arguments_[index];
-    let name: string;
-    let value: string;
-    if (token !== undefined && token.startsWith("--") && token.includes("=")) {
-      // Attached form --flag=value: split on the FIRST "=" so the value may itself
-      // contain "=" or legitimately begin with "--" (unrepresentable in two-token form).
-      const equalsAt = token.indexOf("=");
-      name = token.slice(2, equalsAt);
-      value = token.slice(equalsAt + 1);
-      index += 1;
-    } else {
-      const next = arguments_[index + 1];
-      // Two-token form is unchanged: a value beginning with "--" is still rejected,
-      // which doubles as missing-value (undefined next) detection.
-      if (!token?.startsWith("--") || next === undefined || next.startsWith("--")) {
-        fail("CLI_ARGUMENT_MALFORMED", String(token ?? "missing"));
-      }
-      name = token.slice(2);
-      value = next;
-      index += 2;
-    }
-    if (!allowed.includes(name)) {
-      fail("CLI_ARGUMENT_UNKNOWN", name);
-    }
-    if (Object.hasOwn(values, name)) {
-      fail("CLI_ARGUMENT_DUPLICATE", name);
-    }
-    values[name] = value;
-  }
-  return values;
-}
-
-function required(values: Readonly<Record<string, string>>, names: readonly string[]): void {
-  const missing = names.filter((name) => !values[name]);
-  if (missing.length > 0) {
-    fail("CLI_ARGUMENT_MISSING", missing.join(","));
-  }
-}
-
-// CQ-05(c): the single arbiter for integer-valued flags. A syntactically malformed value
-// fails at the CLI boundary with CLI_ARGUMENT_MALFORMED naming the offending flag, instead
-// of reaching core as NaN and being reported under a semantic reason code. The minimum is
-// optional; only non-integers and values below it are rejected here, and every other
-// integer reaches core for its own judgement.
-function integerValue(values: Readonly<Record<string, string>>, name: string, minimum: number = Number.MIN_SAFE_INTEGER): number {
-  const value = Number(values[name]);
-  if (!Number.isSafeInteger(value) || value < minimum) {
-    fail("CLI_ARGUMENT_MALFORMED", name);
-  }
-  return value;
 }
 
 // STORY-178: the file↔pg migration target. Only `file` and `pg` are legal; the
@@ -495,13 +408,6 @@ function nullableIntegerValue(values: Readonly<Record<string, string>>, name: st
   if (raw === "-" || raw === "null") return null;
   return integerValue(values, name);
 }
-
-function booleanValue(value: string | undefined, name: string): boolean {
-  if (value === undefined || value === "false") return false;
-  if (value === "true") return true;
-  fail("CLI_ARGUMENT_MALFORMED", name);
-}
-
 
 // TCRN-CROSS-STORY-364 requirement 3: the card write paths -- knowledge-capture,
 // knowledge-create and knowledge-batch's create members (conference-close --distill retired
@@ -1032,29 +938,6 @@ function statusFilterOption(value: string | undefined): { readonly status?: Know
 // all reads every card and every decision. Work records have no such status and are recalled as always.
 // A model adds it only when a user asked for them; the prompt hook takes none and reads valid records
 // only, always.
-const RECALL_STATUS_FILTERS = Object.freeze(["valid", "removed", "obsolete", "all"] as const);
-type RecallStatusFilter = typeof RECALL_STATUS_FILTERS[number];
-
-function recallStatusOption(value: string | undefined): { readonly status?: RecallStatusFilter } {
-  if (value === undefined) return {};
-  if (!(RECALL_STATUS_FILTERS as readonly string[]).includes(value)) {
-    fail("CLI_ARGUMENT_MALFORMED", `status=${value}; one of ${RECALL_STATUS_FILTERS.join(", ")}`);
-  }
-  return { status: value as RecallStatusFilter };
-}
-
-function recallCrestSummary(degraded: RecallUserCrestDegraded, store: RecallCardStoreRead): Readonly<Record<string, JsonValue>> {
-  const diagnostics = store.evidence?.["diagnostics"] as Readonly<Record<string, JsonValue>> | undefined;
-  return {
-    reasonCode: degraded.reasonCode,
-    withheldCards: degraded.withheldCards ?? null,
-    conflictPairs: diagnostics?.["conflictPairCount"] ?? store.unresolvedConflicts.length,
-    duplicateIds: diagnostics?.["duplicateIdCount"] ?? store.unresolvedDuplicates.length,
-    unresolvedScopes: diagnostics?.["unresolvedScopeCount"] ?? store.unresolvedScopes.length,
-    awaitingChain: diagnostics?.["awaitingChainCount"] ?? store.awaitingChain.length,
-  };
-}
-
 // TCRN-CROSS-STORY-485 R1 (TCRN-CROSS-SUB-345): a gate's command is its argv, given as one JSON array
 // of strings; the engine checks every argument when the gate is declared.
 function gateCommandValue(value: string): unknown {
@@ -1419,7 +1302,10 @@ function affectedProjectionTargets(state: Awaited<ReturnType<typeof materializeW
 }
 
 async function projectionRefreshReadback(state: Awaited<ReturnType<typeof materializeWorkspace>>, projectId?: string): Promise<Record<string, unknown>> {
-  try { return { plan: await planConfigurationProjectionRefresh({ libraryId: state.metadata.workspaceId, ...(projectId === undefined ? {} : { projectId }) }), refreshCommand: "configuration-projections-refresh --workspace <library> --at <instant>", coverage: "known-device-registry-only" }; }
+  try {
+    const { planConfigurationProjectionRefresh } = await import("../../core/src/configuration-projections.js");
+    return { plan: await planConfigurationProjectionRefresh({ libraryId: state.metadata.workspaceId, ...(projectId === undefined ? {} : { projectId }) }), refreshCommand: "configuration-projections-refresh --workspace <library> --at <instant>", coverage: "known-device-registry-only" };
+  }
   catch { return { plan: null, status: "unavailable", reason: "projection-discovery-unavailable", refreshCommand: "configuration-projections-plan --workspace <library>" }; }
 }
 
@@ -2086,36 +1972,8 @@ export function assertDeclaredOutputCategory(command: string, output: string): v
 }
 
 export async function runCli(arguments_: readonly string[], io: CliIo): Promise<void> {
-  if (arguments_[0] !== "recall" || process.env["EINZBERN_RECALL_OBSERVATION"] !== "1") return runCliUnobserved(arguments_, io);
-  const results: { reasonCode: string; outcome: string }[] = [];
-  let observation: import("../../core/src/recall-observation.js").RecallObservation | undefined;
-  try {
-    await withRecallObservation(() => runCliUnobserved(arguments_, { write(value) {
-      let reasonCode = "CLI_RECALL_RESULT";
-      try {
-        const parsed = JSON.parse(value) as { reasonCode?: unknown };
-        if (typeof parsed.reasonCode === "string") reasonCode = parsed.reasonCode;
-      } catch { /* Non-JSON output is not copied into telemetry. */ }
-      const outcome = reasonCode === "RECALL_READY" ? "hit"
-        : reasonCode === "RECALL_NO_STRONG_HIT" ? "no-hit" : "result";
-      results.push({ reasonCode, outcome });
-      io.write(value);
-    } }), value => { observation = value; });
-  } catch (error) {
-    const reason = (error as { reasonCode?: unknown }).reasonCode;
-    const queryPosition = arguments_.indexOf("--query");
-    const query = queryPosition < 0 ? undefined : arguments_[queryPosition + 1];
-    const empty = typeof query === "string" && query.trim().length === 0
-      && (error as { message?: unknown }).message === "query"
-      && (reason === "CLI_ARGUMENT_MISSING" || reason === "CLI_ARGUMENT_MALFORMED");
-    results.push({ reasonCode: typeof reason === "string" ? reason : "CLI_RECALL_FAILED", outcome: empty ? "empty" : "error" });
-    throw error;
-  } finally {
-    if (observation !== undefined) {
-      const { logCliRecall } = await import("../../core/src/recall-observation-log.js");
-      await logCliRecall(observation, results);
-    }
-  }
+  if (arguments_[0] === "recall" && !arguments_.includes("--help") && !arguments_.includes("-h")) return runRecallCli(arguments_, io);
+  return runCliUnobserved(arguments_, io);
 }
 
 async function runCliUnobserved(arguments_: readonly string[], io: CliIo): Promise<void> {
@@ -2622,6 +2480,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     try { observations = JSON.parse(readFileSync(values.observations!, "utf8")); }
     catch { fail("DISPATCH_EVIDENCE_INPUT_INVALID", "--observations must name a readable machine observations JSON file"); }
     if (values.action !== undefined && !["implementation", "research", "coordination"].includes(values.action)) fail("CLI_ARGUMENT_MALFORMED", "action");
+    const { prepareDispatch, writeDispatchArtifact } = await import("../../core/src/dispatch-workflow.js");
     const result = await prepareDispatch(await materializeWorkspace(values.workspace!), values.id!, {
       ...(values.action === undefined ? {} : { action: values.action as "implementation" | "research" | "coordination" }),
       host: values.host!, category: values.category!, rejections: integerValue(values, "rejections"), requestedAgents: integerValue(values, "requested-agents"),
@@ -2639,6 +2498,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       binding = JSON.parse(readFileSync(values.binding!, "utf8"));
       processReturn = JSON.parse(readFileSync(values["process-return"]!, "utf8"));
     } catch { fail("DISPATCH_EVIDENCE_INPUT_INVALID", "--binding and --process-return must name readable JSON files"); }
+    const { recordDispatch, writeDispatchArtifact } = await import("../../core/src/dispatch-workflow.js");
     const result = recordDispatch(binding, integerValue(values, "target"), processReturn);
     await writeDispatchArtifact(values.output!, result);
     io.write(`${JSON.stringify(result)}\n`);
@@ -2658,6 +2518,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     } catch {
       fail("DISPATCH_EVIDENCE_INPUT_INVALID", "--from-file must name a readable JSON evidence file");
     }
+    const { normalizeDispatchAdmissionEvidence } = await import("../../core/src/dispatch-evidence.js");
     const result = normalizeDispatchAdmissionEvidence(input);
     io.write(canonicalJson(result));
     if (!result.valid) fail("DISPATCH_EVIDENCE_INVALID", "Dispatch evidence association failed; see stdout problems");
@@ -2702,6 +2563,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     let initializedProjectId: string | undefined;
     if (values.project !== undefined) {
       await ensureProjectCoordination(realPath, values.at!);
+      const { ensureSetupProjectBinding } = await import("../../core/src/setup-fresh.js");
       initializedProjectId = await ensureSetupProjectBinding(values.project, realPath, { at: values.at!, deviceHome: (await import("../../core/src/device-home.js")).deviceHome() });
       state = await declareChainIdentity(realPath, { ...chainIdentity(await materializeWorkspace(realPath))!, primaryProjectId: initializedProjectId }, { occurredAt: values.at! });
     }
@@ -2996,18 +2858,21 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   if (command === "storage-configure") {
     const values = parseArguments(rest, ["library", "runtime", "at", "decided-in", "yes"]);
     required(values, ["library", "runtime", "at", "decided-in"]);
+    const { configureStorageLocation } = await import("../../core/src/storage-configure.js");
     io.write(canonicalJson(await configureStorageLocation(deviceHome(), values.library!, values.runtime!, values.at!, values["decided-in"]!, booleanValue(values.yes, "yes")) as JsonValue));
     return;
   }
   if (command === "storage-consolidate") {
     const values = parseArguments(rest, ["from", "to", "retire-runtime-root", "at", "decided-in", "yes", "actor"]);
     required(values, ["from", "to", "retire-runtime-root", "at", "decided-in", "actor"]);
+    const { consolidateStorage } = await import("../../core/src/storage-consolidate.js");
     io.write(canonicalJson(await consolidateStorage(deviceHome(), values.from!, values.to!, values["retire-runtime-root"]!, values.at!, values["decided-in"]!, booleanValue(values.yes, "yes"), values.actor!) as JsonValue));
     return;
   }
   if (command === "library-readme-refresh") {
     const values = parseArguments(rest, ["workspace", "at", "actor"]);
     required(values, ["workspace", "at", "actor"]);
+    const { refreshLibraryReadme } = await import("../../core/src/storage-consolidate.js");
     io.write(canonicalJson(await refreshLibraryReadme(values.workspace!, values.at!, values.actor!) as JsonValue));
     return;
   }
@@ -3015,6 +2880,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const values = parseArguments(rest, ["to", "copies", "at", "yes"]);
     required(values, ["to", "copies", "at"]);
     const copies = JSON.parse(await readFile(values.copies!, "utf8")) as { path: string; libraryId: string }[];
+    const { cleanConsolidatedSources } = await import("../../core/src/consolidate.js");
     io.write(canonicalJson(await cleanConsolidatedSources(values.to!, copies, values.at!, booleanValue(values.yes, "yes")) as JsonValue));
     return;
   }
@@ -3022,12 +2888,14 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const values = parseArguments(rest, ["mapping", "to", "at", "actor", "decided-in", "yes"]);
     required(values, ["mapping", "to", "at", "actor", "decided-in"]);
     const mapping = JSON.parse(await readFile(values.mapping!, "utf8")) as ConsolidationMapping;
+    const { consolidateLibraries } = await import("../../core/src/consolidate.js");
     io.write(canonicalJson(await consolidateLibraries(mapping, values.to!, { at: values.at!, actor: values.actor!, decidedIn: values["decided-in"]!, yes: booleanValue(values.yes, "yes") }) as JsonValue));
     return;
   }
   if (command === "workspace-relocate-discard") {
     const values = parseArguments(rest, ["workspace", "to", "transaction-id"]);
     required(values, ["workspace", "to", "transaction-id"]);
+    const { discardRelocationPreparation } = await import("../../core/src/relocate.js");
     io.write(canonicalJson(await discardRelocationPreparation(values.workspace!, values.to!, values["transaction-id"]!))); return;
   }
   if (command === "workspace-relocate") {
@@ -3365,6 +3233,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   }
   if (command === "execution-fallback-candidates") {
     const values = parseArguments(rest, ["request", "at"]); required(values, ["request", "at"]);
+    const { recommendHostFallbacks, validateHostExecutionRequest } = await import("../../core/src/execution-fallback.js");
     const request = validateHostExecutionRequest(JSON.parse(await readFile(values.request!, "utf8")));
     const policy = request.capabilities.hostKind === "dot" ? null : await readEngineModelPolicyFile();
     io.write(canonicalJson(recommendHostFallbacks(request, policy, values.at!))); return;
@@ -3421,6 +3290,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const source = { libraryId: state.metadata.workspaceId, ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }) };
     const outputKeys = values["output-keys"] === undefined ? undefined : argumentJsonValue(values["output-keys"], "output-keys");
     if (outputKeys !== undefined && (!Array.isArray(outputKeys) || outputKeys.some(key => typeof key !== "string"))) fail("CLI_ARGUMENT_MALFORMED", "output-keys must be a string array");
+    const { planConfigurationProjectionRefresh, refreshConfigurationProjections } = await import("../../core/src/configuration-projections.js");
     const result = applying ? await refreshConfigurationProjections(source, { occurredAt: values.at!, ...(values.actor === undefined ? {} : { actorId: values.actor }), ...(outputKeys === undefined ? {} : { outputKeys: outputKeys as string[] }) }) : await planConfigurationProjectionRefresh(source);
     io.write(canonicalJson({ reasonCode: applying ? "CONFIGURATION_PROJECTIONS_REFRESH_FINISHED" : "CONFIGURATION_PROJECTIONS_PLAN_READY", ...result })); return;
   }
@@ -3462,6 +3332,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       effect: "No floor, client, project policy, or accepted boundary is changed. Actual capable release and writer evidence remain required.",
     };
     const presentedSettings = chain?.role === "coordination" ? coordinationCatalogRows(state, catalog.settings) : markUnresolvedCommonDefault(catalog.settings, reading);
+    const { diagnoseLegacySharedPaths } = await import("../../core/src/configuration-projections.js");
     io.write(canonicalJson({ ...catalog, reasonCode: "SETTINGS_CATALOG_READY", chain, projectId: state.configurationProjectId,
       ...(reading.commonDefault === null ? {} : { commonDefault: reading.commonDefault as unknown as JsonValue }),
       projects: state.projects.filter(entry => !entry.tombstone).map(entry => ({ id: entry.id, externalKey: entry.externalKey, name: entry.name, parentProjectId: entry.parentProjectId ?? null })),
@@ -4004,204 +3875,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // the path the caller resolved rather than used to resolve one -- a hook whose path
   // resolution drifts gets a refusal instead of an answer from the wrong chain.
   if (command === "recall") {
-    // TCRN-CROSS-STORY-474: recall answers from one library, whatever directory it sits in; the
-    // partition flag went with the partition registry. --host stays: it names the prompt-language
-    // policy the answer is negotiated against.
-    // TCRN-CROSS-SUB-425 (MIN-239 D6), TCRN-CROSS-SUB-426 R17 续作修订三 (C-R18-1; STORY-514 R4): the
-    // cards and the decisions are the valid ones unless --status names a status of one family, which reads
-    // that family as its list verb does (removed: the removed cards alone; obsolete: the obsolete
-    // decisions alone; all: both families whole) and the other family's valid records; a model adds it
-    // only when a user asked for them. See recallStatusOption.
-    const values = parseArguments(rest, ["project-id", "workspace", "host", "at", "query", "limit", "tau", "allow-trailing", "status", "view"]);
-    required(values, ["workspace", "at", "query"]);
-    const status = recallStatusOption(values.status);
-    if (values.view !== undefined && values.view !== "agent") fail("CLI_ARGUMENT_MALFORMED", "view");
-    const cardStatus: KnowledgeStatusFilter = status.status === "removed" || status.status === "all" ? status.status : "valid";
-    const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
-    const workspace = values.workspace ?? "";
-    const query = values.query ?? "";
-    if (query.trim().length === 0 || query.length > RUNTIME_CAPACITY.stringCodeUnits || !query.isWellFormed()) fail("CLI_ARGUMENT_MALFORMED", "query");
-    const limit = values.limit === undefined ? undefined : integerValue(values, "limit");
-    if (limit !== undefined && (limit < 1 || !Number.isSafeInteger(limit))) fail("CLI_ARGUMENT_MALFORMED", "limit");
-    const { state: rawState, authority } = await readRecallAuthority(workspace, true);
-    const state = await effectiveProjectState(rawState, values["project-id"]);
-    const projectId = values["project-id"];
-    const settingValue = (key: string): string | undefined => state.settings.find((entry) => entry.key === key)?.value;
-    // The flag wins over the setting, the setting over the recorded default: the same
-    // order work-list's scope-bytes already uses.
-    const configuredTau = Number(settingValue("retrieval.tau") ?? String(RECALL_DEFAULT_TAU));
-    const tau = values.tau === undefined
-      ? (Number.isFinite(configuredTau) && configuredTau >= 0 ? configuredTau : RECALL_DEFAULT_TAU)
-      : Number(values.tau);
-    if (!Number.isFinite(tau) || tau < 0) fail("CLI_ARGUMENT_MALFORMED", "tau");
-    // TCRN-CROSS-STORY-364 requirement 4: a prompt whose language is outside the recorded
-    // prompt languages is answered, and the answer says the translation is owed and which
-    // model owes it. The engine calls no model; the hook holding it translates and asks
-    // again. Read-side is fail-open, unlike the write path, because a session with no
-    // answer is worse than an answer ranked in the wrong language.
-    const languageAnswer = resolveQueryLanguage(query, await readRuntimeKnowledgeLanguagePolicy(state.settings, values.host));
-    const scopeBytes = Number(settingValue("retrieval.scopeExcerptBytes") ?? "512");
-    const scopeExcerptBytes = Number.isSafeInteger(scopeBytes) && scopeBytes > 0 ? scopeBytes : 512;
-    // The byte budget of one prompt's answer (TCRN-CROSS-STORY-474 R2): the hit lines are cut to it
-    // at whole lines, which is what a host puts in front of the prompt.
-    const promptBytes = Number(settingValue("injection.perPromptBytes") ?? "1600");
-    const perPromptBytes = Number.isSafeInteger(promptBytes) && promptBytes > 0 ? promptBytes : 1600;
-    // TCRN-CROSS-STORY-476 R5 (TCRN-CROSS-SUB-311): the cards come from two stores, the library's
-    // crest and this user's crest, each read whole as an explicit search corpus (explicit-only
-    // article index cards admitted, the complete corpus before scoring so bm25 keeps its baseline)
-    // and each card labelled with its store. A store with no cards to give -- none initialized, or
-    // one trailing the chain while the caller did not admit a trailing read -- still leaves the
-    // work records and minutes to recall, and its reason code is reported rather than swallowed,
-    // so "no cards" is never indistinguishable from "no card matched". knowledgeReasonCode stays
-    // the library store's, as it always was.
-    // Each store answers the card status as knowledge-list does: removed, the removed cards alone; all,
-    // every card.
-    const cards = await readRecallCards(workspace, {
-      ...(projectId === undefined ? {} : { projectId }),
-      at: values.at ?? "",
-      allowTrailing: booleanValue(values["allow-trailing"], "allow-trailing"),
-      ...(cardStatus === "valid" ? {} : { status: cardStatus }),
-    }, authority);
-    // TCRN-CROSS-STORY-474 R1: what the index holds is decided in one place (recall-inputs.ts), so
-    // the verb and the prompt hook cannot index differently: the Stories, Incidents, Initiatives and
-    // Epics with their goal, body and parent titles, every minutes record, and the cards.
-    const result = await recallPersistent({
-      // Library identity stays path-independent; project-specific corpus inputs must not share an index.
-      cacheKey: `${state.metadata.workspaceId}:${values["project-id"] ?? ""}`,
-      // The storage checkpoint: the chain head the records were replayed from, and the
-      // digests of the two knowledge answers they were read with. Any one moving is a
-      // different corpus, and the index is rebuilt from the rows that actually changed.
-      // A library's head is one digest over every stream's head, so it moves with any
-      // entry of the version vector. An index of another status of decisions is another corpus
-      // at the same head, and names that status (the cards' status is in their digest).
-      checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}`,
-      documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes,
-        ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) })),
-      query,
-      tau,
-      ...(limit === undefined ? {} : { limit }),
-    }, workspace);
-    // TCRN-CROSS-SUB-425, TCRN-CROSS-SUB-426 R17 续作修订三 (STORY-514 AC1): a hit on a removed card, which
-    // only --status removed or all reads, says so and carries the card's removal as knowledge-list
-    // answers it: the reason, basis, actor and instant, the card that superseded it, and its event.
-    const removals = new Map(cards.cards.flatMap((card) => (card.removal === undefined ? [] : [[card.id, card.removal] as const])));
-    const statusHits = result.records.map((hit) => {
-      const removal = hit.kind === "card" ? removals.get(hit.id) : undefined;
-      return removal === undefined ? hit : { ...hit, status: "removed", removal };
-    });
-    // TCRN-CROSS-SUB-426 (MIN-239 D5, D6): the valid decisions are indexed unless --status named
-    // obsolete (the obsolete ones alone) or all (every one); a work or card hit that points at an
-    // obsolete decision -- and, in a recall that indexed them, a minutes hit that holds one -- carries it
-    // under obsoleteDecisions, with the decision that superseded it (null when withdrawn), and its line
-    // says so.
-    const hits = recallDecisionHints(state, cards.cards, statusHits, { decisions });
-    const context = [...recallContextLines(hits, perPromptBytes)];
-    const source = {
-      workspaceId: state.metadata.workspaceId,
-      version: state.version,
-      headEventHash: state.headEventHash,
-    };
-    const knowledge = {
-      knowledgeReasonCode: cards.stores.project.reasonCode,
-      // Both stores' reads: each one's reason code and how many cards it gave.
-      knowledgeStores: {
-        project: { reasonCode: cards.stores.project.reasonCode, cards: cards.stores.project.cards, ...cards.stores.project.evidence },
-        user: { reasonCode: cards.stores.user.reasonCode, cards: cards.stores.user.cards, ...cards.stores.user.evidence },
-      },
-      // TCRN-CROSS-SUB-310 (MIN-235 D7): a user crest that gave fewer cards than it holds says so at
-      // the top of the answer -- its read refused (the refusal's reasonCode), or cards withheld in
-      // unresolved conflict (KNOWLEDGE_POSSIBLE_CONFLICT with unresolvedConflicts and withheldCards)
-      // -- so "no user card matched" never stands in for "the user crest was not read".
-      // TCRN-CROSS-SUB-413: every version of an id two devices wrote is withheld too, named under
-      // unresolvedDuplicates (KNOWLEDGE_DUPLICATE when no pair is withheld as well).
-      ...(cards.userCrestDegraded === null ? {} : { userCrestDegraded: cards.userCrestDegraded as unknown as JsonValue }),
-      // TCRN-CROSS-SUB-414 (C-R15-1): the cards the library's crest withheld are named the same way,
-      // in the same form: an unresolved pair (KNOWLEDGE_POSSIBLE_CONFLICT), versions of an unresolved
-      // duplicate (KNOWLEDGE_DUPLICATE when no pair is withheld), cards whose project the chain no
-      // longer holds, under unresolvedScopes (KNOWLEDGE_LINK_INVALID when neither is withheld; R16,
-      // C-R16-1), or records awaiting chain events this device has not received, under awaitingChain
-      // (KNOWLEDGE_HIGH_WATER_MISMATCH when they are all that is withheld), with withheldCards. A
-      // refused read stays knowledgeReasonCode.
-      ...(cards.projectCrestDegraded === null ? {} : { projectCrestDegraded: cards.projectCrestDegraded as unknown as JsonValue }),
-    };
-    // Both stores can be degraded at once. Reserve envelope space and avoid duplicating their
-    // bounded examples in the legacy disclosure when that would exceed the empty-response budget.
-    // Snapshot totals and ID examples remain in knowledgeStores; explicit list pages retain detail.
-    if (Buffer.byteLength(JSON.stringify(knowledge), "utf8") > 3000) {
-      if (cards.userCrestDegraded !== null) knowledge.userCrestDegraded = { ...recallCrestSummary(cards.userCrestDegraded, cards.stores.user), truncated: true };
-      if (cards.projectCrestDegraded !== null) knowledge.projectCrestDegraded = { ...recallCrestSummary(cards.projectCrestDegraded, cards.stores.project), truncated: true };
-    }
-    if (values.view === "agent") {
-      const summary = {
-        schemaVersion: "tcrn.recall-agent.v1",
-        reasonCode: result.reasonCode,
-        ...source,
-        ...status,
-        indexed: result.indexed,
-        total: result.total,
-        perPromptBytes,
-        queryLanguage: languageAnswer.queryLanguage,
-        translationTarget: languageAnswer.queryTranslation?.to ?? null,
-        knowledgeReasonCode: knowledge.knowledgeReasonCode,
-        knowledgeStores: knowledge.knowledgeStores,
-        ...(cards.userCrestDegraded === null ? {} : { userCrestDegraded: recallCrestSummary(cards.userCrestDegraded, cards.stores.user) }),
-        ...(cards.projectCrestDegraded === null ? {} : { projectCrestDegraded: recallCrestSummary(cards.projectCrestDegraded, cards.stores.project) }),
-        diagnostics: {
-          schemaVersion: "tcrn.recall.v1",
-          knowledgeSha256: canonicalSha256(knowledge),
-          projectSnapshotDigest: cards.stores.project.digest === "absent" ? null : cards.stores.project.digest,
-          userSnapshotDigest: cards.stores.user.digest === "absent" ? null : cards.stores.user.digest,
-        },
-        outputLimitBytes: AGENT_OUTPUT_MAX_BYTES,
-      };
-      const output = canonicalJson({ ...summary, delivery: "complete", context });
-      const bytes = Buffer.byteLength(output, "utf8");
-      io.write(bytes <= AGENT_OUTPUT_MAX_BYTES
-        ? output
-        : canonicalJson({ ...summary, delivery: "over-budget", requiredBytes: bytes }));
-      return;
-    }
-    io.write(canonicalJson({
-      schemaVersion: "tcrn.recall.v1",
-      reasonCode: result.reasonCode,
-      ...source,
-      at: values.at ?? "",
-      ...status,
-      ...knowledge,
-      query,
-      queryTokens: [...result.tokens],
-      // The canonical protocol carries only safe integers, and a bm25 score is not one.
-      // These three are spoken the way every numeric setting in this engine is spoken --
-      // as a decimal string -- rather than scaled into an integer whose unit a reader
-      // would have to be told.
-      tau: result.tau.toFixed(4),
-      relativeFloor: result.relativeFloor.toFixed(4),
-      limit: result.limit,
-      scopeExcerptBytes,
-      queryLanguage: languageAnswer.queryLanguage,
-      queryTranslation: languageAnswer.queryTranslation,
-      telemetry: languageAnswer.telemetry,
-      indexed: result.indexed,
-      rebuilt: result.rebuilt,
-      total: result.total,
-      // TCRN-CROSS-STORY-474 R2, R3: each hit also as the one line a host shows (kind and status,
-      // title, key, id, the titles above it), and the answer as those lines cut to the prompt's
-      // budget. Below the strong-hit threshold the reason code is RECALL_NO_STRONG_HIT and both are
-      // empty: a prompt about nothing the library holds gets nothing, not its best weak guesses.
-      // A card hit names its store, "project" or "user" (TCRN-CROSS-STORY-476 R5), and its line
-      // marks a user card 「用户」.
-      records: hits.map((hit) => ({
-        kind: hit.kind, key: hit.key, id: hit.id, status: hit.status,
-        title: hit.title, summary: hit.summary, score: hit.score.toFixed(4),
-        line: formatRecallLine(hit), parentChain: [...hit.parentChain],
-        ...(hit.scope === undefined ? {} : { scope: hit.scope }),
-        ...(hit.involvedProjects === undefined ? {} : { involvedProjects: hit.involvedProjects }),
-        ...(hit.obsoleteDecisions === undefined ? {} : { obsoleteDecisions: hit.obsoleteDecisions.map((entry) => ({ ...entry })) }),
-        ...(hit.removal === undefined ? {} : { removal: { ...hit.removal } }),
-      })),
-      perPromptBytes,
-      context,
-    }));
+    await runRecallCommand(rest, io);
     return;
   }
   if (command === "knowledge-checkpoint") {
