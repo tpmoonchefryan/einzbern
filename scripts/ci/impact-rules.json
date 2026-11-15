@@ -2537,7 +2537,7 @@
     "tests/fixtures/source-lease-actor.c": "3733fd5c709b0b69cf3fca39ff0fab0dd0e20576305f897406f36ae3064d2f7d",
     "tests/helpers/source-attestor-observer.mjs": "aa904c068ea9ae2d89177ec824bd7059dc8543c702ffd3b9e31f5eaf9e1ecf30",
     "tests/source-attestor.test.mjs": "2cf7a2615e94aaee1b25e76ff959064e2a83a0b2db16441e7cef67a250cf0438",
-    "tests/helpers/task-runtime-fixture.mjs": "bb1527b87c75d42f0fc30a765fe4443c2d4da6ba39a55d45922ab347f8c19057",
+    "tests/helpers/task-runtime-fixture.mjs": "a359d516b348de8ccdafff6e5fcee54152ccbae14b2291d79d305918a20eb0b1",
     "packages/core/src/crest-source-proof.ts": "55c68a4fb38040da1d64148a2e22111cf79c15b78914d5441ad5d3f2d40bb1cd",
     "packages/core/src/source-attestor-crest.ts": "01a3d4decfcb2800f9c54d1c6cab705e488c6177a869d5dcc2d0860a71fd8437",
     "tests/crest-projection.test.mjs": "e5cf29dbc23992fcc3ccb3024a5c03bdc835a0bd9903546723d7bea06c5920a3",

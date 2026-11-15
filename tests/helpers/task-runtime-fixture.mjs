@@ -8,7 +8,7 @@ const sourceRoot = resolve(import.meta.dirname, "../..");
 // fixtures carry its actual source/import closure and the governing compiler
 // project, rather than stubbing the host or skipping dependency verification.
 export async function copyTaskRuntimeInputs(root) {
-  for (const path of ["tsconfig.json", "packages/core/src/darwin-source-identity.mjs", "packages/core/src/source-attestor-service.ts", "packages/core/src/source-attestor-protocol.ts"]) {
+  for (const path of ["tsconfig.json", "packages/core/src/darwin-source-identity.mjs", "packages/core/src/source-attestor-service.ts", "packages/core/src/source-attestor-protocol.ts", "packages/core/src/source-attestor-crest.ts"]) {
     await mkdir(dirname(join(root, path)), { recursive: true });
     await cp(join(sourceRoot, path), join(root, path));
   }
