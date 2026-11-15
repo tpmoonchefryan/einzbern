@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
 import type { BigIntStats } from "node:fs";
-import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { lstat, open, readdir, readFile, statfs } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -102,15 +102,19 @@ export async function localTreeIdentity(root: string): Promise<string | null> {
   const entries: [string, LocalFileIdentity, string | null][] = [];
   const files: { readonly path: string; readonly identity: LocalFileIdentity }[] = [];
   const directories: { readonly path: string; readonly identity: LocalFileIdentity; readonly names: string[] }[] = [];
+  let visited = 0;
   async function visit(path: string): Promise<void> {
-    const info = await lstat(path, { bigint: true });
+    // This capability admits only local filesystems. Batch their metadata just
+    // like the small-file hashes below, avoiding one libuv job per Crest file.
+    if (++visited % 16 === 0) await new Promise<void>(resolve => setImmediate(resolve));
+    const info = lstatSync(path, { bigint: true });
     const identity = localFileIdentity(info, observed, info.isDirectory());
     if (identity === null) throw new Error("unprovable source identity");
     if (info.isDirectory()) {
       entries.push([relative(root, path), identity, null]);
-      const names = await readdir(path);
+      const names = readdirSync(path);
       directories.push({ path, identity, names: names.sort() });
-      await Promise.all(names.map((name) => visit(join(path, name))));
+      for (const name of names) await visit(join(path, name));
       return;
     }
     files.push({ path, identity });

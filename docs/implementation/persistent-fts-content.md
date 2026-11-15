@@ -18,7 +18,11 @@ of a V8-serialized array. Array order is title, body, tags, expansions,
 externalKey, proseTitle, proseBody, proseTags, proseExpansions. The first five
 values must be strings; the last four must be strings or NULL. The decoder
 checks the header, safe positive length within Node's buffer capacity, zlib
-checksum, complete consumed input, exact output length, array arity and types.
+checksum, complete consumed zlib input, exact output length, and a single fully
+consumed V8 value. Each of the nine array slots must be an own property with
+the required type; missing slots cannot become SQL NULL. Node's public
+`DefaultDeserializer.readRawBytes` API checks for remaining V8 input. Valid
+producer bytes keep the existing format and binding.
 Inflation is bounded by the declared row length; decoded data lives only for
 the SQL call. There is no decoded-row or corpus memoization and no additional
 document size policy. The pinned Node 24.16 runtime supports SQLite UDFs and

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { AsyncLocalStorage } from "node:async_hooks";
 import { spawnSync } from "node:child_process";
-import { createHash, webcrypto } from "node:crypto";
+import { createHash } from "node:crypto";
 import { constants, closeSync, fstatSync, lstatSync, openSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
@@ -286,8 +286,9 @@ async function contentProofAsync(file: OpenSegment, identity: DarwinIdentity | L
       offset += bytesRead;
     }
     if (offset !== expectedBytes) return null;
-    const digest = await webcrypto.subtle.digest("SHA-256", content);
-    const sha256 = Buffer.from(digest).toString("hex");
+    // The buffer is owned by this read. Hash it directly rather than copying
+    // every segment again into a WebCrypto job on the same I/O worker pool.
+    const sha256 = createHash("sha256").update(content).digest("hex");
     observeEventRead(offset, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
     const named = await lstat(file.path, { bigint: true });
     if (sha256 !== file.segment.sha256 || !named.isFile() || named.nlink !== 1n || named.ino !== held.ino || named.dev !== held.dev) return null;

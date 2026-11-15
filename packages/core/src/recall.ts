@@ -33,7 +33,7 @@ import { createHash } from "node:crypto";
 import { constants as bufferConstants } from "node:buffer";
 import { DatabaseSync } from "node:sqlite";
 import type { SQLOutputValue } from "node:sqlite";
-import { serialize, deserialize } from "node:v8";
+import { DefaultDeserializer, serialize, deserialize } from "node:v8";
 import { deflateRawSync, inflateRawSync, deflateSync, inflateSync } from "node:zlib";
 import type { BigIntStats } from "node:fs";
 import { constants, rmSync, closeSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
@@ -594,8 +594,18 @@ function ftsContentText(payload: SQLOutputValue, column: SQLOutputValue): string
   // bytesWritten also rejects trailing input on the pinned Node 24 runtime.
   const decoded = inflateSync(packed.subarray(12), { maxOutputLength: length, info: true }) as unknown as { buffer: Buffer; engine: { bytesWritten: number } };
   if (decoded.buffer.length !== length || decoded.engine.bytesWritten !== packed.length - 12) throw new Error("invalid FTS content stream length");
-  const fields: unknown = deserialize(decoded.buffer);
-  if (!Array.isArray(fields) || fields.length !== FTS_CONTENT_COLUMNS.length || !fields.every((value: unknown, index: number) => typeof value === "string" || index >= 5 && value === null)) throw new Error("invalid FTS content columns");
+  const decoder = new DefaultDeserializer(decoded.buffer);
+  decoder.readHeader();
+  const fields: unknown = decoder.readValue();
+  if (!Array.isArray(fields) || fields.length !== FTS_CONTENT_COLUMNS.length) throw new Error("invalid FTS content columns");
+  for (let index = 0; index < FTS_CONTENT_COLUMNS.length; index += 1) {
+    if (!Object.hasOwn(fields, index) || !(typeof fields[index] === "string" || index >= 5 && fields[index] === null)) throw new Error("invalid FTS content columns");
+  }
+  // readValue accepts a valid prefix. Probe one raw byte with Node's public
+  // deserializer API: only EOF proves this frame contains exactly one value.
+  let trailing = true;
+  try { decoder.readRawBytes(1); } catch { trailing = false; }
+  if (trailing) throw new Error("invalid FTS content trailing data");
   // No decoded corpus or row cache survives the SQL call. NULL and empty strings
   // remain distinct, so the prose view retains the original COALESCE semantics.
   return fields[column] as string | null;

@@ -76,8 +76,8 @@ test("095 FTS storage: real external-content text, BM25, Unicode, clauses and sa
   integrity(compressed);
 });
 
-function frame(fields) {
-  const data = serialize(fields), header = Buffer.alloc(12);
+function frame(fields, tail = Buffer.alloc(0)) {
+  const data = Buffer.concat([serialize(fields), tail]), header = Buffer.alloc(12);
   header.write("EFT1"); header.writeDoubleLE(data.length, 4);
   return Buffer.concat([header, deflateSync(data)]);
 }
@@ -108,8 +108,19 @@ test("095 FTS storage: malformed frames fail the complete external-content query
   const hugeLength = Buffer.from(good); hugeLength.writeDoubleLE(Infinity, 4);
   const corrupt = Buffer.from(good); corrupt[corrupt.length - 1] ^= 1;
   const malformed = ["not a blob", 7, Buffer.alloc(0), header, length, shortLength, hugeLength, good.subarray(0, -1), corrupt, Buffer.concat([good, Buffer.from([0])]), frame({ title: "object" }), frame(["missing"]), frame(["a", 3, "", "", "", null, null, null, null]), frame(["a", "", "", "", "", false, null, null, null])];
+  const dense = ["alloy", "alloy body", "", "", "codec 095", null, null, null, null];
+  for (let index = 0; index < dense.length; index += 1) {
+    const sparse = dense.slice(); delete sparse[index];
+    malformed.push(frame(sparse));
+    const undefinedSlot = dense.slice(); undefinedSlot[index] = undefined;
+    malformed.push(frame(undefinedSlot));
+  }
+  const sparseProse = dense.slice();
+  for (let index = 5; index < 9; index += 1) delete sparseProse[index];
+  malformed.push(frame(sparseProse), frame(dense, Buffer.from("garbage after serialized object")), frame(dense, serialize(dense)), frame(dense, Buffer.from([0])));
   for (const payload of malformed) {
     database.prepare("UPDATE recall_fts_payload SET payload = ? WHERE rowId = 1").run(payload);
+    assert.throws(() => database.prepare(`SELECT rowId, ${columns} FROM recall_fts_content`).all());
     assert.throws(() => database.prepare("SELECT title, body FROM recall_index WHERE recall_index MATCH 'alloy'").all());
     assert.throws(() => integrity(database));
   }

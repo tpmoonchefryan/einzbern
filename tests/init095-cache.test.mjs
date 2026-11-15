@@ -174,6 +174,20 @@ test("095: tree file batches service a pending event-loop callback before finish
   assert.equal(filesRead, 64);
 });
 
+test("095: tree metadata batches yield before admitting the complete file set", treeTestOptions, async t => {
+  const root = await treeFixture(t);
+  for (let index = 0; index < 64; index += 1) await fs.writeFile(join(root, String(index)), "content");
+  const lstat = syncFs.lstatSync;
+  let observed = 0, servicedAt = null;
+  t.mock.method(syncFs, "lstatSync", (path, ...args) => {
+    if (path.startsWith(root) && ++observed === 1) setImmediate(() => { servicedAt = observed; });
+    return lstat(path, ...args);
+  });
+  syncBuiltinESMExports();
+  assert.notEqual(await localTreeIdentity(root), null);
+  assert.ok(servicedAt > 0 && servicedAt < 64, `serviced after ${servicedAt} metadata entries`);
+});
+
 // Touch the mapping before warming any proof. Later writes through that same
 // writable page need not change ctime. Restore even when the assertion fails.
 async function withWritableMapping(path, offset, operation) {
