@@ -19,6 +19,7 @@ import { localTreeIdentity } from "./local-file-identity.js";
 import { readUserCrestPath } from "./machine-settings.js";
 import { readProtectedProjection } from "./protected-projection.js";
 import { recallAuthorityState } from "./recall-authority.js";
+import { crestProjectionProof } from "./crest-source-proof.js";
 import type { RecallAuthority } from "./recall-authority.js";
 import { observeCacheReason } from "./recall-observation.js";
 import type {
@@ -109,8 +110,10 @@ export function crestMetaBoundary(
   roots: readonly string[],
   headEventHash: string | null,
   treesPromise?: Promise<readonly (string | null)[]>,
+  liveBinding?: string,
 ): () => Promise<string | null> {
   return async (): Promise<string | null> => {
+    if (liveBinding !== undefined) return liveBinding;
     const trees = await (treesPromise ?? Promise.all(roots.map((root) => localTreeIdentity(root))));
     if (trees.some((tree) => tree === null)) return null;
     return createHash("sha256")
@@ -345,13 +348,16 @@ export async function listKnowledgeMetadataFast(
   const roots = [storePath, ...archiveRoots];
   // Source proofs belong to this resolved authority, not an earlier speculative
   // read whose bytes may have changed while materialization was pending.
-  const treesPromise = Promise.all(roots.map((root) => localTreeIdentity(root)));
-  const boundary = crestMetaBoundary(roots, workspace.headEventHash, treesPromise);
-  const saved = await readProtectedProjection<CachedCrestMeta>(library, "crest-meta", boundary);
-  if (saved !== null) {
-    observeCacheReason("crest-projection-hit");
-    return buildCachedProjectAnswer(saved, workspace, query);
-  }
+  const proof = await crestProjectionProof(library, workspace, roots, KNOWLEDGE_PROJECTION_VERSION, true);
+  const treesPromise = proof === null ? Promise.all(roots.map((root) => localTreeIdentity(root))) : undefined;
+  const boundary = crestMetaBoundary(roots, workspace.headEventHash, treesPromise, proof?.binding);
+  try {
+    const saved = await readProtectedProjection<CachedCrestMeta>(library, "crest-meta", boundary);
+    if (saved !== null && (proof === null || await proof.finish())) {
+      observeCacheReason("crest-projection-hit");
+      return buildCachedProjectAnswer(saved, workspace, query);
+    }
+  } finally { proof?.close(); }
   const { listKnowledgeMetadata } = await import("./knowledge-core.js");
   return listKnowledgeMetadata(workspaceRoot, query, resolvedAuthority);
 }

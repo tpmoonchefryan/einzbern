@@ -1,121 +1,110 @@
-# Crest continuity: next source package
+# Crest source-set continuity
 
-This is a measured design and private prototype handoff for STORY-663 AC01,
-not production integration or independent acceptance. The ordinary reader keeps
-full SHA. No real library helper, lease, source mutation or installation was
-used. The existing failed default CLI/Hook samples and the skip-scan criterion
-remain unchanged.
+The optional Linux attestor now supplies a Crest-specific complete source-set
+proof to ordinary knowledge lists and Recall's metadata path. This is an
+implementation candidate with implementation self-checks, not independent
+acceptance, production enablement or a new real-mount performance result.
+The default reader still uses full SHA. The existing explicit
+`EINZBERN_SOURCE_ATTESTOR_ROOT` selection is required; no new safety switch,
+mandatory addon, startup build, installation hook or global service is added.
 
-## Current callers and proof gap
+## Admission and continuity
 
-`readRecallCards` in `recall-inputs.ts` calls `listKnowledgeMetadataFast` in
-`knowledge-read.ts`. Its `crestMetaBoundary` hashes every file through
-`localTreeIdentity` before a protected `crest-meta` projection can be adopted.
-The ordinary `listKnowledgeMetadata` path in `knowledge-core.ts` similarly uses
-`cachedKnowledgeListScan`, current Crest heads and protected `crest`/`crest-view`
-projections. Faster synchronous SHA scheduling still performs the source scan.
+`crest-source-proof.ts` binds the already validated raw workspace replay,
+manifest, device, head, version vector, stream declarations, consolidation
+provenance and projection version. The existing client hashes the actual
+runtime host/addon and separates Crest root collections from Akasha endpoints.
+Their retained leases cannot evict one another. The live projection binding
+also includes the complete set digest, helper epoch, generation and lease
+incarnations. A checksum in a writable cache or a client file declaration is
+not initial authority.
 
-The complete source set includes the library Crest marker, legacy units,
-stream heads, event metadata, bodies and removals; every member of each extant
-directory, including unexpected/partial files; relevant archive Crest roots
-from the current consolidation inventory; and named ancestry up to the root.
-User Crest is independently rooted, possibly configured outside the library.
-It requires its own identity and complete set, or its existing full reader.
-It cannot be silently omitted or authorized by a library-root proof.
+The helper's `CrestSourceSet` guards each existing parent/name before testing
+its child. It watches every directory before enumerating it, then admits all
+members, including unexpected and partial names. Missing roots retain their
+existing parent/name guard. The set covers marker, legacy units, heads, event
+metadata, bodies, removals and the relevant archived Crest roots selected by
+the validated consolidation inventory. An unadmittable member makes the entire
+proof miss; the ordinary reader still receives the original inputs. User Crest
+keeps its separately rooted and authorized full reader.
 
-The current attestor retains leased FDs across clients but closes a transaction's
-directory guard at finish/disconnect. A request constructed from an old saved
-file list can therefore miss a newly added member between clients. Production
-is safe because callers still enumerate; replacing that enumeration with a
-saved list would introduce the gap.
+Initial native admission retains O_NOFOLLOW component traversal, regular file,
+nlink=1, owner, reviewed filesystem, held-fd/current-name identity and a real
+read lease. `acquireCrest` installs the held-inode watch before the final full
+held/current-name admission. The helper then hashes that same leased fd through
+EOF and checks its length; persistent guards and native lease checks protect
+the following parser/adoption interval. This catches an
+external hardlink that directory watches cannot observe. Writable descriptors
+and mappings deny initial leases; later breaks invalidate in the native signal
+handler before unlocking, even while JavaScript is busy. Inotify does not prove
+mmap content continuity.
 
-## Distinguishing owned experiments
+`guardAdd` extends discovery guards; `guardHold` observes held inodes;
+`guardedCheck` brackets held-lease/F_GETLEASE and generation checks with drains
+of the persistent guard. An unchanged warm check performs no member open,
+stat, path-stat or enumeration. The guards and leases survive short-lived
+clients. Dirty queues, overflow, ignored/lost watches, rename, replacement,
+attribute/content changes, revoked leases, incomplete adoption, disconnect,
+restart or unknown capabilities retire the entire set. Rebuilding requires a
+new complete admission, with no retry of the failed one-shot adoption.
 
-Private artifacts are under the platform-container-relative directory
-`.em-093-096/codex-takeover-20261114/phase-095-lifecycle-repair/worker-evidence/`.
-`crest-prototype.mjs` drives the real client, helper, same-FD SHA and native
-bridge. Its private CJS bridge retains an additional complete-directory guard
-across short-lived clients. Synthetic Crest-shaped files exercise continuity;
-they do not stand in for parser, protected-cache or FTS semantic acceptance.
+Directory and inode watches do not establish a client's mount view. The client
+and helper sample namespace, filesystem root identity and the **complete**
+mountinfo bytes before/after begin and finish. The helper independently reads
+these through the PID obtained from the Unix socket's kernel SO_PEERCRED, not a
+request-supplied PID. Different namespaces, source subtree overmounts, changed
+mount collections or unreadable/unstable observations cause full fallback.
+Cold admission also compares each native directory/file mount ID with its
+expected mount in that captured complete table, so a transient overmount cannot
+seed leases for a different named view. An ambiguous mount stack falls back.
+These finite process/root observations do not add warm member path checks. Namespace
+creation for tests remains confined to owned fixtures; host mounts are untouched.
 
-`crest-prototype-1110-report.json` records 1110 initially hashed held files,
-72150 payload bytes, three distinct warm processes with no additional helper
-hashes, and a new epoch rehashing all 1110 files after restart. Initial request
-discovery itself also reads 72150 bytes, accounted separately. Capacity 2
-refuses admission. Add/delete, restored rename, parent rename, guard loss,
-external hardlink and real native mmap writes reject the retained-set proof.
-All helpers are stopped and their processes are confirmed gone before fixtures
-are removed. The observed large-helper RSS is about 77–84 MB; this is a fixture
-measurement, not a production capacity guarantee.
+Cold collection uses bounded, authenticated `crest-next` preparation steps at
+the existing 16-member reader quantum. Each exchange keeps the 1500ms IPC
+deadline; preparation, parsing and one-shot adoption share the original
+five-second transaction. Partial sets cannot authorize projections and are
+released on cancellation, disconnect or expiry. Warm adoption uses no such loop.
 
-`crest-prototype-64-report.json` and `crest-trace64.*` retain a smaller syscall
-run, counting both helper and clients. Zero warm payload reads do not imply
-zero source work: the current bridge still reopens/statx-checks every member.
-Those operations are not hidden by moving them into the helper. Large-fixture
-resource results and the smaller kernel counts are separate evidence scopes.
-The 64-member warm sample has zero payload bytes and directory member reads,
-but 192 payload-file opens and 384 source stat calls, all in the helper. The
-raw/reduced trace also retains ancestry operations separately.
+## Projection adoption and full fallback
 
-An external hardlink was rejected by the existing native object check while
-the retained directory guard remained clean. The mmap case also depended on
-native lease invalidation. `inode-watch-probe.py` independently observed
-IN_ATTRIB on a held inode watch for an external link/unlink, no event on the
-source directory watch, and no event for its owned mmap write. Directory guards
-alone therefore cannot replace the current object checks. Inode watches alone
-cannot replace leases either.
+`listKnowledgeMetadataFast` probes a live set before `crestMetaBoundary` and
+`readProtectedProjection("crest-meta")`. Cold/missing sets continue into the
+ordinary reader. `cachedKnowledgeListScan` binds `crest`, `crest-view` and
+`crest-meta` to the same admitted set, and only adopts a protected value after
+a successful one-shot finish. Cold construction runs the ordinary parser and
+replay before finish and protected-record issuance. Disposable local view
+repair remains in the ordinary list path. Missing/damaged views rebuild from
+the full reader.
 
-## Smallest implementable route
+A failed proof follows the original complete verification path. Byte continuity,
+event validation and materialized reducer authority remain separate. F005 lazy
+public history, doctor/shared-submit/write-lock strong SHA and SQLite's prepared
+fd full SHA remain required. Timeless projections contain no cached query
+freshness: each request evaluates its own `at`, and FTS reconciliation retains
+its existing ordering.
 
-1. Add a concrete Crest proof namespace to the existing client/helper, preserving
-   the Akasha request/lifetime. The current helper evicts FDs outside the next
-   request's set: alternating independent Crest and Akasha requests must not
-   share that set accidentally. Separate domain endpoints are the smaller
-   alternative to a general shared-service/refcount framework. Record the extra
-   process and memory cost. A separately rooted user Crest keeps its own proof
-   domain; unsupported roots keep full SHA.
-2. Bootstrap complete membership under persistent directory and named-ancestry
-   guards, before same-leased-FD SHA and normal Crest parsing. Bind the resulting
-   complete-set digest, library/root identities, head/vector, stream watermarks,
-   archive provenance, projection schema/engine version, runtime/native identity
-   and helper epoch to the existing protected projection. A request-supplied
-   checksum or bare stat is never bootstrap authority. Absent roots require
-   guarding their existing parent/name so later creation cannot be missed.
-3. Retain those guards between clients and add held-inode attribute watches
-   before removing per-member pathname/stat checks. Extend the native bridge
-   with a Crest-specific guarded check of lease validity, F_GETLEASE and
-   generation, bracketed by both complete directory and inode guard drains.
-   It must perform no source-path enumeration/open/stat on the unchanged warm
-   path. Preserve same-FD initial SHA, O_NOFOLLOW named ancestry, nlink/owner/
-   filesystem admission and full metadata validation at bootstrap. The current
-   prototype does not implement or prove that new native API.
-4. Watch/queue loss, overflow, changed membership, inode attributes, writer/mmap
-   break, forced revoke, unknown capability, restart or partial resource
-   admission invalidate the entire affected set. Never repair a dirty guard by
-   resetting its epoch while retaining old authority. Use ordinary complete
-   validation and a new fully admitted set; no retry of the failed adoption.
-   Parent path replacement and unrelated ancestor events remain conservative.
-5. Let the two existing protected-projection boundary functions consume a live
-   proof of this set instead of calling `localTreeIdentity` on a proved warm
-   hit. Require a valid one-shot finish before adopting parsed/protected data.
-   An unproved set still uses the existing full scan. Keep archive scope,
-   conflicts, awaiting-chain/removal semantics and returned-history authority.
-6. Keep freshness outside the timeless projection, recomputed from query `at`.
-   Preserve the existing projection upgrade and persistent FTS reconciliation
-   boundaries. Compare actual list/Recall/complete Hook and FTS rows with the
-   full reader at fixed head before/after expiry and version change, including
-   a card body/metadata edit and add/delete across a no-client interval.
+## Resource and evidence scope
 
-Existing limits remain: default 4096 leases, absolute 8192, actual RLIMIT-derived
-capacity, 8192 guard rules/65536 named children, 8 MiB IPC, 16 connections,
-five-second transactions, 128 MiB helper heap and 256 MiB RSS retirement. New
-inode watches consume real per-user watch capacity. Admission failure is full
-fallback; this design raises no threshold or device policy. Read actual FD,
-watch, queue and memory use rather than declaring 1110 files universally safe.
+The existing limits remain: 4096 default/8192 absolute leases, actual RLIMIT
+capacity, 8192 guard rules (now including inode watches), 65536 named children,
+8 MiB IPC, 16 connections, five-second transactions, 128 MiB heap and 256 MiB RSS
+retirement. Separate Crest/Akasha processes add real FD/watch/RSS cost; observed
+resources belong to the recorded fixture, not a maximum-capacity guarantee.
+Controller process-group ownership, private IO, NODE_OPTIONS, reaping and exact
+F006 descriptor retirement are preserved.
 
-The next package must retain cold preparation and helper/client totals for
-source bytes, file opens/stat calls, directory member reads, metadata, cache,
-replay and delivered semantics. Warm zero source-path operations must be proved
-across fresh processes and client gaps, with loss/restart negatives and owned
-cleanup. Only then is current-host full-entry latency sampling useful again.
-Other unmounted platforms remain unknown under the existing portable decision.
+Implementation evidence is retained at the platform-container-relative path
+`.em-093-096/codex-takeover-20261114/phase-095-crest-continuity/`.
+Its report distinguishes protocol fixtures, real list/Recall/FTS behavior,
+complete helper/client kernel journals, cold discovery, fallbacks, private
+frozen-input latency and unverified obligations. Trace-induced timeout failures
+are retained and never counted as warm proofs. Prior 1110 native hash counters
+and the older 64-member trace are historical prototype evidence only.
+
+The prior real-default CLI/Hook latency failures remain failures at their
+original source/input identity. Real rclone/remote behavior, Mac/Drive, Windows,
+non-ext4 providers, production-library enablement and global/native host hook
+loading remain unverified. Declaring `EINZBERN_HOST=claude-code` does not prove
+Codex native hook loading. Independent final P1/formal acceptance belongs to a
+different fresh worker after this candidate is frozen.

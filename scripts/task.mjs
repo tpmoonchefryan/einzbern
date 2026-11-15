@@ -1428,7 +1428,7 @@ function privateUnixIpcSite(label, content, protocol, moduleName) {
       ],
     },
     "packages/core/src/source-attestor-service.ts": {
-      binding: "createServer, type Socket", references: { createServer: 2, Socket: 6, server: 5 }, transports: 1,
+      binding: "createServer, type Socket", references: { createServer: 2, Socket: 7, server: 5 }, transports: 1,
       sections: [
         ["  const epoch =", "  const held =", "fc8993f7106859315d8b9876cef057efaffabec1d0466db6ba943ee8a3273aa8"],
         ["    await validateAttestorDirectory(dirname(launch.descriptor));", "    process.stdout.write(", "f0bd35f64a0a41317a7d7d390dc664b0a9fa9d57cb1d1a9a6cd17d68ede5d60d"],

@@ -1,10 +1,39 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { readFileSync, readlinkSync, statSync } from "node:fs";
 import { lstat, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 
 export const ATTESTOR_SCHEMA = "einzbern.continuous-source-lease.v1";
 export const ATTESTOR_MESSAGE_BYTES = 8 * 1024 * 1024;
+export const CREST_PROOF_SCHEMA = "einzbern.crest-source-set.v1";
+export interface CrestAttestorRequest {
+  readonly schema: typeof CREST_PROOF_SCHEMA;
+  readonly domain: "crest";
+  readonly root: string;
+  readonly roots: readonly string[];
+  readonly binding: string;
+  readonly context: string;
+}
+
+/** Namespace plus the complete visible mount table, not just the root's mount.
+ * The service also reads this through the kernel socket peer's /proc entry.
+ * Mount/namespace uncertainty is a miss; these are not source-member stats. */
+export function attestorMountSnapshot(pid?: number): { readonly identity: string; readonly mountinfo: string } {
+  if (process.platform !== "linux" || pid !== undefined && (!Number.isSafeInteger(pid) || pid <= 0)) throw new Error("mount-context-unavailable");
+  const prefix = `/proc/${pid ?? "self"}`;
+  const namespace = readlinkSync(`${prefix}/ns/mnt`);
+  const root = statSync(`${prefix}/root`, { bigint: true });
+  const mounts = readFileSync(`${prefix}/mountinfo`);
+  const currentRoot = statSync(`${prefix}/root`, { bigint: true });
+  if (!/^mnt:\[\d+\]$/u.test(namespace) || mounts.length === 0 || !root.isDirectory()
+    || root.dev !== currentRoot.dev || root.ino !== currentRoot.ino
+    || namespace !== readlinkSync(`${prefix}/ns/mnt`) || !mounts.equals(readFileSync(`${prefix}/mountinfo`))) throw new Error("mount-context-changed");
+  const mountinfo = mounts.toString("utf8");
+  if (!Buffer.from(mountinfo, "utf8").equals(mounts)) throw new Error("mount-context-encoding");
+  return { identity: attestorDigest([namespace, root.dev.toString(), root.ino.toString(), createHash("sha256").update(mounts).digest("hex")]), mountinfo };
+}
+export function attestorMountContext(pid?: number): string { return attestorMountSnapshot(pid).identity; }
 export interface AttestorFile {
   readonly path: string;
   readonly bytes: number;

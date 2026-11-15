@@ -1093,6 +1093,7 @@
         "defaultDescription": "full SHA-256 reader without an attestor",
         "scope": "one explicitly selected local library invocation",
         "consumer": [
+          "packages/core/src/crest-source-proof.ts",
           "packages/core/src/source-attestor-client.ts",
           "packages/core/src/source-verification-native.ts"
         ],

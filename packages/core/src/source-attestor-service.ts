@@ -8,17 +8,23 @@ import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorEndpoint, attestorMac, validateAttestorDirectory, validateAttestorEndpoint, validAttestorMac } from "./source-attestor-protocol.js";
 import type { AttestorDescriptor, AttestorFile, AttestorRequest } from "./source-attestor-protocol.js";
+import { CrestSourceSet } from "./source-attestor-crest.js";
 
-interface Lease { readonly id: number; readonly fd: number; readonly incarnation: number }
-interface Bridge {
+interface Lease { readonly id: number; readonly fd: number; readonly incarnation: number; readonly mountId?: string }
+export interface SourceLeaseBridge {
   init(capacity: number): { capacity: number };
   acquire(path: string): Lease;
+  acquireCrest?(path: string, guard: object): Lease;
   check(ids: readonly number[]): boolean;
   release(id: number): void;
   status(): { generation: number; held: number; live: number; capacity: number };
   watch(directories: readonly { path: string; names: readonly string[] | null }[]): object;
   guardCheck(guard: object): boolean;
   guardClose(guard: object): void;
+  guardAdd?(guard: object, path: string, names: readonly string[] | null): string;
+  guardHold?(guard: object, id: number): void;
+  guardedCheck?(guard: object, ids: readonly number[], generation: number): boolean;
+  peer?(fd: number): { pid: number; uid: number };
 }
 export interface AttestorLaunch {
   readonly root: string;
@@ -26,6 +32,7 @@ export interface AttestorLaunch {
   readonly identity: string;
   readonly module: string;
   readonly capacity?: number;
+  readonly crestRoots?: readonly string[];
 }
 interface Held { readonly declaration: AttestorFile; readonly lease: Lease }
 interface Transaction {
@@ -60,8 +67,9 @@ function validateRequest(value: AttestorRequest, launch: AttestorLaunch): void {
 /** One bounded, disposable process, no source writes and no authority on disk. */
 export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
   const require = createRequire(import.meta.url);
-  const bridge = require(launch.module) as Bridge;
+  const bridge = require(launch.module) as SourceLeaseBridge;
   bridge.init(launch.capacity ?? 4096);
+  const crest = launch.crestRoots === undefined ? null : new CrestSourceSet(bridge, launch.root, launch.crestRoots);
   const epoch = randomBytes(32).toString("hex");
   const descriptor: AttestorDescriptor = { schema: ATTESTOR_SCHEMA, endpoint: attestorEndpoint(launch.descriptor, epoch),
     secret: randomBytes(32).toString("hex"), epoch, pid: process.pid, identity: launch.identity };
@@ -72,6 +80,7 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
   let lastActivity = performance.now();
   const release = (entry: Held): void => { bridge.release(entry.lease.id); held.delete(entry.declaration.path); };
   const clearTransaction = (socket: Socket): void => {
+    crest?.close(socket);
     const tx = transactions.get(socket);
     if (tx !== undefined) bridge.guardClose(tx.guard);
     transactions.delete(socket);
@@ -81,6 +90,7 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
     stopping = true;
     clearInterval(timer);
     for (const socket of sockets) { clearTransaction(socket); socket.destroy(); }
+    crest?.stop();
     for (const entry of held.values()) release(entry);
     await new Promise<void>(resolve => server.close(() => resolve()));
     if (ownsDescriptor) {
@@ -88,7 +98,7 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
       if (current === JSON.stringify(descriptor)) await unlink(launch.descriptor).catch(() => undefined);
     }
   };
-  const resources = (): unknown => ({ ...bridge.status(), hashes, hashedBytes, transactions: transactions.size, ...process.memoryUsage() });
+  const resources = (): unknown => ({ ...bridge.status(), hashes, hashedBytes, transactions: transactions.size, crest: crest?.resources(), ...process.memoryUsage() });
   function begin(socket: Socket, request: AttestorRequest): unknown {
     validateRequest(request, launch);
     clearTransaction(socket);
@@ -175,8 +185,14 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
           if (!validAttestorMac(descriptor.secret, body, envelope.mac) || body.epoch !== descriptor.epoch || body.number !== ++requestNumber
             || typeof body.nonce !== "string" || !/^[a-f0-9]{64}$/u.test(body.nonce)) throw new Error("ipc-authentication");
           let result: unknown;
-          if (body.op === "begin" && requestNumber === 1) result = begin(socket, body.request);
-          else if (body.op === "finish" && requestNumber === 2) result = finish(socket, body);
+          if (body.op === "begin" && requestNumber === 1 && crest === null) result = begin(socket, body.request);
+          else if (body.op === "crest-begin" && requestNumber === 1 && crest !== null) {
+            const fd = (socket as Socket & { _handle?: { fd?: number } })._handle?.fd;
+            if (!Number.isSafeInteger(fd)) throw new Error("crest-peer-unavailable");
+            result = crest.begin(socket, body.request, bridge.peer!(fd!).pid, body.warmOnly === true);
+          }
+          else if (body.op === "crest-next" && requestNumber > 1 && crest !== null) result = crest.next(socket, body);
+          else if (body.op === "finish" && (crest === null ? requestNumber === 2 : requestNumber > 1)) result = crest === null ? finish(socket, body) : crest.finish(socket, body);
           else if (body.op === "status" && requestNumber === 1) result = { valid: false, resources: resources() };
           else if (body.op === "stop" && requestNumber === 1) result = { valid: false, stopping: true };
           else throw new Error("ipc-order");
@@ -196,6 +212,7 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
   });
   server.maxConnections = 16;
   const timer = setInterval(() => {
+    crest?.expire();
     for (const [socket, tx] of transactions) if (performance.now() - tx.started >= 5000) { clearTransaction(socket); socket.destroy(); }
     // Resource failure never evicts source bytes into a fabricated proof.
     if ((sockets.size === 0 && performance.now() - lastActivity >= 60_000) || process.memoryUsage().rss > 256 * 1024 * 1024) void stop();

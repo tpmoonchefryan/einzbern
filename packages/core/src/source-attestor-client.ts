@@ -8,8 +8,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FRAMEWORK_VERSION } from "./framework-version.js";
 import { observeCacheReason, observeEventRead, observeMetadataBytes } from "./recall-observation.js";
-import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorEndpoint, attestorMac, validateAttestorDirectory, validateAttestorEndpoint, validAttestorMac } from "./source-attestor-protocol.js";
-import type { AttestorDescriptor, AttestorRequest } from "./source-attestor-protocol.js";
+import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, CREST_PROOF_SCHEMA, attestorDigest, attestorEndpoint, attestorMac, attestorMountContext, validateAttestorDirectory, validateAttestorEndpoint, validAttestorMac } from "./source-attestor-protocol.js";
+import type { AttestorDescriptor, AttestorRequest, CrestAttestorRequest } from "./source-attestor-protocol.js";
 
 interface BeginResult {
   readonly valid: boolean;
@@ -20,6 +20,11 @@ interface BeginResult {
   readonly incarnations: readonly number[];
   readonly reads: readonly { path: string; bytes: number }[];
   readonly resources: unknown;
+  readonly sourceSet?: string;
+  readonly context?: string;
+  readonly warm?: boolean;
+  readonly pending?: boolean;
+  readonly progress?: number;
 }
 export interface SourceAttestation {
   readonly initial: BeginResult;
@@ -99,7 +104,7 @@ async function readDescriptor(path: string, identity: string): Promise<BoundDesc
   } catch { return null; }
   finally { await handle?.close(); }
 }
-async function configuration(root: string, home: string): Promise<{ host: string; module: string; identity: string; descriptor: string } | null> {
+async function configuration(root: string, home: string, crestRoots?: readonly string[]): Promise<{ host: string; module: string; identity: string; descriptor: string; crestRoots?: readonly string[] } | null> {
   // Explicit scope for an optional capability pilot, not a weaker read mode.
   // No environment selection can bypass the ordinary full verification path.
   if (process.env.EINZBERN_SOURCE_ATTESTOR_ROOT !== root) return null;
@@ -110,7 +115,7 @@ async function configuration(root: string, home: string): Promise<{ host: string
   const host = fileURLToPath(new URL(RUNTIME_FILES.host, import.meta.url));
   const module = resolve(process.env.EINZBERN_SOURCE_LEASE_MODULE ?? fileURLToPath(new URL(RUNTIME_FILES.native, import.meta.url)));
   try {
-    const identity = attestorDigest({ schema: ATTESTOR_SCHEMA, engine: FRAMEWORK_VERSION, runtime: process.version, executable: await realpath(process.execPath),
+    const identity = attestorDigest({ schema: ATTESTOR_SCHEMA, ...(crestRoots === undefined ? {} : { domain: CREST_PROOF_SCHEMA, roots: crestRoots }), engine: FRAMEWORK_VERSION, runtime: process.version, executable: await realpath(process.execPath),
       platform: process.platform, architecture: process.arch, host: attestorDigest(await readFile(host)), native: attestorDigest(await readFile(module)) });
     const directory = join(home, "source-attestor", attestorDigest([root, identity]).slice(0, 32));
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -118,7 +123,7 @@ async function configuration(root: string, home: string): Promise<{ host: string
       const info = await lstat(path);
       if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0 || await realpath(path) !== path) throw new Error("private-runtime-boundary");
     }
-    return { host, module, identity, descriptor: join(directory, "endpoint.json") };
+    return { host, module, identity, descriptor: join(directory, "endpoint.json"), ...(crestRoots === undefined ? {} : { crestRoots }) };
   } catch {
     observeCacheReason("source-attestor-capability-unavailable-full-sha256");
     return null;
@@ -148,7 +153,7 @@ async function start(config: NonNullable<Awaited<ReturnType<typeof configuration
         try { if (JSON.parse(value.toString()).ready !== true) throw new Error("attestor-not-ready"); resolve(); }
         catch (error) { reject(error); }
       });
-      launched.stdin!.end(JSON.stringify({ root, descriptor: config.descriptor, identity: config.identity, module: config.module, capacity }));
+      launched.stdin!.end(JSON.stringify({ root, descriptor: config.descriptor, identity: config.identity, module: config.module, capacity, crestRoots: config.crestRoots }));
     });
     child.stdout!.destroy();
     if (controlled) (child.stderr as Socket).unref();
@@ -222,8 +227,64 @@ export async function beginSourceAttestation(request: AttestorRequest, home: str
     return null;
   }
 }
-export async function controlSourceAttestor(root: string, home: string, op: "status" | "stop"): Promise<unknown> {
-  const config = await configuration(root, home);
+export interface CrestAttestation extends SourceAttestation { readonly binding: string }
+
+/** A separate endpoint/root collection prevents Akasha's request-set eviction
+ * from silently retiring Crest continuity. No native addon loads in the client. */
+export async function beginCrestAttestation(value: Omit<CrestAttestorRequest, "context">, home: string, warmOnly = false): Promise<CrestAttestation | null> {
+  const config = await configuration(value.root, home, value.roots);
+  if (config === null) return null;
+  let channel: Connection | undefined;
+  let bound: BoundDescriptor | null = null;
+  try {
+    const request: CrestAttestorRequest = { ...value, context: attestorMountContext() };
+    try { await lstat(config.descriptor); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; await start(config, value.root); }
+    bound = await readDescriptor(config.descriptor, config.identity);
+    if (bound === null) throw new Error("descriptor-unavailable");
+    const descriptor = bound.value;
+    channel = await connect(descriptor);
+    const started = performance.now();
+    let initial = await channel.send({ op: "crest-begin", request, warmOnly });
+    let progress = 0;
+    const token = initial.token;
+    while (initial.pending === true) {
+      if (!initial.valid || initial.token !== token || initial.fingerprint !== attestorDigest(request)
+        || !Number.isSafeInteger(initial.progress) || initial.progress! <= progress || initial.progress! > 8192 || performance.now() - started >= 5000) throw new Error("crest-preparation-progress");
+      progress = initial.progress!;
+      initial = await channel.send({ op: "crest-next", token, fingerprint: initial.fingerprint, context: request.context, progress });
+    }
+    for (const read of initial.reads ?? []) if (Number.isSafeInteger(read.bytes) && read.bytes >= 0) observeMetadataBytes(read.bytes);
+    if (!initial.valid || initial.fingerprint !== attestorDigest(request) || typeof initial.token !== "string" || initial.token !== token
+      || !Array.isArray(initial.incarnations) || !Array.isArray(initial.reads) || initial.context !== request.context
+      || typeof initial.sourceSet !== "string" || !/^[a-f0-9]{64}$/u.test(initial.sourceSet)
+      || typeof initial.warm !== "boolean" || attestorMountContext() !== request.context) throw new Error(initial.reason ?? "crest-begin-binding");
+    const connected = channel;
+    const binding = attestorDigest({ schema: CREST_PROOF_SCHEMA, fingerprint: initial.fingerprint, sourceSet: initial.sourceSet, epoch: descriptor.epoch,
+      identity: descriptor.identity, generation: initial.generation, incarnations: initial.incarnations });
+    observeCacheReason(initial.warm ? "crest-source-set-warm" : "crest-source-set-leased-sha256");
+    return { initial, binding, epoch: descriptor.epoch,
+      finish: async () => {
+        try {
+          const result = await connected.send({ op: "finish", token: initial.token, fingerprint: initial.fingerprint, context: attestorMountContext() });
+          const valid = result.valid === true && result.token === initial.token && result.fingerprint === initial.fingerprint
+            && result.generation === initial.generation && result.sourceSet === initial.sourceSet && result.context === initial.context
+            && attestorDigest(result.incarnations) === attestorDigest(initial.incarnations) && attestorMountContext() === request.context;
+          observeCacheReason(valid ? "crest-source-set-finish-valid" : "crest-source-set-finish-invalid-full-scan");
+          return valid;
+        } catch { observeCacheReason("crest-source-set-disconnected-full-scan"); return false; }
+        finally { connected.close(); }
+      }, close: () => connected.close() };
+  } catch (error) {
+    channel?.close();
+    observeCacheReason(`crest-source-set-miss-full-scan:${error instanceof Error ? error.message : "unknown"}`);
+    if (bound !== null) await retireDeadDescriptor(config, bound);
+    return null;
+  }
+}
+
+export async function controlSourceAttestor(root: string, home: string, op: "status" | "stop", crestRoots?: readonly string[]): Promise<unknown> {
+  const config = await configuration(root, home, crestRoots);
   if (config === null) return { available: false };
   const bound = await readDescriptor(config.descriptor, config.identity);
   if (bound === null) return { available: false };

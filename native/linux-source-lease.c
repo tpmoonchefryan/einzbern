@@ -35,6 +35,8 @@ static volatile sig_atomic_t generation = 1;
 static volatile sig_atomic_t exhausted;
 static sigset_t lease_signals;
 static struct sigaction old_rt, old_io;
+typedef struct guard guard;
+static int hold_inode(guard *g, unsigned id);
 
 static void advance(void) {
   if (generation == INT_MAX) exhausted = 1;
@@ -67,6 +69,12 @@ static napi_value fail(napi_env env, const char *message) {
 static napi_value integer(napi_env env, int64_t n) { napi_value v; napi_create_int64(env, n, &v); return v; }
 static napi_value boolean(napi_env env, int n) { napi_value v; napi_get_boolean(env, n, &v); return v; }
 static void prop(napi_env env, napi_value obj, const char *key, napi_value value) { napi_set_named_property(env, obj, key, value); }
+static napi_value mount_id(napi_env env, const struct statx *s) {
+  char text[32]; napi_value value;
+  snprintf(text, sizeof(text), "%llu", (unsigned long long)s->stx_mnt_id);
+  napi_create_string_utf8(env, text, NAPI_AUTO_LENGTH, &value);
+  return value;
+}
 static char *string_arg(napi_env env, napi_value v) {
   size_t n;
   if (napi_get_value_string_utf8(env, v, NULL, 0, &n) != napi_ok || n == 0 || n >= PATH_MAX) { errno = EINVAL; return NULL; }
@@ -163,11 +171,9 @@ static napi_value init(napi_env env, napi_callback_info info) {
   prop(env, result, "signal", integer(env, lease_signal));
   return result;
 }
-static napi_value acquire(napi_env env, napi_callback_info info) {
-  size_t argc = 1; napi_value argv[1];
-  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
-  if (!current_owner() || exhausted || entries == NULL || argc != 1) { errno = EINVAL; return fail(env, "lease owner"); }
-  char *path = string_arg(env, argv[0]);
+static napi_value acquire_path(napi_env env, napi_value value, guard *g) {
+  if (!current_owner() || exhausted || entries == NULL) { errno = EINVAL; return fail(env, "lease owner"); }
+  char *path = string_arg(env, value);
   if (path == NULL) return fail(env, "lease path");
   unsigned i;
   for (i = 0; i < capacity && entries[i].fd >= 0; i++);
@@ -176,7 +182,7 @@ static napi_value acquire(napi_env env, napi_callback_info info) {
   struct statx sx; struct statfs fs;
   // Only local ext4 is admitted in this candidate. Successful F_SETLEASE on
   // an unreviewed provider is not a cross-platform capability declaration.
-  if (fd < 0 || !identity(fd, &sx) || !S_ISREG(sx.stx_mode) || sx.stx_nlink != 1 || fstatfs(fd, &fs) != 0 || fs.f_type != 0xef53) {
+  if (fd < 0 || !identity(fd, &sx) || !S_ISREG(sx.stx_mode) || sx.stx_nlink != 1 || sx.stx_uid != getuid() || fstatfs(fd, &fs) != 0 || fs.f_type != 0xef53) {
     int saved = errno ? errno : ENOTSUP; if (fd >= 0) close(fd); free(path); errno = saved; return fail(env, "lease object/filesystem");
   }
   sigset_t prior; block(&prior);
@@ -184,6 +190,9 @@ static napi_value acquire(napi_env env, napi_callback_info info) {
   e->path = path; e->identity = sx; e->incarnation = ++serial; e->valid = 1; e->fd = fd;
   struct f_owner_ex own = { .type = F_OWNER_TID, .pid = owner };
   int ok = fcntl(fd, F_SETOWN_EX, &own) == 0 && fcntl(fd, F_SETSIG, lease_signal) == 0 && fcntl(fd, F_SETLEASE, F_RDLCK) == 0;
+  // The Crest inode watch precedes the final full held/current-name admission.
+  // No attribute-watch gap is left between that admission and the initial SHA.
+  if (ok && g != NULL) ok = hold_inode(g, i);
   int saved = errno;
   if (!ok) e->valid = 0;
   unblock(&prior);
@@ -192,7 +201,20 @@ static napi_value acquire(napi_env env, napi_callback_info info) {
   prop(env, result, "id", integer(env, i)); prop(env, result, "fd", integer(env, fd));
   prop(env, result, "incarnation", integer(env, e->incarnation));
   prop(env, result, "generation", integer(env, generation));
+  prop(env, result, "mountId", mount_id(env, &e->identity));
   return result;
+}
+static napi_value acquire(napi_env env, napi_callback_info info) {
+  size_t argc = 1; napi_value argv[1];
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 1) { errno = EINVAL; return fail(env, "lease argument"); }
+  return acquire_path(env, argv[0], NULL);
+}
+static napi_value acquire_crest(napi_env env, napi_callback_info info) {
+  size_t argc = 2; napi_value argv[2]; guard *g = NULL;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 2 || napi_get_value_external(env, argv[1], (void **)&g) != napi_ok || g == NULL) { errno = EINVAL; return fail(env, "Crest guard argument"); }
+  return acquire_path(env, argv[0], g);
 }
 static napi_value check(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1]; uint32_t n;
@@ -221,8 +243,8 @@ static napi_value status(napi_env env, napi_callback_info info) {
   prop(env, result, "live", integer(env, live)); prop(env, result, "capacity", integer(env, capacity));
   return result;
 }
-typedef struct { int wd; char **names; uint32_t count; int all; } watch_rule;
-typedef struct { int fd; watch_rule *rules; uint32_t count; } guard;
+typedef struct { int wd; char **names; uint32_t count; int all; int lease_id; unsigned incarnation; } watch_rule;
+struct guard { int fd; watch_rule *rules; uint32_t count, names_total; };
 static void clear_rules(guard *g) {
   for (uint32_t i = 0; i < g->count; i++) {
     for (uint32_t j = 0; j < g->rules[i].count; j++) free(g->rules[i].names[j]);
@@ -244,14 +266,15 @@ static napi_value watch(napi_env env, napi_callback_info info) {
   if (g == NULL) return fail(env, "watch allocation");
   g->fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   if (g->fd < 0) { free(g); return fail(env, "inotify"); }
-  g->rules = calloc(n, sizeof(*g->rules)); g->count = n;
+  g->rules = calloc(8192, sizeof(*g->rules)); g->count = n;
   if (g->rules == NULL) { g->count = 0; guard_cleanup(env, g, NULL); return fail(env, "watch rules"); }
   uint32_t names_total = 0;
   for (uint32_t i = 0; i < n; i++) {
     napi_value v, name, names; napi_get_element(env, argv[0], i, &v);
     napi_get_named_property(env, v, "path", &name);
     napi_get_named_property(env, v, "names", &names);
-    watch_rule *rule = &g->rules[i]; napi_valuetype type; napi_typeof(env, names, &type);
+    watch_rule *rule = &g->rules[i]; rule->lease_id = -1;
+    napi_valuetype type; napi_typeof(env, names, &type);
     rule->all = type == napi_null;
     if (!rule->all) {
       uint32_t count;
@@ -273,12 +296,11 @@ static napi_value watch(napi_env env, napi_callback_info info) {
     free(path);
     if (wd < 0) { guard_cleanup(env, g, NULL); return fail(env, "directory watch"); }
   }
+  g->names_total = names_total;
   napi_value result; napi_create_external(env, g, guard_cleanup, NULL, &result); return result;
 }
-static napi_value guard_check(napi_env env, napi_callback_info info) {
-  size_t argc = 1; napi_value argv[1]; guard *g = NULL;
-  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
-  if (argc != 1 || napi_get_value_external(env, argv[0], (void **)&g) != napi_ok || g == NULL || g->fd < 0) return boolean(env, 0);
+static int drain_guard(guard *g) {
+  if (g == NULL || g->fd < 0 || !current_owner()) return 0;
   union { struct inotify_event align; char bytes[65536]; } buffer;
   int ok = 0;
   // Filter ONLY unrelated children of ancestry directories. Enumerated source
@@ -302,7 +324,105 @@ static napi_value guard_check(napi_env env, napi_callback_info info) {
     if (dirty) break;
   }
   if (!ok) { close(g->fd); g->fd = -1; clear_rules(g); }
+  return ok;
+}
+static napi_value guard_check(napi_env env, napi_callback_info info) {
+  size_t argc = 1; napi_value argv[1]; guard *g = NULL;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 1 || napi_get_value_external(env, argv[0], (void **)&g) != napi_ok) return boolean(env, 0);
+  return boolean(env, drain_guard(g));
+}
+// Extend before discovering a directory's members. Repeated ancestry rules are
+// merged; upgrading to all children never discards a queued event.
+static napi_value guard_add(napi_env env, napi_callback_info info) {
+  size_t argc = 3; napi_value argv[3]; guard *g = NULL; uint32_t count = 0;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 3 || napi_get_value_external(env, argv[0], (void **)&g) != napi_ok || g == NULL || g->fd < 0 || !current_owner()) { errno = EINVAL; return fail(env, "guard add"); }
+  napi_valuetype type; napi_typeof(env, argv[2], &type);
+  int all = type == napi_null;
+  if (!all && (napi_get_array_length(env, argv[2], &count) != napi_ok || count > 8192 || count > 65536 - g->names_total)) { errno = EINVAL; return fail(env, "guard names"); }
+  char *path = string_arg(env, argv[1]);
+  int fd = path == NULL ? -1 : named(path, 1);
+  free(path);
+  struct statx observed;
+  int identified = fd >= 0 && identity(fd, &observed);
+  char held[64]; snprintf(held, sizeof(held), "/proc/self/fd/%d", fd);
+  int wd = !identified ? -1 : inotify_add_watch(g->fd, held, IN_MASK_ADD | IN_ONLYDIR | IN_MODIFY | IN_ATTRIB | IN_MOVED_FROM | IN_MOVED_TO | IN_CREATE | IN_DELETE | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT);
+  if (fd >= 0) close(fd);
+  if (wd < 0) return fail(env, "guard directory");
+  watch_rule *rule = NULL;
+  for (uint32_t i = 0; i < g->count; i++) if (g->rules[i].wd == wd) rule = &g->rules[i];
+  if (rule == NULL) {
+    if (g->count == 8192) { errno = ENOSPC; return fail(env, "guard capacity"); }
+    rule = &g->rules[g->count++]; rule->wd = wd; rule->lease_id = -1;
+  }
+  if (rule->lease_id >= 0) { errno = EINVAL; return fail(env, "guard directory alias"); }
+  if (all) rule->all = 1;
+  if (!rule->all && count > 0) {
+    char **names = realloc(rule->names, (rule->count + count) * sizeof(char *));
+    if (names == NULL) return fail(env, "guard name allocation");
+    rule->names = names;
+    for (uint32_t j = 0; j < count; j++) {
+      napi_value item; napi_get_element(env, argv[2], j, &item);
+      char *name = string_arg(env, item);
+      if (name == NULL || strlen(name) > NAME_MAX || strchr(name, '/')) { free(name); errno = EINVAL; return fail(env, "guard child name"); }
+      rule->names[rule->count++] = name; g->names_total++;
+    }
+  }
+  return mount_id(env, &observed);
+}
+// Watch the held inode, including link/attribute changes outside watched source
+// directories. This does not prove bytes: writable mappings still need leases.
+static int hold_inode(guard *g, unsigned id) {
+  if (g == NULL || g->fd < 0 || !current_owner() || id >= capacity || !entries[id].valid || entries[id].fd < 0 || g->count == 8192) { errno = EINVAL; return 0; }
+  char held[64]; snprintf(held, sizeof(held), "/proc/self/fd/%d", entries[id].fd);
+  int wd = inotify_add_watch(g->fd, held, IN_MASK_ADD | IN_MODIFY | IN_ATTRIB | IN_DELETE_SELF | IN_MOVE_SELF | IN_UNMOUNT);
+  if (wd < 0) return 0;
+  for (uint32_t i = 0; i < g->count; i++) if (g->rules[i].wd == wd) { errno = EINVAL; return 0; }
+  watch_rule *rule = &g->rules[g->count++];
+  rule->wd = wd; rule->all = 1; rule->lease_id = (int)id; rule->incarnation = entries[id].incarnation;
+  return 1;
+}
+static napi_value guard_hold(napi_env env, napi_callback_info info) {
+  size_t argc = 2; napi_value argv[2]; guard *g = NULL; uint32_t id;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 2 || napi_get_value_external(env, argv[0], (void **)&g) != napi_ok || napi_get_value_uint32(env, argv[1], &id) != napi_ok || !hold_inode(g, id)) { errno = EINVAL; return fail(env, "guard inode"); }
+  return boolean(env, 1);
+}
+// Only for a complete set admitted under its persistent directory/inode guard.
+// No pathname open, stat, statx or enumeration occurs on this warm boundary.
+static napi_value guarded_check(napi_env env, napi_callback_info info) {
+  size_t argc = 3; napi_value argv[3]; guard *g = NULL; uint32_t n; int32_t expected;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  if (argc != 3 || napi_get_value_external(env, argv[0], (void **)&g) != napi_ok || napi_get_array_length(env, argv[1], &n) != napi_ok
+    || napi_get_value_int32(env, argv[2], &expected) != napi_ok || n > capacity || exhausted || generation != expected || !drain_guard(g)) return boolean(env, 0);
+  uint32_t covered = 0;
+  for (uint32_t j = 0; j < g->count; j++) {
+    watch_rule *rule = &g->rules[j];
+    if (rule->lease_id < 0) continue;
+    if (covered >= n) return boolean(env, 0);
+    napi_value v; uint32_t id; napi_get_element(env, argv[1], covered++, &v);
+    if (napi_get_value_uint32(env, v, &id) != napi_ok || id >= capacity || id != (uint32_t)rule->lease_id) return boolean(env, 0);
+    entry *e = &entries[id];
+    if (!e->valid || e->fd < 0 || e->incarnation != rule->incarnation) return boolean(env, 0);
+    if (fcntl(e->fd, F_GETLEASE) != F_RDLCK) { invalidate_lease(e); return boolean(env, 0); }
+  }
+  int ok = covered == n && drain_guard(g) && !exhausted && generation == expected;
   return boolean(env, ok);
+}
+// Obtain the kernel peer, never a PID supplied in authenticated request text.
+static napi_value peer(napi_env env, napi_callback_info info) {
+  size_t argc = 1; napi_value argv[1]; int32_t fd;
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  struct ucred credentials; socklen_t length = sizeof(credentials);
+  struct sockaddr address; socklen_t address_length = sizeof(address);
+  if (argc != 1 || !current_owner() || napi_get_value_int32(env, argv[0], &fd) != napi_ok || fd < 0
+    || getsockname(fd, &address, &address_length) != 0 || address.sa_family != AF_UNIX
+    || getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &credentials, &length) != 0 || length != sizeof(credentials)
+    || credentials.pid <= 0 || credentials.uid != getuid()) { errno = EACCES; return fail(env, "private peer"); }
+  napi_value result; napi_create_object(env, &result);
+  prop(env, result, "pid", integer(env, credentials.pid)); prop(env, result, "uid", integer(env, credentials.uid));
+  return result;
 }
 static napi_value guard_close(napi_env env, napi_callback_info info) {
   size_t argc = 1; napi_value argv[1]; guard *g = NULL;
@@ -314,12 +434,17 @@ static napi_value module_init(napi_env env, napi_value exports) {
   napi_property_descriptor methods[] = {
     {"init", NULL, init, NULL, NULL, NULL, napi_default, NULL},
     {"acquire", NULL, acquire, NULL, NULL, NULL, napi_default, NULL},
+    {"acquireCrest", NULL, acquire_crest, NULL, NULL, NULL, napi_default, NULL},
     {"check", NULL, check, NULL, NULL, NULL, napi_default, NULL},
     {"release", NULL, release, NULL, NULL, NULL, napi_default, NULL},
     {"status", NULL, status, NULL, NULL, NULL, napi_default, NULL},
     {"watch", NULL, watch, NULL, NULL, NULL, napi_default, NULL},
     {"guardCheck", NULL, guard_check, NULL, NULL, NULL, napi_default, NULL},
-    {"guardClose", NULL, guard_close, NULL, NULL, NULL, napi_default, NULL}
+    {"guardClose", NULL, guard_close, NULL, NULL, NULL, napi_default, NULL},
+    {"guardAdd", NULL, guard_add, NULL, NULL, NULL, napi_default, NULL},
+    {"guardHold", NULL, guard_hold, NULL, NULL, NULL, napi_default, NULL},
+    {"guardedCheck", NULL, guarded_check, NULL, NULL, NULL, napi_default, NULL},
+    {"peer", NULL, peer, NULL, NULL, NULL, napi_default, NULL}
   };
   napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
   return exports;
