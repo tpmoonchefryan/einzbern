@@ -348,7 +348,7 @@ export async function listKnowledgeMetadataFast(
   const roots = [storePath, ...archiveRoots];
   // Source proofs belong to this resolved authority, not an earlier speculative
   // read whose bytes may have changed while materialization was pending.
-  const proof = await crestProjectionProof(library, workspace, roots, KNOWLEDGE_PROJECTION_VERSION, true);
+  const proof = await crestProjectionProof(library, workspace, roots, KNOWLEDGE_PROJECTION_VERSION);
   const treesPromise = proof === null ? Promise.all(roots.map((root) => localTreeIdentity(root))) : undefined;
   const boundary = crestMetaBoundary(roots, workspace.headEventHash, treesPromise, proof?.binding);
   try {

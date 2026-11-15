@@ -1791,7 +1791,7 @@
     "packages/core/src/knowledge-duplicates.ts": "1e89f9766eac9d9efd253c20efcb3791660266a77cc5a3f2bb4141b72b9e0ef7",
     "packages/core/src/knowledge-hint.ts": "e3eeb2521c20c3fe6cb2f946030af5a3e8824f2ab505b97c18db62584bca40ed",
     "packages/core/src/knowledge-language.ts": "f093871bb4ae2195699d2473f7bac9b2c6a3e14968a95f760f449cf7e78b1741",
-    "packages/core/src/knowledge-read.ts": "61cef48a2626dfda85b1d610a5310b656fcaf70a9dcce3ee08b3312ba104d391",
+    "packages/core/src/knowledge-read.ts": "50f504fa38fa67416f51390299ac842103227998e9e0bcce8a3ba67cdbc86c4b",
     "packages/core/src/knowledge-scope.ts": "cea7b60c241b0e4a442aff0ff60cbe0fcbf38179f06e7b029ee4207bdda2f10b",
     "packages/core/src/legacy-import.ts": "1aff25fd2ed907f60b4c908df647b4ecd9330a8f0ff54d34803806d4f2f76197",
     "packages/core/src/legacy-workspace.ts": "7379a0baa408ba115dbc108bd850f47bc2f76127dc8d28bf229695ac44817336",
@@ -2540,7 +2540,7 @@
     "tests/helpers/task-runtime-fixture.mjs": "a359d516b348de8ccdafff6e5fcee54152ccbae14b2291d79d305918a20eb0b1",
     "packages/core/src/crest-source-proof.ts": "55c68a4fb38040da1d64148a2e22111cf79c15b78914d5441ad5d3f2d40bb1cd",
     "packages/core/src/source-attestor-crest.ts": "01a3d4decfcb2800f9c54d1c6cab705e488c6177a869d5dcc2d0860a71fd8437",
-    "tests/crest-projection.test.mjs": "e5cf29dbc23992fcc3ccb3024a5c03bdc835a0bd9903546723d7bea06c5920a3",
+    "tests/crest-projection.test.mjs": "5626ae4f009edafb60f24c1fd42a7661a8fb9f5bb67d3af66d19cf2e6ffeca97",
     "tests/crest-source-set.test.mjs": "3a622ba67ee77e177937262519db6be835447fb069728a65c5e3504659e075f0",
     "tests/fixtures/crest-projection-client.mjs": "cca44c7bf080a16c5fe4224cbd24108bde962f400acfe7b5a135c982a0aac5c1",
     "tests/fixtures/crest-set-client.mjs": "81b06f56aa0f764c5c21a4e8db6f3a666bd86c2e35d1767c10949653e324e8d9"

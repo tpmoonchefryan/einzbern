@@ -53,6 +53,15 @@ async function read(f, mode, query = { at }) {
 }
 const warmed = result => result.observation.cacheReasons.includes("crest-source-set-warm") && result.observation.cacheReasons.includes("crest-source-set-finish-valid");
 
+test("Crest production: a cold Recall entry establishes continuity for the next fresh Recall process", { skip: !enabled }, async t => {
+  const f = await fixture(t);
+  const first = await read(f, "recall");
+  assert.equal(first.value.cards.length, 1);
+  const second = await read(f, "recall");
+  assert.deepEqual(second.value, first.value); assert.equal(warmed(second), true);
+  assert.deepEqual((await read(f, "fast")).value, (await read(f, "full")).value);
+});
+
 test("Crest production: ordinary list, fast metadata and readRecallCards adopt a complete proof across fresh processes and fixed-head expiry", { skip: !enabled }, async t => {
   const f = await fixture(t), full = await read(f, "full");
   assert.deepEqual((await read(f, "list")).value, full.value);
