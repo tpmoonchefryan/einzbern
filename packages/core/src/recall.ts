@@ -30,9 +30,11 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // rebuilt from the current chain and knowledge corpus without losing a fact.
 
 import { createHash } from "node:crypto";
+import { constants as bufferConstants } from "node:buffer";
 import { DatabaseSync } from "node:sqlite";
+import type { SQLOutputValue } from "node:sqlite";
 import { serialize, deserialize } from "node:v8";
-import { deflateRawSync, inflateRawSync } from "node:zlib";
+import { deflateRawSync, inflateRawSync, deflateSync, inflateSync } from "node:zlib";
 import type { BigIntStats } from "node:fs";
 import { constants, rmSync, closeSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
@@ -571,8 +573,48 @@ function unpackScoring(bytes: Uint8Array, compressed: boolean): Pick<DocumentLex
   return { words, identifiers, coverage, anchor };
 }
 
+const FTS_CONTENT_COLUMNS = ["title", "body", "tags", "expansions", "externalKey", "proseTitle", "proseBody", "proseTags", "proseExpansions"] as const;
+
+function packFtsContent(fields: readonly (string | null)[]): Buffer {
+  const bytes = serialize(fields);
+  const header = Buffer.alloc(12);
+  header.write("EFT1");
+  header.writeDoubleLE(bytes.length, 4);
+  return Buffer.concat([header, deflateSync(bytes)]);
+}
+
+function ftsContentText(payload: SQLOutputValue, column: SQLOutputValue): string | null {
+  if (!(payload instanceof Uint8Array) || typeof column !== "number" || !Number.isInteger(column) || column < 0 || column >= FTS_CONTENT_COLUMNS.length) throw new Error("invalid FTS content type");
+  const packed = Buffer.from(payload.buffer, payload.byteOffset, payload.byteLength);
+  if (packed.length <= 12 || packed.toString("utf8", 0, 4) !== "EFT1") throw new Error("invalid FTS content header");
+  const length = packed.readDoubleLE(4);
+  if (!Number.isSafeInteger(length) || length <= 0 || length > bufferConstants.MAX_LENGTH) throw new Error("invalid FTS content length");
+  // The frame's length bounds this operation, using Node's existing buffer limit,
+  // not a new document-size policy. Zlib checks its checksum and complete stream;
+  // bytesWritten also rejects trailing input on the pinned Node 24 runtime.
+  const decoded = inflateSync(packed.subarray(12), { maxOutputLength: length, info: true }) as unknown as { buffer: Buffer; engine: { bytesWritten: number } };
+  if (decoded.buffer.length !== length || decoded.engine.bytesWritten !== packed.length - 12) throw new Error("invalid FTS content stream length");
+  const fields: unknown = deserialize(decoded.buffer);
+  if (!Array.isArray(fields) || fields.length !== FTS_CONTENT_COLUMNS.length || !fields.every((value: unknown, index: number) => typeof value === "string" || index >= 5 && value === null)) throw new Error("invalid FTS content columns");
+  // No decoded corpus or row cache survives the SQL call. NULL and empty strings
+  // remain distinct, so the prose view retains the original COALESCE semantics.
+  return fields[column] as string | null;
+}
+
+function openRecallDatabase(path: string, readOnly = false): DatabaseSync {
+  const database = new DatabaseSync(path, { readOnly });
+  try {
+    if (path !== ":memory:") database.function("recall_fts_text", { deterministic: true }, ftsContentText);
+    return database;
+  } catch (error) {
+    database.close();
+    throw error;
+  }
+}
+
 export class RecallIndex {
   #database: DatabaseSync;
+  #compressedContent: boolean;
   #rows = new Map<string, IndexedRow>();
   #rowProjections = new Map<string, Pick<IndexedRow, "document" | "lexicon">>();
   #byExternalKey = new Map<string, string>();
@@ -765,7 +807,8 @@ export class RecallIndex {
   }
 
   constructor(documents: readonly RecallDocument[], checkpoint: string, database = ":memory:", restored?: RecallIndexState, slim?: SlimRecallHeader) {
-    this.#database = new DatabaseSync(database, { readOnly: restored !== undefined || slim !== undefined });
+    this.#database = openRecallDatabase(database, restored !== undefined || slim !== undefined);
+    this.#compressedContent = database !== ":memory:";
     this.#checkpoint = checkpoint;
     if (slim !== undefined) {
       this.#slim = true;
@@ -801,20 +844,28 @@ export class RecallIndex {
     }
     // The fifth column serves key queries. The four-column projection preserves
     // prose BM25 statistics: a zero weight would still count key tokens in length.
-    if (database !== ":memory:") this.#database.exec("PRAGMA page_size = 16384;");
-    this.#database.exec(
-      "CREATE TABLE recall_fts_content(rowId INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, tags TEXT NOT NULL, expansions TEXT NOT NULL, externalKey TEXT NOT NULL, proseTitle TEXT, proseBody TEXT, proseTags TEXT, proseExpansions TEXT);"
-        + "CREATE VIEW recall_prose_view AS SELECT rowId, COALESCE(proseTitle, title) AS title, COALESCE(proseBody, body) AS body, COALESCE(proseTags, tags) AS tags, COALESCE(proseExpansions, expansions) AS expansions FROM recall_fts_content;"
-        + "CREATE VIRTUAL TABLE recall_index USING fts5(title, body, tags, expansions, externalKey, content='recall_fts_content', content_rowid='rowId', tokenize='unicode61');"
-        + "CREATE VIRTUAL TABLE recall_prose USING fts5(title, body, tags, expansions, content='recall_prose_view', content_rowid='rowId', tokenize='unicode61');"
-        + "CREATE VIRTUAL TABLE recall_clauses USING fts5(body, tokenize='unicode61');"
-        + "CREATE TABLE recall_documents(id TEXT PRIMARY KEY, rowId INTEGER NOT NULL, meta BLOB NOT NULL, scoring BLOB NOT NULL, scoringCompressed INTEGER NOT NULL, projection BLOB);"
-        + "CREATE INDEX recall_documents_rowId ON recall_documents(rowId);"
-        + "CREATE TABLE recall_terms(word TEXT PRIMARY KEY, id INTEGER NOT NULL, frequency INTEGER NOT NULL, clauseFrequency INTEGER NOT NULL);"
-        + "CREATE TABLE recall_clause_data(id INTEGER PRIMARY KEY, documentId TEXT NOT NULL, words BLOB NOT NULL, originalWords BLOB NOT NULL);"
-        + "CREATE INDEX recall_clause_doc ON recall_clause_data(documentId)",
-    );
-    this.#apply(documents);
+    try {
+      if (database !== ":memory:") this.#database.exec("PRAGMA page_size = 16384;");
+      const contentSchema = this.#compressedContent
+        ? "CREATE TABLE recall_fts_payload(rowId INTEGER PRIMARY KEY, payload BLOB NOT NULL);"
+          + `CREATE VIEW recall_fts_content AS SELECT rowId, ${FTS_CONTENT_COLUMNS.map((column, index) => `recall_fts_text(payload, ${index}) AS ${column}`).join(", ")} FROM recall_fts_payload;`
+        : "CREATE TABLE recall_fts_content(rowId INTEGER PRIMARY KEY, title TEXT NOT NULL, body TEXT NOT NULL, tags TEXT NOT NULL, expansions TEXT NOT NULL, externalKey TEXT NOT NULL, proseTitle TEXT, proseBody TEXT, proseTags TEXT, proseExpansions TEXT);";
+      this.#database.exec(
+        contentSchema + "CREATE VIEW recall_prose_view AS SELECT rowId, COALESCE(proseTitle, title) AS title, COALESCE(proseBody, body) AS body, COALESCE(proseTags, tags) AS tags, COALESCE(proseExpansions, expansions) AS expansions FROM recall_fts_content;"
+          + "CREATE VIRTUAL TABLE recall_index USING fts5(title, body, tags, expansions, externalKey, content='recall_fts_content', content_rowid='rowId', tokenize='unicode61');"
+          + "CREATE VIRTUAL TABLE recall_prose USING fts5(title, body, tags, expansions, content='recall_prose_view', content_rowid='rowId', tokenize='unicode61');"
+          + "CREATE VIRTUAL TABLE recall_clauses USING fts5(body, tokenize='unicode61');"
+          + "CREATE TABLE recall_documents(id TEXT PRIMARY KEY, rowId INTEGER NOT NULL, meta BLOB NOT NULL, scoring BLOB NOT NULL, scoringCompressed INTEGER NOT NULL, projection BLOB);"
+          + "CREATE INDEX recall_documents_rowId ON recall_documents(rowId);"
+          + "CREATE TABLE recall_terms(word TEXT PRIMARY KEY, id INTEGER NOT NULL, frequency INTEGER NOT NULL, clauseFrequency INTEGER NOT NULL);"
+          + "CREATE TABLE recall_clause_data(id INTEGER PRIMARY KEY, documentId TEXT NOT NULL, words BLOB NOT NULL, originalWords BLOB NOT NULL);"
+          + "CREATE INDEX recall_clause_doc ON recall_clause_data(documentId)",
+      );
+      this.#apply(documents);
+    } catch (error) {
+      this.#database.close();
+      throw error;
+    }
   }
 
   projection(): RecallIndexState {
@@ -861,7 +912,7 @@ export class RecallIndex {
   /** A private copy permits a transaction without modifying a published index. */
   writableCopy(database: string): void {
     this.#database.close();
-    this.#database = new DatabaseSync(database);
+    this.#database = openRecallDatabase(database);
   }
 
   async publish(temporary: string, destination: string): Promise<Buffer> {
@@ -870,7 +921,7 @@ export class RecallIndex {
     await writeFileAtomic(destination, bytes);
     // Keep querying exactly the artifact whose maps we just built. Another
     // process may atomically publish a newer head at destination at any time.
-    this.#database = new DatabaseSync(temporary, { readOnly: true });
+    this.#database = openRecallDatabase(temporary, true);
     this.#cleanup = () => { this.#database.close(); rmSync(temporary, { force: true }); };
     process.once("exit", this.#cleanup);
     return bytes;
@@ -900,7 +951,8 @@ export class RecallIndex {
     this.#database.exec("BEGIN IMMEDIATE");
     try {
       const insertFtsContent = this.#database.prepare(
-        "INSERT INTO recall_fts_content(rowId, title, body, tags, expansions, externalKey, proseTitle, proseBody, proseTags, proseExpansions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        this.#compressedContent ? "INSERT INTO recall_fts_payload(rowId, payload) VALUES (?, ?)"
+          : "INSERT INTO recall_fts_content(rowId, title, body, tags, expansions, externalKey, proseTitle, proseBody, proseTags, proseExpansions) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       );
       const insert = this.#database.prepare(
         "INSERT INTO recall_index(rowid, title, body, tags, expansions, externalKey) VALUES (?, ?, ?, ?, ?, ?)",
@@ -914,7 +966,7 @@ export class RecallIndex {
       const removeFtsProse = this.#database.prepare(
         "INSERT INTO recall_prose(recall_prose, rowid, title, body, tags, expansions) SELECT 'delete', rowId, title, body, tags, expansions FROM recall_prose_view WHERE rowId = ?",
       );
-      const removeFtsContent = this.#database.prepare("DELETE FROM recall_fts_content WHERE rowId = ?");
+      const removeFtsContent = this.#database.prepare(`DELETE FROM ${this.#compressedContent ? "recall_fts_payload" : "recall_fts_content"} WHERE rowId = ?`);
       const removeClause = this.#database.prepare("DELETE FROM recall_clauses WHERE rowid = ?");
       const removeClauseData = this.#database.prepare("DELETE FROM recall_clause_data WHERE id = ?");
       const insertClause = this.#database.prepare("INSERT INTO recall_clauses(rowid, body) VALUES (?, ?)");
@@ -958,14 +1010,15 @@ export class RecallIndex {
           segmentProse(document.tags),
           segmentProse(document.expansions),
         ] as const;
-        insertFtsContent.run(
-          rowId,
+        const contentFields = [
           fields[0], fields[1], fields[2], fields[3], keyTokens,
           proseFields[0] === fields[0] ? null : proseFields[0],
           proseFields[1] === fields[1] ? null : proseFields[1],
           proseFields[2] === fields[2] ? null : proseFields[2],
           proseFields[3] === fields[3] ? null : proseFields[3],
-        );
+        ];
+        if (this.#compressedContent) insertFtsContent.run(rowId, packFtsContent(contentFields));
+        else insertFtsContent.run(rowId, ...contentFields);
         insert.run(rowId, fields[0], fields[1], fields[2], fields[3], keyTokens);
         // Identifier expansions have their own route: they must not change every
         // prose score through FTS length normalization.
@@ -1537,7 +1590,7 @@ export interface RecallResult {
  * resetRecallCache closes it; selecting another project does not evict its index.
  */
 const cachedIndexes = new Map<string, RecallIndex>();
-const PERSISTENT_RECALL_VERSION = "record-clause-fts-v17";
+const PERSISTENT_RECALL_VERSION = "record-clause-fts-v18";
 
 interface SlimRecallHeader {
   readonly checkpoint: string;

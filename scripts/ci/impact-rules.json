@@ -1823,7 +1823,7 @@
     "packages/core/src/recall-inputs.ts": "761a07ac6de0166473ff3ab3f14cc0491106713096316dd2df60a3c31f424cf7",
     "packages/core/src/recall-observation-log.ts": "9805eea553fb008abeef88685c82724d9fc7b4969661d84472bebf106a4a139c",
     "packages/core/src/recall-observation.ts": "f8f6daf07a57d0f46a383910d212e07d5a7a96a6a5ffda4f9ac1e5c5d61f7fdd",
-    "packages/core/src/recall.ts": "0dfaa4308dc038f8c9355809e82b2d270b13ae30484bae5f3a00dc9c48a529fa",
+    "packages/core/src/recall.ts": "5a10e257dddb63fbad1ab1e1df6b5416a7ae6dbe2128642248233cdfdc7a7aa1",
     "packages/core/src/reference-profiles.ts": "4f1dbb380af080e5920e17b1048bcc6159f13ddb887f7ebebd4962fd767391e1",
     "packages/core/src/registry.ts": "a9411f1a433f7b02bb685129955d10fa3cbae79c3687926c2b9c567f5522f634",
     "packages/core/src/relocate.ts": "a831043af5860dce52c0e078eaad85823efdc9dd5038f93392543a221358c9c7",
@@ -2324,7 +2324,7 @@
     "tests/init053-owner-return.test.mjs": "bccf7774e524e463c9d8b7e053d3f37ff50004180ca330dcb06044abda77686d",
     "tests/init080-work-create-validation.test.mjs": "0aa89d2d1db4d9ad083525394affafcd57e7fb6dde5370cf7e6896c0ace7e6c8",
     "tests/init093-knowledge.test.mjs": "0ccfb75f7af9e04879469cf3f2243d7886b0bcc94735fb167e3d8b780e472bf1",
-    "tests/init095-cache.test.mjs": "287b303c43d938b102d8d94a0c924e05768bbfc0e8272d9fa78ae1b19c59032a",
+    "tests/init095-cache.test.mjs": "4cc94dcfac499053e41b6905544c04d74845ad41c943a92b53298511be87918c",
     "tests/installer-cleanup-audit-regressions.test.mjs": "d631bad43594ac098af905c203255271cc99121013403c9f0d73656ca31be101",
     "tests/involved-projects-cli.test.mjs": "0f8936dd2fdfc2b584eac4b70a4765d14e04fd14b2202aa75d421a5799a3f58b",
     "tests/io-boundaries.test.mjs": "c1a041df28068cee72f4c0a4f7f2dd64adc90ed7b602da894f510f75dd9fbaa5",
@@ -2543,7 +2543,8 @@
     "tests/crest-projection.test.mjs": "5626ae4f009edafb60f24c1fd42a7661a8fb9f5bb67d3af66d19cf2e6ffeca97",
     "tests/crest-source-set.test.mjs": "3a622ba67ee77e177937262519db6be835447fb069728a65c5e3504659e075f0",
     "tests/fixtures/crest-projection-client.mjs": "cca44c7bf080a16c5fe4224cbd24108bde962f400acfe7b5a135c982a0aac5c1",
-    "tests/fixtures/crest-set-client.mjs": "81b06f56aa0f764c5c21a4e8db6f3a666bd86c2e35d1767c10949653e324e8d9"
+    "tests/fixtures/crest-set-client.mjs": "81b06f56aa0f764c5c21a4e8db6f3a666bd86c2e35d1767c10949653e324e8d9",
+    "tests/init095-fts-storage.test.mjs": "02bb8149767c0ede75f1639f36ea3f5b95165826d57c4f3aa2e295afc17cafbb"
   },
   "version": 68
 }

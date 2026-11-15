@@ -391,6 +391,12 @@ function documents(text = "Seven alloy units") {
 }
 
 test("095: persistent FTS updates only changed rows, and truncation/busy locks recover", async t => {
+  const register = DatabaseSync.prototype.function;
+  let decode;
+  t.mock.method(DatabaseSync.prototype, "function", function (...args) {
+    if (args[0] === "recall_fts_text") decode = args.at(-1);
+    return register.apply(this, args);
+  });
   const f = await fixture(t);
   const request = (docs, checkpoint) => ({ cacheKey: "init095.synthetic-source.v1", checkpoint, query: "alloy", documents: () => docs, tau: 0 });
   await recallPersistent(request(documents(), "head-1"), f.root);
@@ -419,6 +425,7 @@ test("095: persistent FTS updates only changed rows, and truncation/busy locks r
   resetRecallCache();
   const before = await fs.stat(path);
   const corrupted = new DatabaseSync(path);
+  corrupted.function("recall_fts_text", { deterministic: true }, decode);
   corrupted.exec("DELETE FROM recall_prose; DELETE FROM recall_index; DELETE FROM recall_clauses");
   corrupted.close();
   await fs.utimes(path, before.atime, before.mtime);
