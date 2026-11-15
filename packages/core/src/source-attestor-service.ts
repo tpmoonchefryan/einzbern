@@ -1,13 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash, randomBytes } from "node:crypto";
 import { readSync } from "node:fs";
-import { lstat, readFile, unlink, writeFile } from "node:fs/promises";
+import { chmod, readFile, unlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { createServer } from "node:net";
-import type { Socket } from "node:net";
+import { createServer, type Socket } from "node:net";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorMac, validAttestorMac } from "./source-attestor-protocol.js";
+import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorEndpoint, attestorMac, validateAttestorDirectory, validateAttestorEndpoint, validAttestorMac } from "./source-attestor-protocol.js";
 import type { AttestorDescriptor, AttestorFile, AttestorRequest } from "./source-attestor-protocol.js";
 
 interface Lease { readonly id: number; readonly fd: number; readonly incarnation: number }
@@ -63,8 +62,9 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
   const require = createRequire(import.meta.url);
   const bridge = require(launch.module) as Bridge;
   bridge.init(launch.capacity ?? 4096);
-  const descriptor: AttestorDescriptor = { schema: ATTESTOR_SCHEMA, endpoint: `\0einzbern-source-${attestorDigest([launch.descriptor, launch.identity]).slice(0, 40)}`,
-    secret: randomBytes(32).toString("hex"), epoch: randomBytes(32).toString("hex"), pid: process.pid, identity: launch.identity };
+  const epoch = randomBytes(32).toString("hex");
+  const descriptor: AttestorDescriptor = { schema: ATTESTOR_SCHEMA, endpoint: attestorEndpoint(launch.descriptor, epoch),
+    secret: randomBytes(32).toString("hex"), epoch, pid: process.pid, identity: launch.identity };
   const held = new Map<string, Held>();
   const sockets = new Set<Socket>();
   const transactions = new Map<Socket, Transaction>();
@@ -82,7 +82,7 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
     clearInterval(timer);
     for (const socket of sockets) { clearTransaction(socket); socket.destroy(); }
     for (const entry of held.values()) release(entry);
-    server.close();
+    await new Promise<void>(resolve => server.close(() => resolve()));
     if (ownsDescriptor) {
       const current = await readFile(launch.descriptor, "utf8").catch(() => "");
       if (current === JSON.stringify(descriptor)) await unlink(launch.descriptor).catch(() => undefined);
@@ -202,10 +202,11 @@ export async function runSourceAttestor(launch: AttestorLaunch): Promise<void> {
   }, 250);
   process.once("SIGTERM", () => { void stop(); }); process.once("SIGINT", () => { void stop(); });
   try {
-    const info = await lstat(dirname(launch.descriptor));
-    if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0) throw new Error("private-runtime-boundary");
-    await writeFile(launch.descriptor, JSON.stringify(descriptor), { flag: "wx", mode: 0o600 }); ownsDescriptor = true;
+    await validateAttestorDirectory(dirname(launch.descriptor));
     await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(descriptor.endpoint, resolve); });
+    await chmod(descriptor.endpoint, 0o600);
+    await validateAttestorEndpoint(descriptor.endpoint);
+    await writeFile(launch.descriptor, JSON.stringify(descriptor), { flag: "wx", mode: 0o600 }); ownsDescriptor = true;
     process.stdout.write(JSON.stringify({ ready: true, pid: process.pid }) + "\n");
   } catch (error) { await stop(); throw error; }
 }

@@ -21,7 +21,7 @@ import type { VerificationBoundary } from "./source-verification-records.js";
 import { observeAuthorityWork, observeAuthorityWorkAsync, observeCacheRead, observeCacheWrite, observeCacheReason, observeEventRead, observeVerificationHelper, observeVerificationRecord, observeVerifiedSegment } from "./recall-observation.js";
 import { fileContentDigest, localFileIdentity, localIdentityContext } from "./local-file-identity.js";
 import type { LocalFileIdentity, LocalIdentityContext } from "./local-file-identity.js";
-import { readProtectedProjection, readProtectedProjectionSync, writeProtectedProjection } from "./protected-projection.js";
+import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
 import { buildPrecomputedDecisionHints, PRECOMPUTED_DECISION_HINTS } from "./recall-inputs.js";
 import type { PrecomputedDecisionHints } from "./recall-inputs.js";
 import type { WorkspaceState } from "./workspace.js";
@@ -599,10 +599,10 @@ function authorityMetadata(read: LibraryRead): unknown {
   };
 }
 
-function hydrateMaterializedState(cached: CachedMaterializedState, library: Library, binding: string): WorkspaceState {
-  // Keep the complete public event history, but decode and authenticate it
-  // only when a consumer asks for it. Recall's state/Crest/index hits need
-  // the current records, not the historical payload graph.
+function hydrateMaterializedState(cached: CachedMaterializedState, history: Buffer): WorkspaceState {
+  // Own the authenticated history bytes at the same source boundary as the
+  // reducer state. Later cache deletion or publication cannot change this state.
+  // Decode lazily: Recall does not need the complete historical payload graph.
   const state: Record<string, unknown> = {};
   Object.defineProperty(state, PRECOMPUTED_DECISION_HINTS, { value: cached.decisionHints, enumerable: false, configurable: true });
   for (const [key, bytes] of Object.entries(cached.fields)) {
@@ -616,9 +616,7 @@ function hydrateMaterializedState(cached: CachedMaterializedState, library: Libr
   let decodedEvents: { readonly value: unknown } | undefined;
   Object.defineProperty(state, "events", { enumerable: true, configurable: true, get() {
     if (decodedEvents === undefined) {
-      const packed = readProtectedProjectionSync<Buffer>(library, "materialized-events", binding);
-      if (packed === null) throw new Error("materialized-events projection failed verification");
-      decodedEvents = { value: JSON.parse(gunzipSync(packed).toString("utf8")) };
+      decodedEvents = { value: JSON.parse(gunzipSync(history).toString("utf8")) };
     }
     return decodedEvents.value;
   } });
@@ -649,10 +647,11 @@ export async function tryReadVerifiedMaterializedState(library: Library): Promis
     const binding = canonicalSha256({ projection: "materialized-library-v9", metadata: session.metadata,
       files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) });
     const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);
-    if (cached === null || !await filesUnchanged(session)) return null;
+    const history = cached === null ? null : await readProtectedProjection<Buffer>(library, "materialized-events", binding);
+    if (cached === null || history === null || !await filesUnchanged(session)) return null;
     for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
     observeCacheReason("materialized-state-hit");
-    return hydrateMaterializedState(cached, library, binding);
+    return hydrateMaterializedState(cached, history);
   } finally {
     session.attestation?.close();
     await Promise.all([...session.files.values()].map(file => file.handle?.close().catch(() => undefined)));
@@ -674,10 +673,11 @@ export async function withSourceVerification(library: Library, operation: () => 
       files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) }) : null;
     if (binding !== null) {
       const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);
-      if (cached !== null && await filesUnchanged(session)) {
+      const history = cached === null ? null : await readProtectedProjection<Buffer>(library, "materialized-events", binding);
+      if (cached !== null && history !== null && await filesUnchanged(session)) {
         for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
         observeCacheReason("materialized-state-hit");
-        return hydrateMaterializedState(cached, library, binding);
+        return hydrateMaterializedState(cached, history);
       }
     }
     const answer = await active.run(session, operation);

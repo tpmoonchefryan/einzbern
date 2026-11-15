@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { beginSourceAttestation, controlSourceAttestor } from "../dist/build/packages/core/src/source-attestor-client.js";
-import { ATTESTOR_SCHEMA, attestorDigest, attestorMac } from "../dist/build/packages/core/src/source-attestor-protocol.js";
+import { ATTESTOR_SCHEMA, attestorDigest, attestorMac, validateAttestorEndpoint } from "../dist/build/packages/core/src/source-attestor-protocol.js";
 import { initializeLibrary, createProject, appendEvents, createWorkDelta, setWorkspaceSetting, readAllStreams, materializeWorkspaceFromGenesis, declareChainIdentity, consolidateLibraries, registerLibrary,
   createKnowledgeUnit, initializeKnowledgeStore, recordMinutes, cachePath } from "../dist/build/packages/core/src/index.js";
 import { withRecallObservation } from "../dist/build/packages/core/src/recall-observation.js";
@@ -28,7 +28,7 @@ function log(value) { if (journal) return fs.appendFile(journal, JSON.stringify(
 async function run(argv, options = {}) {
   const started = performance.now();
   const r = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", env: process.env, timeout: 15000, maxBuffer: 32 * 1024 * 1024, ...options });
-  await log({ argv, cwd: process.cwd(), exitCode: r.status, signal: r.signal, stdout: r.stdout, stderr: r.stderr, elapsedMs: performance.now() - started });
+  await log({ argv, cwd: options.cwd ?? process.cwd(), env: options.env ?? process.env, pid: r.pid, exitCode: r.status, signal: r.signal, stdout: r.stdout, stderr: r.stderr, elapsedMs: performance.now() - started });
   return r;
 }
 async function setup(t) {
@@ -65,6 +65,10 @@ async function descriptors(home) {
     try { result.push(JSON.parse(await fs.readFile(join(directory, name, "endpoint.json"), "utf8"))); } catch {}
   }
   return result;
+}
+async function rawConnection(descriptor) {
+  await validateAttestorEndpoint(descriptor.endpoint);
+  return createConnection(descriptor.endpoint);
 }
 async function raw(f, n = 3) {
   const files = [];
@@ -107,6 +111,27 @@ test("attestor: distinct clients share real same-fd SHA; restart, binding and so
   assert.notEqual(first.pid, second.pid); assert.equal(first.valid, true); assert.equal(second.valid, true);
   assert.equal(first.initial.reads.length, 3); assert.deepEqual(second.initial.reads, []);
   assert.equal(second.epoch, first.epoch); assert.deepEqual(second.initial.incarnations, first.initial.incarnations);
+  const initialDescriptor = (await descriptors(f.home))[0];
+  const descriptorPath = join(dirname(initialDescriptor.endpoint), "endpoint.json");
+  assert.equal((await fs.lstat(initialDescriptor.endpoint)).isSocket(), true);
+  assert.equal((await fs.lstat(initialDescriptor.endpoint)).mode & 0o077, 0);
+  for (const endpoint of ["\0einzbern-source-legacy", "relative.sock", "127.0.0.1:9", join(f.home, "absent")]) {
+    await fs.writeFile(descriptorPath, JSON.stringify({ ...initialDescriptor, endpoint }));
+    assert.equal((await readClient(request, f.home)).valid, false, endpoint);
+  }
+  await fs.writeFile(descriptorPath, JSON.stringify(initialDescriptor));
+  await fs.chmod(initialDescriptor.endpoint, 0o666);
+  assert.equal((await readClient(request, f.home)).valid, false, "shared socket cannot attest");
+  await fs.chmod(initialDescriptor.endpoint, 0o600);
+  await fs.chmod(dirname(initialDescriptor.endpoint), 0o755);
+  assert.equal((await readClient(request, f.home)).valid, false, "shared directory cannot attest");
+  await fs.chmod(dirname(initialDescriptor.endpoint), 0o700);
+  await fs.rename(initialDescriptor.endpoint, initialDescriptor.endpoint + ".held");
+  await fs.symlink(initialDescriptor.endpoint + ".held", initialDescriptor.endpoint);
+  assert.equal((await readClient(request, f.home)).valid, false, "symlink socket cannot attest");
+  await fs.unlink(initialDescriptor.endpoint);
+  await fs.rename(initialDescriptor.endpoint + ".held", initialDescriptor.endpoint);
+  assert.equal((await readClient(request, f.home)).valid, true);
   const proof = await beginSourceAttestation(request, f.home);
   const descriptor = (await descriptors(f.home))[0]; process.kill(descriptor.pid, "SIGKILL"); await delay(30);
   assert.equal(await proof.finish(), false);
@@ -152,10 +177,10 @@ test("attestor: concurrent one-shot finish, forged IPC, replay, timeout and fd e
   assert.ok(a && b); assert.deepEqual(await Promise.all([a.finish(), b.finish()]), [true, true]);
   assert.equal(await a.finish(), false);
   const d = (await descriptors(f.home))[0];
-  const forged = createConnection(d.endpoint);
+  const forged = await rawConnection(d);
   const fake = await new Promise(resolve => { forged.once("connect", () => forged.write(JSON.stringify({ body: { epoch: d.epoch, number: 1, nonce: "b".repeat(64), op: "begin", request }, mac: "0".repeat(64) }) + "\n")); forged.once("data", bytes => { forged.destroy(); resolve(bytes.toString()); }); });
   assert.match(fake, /ipc-authentication/u);
-  const socket = createConnection(d.endpoint);
+  const socket = await rawConnection(d);
   const body = { op: "finish", epoch: d.epoch, number: 1, nonce: "a".repeat(64), token: a.initial.token, fingerprint: attestorDigest(request) };
   const response = await new Promise(resolve => { socket.once("connect", () => socket.write(JSON.stringify({ body, mac: attestorMac(d.secret, body) }) + "\n")); socket.once("data", b => { socket.destroy(); resolve(b.toString()); }); });
   assert.match(response, /ipc-order/u);
@@ -219,7 +244,7 @@ test("attestor: optional native absence retains full materialization; 220 real s
   const bad = await materialize(f); assert.notEqual(bad.status, 0); assert.match(bad.stderr, /AKASHA_.*CORRUPT/u);
 });
 
-test("attestor: 334-segment merged prefix/tail agrees with genesis and lost replay proof forces replay", { skip: !enabled, timeout: 120000 }, async t => {
+test("attestor: 334-segment merged history survives cache loss with separate reducer authorities", { skip: !enabled, timeout: 120000 }, async t => {
   const f = await setup(t), sources = [];
   const readsPath = resolve(repo, `dist/attestor-source-reads-${process.pid}.jsonl`);
   await fs.writeFile(readsPath, "");
@@ -257,15 +282,48 @@ test("attestor: 334-segment merged prefix/tail agrees with genesis and lost repl
   const read = await readAllStreams(f.root);
   const count = r => r.streams.reduce((n,s) => n + (s.manifest?.segments.length ?? 0), 0) + (r.consolidation?.sources.reduce((n,s) => n + count(s.read), 0) ?? 0);
   assert.ok(count(read) >= 334); t.diagnostic(JSON.stringify({ segments: count(read), first: first.value.observation, warm: warm.value.observation, tail: tail.value.observation }));
-  // Losing the independent replay receipt is a full reducer replay even while
-  // the source bytes still have valid continuously held leases.
-  const { openLibrary } = await import("../dist/build/packages/core/src/index.js");
+  const { openLibrary, materializeLibrary } = await import("../dist/build/packages/core/src/index.js");
   const libraryId = (await openLibrary(f.root)).manifest.libraryId;
-  await fs.rm(join(f.home, "replay-projections", libraryId.replace(":", "-"), "projection.json"));
+  const replayReceipt = join(f.home, "replay-projections", libraryId.replace(":", "-"), "projection.json");
+  const historyReceipt = join(f.home, "derived-projections", libraryId.replace(":", "-"), "materialized-events.json");
+  const historyPayload = join(cachePath(libraryId), "materialized-events.bin");
+  // A separately authenticated materialized state remains reducer authority.
+  await fs.rm(replayReceipt);
+  const receiptOnly = await materialize(f);
+  assert.equal(receiptOnly.status, 0, receiptOnly.stderr);
+  assert.equal(receiptOnly.value.observation.replayedEvents, 0);
+  assert.equal(receiptOnly.value.digest, tail.value.digest);
+  for (const loss of ["receipt", "payload", "damaged-receipt", "damaged-payload"]) {
+    if (loss === "receipt") await fs.rm(historyReceipt);
+    if (loss === "payload") await fs.rm(historyPayload);
+    if (loss === "damaged-receipt") await fs.writeFile(historyReceipt, "invalid receipt");
+    if (loss === "damaged-payload") await fs.writeFile(historyPayload, "invalid payload");
+    const recovered = await materialize(f);
+    assert.equal(recovered.status, 0, `${loss}: ${recovered.stderr}`);
+    assert.equal(recovered.value.digest, tail.value.digest, loss);
+    assert.equal(recovered.value.observation.logicalEventBytes, 0, "history loss does not revoke byte authority");
+    assert.equal((await materialize(f)).value.observation.replayedEvents, 0, "repaired cache is reusable");
+  }
+  // Only losing all applicable reducer authorities forces full reducer replay.
+  await fs.rm(replayReceipt, { force: true });
   await fs.rm(join(cachePath(libraryId), "materialized.bin"), { force: true });
   const missingProof = await materialize(f); assert.equal(missingProof.status, 0, missingProof.stderr);
   assert.ok(missingProof.value.observation.replayedEvents > 1);
+  assert.equal(missingProof.value.observation.logicalEventBytes, 0);
   assert.equal(missingProof.value.digest, tail.value.digest);
+  // A returned public state owns its authenticated history, even if caches
+  // disappear and a later materialization publishes another head before use.
+  const retained = await materializeLibrary(f.root);
+  await fs.rm(cachePath(libraryId), { recursive: true, force: true });
+  const rebuilt = await materialize(f);
+  assert.equal(rebuilt.status, 0, rebuilt.stderr);
+  assert.equal(rebuilt.value.digest, tail.value.digest);
+  await appendEvents(f.root, [createWorkDelta({ projectId: sources[0].projectId, externalKey: "AFTER-RETURN", kind: "Initiative", parentId: null, title: "Later head", occurredAt: at })], { occurredAt: at });
+  const later = await materialize(f);
+  assert.equal(later.status, 0, later.stderr);
+  assert.notEqual(later.value.head, retained.headEventHash);
+  assert.equal(canonicalSha256(retained), tail.value.digest);
+  assert.equal(later.value.digest, canonicalSha256(await materializeWorkspaceFromGenesis(f.root)));
 });
 
 test("attestor: complete CLI and Hook launcher preserve fixed-head Crest/FTS expiry and projection upgrade", { skip: !enabled, timeout: 120000 }, async t => {

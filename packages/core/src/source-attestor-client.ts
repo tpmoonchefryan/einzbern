@@ -3,13 +3,12 @@ import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath, unlink } from "node:fs/promises";
-import { createConnection } from "node:net";
-import type { Socket } from "node:net";
+import { createConnection, type Socket } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FRAMEWORK_VERSION } from "./framework-version.js";
 import { observeCacheReason, observeEventRead, observeMetadataBytes } from "./recall-observation.js";
-import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorMac, validAttestorMac } from "./source-attestor-protocol.js";
+import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorEndpoint, attestorMac, validateAttestorEndpoint, validAttestorMac } from "./source-attestor-protocol.js";
 import type { AttestorDescriptor, AttestorRequest } from "./source-attestor-protocol.js";
 
 interface BeginResult {
@@ -36,6 +35,7 @@ interface Connection {
 // read-only bundled resource they cannot be an in-memory/data URL.
 const RUNTIME_FILES = { host: "source-attestor-host.mjs", native: "native/linux-source-lease.node" };
 async function connect(descriptor: AttestorDescriptor): Promise<Connection> {
+  await validateAttestorEndpoint(descriptor.endpoint);
   const socket = createConnection(descriptor.endpoint);
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(() => { socket.destroy(); reject(new Error("ipc-connect-timeout")); }, 1500);
@@ -92,7 +92,7 @@ async function readDescriptor(path: string, identity: string): Promise<AttestorD
     if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0 || info.size > 4096) return null;
     const descriptor = JSON.parse(await handle.readFile("utf8")) as AttestorDescriptor;
     return descriptor.schema === ATTESTOR_SCHEMA && descriptor.identity === identity && typeof descriptor.endpoint === "string"
-      && descriptor.endpoint.startsWith("\0einzbern-source-") && /^[a-f0-9]{64}$/u.test(descriptor.secret) && /^[a-f0-9]{64}$/u.test(descriptor.epoch)
+      && descriptor.endpoint === attestorEndpoint(path, descriptor.epoch) && /^[a-f0-9]{64}$/u.test(descriptor.secret)
       && Number.isSafeInteger(descriptor.pid) && descriptor.pid > 0 ? descriptor : null;
   } catch { return null; }
   finally { await handle?.close(); }
@@ -184,7 +184,13 @@ export async function beginSourceAttestation(request: AttestorRequest, home: str
     if (descriptor !== null) {
       try { process.kill(descriptor.pid, 0); }
       catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ESRCH" && await readFile(config.descriptor, "utf8").catch(() => "") === JSON.stringify(descriptor)) await unlink(config.descriptor).catch(() => undefined);
+        if ((error as NodeJS.ErrnoException).code === "ESRCH" && await readFile(config.descriptor, "utf8").catch(() => "") === JSON.stringify(descriptor)) {
+          // The epoch-specific socket belongs to this confirmed dead service.
+          // Never remove a replacement service's endpoint or retry this read.
+          await validateAttestorEndpoint(descriptor.endpoint);
+          await unlink(descriptor.endpoint);
+          if (await readFile(config.descriptor, "utf8").catch(() => "") === JSON.stringify(descriptor)) await unlink(config.descriptor);
+        }
       }
     }
     return null;

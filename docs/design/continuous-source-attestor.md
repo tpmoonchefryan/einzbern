@@ -31,8 +31,13 @@ The native candidate admits local ext4 with the required statx fields and actual
 successful read leases; it makes no claim for Drive, rclone remote semantics,
 network filesystems, macOS or Windows.
 
-The helper uses an authenticated abstract Unix stream socket. Its random secret,
-epoch and endpoint are in a 0600 descriptor in a checked 0700 device directory,
+The helper uses an authenticated filesystem Unix stream socket. The canonical
+absolute socket path is checked for ownership, type and 0600 permissions in a
+real 0700 owner-private directory before connecting. It must fit the Linux
+108-byte sockaddr_un capacity including its terminator. There is no abstract,
+TCP, localhost, DNS, TLS or UDP fallback. Unusable or legacy endpoints retain
+the ordinary full reader. Its random secret, epoch and endpoint are in a 0600
+descriptor in that checked device directory,
 outside source/runtime/derived cache writer roots, using the existing device
 trust boundary. An on-disk descriptor is only a rendezvous: a fresh challenge,
 HMAC, message number, socket-local single-use token, complete request digest,
@@ -73,6 +78,13 @@ writer can receive EAGAIN; normal writer release timing requires measurement.
 The attestor proves bytes only. Protected event projections, event-chain/head/
 vector checks and independently recorded reducer coverage still authorize all
 event/state reuse. The expected digest alone never issues event or replay proof.
+An independently authenticated protected materialized state is also reducer
+authority when the separate legacy replay receipt is absent. All applicable
+reducer authorities must be unavailable before a full reducer replay is needed.
+Before returning that state, its complete compressed history is independently
+authenticated at the same binding and retained in memory. Decoding remains lazy;
+cache loss or a later head cannot invalidate or replace the returned history.
+Missing or damaged history dependencies reject adoption and rebuild normally.
 Any finish loss discards adoption and reruns the ordinary full reader. Public
 event readers and reads under a write lock keep their original full behavior.
 
@@ -82,7 +94,7 @@ budget within that bound; there is no 128-segment discontinuity. Whole requests
 over budget use full SHA. IPC is bounded at 8 MiB, sixteen connections and five
 seconds per transaction. The helper has a 128 MiB V8 heap limit, a 256 MiB RSS
 stop boundary, and a 60-second idle exit. Idle, explicit stop and normal signals
-close all owned fds/guards and remove the exact owned descriptor. Kernel process
+close all owned fds/guards/socket and remove the exact owned descriptor. Kernel process
 exit releases leases on crash. The private `controlSourceAttestor(root, home,
 "status" | "stop")` API inspects/stops this helper without starting a new one.
 

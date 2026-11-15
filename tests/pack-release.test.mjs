@@ -409,12 +409,31 @@ test("optional source lease builds outside a relocated release and the packaged 
   const build = node([join(tree, "scripts/build-source-lease.mjs"), join(tree, "native/linux-source-lease.c"), native], { env: isolated.env });
   assert.equal(build.status, 0, build.stderr);
   const library = join(isolated.root, "library"), entry = join(tree, "scripts/einzbern.mjs"), at = "2026-11-13T00:00:00Z";
-  const env = { ...isolated.env, EINZBERN_SOURCE_ATTESTOR_ROOT: library, EINZBERN_SOURCE_LEASE_MODULE: native, EINZBERN_RECALL_OBSERVATION: "1" };
+  // The filesystem IPC endpoint must fit sockaddr_un in this relocated fixture.
+  const home = await realpath(await mkdtemp(join(tmpdir(), "pl-")));
+  const env = { ...isolated.env, EINZBERN_HOME: home, EINZBERN_SOURCE_ATTESTOR_ROOT: library, EINZBERN_SOURCE_LEASE_MODULE: native, EINZBERN_RECALL_OBSERVATION: "1" };
   const saved = { root: process.env.EINZBERN_SOURCE_ATTESTOR_ROOT, module: process.env.EINZBERN_SOURCE_LEASE_MODULE };
   t.after(async () => {
     process.env.EINZBERN_SOURCE_ATTESTOR_ROOT = library; process.env.EINZBERN_SOURCE_LEASE_MODULE = native;
     const { controlSourceAttestor } = await import("../dist/build/packages/core/src/source-attestor-client.js");
     await controlSourceAttestor(library, env.EINZBERN_HOME, "stop").catch(() => undefined);
+    // A packaged host has its own runtime identity, distinct from this source
+    // test's client. Retire only the PID from our private descriptor whose
+    // actual executable arguments still name that exact packaged companion.
+    const directory = join(home, "source-attestor");
+    for (const name of await readdir(directory).catch(() => [])) {
+      const path = join(directory, name, "endpoint.json");
+      const descriptor = await readFile(path, "utf8").then(JSON.parse).catch(() => null);
+      if (!Number.isSafeInteger(descriptor?.pid) || descriptor.pid <= 0) continue;
+      const args = await readFile(`/proc/${descriptor.pid}/cmdline`, "utf8").catch(() => "");
+      if (!args.split("\0").includes(join(tree, "scripts/source-attestor-host.mjs"))) continue;
+      process.kill(descriptor.pid, "SIGTERM");
+      for (let n = 0; n < 100 && existsSync(path); n++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(existsSync(path), false, "owned packaged helper removed its descriptor");
+      assert.equal(existsSync(descriptor.endpoint), false, "owned packaged socket was closed");
+      t.diagnostic(JSON.stringify({ cleanupPid: descriptor.pid, endpointRemoved: true }));
+    }
+    await rm(home, { recursive: true, force: true });
     if (saved.root === undefined) delete process.env.EINZBERN_SOURCE_ATTESTOR_ROOT; else process.env.EINZBERN_SOURCE_ATTESTOR_ROOT = saved.root;
     if (saved.module === undefined) delete process.env.EINZBERN_SOURCE_LEASE_MODULE; else process.env.EINZBERN_SOURCE_LEASE_MODULE = saved.module;
   });

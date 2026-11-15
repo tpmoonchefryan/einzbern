@@ -123,7 +123,7 @@ async function createRepos(name) {
   for (const directory of ["scripts", "portal", "skill"]) {
     await cp(join(REPOSITORY_ROOT, directory), join(engineRoot, directory), { recursive: true });
   }
-  for (const path of ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "packages/core/src/names.ts", "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md", ...SPECIFICATIONS.map(name => `specs/${name}`)]) {
+  for (const path of ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "native/linux-source-lease.c", "packages/core/src/names.ts", "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md", "docs/design/continuous-source-attestor.md", ...SPECIFICATIONS.map(name => `specs/${name}`)]) {
     await writeText(engineRoot, path, await readFile(join(REPOSITORY_ROOT, path), "utf8"));
   }
   await writeText(engineRoot, "packages/core/src/framework-version.ts", await readFile(join(REPOSITORY_ROOT, "packages/core/src/framework-version.ts"), "utf8"));
@@ -1405,6 +1405,9 @@ print(json.dumps({"packages": len(packages), "files": len(copied)}))
     ...fixture.environment,
     COREPACK_HOME: corepackHome,
     COREPACK_ENABLE_NETWORK: "0", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
+    // Reuse the genuine record under its recorded verifier policy. A private
+    // HOME has no user-level pnpm settings to activate that verifier for us.
+    pnpm_config_minimum_release_age: String(verificationCache.record.policy.minimumReleaseAge),
     pnpm_config_store_dir: privateStore,
     pnpm_config_cache_dir: verificationCache.cacheDir,
     pnpm_config_offline: "true", pnpm_config_frozen_lockfile: "true", pnpm_config_ignore_scripts: "true",
