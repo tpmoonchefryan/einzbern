@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
+import { renameSync, writeFileSync } from "node:fs";
 import { createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -28,7 +29,9 @@ function log(value) { if (journal) return fs.appendFile(journal, JSON.stringify(
 async function run(argv, options = {}) {
   const started = performance.now();
   const r = spawnSync(argv[0], argv.slice(1), { encoding: "utf8", env: process.env, timeout: 15000, maxBuffer: 32 * 1024 * 1024, ...options });
-  await log({ argv, cwd: options.cwd ?? process.cwd(), env: options.env ?? process.env, pid: r.pid, exitCode: r.status, signal: r.signal, stdout: r.stdout, stderr: r.stderr, elapsedMs: performance.now() - started });
+  const environment = options.env ?? process.env;
+  const keys = ["PATH", "TMPDIR", "NODE_OPTIONS", "EINZBERN_HOME", "EINZBERN_TEST_DEVICE_ROOT", "EINZBERN_SOURCE_ATTESTOR_ROOT", "EINZBERN_SOURCE_LEASE_MODULE", "EINZBERN_SOURCE_ATTESTOR_FDS", "EINZBERN_ATTESTOR_READ_JOURNAL", "TCRN_OFFLINE_PROOF", "TCRN_TEST_CONTROLLER_PROCESS_GROUP", "TCRN_TEST_CONTROLLER_REAPER_PID", "TCRN_TEST_CONTROLLER_CHILD_REGISTRY"];
+  await log({ argv, cwd: options.cwd ?? process.cwd(), envBoundary: Object.fromEntries(keys.filter(key => environment[key] !== undefined).map(key => [key, environment[key]])), pid: r.pid, childStarted: r.pid > 0, exitCode: r.status, signal: r.signal, timedOut: r.error?.code === "ETIMEDOUT", timeoutMs: options.timeout ?? 15000, stdout: r.stdout, stderr: r.stderr, elapsedMs: performance.now() - started });
   return r;
 }
 async function setup(t) {
@@ -141,6 +144,95 @@ test("attestor: distinct clients share real same-fd SHA; restart, binding and so
   const foreign = await readClient({ ...request, root: f.base }, f.home); assert.equal(foreign.valid, false);
   const badDigest = structuredClone(request); badDigest.files[0].sha256 = "0".repeat(64);
   assert.equal((await readClient(badDigest, f.home)).valid, false);
+});
+
+async function stoppedDescriptor(f) {
+  const descriptor = (await descriptors(f.home))[0];
+  assert.ok(descriptor);
+  await controlSourceAttestor(f.root, f.home, "stop");
+  let dead = false;
+  for (let n = 0; n < 150; n++) {
+    try { process.kill(descriptor.pid, 0); }
+    catch (error) { if (error.code === "ESRCH") { dead = true; break; } throw error; }
+    await delay(10);
+  }
+  assert.equal(dead, true, "the service has actually exited");
+  await assert.rejects(fs.lstat(descriptor.endpoint), { code: "ENOENT" });
+  const path = join(dirname(descriptor.endpoint), "endpoint.json");
+  await fs.writeFile(path, JSON.stringify(descriptor), { flag: "wx", mode: 0o600 });
+  return { descriptor, path };
+}
+
+test("attestor: exact dead descriptor with absent socket falls back completely, retires, then fresh clients restart", { skip: !enabled }, async t => {
+  const f = await setup(t);
+  await initializeLibrary({ root: f.root, createdAt: at });
+  await createProject(f.root, { externalKey: "DEAD-ENDPOINT", name: "Dead endpoint", occurredAt: at });
+  const first = await materialize(f);
+  assert.equal(first.status, 0, first.stderr);
+  const { descriptor, path } = await stoppedDescriptor(f);
+  const fallback = await materialize(f);
+  assert.equal(fallback.status, 0, fallback.stderr);
+  assert.ok(fallback.value.observation.logicalEventBytes > 0, "this client still performs full SHA");
+  assert.equal(fallback.value.digest, first.value.digest);
+  assert.equal(fallback.value.digest, canonicalSha256(await materializeWorkspaceFromGenesis(f.root)), "complete public history is retained");
+  await assert.rejects(fs.lstat(path), { code: "ENOENT" });
+  const restarted = await materialize(f);
+  assert.equal(restarted.status, 0, restarted.stderr);
+  assert.notEqual((await descriptors(f.home))[0].epoch, descriptor.epoch);
+  assert.ok(restarted.value.observation.logicalEventBytes > 0, "a new epoch does its own initial SHA");
+  const warm = await materialize(f);
+  assert.equal(warm.status, 0, warm.stderr);
+  assert.equal(warm.value.observation.logicalEventBytes, 0);
+  assert.equal(warm.value.digest, first.value.digest);
+});
+
+test("attestor: absent socket never retires untrusted, live, unknown or replaced descriptors", { skip: !enabled }, async t => {
+  const f = await setup(t), request = await raw(f);
+  assert.equal((await readClient(request, f.home)).valid, true);
+  const { descriptor, path } = await stoppedDescriptor(f);
+  const bytes = JSON.stringify(descriptor);
+  for (const value of [
+    "malformed", { ...descriptor, schema: "other" }, { ...descriptor, identity: "0".repeat(64) },
+    { ...descriptor, epoch: "0".repeat(64) }, { ...descriptor, endpoint: join(f.home, "absent") },
+    { ...descriptor, secret: "invalid" }, { ...descriptor, pid: 0 }, { ...descriptor, pid: process.pid },
+  ]) {
+    const text = typeof value === "string" ? value : JSON.stringify(value);
+    await fs.writeFile(path, text);
+    assert.equal((await readClient(request, f.home)).valid, false);
+    assert.equal(await fs.readFile(path, "utf8"), text);
+  }
+  await fs.writeFile(path, bytes);
+  for (const boundary of ["descriptor-mode", "descriptor-hardlink", "descriptor-symlink", "parent-mode", "socket-file", "socket-symlink"]) {
+    if (boundary === "descriptor-mode") await fs.chmod(path, 0o666);
+    if (boundary === "descriptor-hardlink") await fs.link(path, path + ".held");
+    if (boundary === "descriptor-symlink") { await fs.rename(path, path + ".held"); await fs.symlink(path + ".held", path); }
+    if (boundary === "parent-mode") await fs.chmod(dirname(path), 0o755);
+    if (boundary === "socket-file") await fs.writeFile(descriptor.endpoint, "replacement", { mode: 0o600 });
+    if (boundary === "socket-symlink") await fs.symlink(path, descriptor.endpoint);
+    assert.equal((await readClient(request, f.home)).valid, false, boundary);
+    assert.equal(await fs.readFile(path, "utf8"), bytes, boundary);
+    if (boundary === "descriptor-mode") await fs.chmod(path, 0o600);
+    if (boundary === "descriptor-hardlink") await fs.unlink(path + ".held");
+    if (boundary === "descriptor-symlink") { await fs.unlink(path); await fs.rename(path + ".held", path); }
+    if (boundary === "parent-mode") await fs.chmod(dirname(path), 0o700);
+    if (boundary.startsWith("socket-")) await fs.unlink(descriptor.endpoint);
+  }
+  const originalKill = process.kill;
+  for (const mutation of ["EPERM", "EIO", "replace"]) {
+    process.kill = function (pid, signal) {
+      if (pid !== descriptor.pid || signal !== 0) return originalKill.call(this, pid, signal);
+      try { originalKill.call(this, pid, signal); }
+      catch (error) {
+        assert.equal(error.code, "ESRCH");
+        if (mutation === "replace") { writeFileSync(path + ".new", bytes, { mode: 0o600 }); renameSync(path + ".new", path); }
+        else error.code = mutation;
+        throw error;
+      }
+    };
+    try { assert.equal(await beginSourceAttestation(request, f.home), null, mutation); }
+    finally { process.kill = originalKill; }
+    assert.equal(await fs.readFile(path, "utf8"), bytes, mutation);
+  }
 });
 
 for (const mode of ["hold", "hold-map", "hold-fork-map"]) test(`attestor: existing ${mode} denies initial lease, including fd-closed mmap`, { skip: !enabled }, async t => {

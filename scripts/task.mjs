@@ -1421,10 +1421,10 @@ function privateUnixIpcSite(label, content, protocol, moduleName) {
   if (!sectionMatches(protocol, ["export function attestorEndpoint(", "export function attestorDigest(", "9899a48d3b0c8045f3c1262f07cbd4871ddab8478bdf91c06fb0675e352bbe39"])) return false;
   const sites = {
     "packages/core/src/source-attestor-client.ts": {
-      binding: "createConnection, type Socket", references: { createConnection: 2, Socket: 2 }, transports: 0,
+      binding: "createConnection, type Socket", references: { createConnection: 2, Socket: 3 }, transports: 0,
       sections: [
         ["async function connect(", "function connection(", "daa82b6b179646af8b2fd271d8c8b9602f913a4efae98ce7ce464d1e987928b5"],
-        ["async function readDescriptor(", "async function configuration(", "0ef3f2e82b3b85fd9abd435b1a71e2d100061a5543018ea7dff0ae3c1919155b"],
+        ["async function readDescriptor(", "async function configuration(", "1eb09b659192e33fe7f408fe00c229e668aa3bb73e3a2aeb5f5f9a3e74edde81"],
       ],
     },
     "packages/core/src/source-attestor-service.ts": {

@@ -44,6 +44,16 @@ HMAC, message number, socket-local single-use token, complete request digest,
 native generation and fd incarnations must all match. Disk history, cache
 checksums and process IDs never prove a live lease. A dead descriptor is retired
 only after its process is confirmed gone; the failed request still reads fully.
+Retirement also admits a genuinely absent epoch socket, after rechecking the
+private parent and the descriptor's original file identity and exact contents.
+An invalid/replaced descriptor, unsafe endpoint or unknown/EPERM PID is retained.
+The next fresh client may start a new epoch and must perform initial SHA again.
+
+Under the ordinary test controller, the helper inherits its existing owned
+process group, preserves the child-policy preload and sends startup diagnostics
+through private pipes to its log. It cannot escape the controller's reaper or
+retain controller output descriptors. Outside that controller, the existing
+on-demand detached lifecycle is retained. No detached-child exemption is added.
 
 Each initial digest comes from the exact O_RDONLY fd that successfully acquired
 F_SETLEASE/F_RDLCK. Native checks compare held statx with the current object,

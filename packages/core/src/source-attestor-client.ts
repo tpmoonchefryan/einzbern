@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, writeSync } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath, unlink } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { FRAMEWORK_VERSION } from "./framework-version.js";
 import { observeCacheReason, observeEventRead, observeMetadataBytes } from "./recall-observation.js";
-import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorEndpoint, attestorMac, validateAttestorEndpoint, validAttestorMac } from "./source-attestor-protocol.js";
+import { ATTESTOR_MESSAGE_BYTES, ATTESTOR_SCHEMA, attestorDigest, attestorEndpoint, attestorMac, validateAttestorDirectory, validateAttestorEndpoint, validAttestorMac } from "./source-attestor-protocol.js";
 import type { AttestorDescriptor, AttestorRequest } from "./source-attestor-protocol.js";
 
 interface BeginResult {
@@ -84,16 +84,18 @@ function connection(socket: Socket, descriptor: AttestorDescriptor): Connection 
     close: () => socket.destroy(),
   };
 }
-async function readDescriptor(path: string, identity: string): Promise<AttestorDescriptor | null> {
+interface BoundDescriptor { readonly value: AttestorDescriptor; readonly file: string }
+async function readDescriptor(path: string, identity: string): Promise<BoundDescriptor | null> {
   let handle;
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const info = await handle.stat();
-    if (!info.isFile() || info.nlink !== 1 || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0 || info.size > 4096) return null;
+    const info = await handle.stat({ bigint: true });
+    if (!info.isFile() || info.nlink !== 1n || info.uid !== BigInt(process.getuid!()) || (info.mode & 0o077n) !== 0n || info.size > 4096n) return null;
     const descriptor = JSON.parse(await handle.readFile("utf8")) as AttestorDescriptor;
     return descriptor.schema === ATTESTOR_SCHEMA && descriptor.identity === identity && typeof descriptor.endpoint === "string"
       && descriptor.endpoint === attestorEndpoint(path, descriptor.epoch) && /^[a-f0-9]{64}$/u.test(descriptor.secret)
-      && Number.isSafeInteger(descriptor.pid) && descriptor.pid > 0 ? descriptor : null;
+      && Number.isSafeInteger(descriptor.pid) && descriptor.pid > 0
+      ? { value: descriptor, file: [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":") } : null;
   } catch { return null; }
   finally { await handle?.close(); }
 }
@@ -124,33 +126,68 @@ async function configuration(root: string, home: string): Promise<{ host: string
 }
 async function start(config: NonNullable<Awaited<ReturnType<typeof configuration>>>, root: string): Promise<void> {
   const log = await open(join(dirname(config.descriptor), "service.log"), constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
+  // Under the test controller the companion stays in its already-owned group.
+  // Private pipes keep every inherited output FD behind the unchanged policy.
+  const controlled = process.env.TCRN_TEST_CONTROLLER_PROCESS_GROUP !== undefined;
+  let child: ReturnType<typeof spawn> | undefined;
   try {
     const capacity = Number(process.env.EINZBERN_SOURCE_ATTESTOR_FDS ?? "4096");
     if (!Number.isSafeInteger(capacity) || capacity < 1 || capacity > 8192) throw new Error("fd-capacity");
-    const child = spawn(process.execPath, ["--max-old-space-size=128", config.host], { detached: true, stdio: ["pipe", "pipe", log.fd] });
+    child = spawn(process.execPath, ["--max-old-space-size=128", config.host], { detached: !controlled, stdio: ["pipe", "pipe", controlled ? "pipe" : log.fd] });
+    const launched = child;
+    if (controlled) {
+      launched.stderr!.on("data", value => { writeSync(log.fd, value); });
+      launched.once("close", () => { void log.close().catch(() => undefined); });
+    }
     await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => { child.kill("SIGTERM"); reject(new Error("attestor-start-timeout")); }, 1500);
-      child.once("error", error => { clearTimeout(timer); reject(error); });
-      child.once("exit", () => { clearTimeout(timer); reject(new Error("attestor-start-failed")); });
-      child.stdout!.once("data", value => {
+      const timer = setTimeout(() => { launched.kill("SIGTERM"); reject(new Error("attestor-start-timeout")); }, 1500);
+      launched.once("error", error => { clearTimeout(timer); reject(error); });
+      launched.once("exit", () => { clearTimeout(timer); reject(new Error("attestor-start-failed")); });
+      launched.stdout!.once("data", value => {
         clearTimeout(timer);
         try { if (JSON.parse(value.toString()).ready !== true) throw new Error("attestor-not-ready"); resolve(); }
         catch (error) { reject(error); }
       });
-      child.stdin!.end(JSON.stringify({ root, descriptor: config.descriptor, identity: config.identity, module: config.module, capacity }));
+      launched.stdin!.end(JSON.stringify({ root, descriptor: config.descriptor, identity: config.identity, module: config.module, capacity }));
     });
-    child.stdout!.destroy(); child.unref();
-  } finally { await log.close(); }
+    child.stdout!.destroy();
+    if (controlled) (child.stderr as Socket).unref();
+    child.unref();
+  } catch (error) {
+    child?.kill("SIGTERM");
+    throw error;
+  } finally { if (!controlled || child === undefined) await log.close(); }
+}
+
+async function retireDeadDescriptor(config: { descriptor: string; identity: string }, original: BoundDescriptor): Promise<void> {
+  try {
+    try { process.kill(original.value.pid, 0); return; }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") return; }
+    await validateAttestorDirectory(dirname(config.descriptor));
+    const current = await readDescriptor(config.descriptor, config.identity);
+    if (attestorDigest(current) !== attestorDigest(original)) return;
+    // Only lstat of the exact endpoint may admit absence. A failed parent or
+    // socket validation, including a replacement/symlink, never authorizes it.
+    const endpoint = original.value.endpoint;
+    let absent = false;
+    try { await lstat(endpoint); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; absent = true; }
+    if (!absent) { await validateAttestorEndpoint(endpoint); await unlink(endpoint); }
+    await validateAttestorDirectory(dirname(config.descriptor));
+    if (attestorDigest(await readDescriptor(config.descriptor, config.identity)) === attestorDigest(original)) await unlink(config.descriptor);
+  } catch { /* Optional recovery cannot replace this request's full SHA fallback. */ }
 }
 export async function beginSourceAttestation(request: AttestorRequest, home: string): Promise<SourceAttestation | null> {
   const config = await configuration(request.root, home);
   if (config === null) return null;
   let channel: Connection | undefined;
   let descriptor: AttestorDescriptor | null = null;
+  let bound: BoundDescriptor | null = null;
   try {
     try { await lstat(config.descriptor); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; await start(config, request.root); }
-    descriptor = await readDescriptor(config.descriptor, config.identity);
+    bound = await readDescriptor(config.descriptor, config.identity);
+    descriptor = bound?.value ?? null;
     if (descriptor === null) throw new Error("descriptor-unavailable");
     channel = await connect(descriptor);
     const initial = await channel.send({ op: "begin", request });
@@ -181,26 +218,16 @@ export async function beginSourceAttestation(request: AttestorRequest, home: str
     observeCacheReason(`source-attestor-miss-full-sha256:${error instanceof Error ? error.message : "unknown"}`);
     // A confirmed dead process cannot hold leases. Retire only its exact
     // descriptor; THIS request still falls back, without an ambiguous retry.
-    if (descriptor !== null) {
-      try { process.kill(descriptor.pid, 0); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ESRCH" && await readFile(config.descriptor, "utf8").catch(() => "") === JSON.stringify(descriptor)) {
-          // The epoch-specific socket belongs to this confirmed dead service.
-          // Never remove a replacement service's endpoint or retry this read.
-          await validateAttestorEndpoint(descriptor.endpoint);
-          await unlink(descriptor.endpoint);
-          if (await readFile(config.descriptor, "utf8").catch(() => "") === JSON.stringify(descriptor)) await unlink(config.descriptor);
-        }
-      }
-    }
+    if (bound !== null) await retireDeadDescriptor(config, bound);
     return null;
   }
 }
 export async function controlSourceAttestor(root: string, home: string, op: "status" | "stop"): Promise<unknown> {
   const config = await configuration(root, home);
   if (config === null) return { available: false };
-  const descriptor = await readDescriptor(config.descriptor, config.identity);
-  if (descriptor === null) return { available: false };
+  const bound = await readDescriptor(config.descriptor, config.identity);
+  if (bound === null) return { available: false };
+  const descriptor = bound.value;
   const channel = await connect(descriptor);
   try { const result = await channel.send({ op }); return { pid: descriptor.pid, epoch: descriptor.epoch, result }; }
   finally { channel.close(); }

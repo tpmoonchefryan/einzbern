@@ -1460,6 +1460,14 @@ test("607-R2: complete generated release readiness, native multi-Story gates, pa
   await materializeReleaseDependencies(fixture);
   const calls = [];
   const runner = async (command, args, options) => {
+    if (command === "corepack" && args[0] === "pnpm@11.3.0" && args.at(-1) === "build") {
+      // Generation has just changed the workspace package versions. Refresh
+      // pnpm's native workspace state explicitly through private pipes before
+      // its real run command; its implicit install would inherit controller IO.
+      const install = ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts"];
+      calls.push({ command, args: install, phase: "native-offline-readiness" });
+      execFileSync(command, install, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    }
     calls.push({ command, args });
     return { status: 0, stdout: execFileSync(command, args, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), stderr: "" };
   };
@@ -1507,13 +1515,17 @@ test("607-R2: complete generated release readiness, native multi-Story gates, pa
     assert.equal(done.doneGates.runId, saved.runId);
   }
   assert.equal((await readdir(dirname(finished.gates.recordPath))).filter((name) => name.endsWith(".json")).length, countBefore, "done consumes the same saved run without another gate execution");
-  assert.equal(calls.filter((call) => call.command === "corepack").length, 1, "one real pinned build");
-  assert.deepEqual(calls.find((call) => call.command === "corepack").args, pinnedBuildArguments(fixture.engineRoot));
+  const builds = calls.filter((call) => call.command === "corepack" && call.phase !== "native-offline-readiness");
+  assert.equal(builds.length, 1, "one real pinned build");
+  assert.deepEqual(builds[0].args, pinnedBuildArguments(fixture.engineRoot));
+  const installs = calls.filter((call) => call.phase === "native-offline-readiness");
+  assert.equal(installs.length, 1, "one explicit native offline preparation after version generation");
+  assert.deepEqual(installs[0].args, ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts"]);
   assert.equal(calls.filter((call) => call.args[0]?.endsWith("pack-release.mjs")).length, 1);
-  const buildIndex = calls.findIndex((call) => call.command === "corepack");
+  const buildIndex = calls.indexOf(builds[0]);
   const renderIndex = calls.findIndex((call) => call.args[0]?.endsWith("render-helper-docs.mjs"));
   const packIndex = calls.findIndex((call) => call.args[0]?.endsWith("pack-release.mjs"));
-  assert.ok(buildIndex >= 0 && renderIndex > buildIndex && packIndex > renderIndex);
+  assert.ok(calls.indexOf(installs[0]) < buildIndex && buildIndex >= 0 && renderIndex > buildIndex && packIndex > renderIndex);
 });
 
 
