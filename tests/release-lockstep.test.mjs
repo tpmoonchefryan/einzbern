@@ -8,6 +8,7 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { cpSync, mkdirSync } from "node:fs";
 import { chmod, cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { homedir, tmpdir } from "node:os";
@@ -118,10 +119,12 @@ async function createRepos(name) {
     await writeText(engineRoot, `packages/${packageName}/package.json`, `${JSON.stringify({ name: `@einzbern/${packageName}`, version: OLD_VERSION, private: true }, null, 2)}\n`);
   }
   await writeText(engineRoot, "packages/protocol/schema-fixture.json", `${JSON.stringify({ schemaVersion: FIXTURE_SCHEMA_VERSION, record: { id: "stable" } }, null, 2)}\n`);
-  await cp(join(REPOSITORY_ROOT, "dist/build"), join(engineRoot, "dist/build"), { recursive: true });
-  await cp(join(REPOSITORY_ROOT, "packages/core"), join(engineRoot, "packages/core"), { recursive: true });
+  // Each fixture needs its own copy. Native synchronous directory copies avoid a
+  // promise round trip per entry while this test process is preparing it serially.
+  cpSync(join(REPOSITORY_ROOT, "dist/build"), join(engineRoot, "dist/build"), { recursive: true });
+  cpSync(join(REPOSITORY_ROOT, "packages/core"), join(engineRoot, "packages/core"), { recursive: true });
   for (const directory of ["scripts", "portal", "skill"]) {
-    await cp(join(REPOSITORY_ROOT, directory), join(engineRoot, directory), { recursive: true });
+    cpSync(join(REPOSITORY_ROOT, directory), join(engineRoot, directory), { recursive: true });
   }
   for (const path of ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "native/linux-source-lease.c", "packages/core/src/names.ts", "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md", "docs/design/continuous-source-attestor.md", ...SPECIFICATIONS.map(name => `specs/${name}`)]) {
     await writeText(engineRoot, path, await readFile(join(REPOSITORY_ROOT, path), "utf8"));
@@ -1442,10 +1445,11 @@ test("607-R2: complete generated release readiness, native multi-Story gates, pa
   // small fixtures; only this case consumes the real source and renderers end to end.
   const tracked = git(REPOSITORY_ROOT, ["ls-files", "-z"]).split("\0").filter(Boolean);
   for (const path of tracked) {
-    await mkdir(dirname(join(fixture.engineRoot, path)), { recursive: true });
-    await cp(join(REPOSITORY_ROOT, path), join(fixture.engineRoot, path));
+    const target = join(fixture.engineRoot, path);
+    mkdirSync(dirname(target), { recursive: true });
+    cpSync(join(REPOSITORY_ROOT, path), target);
   }
-  await cp(join(REPOSITORY_ROOT, "dist/build"), join(fixture.engineRoot, "dist/build"), { recursive: true });
+  cpSync(join(REPOSITORY_ROOT, "dist/build"), join(fixture.engineRoot, "dist/build"), { recursive: true });
   git(fixture.engineRoot, ["rm", "-q", "--", "packages/protocol/schema-fixture.json"]);
   await writeText(fixture.engineRoot, "CHANGELOG.md", `# Changelog\n\n## Unreleased\n\n${RELEASE_NOTES}\n\n## ${OLD_VERSION}\n\nEarlier release.\n`);
   await commitAll(fixture.engineRoot, "complete release source input");

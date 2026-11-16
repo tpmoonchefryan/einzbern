@@ -252,6 +252,8 @@ test("actual input tokens exclude comments, output paths and arbitrary basename 
     ["portal/scripts/e2e-demo.mjs", 'import { writeFile, mkdtemp } from "node:fs/promises"; import { join } from "node:path"; const base = await mkdtemp("demo-"); await writeFile(join(base, "docs", "decisions", "README.md"), "# output");\n'],
     ["scripts/write-doc.py", 'from pathlib import Path\nPath("README.md").write_text("output")\nopen("docs/wiki/Gates.md", "w").write("output")\n'],
     ["scripts/copy-doc.mjs", 'import { copyFileSync } from "node:fs"; copyFileSync("fixture.txt", "README.md");\n'],
+    ["scripts/copy-tree.mjs", 'import { cpSync } from "node:fs"; cpSync("test-inputs", "README.md", { recursive: true });\n'],
+    ["test-inputs/source.txt", "fixture"],
     ["scripts/lib/privacy.mjs", "export const value = 1;\n"],
     ["packages/core/src/names.ts", "// checked by scripts/verify-staged-privacy.mjs\nexport const value = 1;\n"],
     ["scripts/log.mjs", "export const value = 1;\n"],
@@ -263,6 +265,7 @@ test("actual input tokens exclude comments, output paths and arbitrary basename 
   assert.deepEqual(documentReaderClosure(texts, ["README.md"], graph), ["scripts/real-doc.py", "tests/actual.test.mjs"]);
   assert.deepEqual(documentReaderClosure(texts, ["docs/wiki/Gates.md"], graph), []);
   assert.equal(graph.get("tests/catalog.test.mjs").has("scripts/log.mjs"), false);
+  assert.ok(graph.get("scripts/copy-tree.mjs").has("test-inputs/source.txt"));
   const audit = categoryReaderAudit(texts, { privacyPaths: ["scripts/lib/privacy.mjs"], portalPaths: [] }, graph);
   assert.deepEqual(audit.privacy.readers, ["scripts/lib/privacy.mjs"]);
   assert.deepEqual(audit.portal.readers, []);

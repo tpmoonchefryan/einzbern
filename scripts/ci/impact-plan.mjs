@@ -212,7 +212,7 @@ function sourceTokens(text, python = false, javascript = false) {
   return { tokens: scan(), unresolved };
 }
 const outputCalls = /^(?:writeFile(?:Sync|Atomic)?|appendFile(?:Sync)?|write_text|write_bytes|mkdir(?:Sync)?|mkdtemp(?:Sync)?|rm(?:Sync)?|unlink(?:Sync)?|stage|put|writeFixtureFile)$/u;
-const inputCalls = /(?:read|open|access|stat|copyFile|^cp$|exec|spawn|run|import|require|load|inspect|verify|scan)/iu;
+const inputCalls = /(?:read|open|access|stat|copyFile|^cp(?:Sync)?$|exec|spawn|run|import|require|load|inspect|verify|scan)/iu;
 const pureCalls = /^(?:has|includes|startsWith|endsWith|startswith|endswith|test|match|matchAll|replace|replaceAll|split|slice|substring|indexOf|lastIndexOf|set|push|add|delete|sort|filter|map|flatMap|every|some|find|findIndex|isArray|keys|values|entries|fromEntries|stringify|parse|normalize|rooted|safePath|rootValue|digest|canonical)$/u;
 const rooted = (path) => `repo:${posix.normalize(path)}`;
 const rootValue = (value, source, relative = false) => {
@@ -588,9 +588,9 @@ export function sourceDependencyGraph(texts, inputAudit) {
       if (form) inputForms.push(digest(form));
       // Reads and execution can flow through wrappers. Exact path-valued args
       // to unknown calls are conservative edges too, rather than exemptions.
-      const inputArgs = /^(?:cp|copyFile(?:Sync)?)$/u.test(name) ? args.slice(0, 1) : args;
+      const inputArgs = /^(?:cp(?:Sync)?|copyFile(?:Sync)?)$/u.test(name) ? args.slice(0, 1) : args;
       for (const [start, end] of inputArgs) {
-        for (const value of evaluate(start, end)) addKnown(dependencies, value, source, ["import", "require"].includes(name) && value.startsWith("."), /(?:readdir|copy|^cp$|walk|treeFiles|filesOf|pagesOf|mirror)/iu.test(name));
+        for (const value of evaluate(start, end)) addKnown(dependencies, value, source, ["import", "require"].includes(name) && value.startsWith("."), /(?:readdir|copy|^cp(?:Sync)?$|walk|treeFiles|filesOf|pagesOf|mirror)/iu.test(name));
       }
       if (inputCalls.test(name)) {
         // A dynamic expression with an exact input token remains conservative.
