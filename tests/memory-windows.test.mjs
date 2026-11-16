@@ -12,7 +12,8 @@ import { checkMemorySample, memoryTestArguments, parseMemoryPolicy, processTable
 const memoryModule = new URL("../scripts/lib/memory-budget.mjs", import.meta.url).href;
 
 test("Windows system queries preserve Unicode independently of the console code page", { skip: process.platform !== "win32" }, () => {
-  const value = queryWindows("ConvertTo-Json -Compress -InputObject ([string][char]0x5B50 + [string][char]0x4F8B)");
+  // This can be the first Windows PowerShell process on a freshly provisioned CI runner.
+  const value = queryWindows("ConvertTo-Json -Compress -InputObject ([string][char]0x5B50 + [string][char]0x4F8B)", 30_000);
   assert.equal(value, "子例");
 });
 

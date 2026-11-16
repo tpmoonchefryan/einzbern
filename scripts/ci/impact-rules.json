@@ -2409,7 +2409,7 @@
     "tests/managed-write-lock-scope.test.mjs": "5647ccbd090bb27d8bd6423f23dca19d12fa11e78de2c8f9b64362712f14e69d",
     "tests/memory-budget.test.mjs": "555d12f2051359aa2cf579d9970f45a9278c0d795d534724a1f409164e3c189d",
     "tests/memory-policy-backup.test.mjs": "2cc5d0d393e39b1ac822a5409d7a4add8b01228a731eae3e6a1248f82d3fc63d",
-    "tests/memory-windows.test.mjs": "0e048c15ed27aa89b796c7a62d6e335994ac86cb1c025d05456dbdcd4ab1cc81",
+    "tests/memory-windows.test.mjs": "73e2f824977f393f08d7e726d294cd9f8d965eda2eecd0a0e197c1027a1f0a24",
     "tests/merge-alias-write-consistency.test.mjs": "12079880a81a95c758b81bb9b49249ce66c74f91fe87df0bd8be4db153f54d15",
     "tests/migrate-apply.test.mjs": "5f7a93ee64620ac710139c1816de7a4a1bb805a88d6cd8ea5f019590a298c57b",
     "tests/migrate-cleanup.test.mjs": "a1ba11279cb488e639e164c0d13a3ea22232997eb2f80388d35bbad43a7943a8",
