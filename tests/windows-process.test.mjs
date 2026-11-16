@@ -65,6 +65,20 @@ test("Windows batch launch preserves literal arguments and stdin through a PATH 
   assert.deepEqual(JSON.parse(sync.stdout.split("\n")[0]), args);
 });
 
+test("Windows version probes can launch with an isolated child environment", windows, t => {
+  const prior = process.env.EINZBERN_TEST_PARENT_ONLY;
+  process.env.EINZBERN_TEST_PARENT_ONLY = "parent";
+  t.after(() => {
+    if (prior === undefined) delete process.env.EINZBERN_TEST_PARENT_ONLY;
+    else process.env.EINZBERN_TEST_PARENT_ONLY = prior;
+  });
+  const run = spawnCommandSync(process.execPath, ["-e", "console.log(JSON.stringify([process.env.EINZBERN_TEST_PARENT_ONLY, process.env.EINZBERN_JOB_PAYLOAD, process.env.CHILD_VALUE]))"], {
+    env: { CHILD_VALUE: "中文 sample" }, encoding: "utf8", timeout: 15_000,
+  });
+  assert.equal(run.status, 0, run.error?.message ?? run.stderr);
+  assert.deepEqual(JSON.parse(run.stdout), [null, null, "中文 sample"]);
+});
+
 test("Windows hook commands support metacharacters and cross-volume device bindings", windows, async t => {
   const root = await fixture(t);
   const home = join(root, "home");

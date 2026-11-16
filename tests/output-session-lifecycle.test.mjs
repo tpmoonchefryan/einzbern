@@ -237,7 +237,7 @@ function controllerManagedGateTestSource() {
 import { readFileSync } from "node:fs";
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import nodeTest from "node:test";
+import test from "node:test";
 import { runGates } from "../dist/build/packages/core/src/gates-run.js";
 
 const mode = process.env.TCRN_MANAGED_GATE_MODE;
@@ -381,7 +381,7 @@ async function importGuardTaskFixture(context, testLine) {
   context.after(() => rm(resolve(importPath, ".."), { recursive: true, force: true }));
   const root = await taskEntrypointFixture(context, [
     'import { writeFileSync } from "node:fs";',
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'if (process.env.TCRN_TEST_BIND_WINDOW_IMPORT_PATH) writeFileSync(process.env.TCRN_TEST_BIND_WINDOW_IMPORT_PATH, "test-source-imported\\n");',
     testLine,
     "",
@@ -838,7 +838,7 @@ function inheritedPipeSource({ detached, testName }) {
   return [
     'import { spawn } from "node:child_process";',
     'import { writeFileSync } from "node:fs";',
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'const lockPath = process.env.TCRN_TEST_CONTROLLER_LOCK_PATH;',
     `const ${child} = spawn(process.execPath, ["--eval", "const { existsSync } = require(\\\"node:fs\\\"); const lock = process.argv[1]; const timer = setInterval(() => { if (!existsSync(lock)) { clearInterval(timer); process.exit(0); } }, 10);", lockPath], ${options});`,
     ...(detached ? [`${child}.unref();`] : []),
@@ -1075,7 +1075,7 @@ test("nested work uses the existing session and releases once", async (context) 
 });
 
 test("632-Q1: linked worktrees isolate output sessions and recover their own claims", async (context) => {
-  const checkout = await taskEntrypointFixture(context, 'import nodeTest from "node:test";\ntest("linked controller", () => {});\n');
+  const checkout = await taskEntrypointFixture(context, 'import test from "node:test";\ntest("linked controller", () => {});\n');
   const linkedRoot = await realpath(await mkdtemp(join(tmpdir(), "tcrn-linked-output-")));
   const first = resolve(linkedRoot, "linked first");
   const second = resolve(linkedRoot, "linked second");
@@ -3051,7 +3051,7 @@ test("a bound bootstrap blocks recovery before it starts the test controller", a
 test("a fresh real task entrypoint fails closed while a killed predecessor group lives, then recovers cleanly", async (context) => {
   const crashSource = [
     'import { existsSync, writeFileSync } from "node:fs";',
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'writeFileSync(process.env.TCRN_TASK_DESCENDANT_PID_PATH, `${JSON.stringify({ testPid: process.pid, controllerPid: process.ppid, processGroup: Number(process.env.TCRN_TEST_CONTROLLER_PROCESS_GROUP), ownerProcessGroup: Number(process.env.TCRN_TEST_CONTROLLER_REAPER_PID) })}\\n`);',
     'test("remain alive until the contender has observed the surviving group", async () => { while (process.env.TCRN_TASK_DESCENDANT_RELEASE_PATH && !existsSync(process.env.TCRN_TASK_DESCENDANT_RELEASE_PATH)) await new Promise((resolve) => setTimeout(resolve, 10)); });',
     "",
@@ -3109,7 +3109,7 @@ test("a fresh real task entrypoint fails closed while a killed predecessor group
 
   await writeFixtureTest(root, [
     'import assert from "node:assert/strict";',
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("fresh task fixture", () => { assert.equal(2 + 2, 4); });',
     "",
   ].join("\n"));
@@ -3142,7 +3142,7 @@ test("a concurrent real task entrypoint preserves its live command-wide owner an
     'import { existsSync, watch } from "node:fs";',
     'import { writeFile } from "node:fs/promises";',
     'import { dirname } from "node:path";',
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("hold the command-wide session while dist build imports remain stable", async () => {',
     '  const releasePath = process.env.TCRN_TASK_OWNER_RELEASE_PATH;',
     '  let watcher;',
@@ -3257,7 +3257,7 @@ test("the real command-five test path rejects detached inherited-pipe descendant
   await waitForDeadPid(rejectedHolder);
   await waitForDeadPid(rejectedOwner.processGroup);
   await writeFixtureTest(rejected, [
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("recovered fixture", () => {});',
     "",
   ].join("\n"));
@@ -3290,7 +3290,7 @@ test("a permitted real-entrypoint Node relay cannot create a detached escaped de
     'import { spawn } from "node:child_process";',
     'import { once } from "node:events";',
     'import { readFileSync, writeFileSync } from "node:fs";',
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("a permitted relay retains the controller child policy", async () => {',
     '  const relay = [',
     '    "const { spawn } = require(\\\"node:child_process\\\");",',
@@ -3420,7 +3420,7 @@ test("a real task entrypoint completes exec and execFile undefined optional call
   const root = await taskEntrypointFixture(context, [
     'import assert from "node:assert/strict";',
     'import { exec, execFile } from "node:child_process";',
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("callbacks complete", async () => {',
     '  process.env.PATH = process.env.TCRN_CALLBACK_NODE_BIN + ":" + process.env.PATH;',
     '  const callback = (resolve, reject) => (error, stdout, stderr) => { try { assert.equal(error, null); assert.equal(stdout, ""); assert.equal(stderr, ""); resolve(); } catch (failure) { reject(failure); } };',
@@ -3448,7 +3448,7 @@ test("a real task entrypoint completes exec and execFile undefined optional call
 
 test("a real task entrypoint reports a bounded controller timeout without false success", async (context) => {
   const root = await taskEntrypointFixture(context, [
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("the controller remains live until the bounded timeout", async () => { await new Promise(() => {}); });',
     "",
   ].join("\n"));
@@ -3818,7 +3818,7 @@ test("the controller child policy propagates to a Node relay even when it suppli
 
 test("a passing detached test that writes stderr fails the real task entrypoint cleanly", async (context) => {
   const root = await taskEntrypointFixture(context, [
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("the underlying detached test passes", () => {});',
     "",
   ].join("\n"));
@@ -3857,7 +3857,7 @@ test("a passing detached test that writes stderr fails the real task entrypoint 
 
 test("a nonzero detached controller propagates COMMAND_FAILED and releases the real task entrypoint cleanly", async (context) => {
   const root = await taskEntrypointFixture(context, [
-    'import nodeTest from "node:test";',
+    'import test from "node:test";',
     'test("the detached controller fails", () => { throw new Error("test-only nonzero controller failure"); });',
     "",
   ].join("\n"));
@@ -3945,7 +3945,7 @@ test("SIGKILL injection at each staged publication and release boundary resumes 
 
 
 test("607-R2: the real controller's final malformed tail counts the failed poll and physical bytes", async (context) => {
-  const root = await taskEntrypointFixture(context, 'import nodeTest from "node:test"; test("passes", () => {});\n');
+  const root = await taskEntrypointFixture(context, 'import test from "node:test"; test("passes", () => {});\n');
   const taskPath = resolve(root, "scripts/task.mjs");
   const source = await readFile(taskPath, "utf8");
   const marker = "          const delta = await readProgressDelta(progressPath, cursor, progressState);";

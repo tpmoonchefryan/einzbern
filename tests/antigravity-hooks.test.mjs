@@ -92,7 +92,7 @@ test("INIT091-A1: Antigravity CLI and surface probes stay independent and protoc
   assert.equal(notDetected.actualModel.status, "unknown");
 
   const fallbackCli = probeAntigravityHost({ home: f.home, env: {}, observedAt: "2026-11-11T00:00:01Z" });
-  assert.equal(fallbackCli.cli.status, "available");
+  assert.equal(fallbackCli.cli.status, "available", fallbackCli.cli.versionEvidence);
   assert.equal(fallbackCli.cli.version, "0.2.2");
   assert.equal(fallbackCli.cli.executable, fakeAgy);
 
