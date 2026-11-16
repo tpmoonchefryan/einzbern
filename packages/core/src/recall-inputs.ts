@@ -20,8 +20,8 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // this user's crest, and every card says which (scope "project" or "user") on its way to its hit,
 // whose line marks a user card 「用户」. A user card is recalled in every project.
 
-import type { WorkRecord } from "../../protocol/src/index.js";
-import { listKnowledgeMetadata } from "./knowledge-core.js";
+import type { JsonValue, WorkRecord } from "../../protocol/src/index.js";
+import { listKnowledgeMetadataFast } from "./knowledge-read.js";
 import type { KnowledgeStatusFilter, KnowledgeStoreScope } from "./knowledge-core.js";
 import { expansionsText } from "./knowledge-language.js";
 import { decisionLedger, decisionsNamedIn, decisionsOfMinutes, minutesView, obsoleteDecisionHints } from "./minutes.js";
@@ -29,6 +29,7 @@ import type { DecisionLedger, DecisionStatusFilter, ObsoleteDecisionHint } from 
 import type { RecallCardRemoval, RecallHit, RecallInputs, RecallKnowledgeInput, RecallMinutesInput, RecallScope, RecallWorkInput } from "./recall.js";
 import { RECALL_INDEXED_WORK_KINDS } from "./recall.js";
 import { storyFields } from "./story-fields.js";
+import { workContent } from "./work-content.js";
 import { decidedInOf } from "./work-relations.js";
 import type { WorkspaceState } from "./workspace.js";
 
@@ -181,6 +182,7 @@ export interface RecallCardStoreRead {
   readonly reasonCode: string;
   readonly digest: string;
   readonly cards: number;
+  readonly evidence: Readonly<Record<string, JsonValue>> | null;
   // TCRN-CROSS-SUB-310: the pairs of cards the store holds in unresolved conflict, which its
   // default selection left out of the cards counted above; empty for a store with none.
   readonly unresolvedConflicts: readonly (readonly string[])[];
@@ -296,8 +298,9 @@ function unresolvedScopeEntries(value: unknown): readonly RecallUnresolvedScopeE
  * or one whose project the chain no longer holds.
  */
 function withheldCardsDiagnostic(read: RecallCardStoreRead): RecallProjectCrestDegraded | null {
-  if (read.unresolvedConflicts.length === 0 && read.unresolvedDuplicates.length === 0 &&
-    read.awaitingChain.length === 0 && read.unresolvedScopes.length === 0) return null;
+  const count = Number(read.evidence?.["withheldCount"] ?? 0);
+  if (count === 0) return null;
+  const diagnostics = read.evidence?.["diagnostics"] as Readonly<Record<string, JsonValue>> | undefined;
   const duplicateIds = new Set(read.unresolvedDuplicates.map((duplicate) => duplicate.id));
   const cardIds = new Set([
     ...read.unresolvedConflicts.flat(),
@@ -310,16 +313,16 @@ function withheldCardsDiagnostic(read: RecallCardStoreRead): RecallProjectCrestD
     // project the chain no longer holds are KNOWLEDGE_LINK_INVALID, the refusal validate and a
     // checkpoint meet until a card supersedes them; records awaiting chain events alone are
     // KNOWLEDGE_HIGH_WATER_MISMATCH, the refusal validate, a checkpoint and a rebase meet while they wait.
-    reasonCode: read.unresolvedConflicts.length > 0
+    reasonCode: Number(diagnostics?.["conflictPairCount"] ?? read.unresolvedConflicts.length) > 0
       ? "KNOWLEDGE_POSSIBLE_CONFLICT"
-      : read.unresolvedDuplicates.length > 0
+      : Number(diagnostics?.["duplicateIdCount"] ?? read.unresolvedDuplicates.length) > 0
         ? "KNOWLEDGE_DUPLICATE"
-        : read.unresolvedScopes.length > 0 ? "KNOWLEDGE_LINK_INVALID" : "KNOWLEDGE_HIGH_WATER_MISMATCH",
+        : Number(diagnostics?.["unresolvedScopeCount"] ?? 0) + Number(diagnostics?.["unresolvedLegacyCount"] ?? 0) > 0 ? "KNOWLEDGE_LINK_INVALID" : "KNOWLEDGE_HIGH_WATER_MISMATCH",
     ...(read.unresolvedConflicts.length === 0 ? {} : { unresolvedConflicts: read.unresolvedConflicts }),
     ...(read.unresolvedDuplicates.length === 0 ? {} : { unresolvedDuplicates: read.unresolvedDuplicates }),
     ...(read.awaitingChain.length === 0 ? {} : { awaitingChain: read.awaitingChain }),
     ...(read.unresolvedScopes.length === 0 ? {} : { unresolvedScopes: read.unresolvedScopes }),
-    withheldCards: cardIds.size + read.unresolvedDuplicates.reduce((count, duplicate) => count + duplicate.versions.length, 0),
+    withheldCards: read.evidence === null ? cardIds.size + read.unresolvedDuplicates.reduce((count, duplicate) => count + duplicate.versions.length, 0) : count,
   };
 }
 
@@ -369,10 +372,10 @@ export interface RecallCardReadOptions {
  * cards alone, "all" every card. A removed card is indexed by what it keeps, its subject; it carries its
  * removal, as the list gave it, and its id is named in `removedCardIds`.
  */
-export async function readRecallCards(workspaceRoot: string, options: RecallCardReadOptions, authority?: RecallAuthority): Promise<RecallCardRead> {
+export async function readRecallCards(workspaceRoot: string, options: RecallCardReadOptions, authority?: RecallAuthority | Promise<RecallAuthority>): Promise<RecallCardRead> {
   const read = async (scope: KnowledgeStoreScope): Promise<{ readonly cards: readonly RecallKnowledgeInput[]; readonly store: RecallCardStoreRead }> => {
     try {
-      const answer = await listKnowledgeMetadata(workspaceRoot, {
+      const answer = await listKnowledgeMetadataFast(workspaceRoot, {
         at: options.at,
         ...(options.allowTrailing === undefined ? {} : { allowTrailing: options.allowTrailing }),
         ...(options.status === undefined ? {} : { status: options.status }),
@@ -389,6 +392,7 @@ export async function readRecallCards(workspaceRoot: string, options: RecallCard
           reasonCode: String(answer["reasonCode"] ?? ""),
           digest: String(answer["resultDigest"] ?? ""),
           cards: cards.length,
+          evidence: Object.fromEntries(["effectiveScope", "sourceVersion", "projectionVersion", "snapshot", "activeCount", "eligibleCount", "withheldCount", "ineligibleCount", "diagnostics"].map((key) => [key, answer[key] ?? null])),
           unresolvedConflicts: conflictPairs(answer["unresolvedConflicts"]),
           unresolvedDuplicates: duplicateEntries(answer["unresolvedDuplicates"]),
           awaitingChain: awaitingChainEntries(answer["awaitingChain"]),
@@ -398,11 +402,10 @@ export async function readRecallCards(workspaceRoot: string, options: RecallCard
     } catch (error) {
       const reasonCode = (error as { readonly reasonCode?: unknown }).reasonCode;
       if (typeof reasonCode !== "string") throw error;
-      return { cards: [], store: { reasonCode, digest: "absent", cards: 0, unresolvedConflicts: [], unresolvedDuplicates: [], awaitingChain: [], unresolvedScopes: [] } };
+      return { cards: [], store: { reasonCode, digest: "absent", cards: 0, evidence: null, unresolvedConflicts: [], unresolvedDuplicates: [], awaitingChain: [], unresolvedScopes: [] } };
     }
   };
-  const project = await read("project");
-  const user = await read("user");
+  const [project, user] = await Promise.all([read("project"), read("user")]);
   const cards = mergeRecallCards(project.cards, user.cards);
   return {
     cards,
@@ -438,12 +441,22 @@ export function recallInputsFromState(
     conferences: state.conferences.filter(entry => entry.projectId === options.projectId),
   };
   const byId = new Map(state.work.map((record) => [record.id, record]));
+  const ledger = decisionLedger(state);
   const work: RecallWorkInput[] = [];
   for (const record of state.work) {
     if (record.tombstone || !(RECALL_INDEXED_WORK_KINDS as readonly string[]).includes(record.kind)) continue;
     const fields = storyFields(record);
+    const content = workContent(record);
     const fullText = record.kind === "Story" || record.kind === "Incident";
     const scope = record.extensions["advisory:scope"]?.value;
+    const currentDecisions = decisionsOfMinutes(ledger, decidedInOf(record))
+      .map((reference) => ledger.decisions.get(reference))
+      .filter((decision) => decision?.status === "valid")
+      .map((decision) => decision!.text);
+    const contract = content === null
+      ? [currentWorkText(record.summary ?? ""), fields.goal, fields.acceptance, fullText ? currentWorkText(fields.body ?? "") : ""]
+      : [content.goal, ...content.requirements.filter((requirement) => requirement.disposition === "required").map((requirement) => requirement.text),
+        ...content.acceptance.map((acceptance) => acceptance.expected), ...content.constraints];
     work.push({
       id: record.id,
       externalKey: record.externalKey,
@@ -451,11 +464,12 @@ export function recallInputsFromState(
       kind: record.kind,
       status: record.status,
       title: record.title ?? null,
-      summary: record.summary ?? null,
+      summary: record.summary == null ? null : currentWorkText(record.summary),
       scope: typeof scope === "string" ? scope : "",
       labels: record.labels ?? [],
       goal: fields.goal,
-      body: fullText ? fields.body : null,
+      body: fullText ? currentWorkText(fields.body ?? "") : null,
+      contract: [...contract, ...currentDecisions].filter((text) => text != null && text.length > 0).join("\n"),
       parentChain: workParentChain(byId, record),
     });
   }
@@ -471,6 +485,9 @@ export function recallInputsFromState(
       decisions: entry.decisions.map((decision) => decision.text),
       outcomeClass: entry.kind === "conference-minutes" && historical !== undefined ? historical.outcomeClass : "recorded",
       externalKey: entry.externalKey,
+      projectId: entry.projectId,
+      decisionStatuses: entry.decisions.map((decision) => decision.status ?? "valid"),
+      decisionSuccessors: entry.decisions.map((decision) => decision.supersededBy?.decision ?? null),
       // Only when an obsolete decision left a gap, or the decisions given are not D1..Dn, so every other
       // input reads as it always did.
       ...(entry.withheldDecisions === undefined && entry.decisions.every((decision, index) => decision.number === index + 1)
@@ -484,6 +501,12 @@ export function recallInputsFromState(
     work,
     ...(options.scopeExcerptBytes === undefined ? {} : { scopeExcerptBytes: options.scopeExcerptBytes }),
   };
+}
+
+/** Legacy annotations remain readable through work-show, outside the current index. */
+export function currentWorkText(text: string): string {
+  const history = /^(?:#{1,6}\s+.*(?:历史|修订|流水|进度|History|Revision|Changelog|Progress)|【[^\n]*(?:历史|修订|进度|交付记录|验收记录))[^\n]*$/imu.exec(text);
+  return (history === null ? text : text.slice(0, history.index)).trim();
 }
 
 type HintState = Pick<WorkspaceState, "work" | "minutes" | "conferenceMinutes">;
@@ -523,12 +546,99 @@ export function workObsoleteDecisions(state: Pick<WorkspaceState, "minutes" | "c
  * with the decision that superseded it or with null, withdrawn -- what minutes-show's explicit read
  * says of it.
  */
+export const PRECOMPUTED_DECISION_HINTS = Symbol.for("einzbern.precomputedDecisionHints");
+
+export interface PrecomputedDecisionHints {
+  readonly anyObsolete: boolean;
+  readonly obsoleteDecisions: readonly (readonly [string, string | null])[];
+  readonly obsoleteByMinutesId: readonly (readonly [string, readonly string[]])[];
+  readonly minutesKeys: readonly (readonly [string, string])[];
+  readonly minutesIds: readonly string[];
+}
+
+export function buildPrecomputedDecisionHints(state: Pick<WorkspaceState, "minutes" | "conferenceMinutes">): PrecomputedDecisionHints {
+  const ledger = decisionLedger(state);
+  const obsoleteDecisions = [...ledger.decisions.entries()]
+    .filter(([, entry]) => entry.status === "obsolete")
+    .map(([address, entry]) => [address, entry.supersededBy] as const);
+  const anyObsolete = obsoleteDecisions.length > 0;
+  if (!anyObsolete) {
+    return { anyObsolete: false, obsoleteDecisions: [], obsoleteByMinutesId: [], minutesKeys: [], minutesIds: [] };
+  }
+  const obsoleteSet = new Set(obsoleteDecisions.map(([address]) => address));
+  const obsoleteByMinutesId = [...ledger.records.entries()]
+    .map(([id, entries]) => [id, entries.filter((entry) => obsoleteSet.has(entry.decision)).map((entry) => entry.decision)] as const)
+    .filter(([, list]) => list.length > 0);
+  const minutesKeys = state.minutes.filter((record) => !record.tombstone).map((record) => [record.externalKey, record.id] as const);
+  return { anyObsolete: true, obsoleteDecisions, obsoleteByMinutesId, minutesKeys, minutesIds: [...ledger.records.keys()] };
+}
+
+const PRECOMPUTED_NAMED_DECISION = /(minutes:[a-z0-9][a-z0-9._-]*|[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+)\s*#?\s*D([1-9][0-9]*)(?![0-9])/gu;
+
 export function recallDecisionHints(
   state: HintState,
   cards: readonly RecallKnowledgeInput[],
   hits: readonly RecallHit[],
   options: Pick<RecallInputOptions, "decisions"> = {},
 ): readonly RecallHit[] {
+  const precomputed = (state as { [PRECOMPUTED_DECISION_HINTS]?: PrecomputedDecisionHints })[PRECOMPUTED_DECISION_HINTS];
+  if (precomputed !== undefined) {
+    if (!precomputed.anyObsolete) return hits;
+    const obsoleteMap = new Map(precomputed.obsoleteDecisions);
+    const byMinutesId = new Map(precomputed.obsoleteByMinutesId);
+    const minutesIdSet = new Set(precomputed.minutesIds);
+    const keyMap = new Map(precomputed.minutesKeys);
+    const ownDecisions = (options.decisions ?? "valid") !== "valid";
+    const work = new Map(state.work.map((record) => [record.id, record]));
+    const cardsById = new Map(cards.map((card) => [card.id, card]));
+    const collectForMinutes = (ids: readonly string[]): string[] => ids.flatMap((id) => byMinutesId.get(id) ?? []);
+    const hintsFor = (addresses: readonly string[]): ObsoleteDecisionHint[] => {
+      const out: ObsoleteDecisionHint[] = [];
+      const seen = new Set<string>();
+      for (const address of addresses) {
+        if (seen.has(address)) continue;
+        const supersededBy = obsoleteMap.get(address);
+        if (supersededBy === undefined) continue;
+        seen.add(address);
+        out.push({ decision: address, supersededBy });
+      }
+      return out;
+    };
+    return hits.map((hit) => {
+      const record = hit.kind === "work" ? work.get(hit.id) : undefined;
+      const card = hit.kind === "card" ? cardsById.get(hit.id) : undefined;
+      let addresses: readonly string[];
+      if (record !== undefined) {
+        addresses = collectForMinutes(decidedInOf(record));
+      } else if (card !== undefined) {
+        const references = card.sourceReferences ?? [];
+        const minutesIds = references
+          .map((reference) => (minutesIdSet.has(reference) ? reference : keyMap.get(reference.toUpperCase())))
+          .filter((minutesId): minutesId is string => minutesId !== undefined);
+        const named: string[] = [];
+        const text = [card.subject, card.summary, card.snippet, ...references].join("\n");
+        for (const match of text.matchAll(PRECOMPUTED_NAMED_DECISION)) {
+          const name = match[1] ?? "";
+          let minutesId: string | undefined;
+          if (name.startsWith("minutes:")) minutesId = name;
+          else {
+            const key = name.toUpperCase();
+            const exact = precomputed.minutesKeys.find(([externalKey]) => externalKey === key);
+            const tails = precomputed.minutesKeys.filter(([externalKey]) => externalKey.endsWith(`-${key}`));
+            minutesId = exact?.[1] ?? (tails.length === 1 ? tails[0]?.[1] : undefined);
+          }
+          if (minutesId === undefined) continue;
+          const address = `${minutesId}#D${Number(match[2])}`;
+          if (obsoleteMap.has(address) && !named.includes(address)) named.push(address);
+        }
+        addresses = [...collectForMinutes(minutesIds), ...named];
+      } else {
+        addresses = ownDecisions && hit.kind === "minutes" ? collectForMinutes([hit.id]) : [];
+      }
+      const hints = hintsFor(addresses);
+      return hints.length === 0 ? hit : { ...hit, obsoleteDecisions: hints };
+    });
+  }
   const ledger = decisionLedger(state);
   if (![...ledger.decisions.values()].some((entry) => entry.status === "obsolete")) return hits;
   const ownDecisions = (options.decisions ?? "valid") !== "valid";
@@ -558,6 +668,7 @@ function capBytes(text: string, maximumBytes: number): string {
   const bytes = Buffer.from(text, "utf8");
   if (bytes.length <= maximumBytes) return text;
   const ellipsis = "…";
+  if (maximumBytes < Buffer.byteLength(ellipsis)) return "";
   let end = maximumBytes - Buffer.byteLength(ellipsis, "utf8");
   while (end > 0 && (bytes[end]! & 0xc0) === 0x80) end -= 1;
   return `${bytes.subarray(0, end).toString("utf8")}${ellipsis}`;
@@ -574,13 +685,38 @@ function capBytes(text: string, maximumBytes: number): string {
  * obsolete decisions carries its own after its lead (R17 续作修订二).
  */
 export function formatRecallLine(hit: RecallHit): string {
+  return formatRecallLineWithin(hit, RECALL_LINE_MAX_BYTES);
+}
+
+function formatRecallLineWithin(hit: RecallHit, maximumBytes: number): string {
   const flat = (text: string): string => text.replace(/\s+/gu, " ").trim();
   const hint = hit.obsoleteDecisions === undefined || hit.obsoleteDecisions.length === 0 ? "" : ` · ${hintText(hit.obsoleteDecisions)}`;
+  const title = flat(hit.title);
+  const bareTitle = title.length === 0 || title.toUpperCase() === hit.key.toUpperCase() || /^(?:(?:[A-Z0-9]+-)*[A-Z]+-)?\d+$/iu.test(title);
+  const removedEvidence = hit.status === "removed" && (hit.removal?.basis.trim().length ?? 0) > 0;
+  if (bareTitle || (!hit.summary.trim() && !hit.lead.trim() && !removedEvidence) || hit.kind === "minutes" && !hit.lead.trim()) return "";
   let line: string;
   if (hit.kind === "card") {
     line = `[卡片${hit.scope === "user" ? " 用户" : ""}${hit.status === "removed" ? " 已移除" : ""}] ${flat(hit.title)} · ${hit.id}${hint}`;
   } else if (hit.kind === "minutes") {
-    line = `[纪要 ${hit.key}] ${flat(hit.title)}${hit.lead.length > 0 ? ` · ${flat(hit.lead)}` : ""}${hint}`;
+    const decision = hit.decision;
+    if (decision === undefined) {
+      line = `[纪要 ${hit.key}] ${title} · ${flat(hit.lead)}${hint}`;
+    } else {
+      const validity = decision.status === "obsolete"
+        ? `历史已失效→${decision.supersededBy ?? "撤回"}`
+        : hit.historical ? "历史问题；非现行行动" : "现行有效";
+      const source = ` · 出处（minutes-show --id ${decision.reference}）`;
+      const prefix = `[纪要 ${hit.key}] ${title} · D${decision.number} ${validity} · 范围 ${decision.scope} · `;
+      // Reserve the complete locator before shortening prose. No partial source is delivered.
+      const room = Math.min(maximumBytes, RECALL_LINE_MAX_BYTES) - Buffer.byteLength(prefix + source + hint, "utf8");
+      const fullExcerpt = flat(decision.excerpt ?? decision.text);
+      const excerpt = maximumBytes < RECALL_LINE_MAX_BYTES && Buffer.byteLength(fullExcerpt, "utf8") > room
+        ? flat(decision.matchedText ?? fullExcerpt) : fullExcerpt;
+      const text = capBytes(excerpt, Math.min(room, 800));
+      if (text.length === 0) return "";
+      return prefix + text + source + hint;
+    }
   } else {
     const chain = hit.parentChain.length > 0 ? ` · ${hit.parentChain.map(flat).join(" ‹ ")}` : "";
     line = `[${hit.recordKind} ${hit.status}] ${flat(hit.title)} · ${hit.key} · ${hit.id}${hint}${chain}`;
@@ -590,15 +726,21 @@ export function formatRecallLine(hit: RecallHit): string {
 
 /**
  * The lines of an answer, in rank order, cut to `perPromptBytes` UTF-8 bytes at whole lines (one
- * newline between lines counts): the first line that does not fit ends the answer.
+ * newline between lines counts). An overlong candidate never blocks a later line.
  */
 export function recallContextLines(hits: readonly RecallHit[], perPromptBytes: number): readonly string[] {
   const lines: string[] = [];
   let used = 0;
   for (const hit of hits) {
-    const line = formatRecallLine(hit);
-    const cost = Buffer.byteLength(line, "utf8") + (lines.length === 0 ? 0 : 1);
-    if (used + cost > perPromptBytes) break;
+    let line = formatRecallLine(hit);
+    if (line.length === 0) continue;
+    const separator = lines.length === 0 ? 0 : 1;
+    if (used + Buffer.byteLength(line, "utf8") + separator > perPromptBytes && hit.decision !== undefined && Buffer.byteLength(hit.decision.text, "utf8") > 480) {
+      line = formatRecallLineWithin(hit, perPromptBytes - used - separator);
+      if (line.length === 0) continue;
+    }
+    const cost = Buffer.byteLength(line, "utf8") + separator;
+    if (used + cost > perPromptBytes) continue;
     lines.push(line);
     used += cost;
   }

@@ -160,7 +160,7 @@ test("agent recall keeps the full context and identifies degraded knowledge with
     awaitingChain: 0,
   });
   assert.equal(Object.hasOwn(agent, "records"), false);
-  assert.ok(!raw.includes(card.id), "the compact result contains counts only");
+  assert.deepEqual(agent.knowledgeStores.project.diagnostics.idExamples, [card.id], "the compact result has bounded ID evidence");
   const { knowledgeReasonCode, knowledgeStores, projectCrestDegraded } = full;
   assert.equal(agent.diagnostics.knowledgeSha256, canonicalSha256({ knowledgeReasonCode, knowledgeStores, projectCrestDegraded }));
   assert.match(agent.diagnostics.projectSnapshotDigest, /^[a-f0-9]{64}$/u);
@@ -180,7 +180,7 @@ test("agent recall reports an oversized delivery without trimming the machine co
   const query = "Obsidian beacon";
   const title = `${query} ${'界"\\'.repeat(4800)}`;
   await createWork(workspace, {
-    occurredAt: at(40), projectId, externalKey: "RC-LARGE-CONTEXT", kind: "Initiative", parentId: null, title,
+    occurredAt: at(40), projectId, externalKey: "RC-LARGE-CONTEXT", kind: "Initiative", parentId: null, title, goal: "Deliver the Obsidian beacon contract.",
   });
   await setWorkspaceSetting(workspace, { occurredAt: at(41), key: "injection.perPromptBytes", value: "64000" });
   const args = ["--limit", "1", "--tau", "0"];

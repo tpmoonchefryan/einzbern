@@ -535,6 +535,8 @@ test("integrated engine: non-decision valueShapes document projection selection,
       name: "host", required: false, valueKind: "string",
       valueShape: "Explicit host for configured artifact-language model policy; required by that policy, not inferred.",
     }],
+    ["knowledge-list", { name: "diagnostics", required: false, valueKind: "string", valueShape: "summary (default), ids, conflicts, or audit" }],
+    ["knowledge-list", { name: "snapshot", required: false, valueKind: "string", valueShape: "SHA-256 from the first page; required for diagnostic continuation" }],
     ["minutes-record", { name: "decisions", required: false, valueKind: "list", valueShape: "exactly-one-of(--decisions,--decisions-file)" }],
     ["minutes-record", { name: "decisions-file", required: false, valueKind: "string", valueShape: "exactly-one-of(--decisions,--decisions-file)" }],
     ["minutes-show", { name: "id", required: false, valueKind: "string", valueShape: "exactly-one-of(--id,--external-key)" }],
@@ -569,7 +571,7 @@ test("527 Q6: the proposal verbs are cataloged with their required flags, and no
   }
   assert.deepEqual(flags("gates-config-propose"), [
     ["workspace", false, "string"], ["at", true, "instant"], ["name", true, "string"], ["action", false, "string"], ["command", false, "string"], ["root", false, "string"],
-    ["covers", false, "list"], ["required", false, "boolean"], ["enabled", false, "boolean"], ["release-only", false, "boolean"], ["order", false, "integer"],
+    ["repository", false, "string"], ["covers", false, "list"], ["required", false, "boolean"], ["enabled", false, "boolean"], ["release-only", false, "boolean"], ["order", false, "integer"],
     ["actor", true, "string"], ["project-id", false, "string"], ["timeout-ms", false, "integer"],
   ]);
   assert.deepEqual(flags("rule-propose"), [
@@ -657,6 +659,26 @@ test("INIT065 general-native catalog is separate from legacy closed roster", asy
       const expectedKind = entry.name === "execution-host-prepare" && flag.name === "codex-peer-worker" ? "boolean" : "string";
       assert.equal(flag.valueKind, expectedKind, `${entry.name}:${flag.name}`);
     }
+    assert.equal((await invoke([entry.name, "--help"])).ok, true);
+    assert.equal((await invoke([entry.name, "--injected-admission", "true"])).reasonCode, "CLI_ARGUMENT_UNKNOWN");
+  }
+});
+
+test("INIT092 antigravity swarm audit catalog entries have expected flags and strict help/unknown behavior", async () => {
+  const entries = COMMAND_CATALOG.filter(entry => entry.name.startsWith("execution-antigravity-swarm-"));
+  assert.deepEqual(entries.map(entry => entry.name), ["execution-antigravity-swarm-evidence", "execution-antigravity-swarm-record"]);
+  const recordEntry = entries.find(entry => entry.name === "execution-antigravity-swarm-record");
+  assert.deepEqual(recordEntry.flags.map(flag => [flag.name, flag.required]), [
+    ["workspace", true],
+    ["manifest", true],
+    ["preparations", true],
+    ["observations", true],
+    ["prior", false],
+    ["output", true],
+  ]);
+  const evidenceEntry = entries.find(entry => entry.name === "execution-antigravity-swarm-evidence");
+  assert.deepEqual(evidenceEntry.flags.map(flag => [flag.name, flag.required]), [["from-file", true]]);
+  for (const entry of entries) {
     assert.equal((await invoke([entry.name, "--help"])).ok, true);
     assert.equal((await invoke([entry.name, "--injected-admission", "true"])).reasonCode, "CLI_ARGUMENT_UNKNOWN");
   }

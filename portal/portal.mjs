@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 // another preflight or an authentication mechanism. Relocation takes this same
 // registry-before-library lock order. The lock and its path come
 // through the registry-lock bridge, as the names do through names.mjs.
-import { withFileLock, registryPath } from "../scripts/lib/registry-lock.mjs";
+import { withFileLock, registryPath, cachePath } from "../scripts/lib/registry-lock.mjs";
 
 import { canonicalJson } from "../scripts/lib/canonical-json.mjs";
 
@@ -743,7 +743,7 @@ async function latestGateRunProjection() {
   const libraryId = currentLibrary().libraryId;
   const match = /^(library|workspace):([a-f0-9]{24})$/u.exec(libraryId);
   if (match === null) return { ok: false, reasonCode: "PORTAL_GATE_RUN_READ_FAILED", error: "library id is invalid" };
-  const directory = join(deviceHomePath(), "cache", `${match[1]}-${match[2]}`, "gate-runs");
+  const directory = join(cachePath(libraryId), "gate-runs");
   let entries;
   try { entries = await readdir(directory, { withFileTypes: true }); } catch (error) {
     if (error?.code === "ENOENT") return { ok: true, reasonCode: "PORTAL_GATE_RUN_READY", run: null };
@@ -768,8 +768,9 @@ function gateInput(body) {
   if (name === "" || !Array.isArray(command) || command.length === 0 || command.some((part) => typeof part !== "string" || part === "") ||
     typeof root !== "string" || !Array.isArray(covers) || covers.some((cover) => typeof cover !== "string") ||
     typeof body.required !== "boolean" || typeof body.enabled !== "boolean" || typeof body.releaseOnly !== "boolean" ||
-    !(body.order === undefined || body.order === null || typeof body.order === "number" || typeof body.order === "string")) return null;
-  return { name, command, root, covers, required: body.required, enabled: body.enabled, releaseOnly: body.releaseOnly, order: body.order };
+    !(body.order === undefined || body.order === null || typeof body.order === "number" || typeof body.order === "string") ||
+    !(body.repository === undefined || typeof body.repository === "string")) return null;
+  return { name, command, root, covers, required: body.required, enabled: body.enabled, releaseOnly: body.releaseOnly, order: body.order, repository: body.repository };
 }
 
 const writeGate = (gate) => governedWrite((common) => [
@@ -777,6 +778,7 @@ const writeGate = (gate) => governedWrite((common) => [
   "--name", gate.name,
   "--command", JSON.stringify(gate.command),
   "--root", gate.root,
+  ...(gate.repository === undefined ? [] : ["--repository", gate.repository]),
   "--covers", gate.covers.length === 0 ? "-" : gate.covers.join(","),
   "--required", String(gate.required),
   "--enabled", String(gate.enabled),

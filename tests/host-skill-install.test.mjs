@@ -45,3 +45,13 @@ test("peer-aware Skill rejects an older same-version engine without peer receipt
   assert.equal(ready.result.directory, ready.root);
   assert.deepEqual(ready.recorder.blockers, []);
 });
+
+test("swarm-aware Skill rejects an older same-version engine without swarm receipt commands", async t => {
+  const swarmSkill = `${HOST_SKILL_PROTOCOL_MARKER}\nUse \`execution-antigravity-swarm-record\` and \`execution-antigravity-swarm-evidence\`.\n`;
+  const missing = await fixture(t, swarmSkill, names);
+  assert.equal(missing.result.directory, null);
+  assert.equal(missing.recorder.blockers[0].reasonCode, "SETUP_SKILL_ENGINE_MISMATCH");
+  const ready = await fixture(t, swarmSkill, [...names, "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"]);
+  assert.equal(ready.result.directory, ready.root);
+  assert.deepEqual(ready.recorder.blockers, []);
+});

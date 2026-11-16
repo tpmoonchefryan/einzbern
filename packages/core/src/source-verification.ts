@@ -12,6 +12,7 @@ import type { CacheSnapshotHeader } from "./library-cache.js";
 import { cachePath } from "./device-home.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import type { VerifiedSegment } from "./source-verification-native.js";
+import type { WorkspaceState } from "./workspace.js";
 
 interface IndexParse {
   readonly bytes: Buffer;
@@ -106,8 +107,9 @@ async function readArchiveCostHint(library: Library): Promise<number | null> {
   }
 }
 
-export async function withSourceVerification<T>(library: Library, operation: () => Promise<{ readonly value: T; readonly read: LibraryRead; readonly accepted: boolean }>): Promise<T> {
-  if (process.platform !== "darwin" || library.manifest.consolidation === undefined) return (await operation()).value;
+export async function withSourceVerification(library: Library, operation: () => Promise<{ readonly value: WorkspaceState; readonly read: LibraryRead; readonly accepted: boolean }>): Promise<WorkspaceState> {
+  if (process.platform !== "darwin") return (await nativeVerifier()).withSourceVerification(library, operation);
+  if (library.manifest.consolidation === undefined) return (await operation()).value;
   const hintedBytes = await readArchiveCostHint(library);
   if (hintedBytes !== null) {
     if (hintedBytes < FULL_READ_MAX_BYTES) {

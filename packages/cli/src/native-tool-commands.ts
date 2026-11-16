@@ -1,6 +1,8 @@
 import { recordCodexPeerBatch, normalizeCodexPeerBatch } from "../../core/src/codex-peer-batch.js";
 import type { CodexPeerBatchInput } from "../../core/src/codex-peer-batch.js";
 import type { CodexPeerBatch } from "../../core/src/codex-peer-batch.js";
+import { recordAntigravitySwarmBatch, normalizeAntigravitySwarmBatch, stageAntigravitySwarmGuardFromBatch } from "../../core/src/antigravity-swarm-batch.js";
+import type { AntigravitySwarmBatch, AntigravitySwarmBatchInput } from "../../core/src/antigravity-swarm-batch.js";
 import { persistCodexPeerRole } from "../../core/src/codex-peer-hooks.js";
 import { codexNativeGuardHealth } from "../../core/src/codex-native-health.js";
 import type { CodexHookObservation } from "../../core/src/codex-native-health.js";
@@ -42,6 +44,8 @@ export const NATIVE_TOOL_COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] 
   { name: "execution-antigravity-preflight", availability: "cli", mutates: true, flags: [flag("binding", true, "path", "Saved HostExecutionPreparation v1 JSON; validates Antigravity CLI scope without launching a process."), flag("reserve-output", false, "path", "Optionally reserve the private create-new evidence destination before launching Antigravity CLI.")] },
   { name: "execution-antigravity-record", availability: "cli", mutates: true, flags: [flag("binding", true, "path", "Saved Antigravity HostExecutionPreparation v1 JSON."), flag("result", false, "path", "Actual Antigravity child process return JSON; omit only for a refused preflight."), flag("output", true, "path", "Create-new private Antigravity process evidence outside device/library roots.")] },
   { name: "execution-antigravity-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true, "path", "Antigravity process evidence JSON.")] },
+  { name: "execution-antigravity-swarm-record", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("manifest", true), flag("preparations", true), flag("observations", true), flag("prior", false), flag("output", true)] },
+  { name: "execution-antigravity-swarm-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true)] },
   { name: "execution-codex-peer-record", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("manifest", true), flag("records", true), flag("capacity", true), flag("codex-admission", false), flag("role-change", false), flag("actor", false, "string"), flag("delivery", false), flag("prior", false), flag("output", true)] },
   { name: "execution-codex-peer-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true)] },
   { name: "execution-host-prepare", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("request", true, "path", "HostExecutionRequest v1 JSON"), flag("arguments", true, "path", "{selection, argumentsValue} actual request JSON"), flag("codex-peer-worker", false, "boolean"), flag("codex-admission", false), flag("codex-settings-intent", false, "path", "Existing Owner decision and exact settings target source; never a query permission"), flag("output", true)] },
@@ -73,6 +77,29 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
   const catalog = NATIVE_TOOL_COMMAND_CATALOG.find(entry => entry.name === command); if (!catalog) return null;
   for (const key of Object.keys(values)) if (!catalog.flags.some(entry => entry.name === key)) throw new Error(`unsupported --${key}`);
   for (const f of catalog.flags) if (f.required && !values[f.name]?.trim()) throw new Error(`--${f.name} is required`);
+  if (command === "execution-antigravity-swarm-evidence") return json(normalizeAntigravitySwarmBatch(await input(values["from-file"]!)));
+  if (command === "execution-antigravity-swarm-record") {
+    const workspace = await context.resolveWorkspace(values.workspace!);
+    const manifest = await input(values.manifest!) as AntigravitySwarmBatchInput["manifest"];
+    const preparations = await input(values.preparations!) as AntigravitySwarmBatchInput["preparations"];
+    const observations = await input(values.observations!) as AntigravitySwarmBatchInput["observations"];
+    const prior = values.prior === undefined ? undefined : await input(values.prior);
+    const policy = await readEngineModelPolicyFile(context.home);
+    const referenced = new Set([manifest?.workId, ...(Array.isArray(manifest?.members) ? manifest.members.map(member => member?.workId) : [])]);
+    const workRevisions = workspace.state.work.filter(row => !row.tombstone && referenced.has(row.id)).map(row => ({ id: row.id, revision: row.revision }));
+    let result: unknown;
+    const observationCutoff = new Date().toISOString();
+    try {
+      result = recordAntigravitySwarmBatch({ observationCutoff, manifest, preparations, observations, policy, workRevisions, ...(prior === undefined ? {} : { prior }) });
+    } catch (error) {
+      result = { reasonCode: "ANTIGRAVITY_SWARM_RECORD_INVALID", observationCutoff, manifest, preparations, observations, ...(prior === undefined ? {} : { prior }), validation: { status: "invalid" }, problems: [String(error)] };
+    }
+    await writeDispatchArtifact(values.output!, result, [workspace.root], context.home);
+    if ((result as { schemaVersion?: unknown }).schemaVersion === "tcrn.antigravity-swarm-batch.v1") {
+      await stageAntigravitySwarmGuardFromBatch(result as AntigravitySwarmBatch, context.home ?? deviceHome(), workspace.state.metadata.workspaceId);
+    }
+    return json(result);
+  }
   if (command === "execution-codex-peer-evidence") return json(normalizeCodexPeerBatch(await input(values["from-file"]!)));
   if (command === "execution-codex-peer-record") {
     const workspace = await context.resolveWorkspace(values.workspace!);

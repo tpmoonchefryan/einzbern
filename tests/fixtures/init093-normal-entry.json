@@ -1,0 +1,18 @@
+{
+  "cases": [
+    {
+      "name": "synchronous-vs-asynchronous",
+      "summaries": [
+        "必须使用同步缓存",
+        "缓存必须使用异步模式"
+      ]
+    },
+    {
+      "name": "exclusive-age",
+      "summaries": [
+        "Cache maximum age must be 60 seconds",
+        "Cache maximum age must be 120 seconds"
+      ]
+    }
+  ]
+}

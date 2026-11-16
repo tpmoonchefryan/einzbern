@@ -3,7 +3,7 @@
 import { compareCanonicalText } from "./canonical-order.mjs";
 import { P8_RELEASE_ARTIFACTS, P8_SUPPORTED_AOS_RELEASES, P8_TAG, staleReleaseArtifactMoves } from "./p8-workflow-rc.mjs";
 
-const DIAGNOSTIC_WORD = /(?:^|[^A-Za-z])(?:warning|warn|error|errors|failed|failure|blocked|refused|denied)(?:$|[^A-Za-z])/iu;
+const DIAGNOSTIC_WORD = /(?:^|[^A-Za-z])(?:warning|warn|error|errors|failed|failure|blocked|refused|denied|unknown|unstarted|cancelled)(?:$|[^A-Za-z])/iu;
 const P8_SUCCESS_FIELDS = Object.freeze([
   "artifacts", "command", "mutation", "network", "ok", "p8BasisCommit", "privacy", "privacySurfaces",
   "publication", "reasonCode", "releaseStatus", "reproducibility", "sbom",
@@ -60,15 +60,35 @@ function diagnosticText(value) {
   return typeof value === "string" && DIAGNOSTIC_WORD.test(value);
 }
 
-// The budget leg's warning was the one diagnostic word this scan ever exempted; the leg is
-// retired with the proof budget (TCRN-CROSS-STORY-467 R2), so every diagnostic is red.
+// Delivery receipts contain quoted source text as well as execution results.
+// Project only the two typed source fields; all statuses, diagnostics, metrics,
+// unknown fields and malformed source rows still pass through the same scan.
+function retrievalDiagnosticView(value) {
+  if (value.command !== "retrieval-eval" || value.ok !== true || value.reasonCode !== "RETRIEVAL_EVAL_VERIFIED"
+      || value.delivery?.ok !== true || value.delivery.reasonCode !== "RETRIEVAL_EVAL_DELIVERY_VERIFIED"
+      || !Array.isArray(value.delivery.reports)) return value;
+  return { ...value, delivery: { ...value.delivery, reports: value.delivery.reports.map((report) => {
+    if (!Array.isArray(report?.rows)) return report;
+    return { ...report, rows: report.rows.map((row) => {
+      if (!Array.isArray(row?.context) || !row.context.every((line) => typeof line === "string")
+          || !Array.isArray(row.ranked) || !row.ranked.every((record) => record && typeof record.id === "string"
+            && typeof record.key === "string" && typeof record.line === "string")) return row;
+      return { ...row, context: row.context.map(() => "[source text]"), ranked: row.ranked.map((record) => ({ ...record, line: "[source text]" })) };
+    }) };
+  }) } };
+}
+
 function diagnosticValue(value) {
   if (typeof value === "string") return diagnosticText(value);
   if (Array.isArray(value)) return value.some((entry) => diagnosticValue(entry));
   if (!value || typeof value !== "object") return false;
-  return Object.entries(value).some(([key, child]) => {
+  return Object.entries(retrievalDiagnosticView(value)).some(([key, child]) => {
     // Null/false/empty diagnostic fields are ordinary successful receipt shape.
-    if (["error", "errors", "warning", "warnings"].includes(key) && (child === null || child === false || Array.isArray(child) && child.length === 0)) return false;
+    if (["error", "errors", "warning", "warnings", "diagnostic", "failure", "failures"].includes(key)) {
+      return !(child === null || child === false || child === "" || child === 0 || Array.isArray(child) && child.length === 0);
+    }
+    if (["ok", "success", "actualStarted"].includes(key) && child === false) return true;
+    if (["notStarted", "timedOut"].includes(key) && child === true) return true;
     return diagnosticValue(child);
   });
 }

@@ -123,7 +123,7 @@ test("471-AC1: a library in a newer format is refused by status, work-list and w
   await rewriteManifest(library, (manifest) => ({ ...manifest, formatVersion: 99 }));
   const libraryBefore = await treeDigest(library);
   const deviceBefore = await treeDigest(device);
-  assert.ok(deviceBefore.some((row) => row.startsWith("cache/")), "this device's cache holds the library's views and snapshot");
+  assert.ok(deviceBefore.some((row) => row.startsWith("derived-cache/")), "this device's local cache holds the library's views and snapshot");
   for (const args of [
     ["status", "--workspace", library],
     ["work-list", "--workspace", library],

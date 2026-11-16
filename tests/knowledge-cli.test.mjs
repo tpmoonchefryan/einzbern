@@ -102,6 +102,9 @@ test("476-AC1 (CLI): a card written without a lifecycle flag is recalled at once
   assert.equal(created.reasonCode, "KNOWLEDGE_UNIT_CREATED");
   assert.deepEqual(created.ids, [created.id], "the receipt names the card it wrote");
   assert.equal(created.version, 1, "beside the store version");
+  assert.deepEqual([created.localCommitted, created.verifiedReadback, created.remoteVerification], [true, true, "unverified"]);
+  assert.equal(created.readback.records[0].id, created.id);
+  assert.match(created.readback.records[0].headEventHash, /^[a-f0-9]{64}$/u);
   assert.equal(Object.hasOwn(created, "promotionState"), false, "the create receipt omits the retired promotion marker");
 
   const answer = await recallCli(workspace, 11, "pangolin scale inventory");
@@ -109,7 +112,7 @@ test("476-AC1 (CLI): a card written without a lifecycle flag is recalled at once
   assert.equal(hit?.kind, "card", `the card is recalled the moment it is written: ${JSON.stringify(answer.records)}`);
   assert.equal(hit.scope, "project");
   assert.equal(hit.line, `[卡片] Pangolin scale inventory · ${created.id}`);
-  assert.deepEqual(answer.knowledgeStores.project, { reasonCode: "KNOWLEDGE_LIST_READY", cards: 1 });
+  assert.deepEqual([answer.knowledgeStores.project.reasonCode, answer.knowledgeStores.project.cards, answer.knowledgeStores.project.eligibleCount], ["KNOWLEDGE_LIST_READY", 1, 1]);
 
   const listed = await cli(["knowledge-list", "--workspace", workspace, "--at", at(12), "--selection", "all"]);
   assert.deepEqual(listed.records.map((record) => [record.id, record.lifecycle]), [[created.id, "active"]]);
@@ -142,9 +145,9 @@ test("476-AC2, SUB-425 (CLI): a conflicting card is refused until it supersedes 
   const base = await device(context);
   const { workspace } = await library(base, "beta");
   const older = await cli(createArgs(workspace, 20, {
-    key: "KC-WOMBAT-1", subject: "Wombat burrow etiquette", summary: "How to enter a wombat burrow", snippet: "knock before the burrow",
+    key: "KC-WOMBAT-1", subject: "Wombat burrow etiquette", summary: "Enter a wombat burrow at dawn", snippet: "knock before the burrow",
   }));
-  const newer = { key: "KC-WOMBAT-2", subject: "Wombat burrow etiquette revised", summary: "Enter a wombat burrow only at dusk", snippet: "wait for dusk" };
+  const newer = { key: "KC-WOMBAT-2", subject: "Wombat burrow etiquette revised", summary: "Do not enter a wombat burrow at dawn", snippet: "wait for dusk" };
   const refused = await refusal(createArgs(workspace, 21, newer));
   assert.equal(refused?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
   assert.deepEqual(refused.details.conflicts, [older.id], "the refusal hands back the card it conflicts with");
@@ -223,7 +226,7 @@ test("476-AC3 (CLI): --scope user writes this user's crest, and another project 
   const hit = answer.records.find((record) => record.id === created.id);
   assert.equal(hit?.scope, "user", `another project recalls the user card: ${JSON.stringify(answer.records)}`);
   assert.equal(hit.line, `[卡片 用户] Quoll den survey · ${created.id}`);
-  assert.deepEqual(answer.knowledgeStores, {
+  assert.deepEqual(Object.fromEntries(Object.entries(answer.knowledgeStores).map(([key, store]) => [key, { reasonCode: store.reasonCode, cards: store.cards }])), {
     project: { reasonCode: "KNOWLEDGE_LIST_READY", cards: 0 },
     user: { reasonCode: "KNOWLEDGE_LIST_READY", cards: 1 },
   });
@@ -359,7 +362,7 @@ test("476 (bin): a refused knowledge write names the field past its card limit, 
   assert.equal(oversized.reasonCode, "KNOWLEDGE_UNIT_CREATED", "the old per-card ceiling no longer refuses the complete body");
 
   const kept = await cli(createArgs(workspace, 51, { key: "KC-DINGO-1", subject: "Dingo fence patrol", summary: "Walk the dingo fence weekly", snippet: "weekly patrol" }));
-  const conflict = run(createArgs(workspace, 52, { key: "KC-DINGO-2", subject: "Dingo fence patrol schedule", summary: "Walk the dingo fence daily", snippet: "daily patrol" }));
+  const conflict = run(createArgs(workspace, 52, { key: "KC-DINGO-2", subject: "Dingo fence patrol schedule", summary: "Do not walk the dingo fence weekly", snippet: "daily patrol" }));
   assert.equal(conflict.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
   assert.deepEqual(conflict.conflicts, [kept.id]);
 });
@@ -421,7 +424,7 @@ test("R46 I04 (CLI): a library that never created its knowledge store lists an e
   assert.deepEqual(await readdir(store), [], "a library is made with its store directory empty");
   assert.deepEqual(view(await cli(args)), absent, "as made");
   const recalled = await recallCli(workspace, 2, "anything the library might know");
-  assert.deepEqual(recalled.knowledgeStores.project, { reasonCode: "KNOWLEDGE_LIST_READY", cards: 0 }, "recall reads the empty inventory as a ready store");
+  assert.deepEqual({ reasonCode: recalled.knowledgeStores.project.reasonCode, cards: recalled.knowledgeStores.project.cards }, { reasonCode: "KNOWLEDGE_LIST_READY", cards: 0 }, "recall reads the empty inventory as a ready store");
   assert.deepEqual(recalled.records, []);
   await rename(store, join(base, "store-away"));
   assert.deepEqual(view(await cli(args)), absent, "with the store directory gone");

@@ -230,11 +230,11 @@ test("476-R1, R2: the promotion and retirement verbs are gone from the catalog a
 test("476-AC2, SUB-425: a conflicting write is refused without --supersedes, and with it the older card is removed and leaves default retrieval", async (t) => {
   const fx = await fixture(t, "FIXTURE-SUB-308-SUPERSEDE");
   const subject = "SUB-308 only a conflicting write retires a card";
-  const old = await captureKnowledgeUnit(fx.workspace, lesson("SUB-308-OLD", subject));
-  const refused = await refusalOf(() => captureKnowledgeUnit(fx.workspace, lesson("SUB-308-NEW", subject)));
+  const old = await captureKnowledgeUnit(fx.workspace, lesson("SUB-308-OLD", subject, { summary: "Enable cache" }));
+  const refused = await refusalOf(() => captureKnowledgeUnit(fx.workspace, lesson("SUB-308-NEW", subject, { summary: "Disable cache" })));
   assert.equal(refused?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "a conflicting write without --supersedes or --coexist is refused");
   assert.deepEqual(refused.details.conflicts, [old.id]);
-  const replacement = await captureKnowledgeUnit(fx.workspace, lesson("SUB-308-NEW", subject, { supersedes: old.id }));
+  const replacement = await captureKnowledgeUnit(fx.workspace, lesson("SUB-308-NEW", subject, { supersedes: old.id, summary: "Disable cache" }));
   assert.equal(replacement.superseded, old.id);
   assert.equal((await listKnowledgeMetadata(fx.workspace, { at: AT, selection: "all" })).records.some((record) => record.id === old.id), false, "no valid card any more");
   const replaced = (await listKnowledgeMetadata(fx.workspace, { at: AT, status: "removed" })).records.find((record) => record.id === old.id);

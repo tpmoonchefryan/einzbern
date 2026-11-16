@@ -70,6 +70,7 @@ import {
 import { canonicalSha256, parseStrictInstant } from "../dist/build/packages/protocol/src/index.js";
 import { buildIncidentReplay } from "./incident-replay.mjs";
 import { CARDS_SCHEMA_VERSION, MINUTES_SCHEMA_VERSION, WORK_SCHEMA_VERSION } from "./retrieval-eval-record.mjs";
+import { evaluateDelivery } from "./retrieval-delivery-eval.mjs";
 
 const SCOPE_EXCERPT_BYTES = 512;
 const TOP_K = 8;
@@ -270,7 +271,14 @@ if (process.argv.includes("--calibrate")) {
   if (corpusDigest !== policy.corpusDigest) {
     console.log(JSON.stringify({ ok: false, reasonCode: "RETRIEVAL_EVAL_CORPUS_CHANGED", corpusDigest, expected: policy.corpusDigest, message: `corpus digest ${corpusDigest} does not match the frozen ${policy.corpusDigest}` }));
   } else {
-    console.log(JSON.stringify(evaluate(corpusDigest, policy)));
+    const result = evaluate(corpusDigest, policy);
+    try {
+      const delivery = await evaluateDelivery({ ...(process.env.EINZBERN_RETRIEVAL_EVAL_OUT ? { out: process.env.EINZBERN_RETRIEVAL_EVAL_OUT } : {}) });
+      console.log(JSON.stringify({ ...result, ok: result.ok && delivery.ok,
+        reasonCode: !result.ok ? result.reasonCode : delivery.ok ? result.reasonCode : delivery.reasonCode, delivery }));
+    } catch (error) {
+      console.log(JSON.stringify({ ...result, ok: false, reasonCode: "RETRIEVAL_EVAL_DELIVERY_INVALID", delivery: { ok: false, message: error.message } }));
+    }
   }
 }
 

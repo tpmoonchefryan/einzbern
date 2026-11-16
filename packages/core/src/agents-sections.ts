@@ -40,6 +40,7 @@ import { effectiveProjectState } from "./project-chain.js";
 // coordinates -- and nowhere else (managedOutputBinding).
 
 import { lstat, readFile, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import { dirname, join, resolve } from "node:path";
 import { pathIsInside } from "./path-containment.js";
@@ -71,7 +72,6 @@ import type {
   ParsedSection,
 } from "./managed-sections.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
-import { BRAND } from "./names.js";
 import { gitTopLevel, readRegistry, resolveLibrary } from "./registry.js";
 import type { ResolutionPath } from "./registry.js";
 import { BUILT_IN_RULES, builtInRule, ruleBody } from "./rules-catalog.js";
@@ -126,10 +126,8 @@ export interface AgentsSection {
 /** CLAUDE.md's one section: the import of AGENTS.md, written only while CLAUDE.md does not import it (R5). */
 export const CLAUDE_IMPORT_SECTION: AgentsSection = Object.freeze({ id: "claude-import", file: CLAUDE_FILE, body: "@AGENTS.md\n" });
 
-/** One Skill entry shared by managed navigation and fallback pointer hooks. */
-export const NAVIGATION_LINES: readonly string[] = Object.freeze([
-  `This workspace uses ${BRAND.engine.name}. Load and follow the ${BRAND.helper.name} skill for applicable work.`,
-]);
+import { NAVIGATION_LINES } from "./navigation-lines.js";
+export { NAVIGATION_LINES };
 
 /** AGENTS.md's navigation section, written only on a device whose agents.navigation is written. */
 export const NAVIGATION_SECTION: AgentsSection = Object.freeze({ id: "navigation", file: AGENTS_FILE, body: `${NAVIGATION_LINES.join("\n")}\n` });
@@ -705,6 +703,9 @@ export interface RenderedFile {
   readonly file: string;
   readonly written: boolean;
   readonly backupPath: string | null;
+  readonly exists: boolean;
+  readonly sha256: string | null;
+  readonly hostLoad: "unverified";
 }
 
 export interface AgentsRenderResult {
@@ -850,6 +851,7 @@ export async function renderAgentsSections(workspaceRoot: string, input: {
           desired: agents.sections.map((section) => ({ id: section.id, body: section.body })),
           records: managedSectionRecordsFor(state, AGENTS_FILE),
           retired: RETIRED_VARIABLE_SECTION_IDS,
+          restoreMissingFile: true,
         }), ruleOrders(state)),
         await planClaudeImport(input.projectRoot, managedSectionRecordsFor(state, CLAUDE_FILE)),
       ];
@@ -866,7 +868,12 @@ export async function renderAgentsSections(workspaceRoot: string, input: {
         for (const plan of plans) {
           const applied = await applyManagedWrite(plan, { now: input.occurredAt, ...(input.backupRoot === undefined ? {} : { backupRoot: input.backupRoot }) });
           if (applied.written) wrote.push(plan);
-          files.push({ file: plan.file, written: applied.written, backupPath: applied.backupPath });
+          const actual = await readSectionFile(plan.filePath, plan.file);
+          if (actual !== (plan.after ?? plan.before)) {
+            throw new ManagedSectionError("MANAGED_SECTION_CHANGED_SINCE_PLAN", `${plan.file} differs at readback`, { file: plan.file });
+          }
+          files.push({ file: plan.file, written: applied.written, backupPath: applied.backupPath,
+            exists: actual !== null, sha256: actual === null ? null : createHash("sha256").update(actual).digest("hex"), hostLoad: "unverified" });
         }
         committed = await commitPlanned(root, append, recorded);
       } catch (error) {

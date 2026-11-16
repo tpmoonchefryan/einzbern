@@ -130,6 +130,48 @@ test("successful Core file labels containing diagnostic words are reusable while
   ]) assert.equal(judgeLegOutput(JSON.stringify(bad), leg), "P1_LEG_DIAGNOSTIC_PRESENT");
 });
 
+test("retrieval source quotations are data in both leg coverage and P1; execution diagnostics remain red", () => {
+  const leg = P1_SEQUENCE.find((row) => row.task === "retrieval-eval");
+  const source = "A recorded clause may say blocked, refused, unknown or unstarted.";
+  const receipt = { ...receiptFor(leg), reasonCode: "RETRIEVAL_EVAL_VERIFIED", delivery: {
+    ok: true, reasonCode: "RETRIEVAL_EVAL_DELIVERY_VERIFIED", failures: [],
+    reports: [{ rows: [{ context: [source], ranked: [{ id: "minutes:example", key: "EVAL-MIN-1", line: source }] }] }],
+  } };
+  const original = JSON.stringify(receipt);
+  const p1 = (value) => JSON.stringify({ reasonCode: "P1_VERIFIED", legs: [value] });
+  assert.equal(judgeLegOutput(original, leg), "P1_LEG_COVERED");
+  assert.equal(hasWarningOrError(p1(receipt), "verify:p1"), false);
+  const run = fullRun();
+  run.files.set(run.gates[P1_SEQUENCE.indexOf(leg)].outputFile, original + "\n");
+  assert.equal(assess(run).covered, true);
+  assert.equal(JSON.stringify(receipt), original, "diagnostic projection never edits the source receipt");
+  for (const patch of [
+    { diagnostic: "connection unavailable" }, { warnings: ["partial result"] },
+    { errors: ["E123"] }, { status: "unknown" }, { status: "unstarted" },
+    { status: "refused" }, { success: false }, { notStarted: true }, { actualStarted: false },
+    { timedOut: true }, { payload: { context: [source] } },
+  ]) {
+    const bad = { ...receipt, ...patch };
+    assert.equal(judgeLegOutput(JSON.stringify(bad), leg), "P1_LEG_DIAGNOSTIC_PRESENT", JSON.stringify(patch));
+    assert.equal(hasWarningOrError(p1(bad), "verify:p1"), true);
+  }
+  for (const edit of [
+    (value) => { value.delivery.ok = false; },
+    (value) => { value.delivery.failures = ["clause missing"]; },
+    (value) => { value.delivery.reports[0].status = "unknown"; },
+    (value) => { value.delivery.reports[0].rows[0].diagnostic = "E123"; },
+    (value) => { value.delivery.reports[0].rows[0].ranked[0].status = "refused"; },
+    (value) => { value.delivery.reports[0].rows[0].context = [{ error: "E123" }]; },
+  ]) {
+    const bad = structuredClone(receipt); edit(bad);
+    assert.equal(judgeLegOutput(JSON.stringify(bad), leg), "P1_LEG_DIAGNOSTIC_PRESENT");
+  }
+  assert.equal(judgeLegOutput(original + "\nwarning: incomplete\n", leg), "P1_LEG_DIAGNOSTIC_PRESENT");
+  assert.equal(judgeLegOutput(JSON.stringify({ ...receipt, ok: false }), leg), "P1_LEG_RECEIPT_MISSING");
+  assert.equal(assess(change(run, "retrieval-eval", { ok: false })).covered, false);
+  assert.equal(assess({ gates: run.gates.filter((gate) => gate.name !== "engine:retrieval-eval"), files: run.files }).covered, false);
+});
+
 test("537-GWT2: a run short of a leg, or with a red, cut or diagnostic-bearing leg, is not carried; each says which leg and why", () => {
   const run = fullRun();
   const missing = { gates: run.gates.filter((gate) => gate.name !== "engine:links"), files: run.files };

@@ -253,3 +253,23 @@ test("478-R3, R4: the refusals of rule-resolve and agents-render, and a device t
   assert.equal((await refusal(["agents-render"])).reasonCode, "CLI_ARGUMENT_MISSING");
   assert.equal((await refusal(["rule-resolve", "--section", "navigation", "--at", at()])).reasonCode, "CLI_ARGUMENT_MISSING");
 });
+
+test("671: a missing whole AGENTS file is restored from enabled sections and explicit generation disablement is retained", async (context) => {
+  const { project, projectId, library, agents } = await scratch(context);
+  const first = await render(project);
+  const original = sectionOf(await readFile(agents, "utf8"), "navigation");
+  await rm(agents);
+  const restored = await render(project);
+  const file = restored.files.find((entry) => entry.file === "AGENTS.md");
+  assert.deepEqual([file.written, file.exists, file.hostLoad], [true, true, "unverified"]);
+  assert.equal(file.sha256, (await import("node:crypto")).createHash("sha256").update(await readFile(agents)).digest("hex"));
+  assert.equal(sectionOf(await readFile(agents, "utf8"), "navigation").raw, original.raw);
+  assert.equal(restored.recorded, 0, "restoring bytes keeps the existing shared section revision");
+  assert.equal(first.files.find((entry) => entry.file === "AGENTS.md").exists, true);
+  assert.equal((await render(project)).files.some((entry) => entry.written), false);
+  await withSurface(ATELIER_SURFACE, () => cli(["settings-set", "--workspace", library, "--project-id", projectId,
+    "--key", "agents.generation", "--value", "none", "--at", at()]));
+  await rm(agents);
+  assert.deepEqual((await render(project)).files, []);
+  await assert.rejects(stat(agents), { code: "ENOENT" });
+});

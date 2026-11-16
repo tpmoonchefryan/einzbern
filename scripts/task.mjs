@@ -654,6 +654,9 @@ async function build() {
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/storage-location.mjs", storageLocation);
   const sourceIdentity = await readSourceFile(resolve(repositoryRoot, "packages/core/src/darwin-source-identity.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/packages/core/src/darwin-source-identity.mjs", sourceIdentity);
+  const { bundleEntry } = await import("./lib/bundle.mjs");
+  const sourceAttestor = await bundleEntry(resolve(repositoryRoot, "scripts/source-attestor-host.mjs"));
+  await safeWriteOutput(repositoryRoot, "dist/build/packages/core/src/source-attestor-host.mjs", sourceAttestor.code);
   const memoryBudget = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-budget.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-budget.mjs", memoryBudget);
   const memoryWorkerCheck = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-worker-check.mjs"));
@@ -1406,6 +1409,43 @@ function baselineFetchOffset(label, content) {
   return calls.length === 1 ? calls[0].index : null;
 }
 
+// These are individual filesystem IPC capabilities. Pin the path/ownership
+// checks and exact transport sites; an added import, alias or transport call
+// still reaches the ordinary scanner. No module or file receives an exemption.
+function privateUnixIpcSite(label, content, protocol, moduleName) {
+  const sectionMatches = (source, [start, end, digest]) => {
+    const offset = source.indexOf(start), limit = source.indexOf(end, offset);
+    return offset >= 0 && limit > offset && source.indexOf(start, offset + start.length) < 0
+      && createHash("sha256").update(source.slice(offset, limit)).digest("hex") === digest;
+  };
+  if (!sectionMatches(protocol, ["export function attestorEndpoint(", "export function attestorDigest(", "9899a48d3b0c8045f3c1262f07cbd4871ddab8478bdf91c06fb0675e352bbe39"])) return false;
+  const sites = {
+    "packages/core/src/source-attestor-client.ts": {
+      binding: "createConnection, type Socket", references: { createConnection: 2, Socket: 3 }, transports: 0,
+      sections: [
+        ["async function connect(", "function connection(", "daa82b6b179646af8b2fd271d8c8b9602f913a4efae98ce7ce464d1e987928b5"],
+        ["async function readDescriptor(", "async function configuration(", "1eb09b659192e33fe7f408fe00c229e668aa3bb73e3a2aeb5f5f9a3e74edde81"],
+      ],
+    },
+    "packages/core/src/source-attestor-service.ts": {
+      binding: "createServer, type Socket", references: { createServer: 2, Socket: 7, server: 5 }, transports: 1,
+      sections: [
+        ["  const epoch =", "  const held =", "fc8993f7106859315d8b9876cef057efaffabec1d0466db6ba943ee8a3273aa8"],
+        ["    await validateAttestorDirectory(dirname(launch.descriptor));", "    process.stdout.write(", "f0bd35f64a0a41317a7d7d390dc664b0a9fa9d57cb1d1a9a6cd17d68ede5d60d"],
+      ],
+    },
+    "tests/source-attestor.test.mjs": {
+      binding: "createConnection", references: { createConnection: 2 }, transports: 0,
+      sections: [["async function rawConnection(", "async function raw(", "8d9b82ffa9dc79216d6117a53b6f101e0db281c0b52ac758d28bd8ab62fa3aaf"]],
+    },
+  };
+  const site = sites[label];
+  return site !== undefined && content.includes(`import { ${site.binding} } from "${moduleName}";`) && content.split(moduleName).length === 2
+    && site.sections.every(section => sectionMatches(content, section))
+    && Object.entries(site.references).every(([name, count]) => [...content.matchAll(new RegExp(`\\b${name}\\b`, "gu"))].length === count)
+    && [...content.matchAll(/\.\s*(?:listen|connect)\b/gu)].length === site.transports;
+}
+
 function loopbackHarnessSites(content, declaration) {
   const result = { fetchOffsets: new Set(), modules: new Set() };
   if (!declaration) return result;
@@ -1455,7 +1495,10 @@ async function verifyOfflineBoundary() {
   ];
   const harnessDeclarations = await readJson(resolve(repositoryRoot, "scripts/policy/offline-loopback-harness.json"));
   const findings = [];
-  for (const path of (await walkFiles()).filter((candidate) => [".mjs", ".ts"].includes(extname(candidate)))) {
+  const paths = (await walkFiles()).filter((candidate) => [".mjs", ".ts"].includes(extname(candidate)));
+  const protocolPath = paths.find(path => toPosixPath(relative(repositoryRoot, path)) === "packages/core/src/source-attestor-protocol.ts");
+  const ipcProtocol = protocolPath === undefined ? "" : await readText(protocolPath);
+  for (const path of paths) {
     const label = toPosixPath(relative(repositoryRoot, path));
     const content = await readText(path);
     if (!guardFiles.has(label) && !loopbackServerFiles.has(label)) {
@@ -1463,7 +1506,7 @@ async function verifyOfflineBoundary() {
       const permittedFetchOffset = versionScopedInstallerFetchOffset(label, content) ?? baselineFetchOffset(label, content);
       const harnessSites = loopbackHarnessSites(content, harnessDeclarations[label]);
       for (const moduleName of modules) {
-        const localUnixSocketImport = label === localUnixSocketTest && moduleName === modules[2];
+        const localUnixSocketImport = moduleName === modules[2] && (label === localUnixSocketTest || privateUnixIpcSite(label, content, ipcProtocol, moduleName));
         if (!localUnixSocketImport && !harnessSites.modules.has(moduleName) && (content.includes(`\"${moduleName}\"`) || content.includes(`'${moduleName}'`))) {
           findings.push(`NETWORK_MODULE:${label}:${moduleName}`);
         }

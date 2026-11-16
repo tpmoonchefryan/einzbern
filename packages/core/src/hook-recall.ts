@@ -1,5 +1,5 @@
 import { readRecallAuthority } from "./recall-authority.js";
-import { effectiveProjectState } from "./project-chain.js";
+import { effectiveProjectState } from "./project-state-read.js";
 // SPDX-License-Identifier: Apache-2.0
 
 // TCRN-CROSS-STORY-477 R2, AC3 and STORY-474 R2, R3 (MIN-227 D5, D7): what the one Einzbern hook
@@ -34,11 +34,10 @@ import { effectiveProjectState } from "./project-chain.js";
 // writes that code into log/hook.ndjson in the device directory; a failure is still thrown, and
 // the entry notes the failure's own reasonCode before passing it on.
 
-import { NAVIGATION_LINES } from "./agents-sections.js";
-import { isSharedLibrary } from "./chain-identity.js";
+import { NAVIGATION_LINES } from "./navigation-lines.js";
 import { CODEX_HOOK_EVENTS, HOST_HOOK_EVENTS, HOST_HOOK_HOSTS, HOST_HOOK_POINTER_EVENTS } from "./host-hooks.js";
 import type { HostHookHost } from "./host-hooks.js";
-import { recall, recallDocuments } from "./recall.js";
+import { preparePersistentRecall, recallPersistent, recallDocuments } from "./recall.js";
 import { readRecallCards, recallContextLines, recallDecisionHints, recallInputsFromState } from "./recall-inputs.js";
 import { resolveLibrary } from "./registry.js";
 import type { ResolvedLibrary } from "./registry.js";
@@ -195,23 +194,34 @@ export async function promptRecallOutcome(request: PromptRecallRequest): Promise
   const library = await confirmedLibrary(request.cwd, request.libraryPath);
   if (library === null) return { answer: null, reasonCode: "HOOK_RECALL_LIBRARY_UNCONFIRMED" };
   const at = request.at ?? currentInstant();
-  const { state: rawState, authority } = await readRecallAuthority(library.libraryPath);
-  const state = await effectiveProjectState(rawState, library.entry.projectId);
-  const projectId = isSharedLibrary(state) ? library.entry.projectId : undefined;
-  // TCRN-CROSS-SUB-425 (MIN-239 D6): the prompt hook recalls valid cards only, always; no prompt asks
-  // it for a removed one.
-  const { cards, digest } = await readRecallCards(library.libraryPath, { at, allowTrailing: true, status: "valid", ...(projectId === undefined ? {} : { projectId }) }, authority);
-  const tau = numericSetting(state, "retrieval.tau", (value) => Number.isFinite(value) && value >= 0);
-  const scopeExcerptBytes = numericSetting(state, "retrieval.scopeExcerptBytes", (value) => Number.isSafeInteger(value) && value > 0);
-  const perPromptBytes = numericSetting(state, "injection.perPromptBytes", (value) => Number.isSafeInteger(value) && value > 0);
-  const result = recall({
-    // Its own index: the recall verb's documents are built another way and must not answer here.
-    cacheKey: `prompt-hook:${state.metadata.workspaceId}:${state.configurationProjectId ?? "library"}`,
-    checkpoint: `${state.headEventHash}:${digest}`,
-    documents: () => recallDocuments(recallInputsFromState(state, cards, { scopeExcerptBytes, ...(projectId === undefined ? {} : { projectId }) })),
-    query: prompt,
-    tau,
+  const projectId = library.entry.projectId;
+  const authorityPromise = readRecallAuthority(library.libraryPath);
+  const cardsPromise = readRecallCards(library.libraryPath, { at, allowTrailing: true, status: "valid", ...(projectId === undefined ? {} : { projectId }) }, authorityPromise.then((resolved) => resolved.authority));
+  const preparedPromise = preparePersistentRecall(`prompt-hook:${library.entry.libraryId}:${projectId ?? "library"}`, library.libraryPath).catch(() => undefined);
+  const [{ state: rawState }, { cards, digest }, prepared] = await Promise.all([authorityPromise, cardsPromise, preparedPromise]).catch(async (error: unknown) => {
+    await (await preparedPromise)?.handle.close().catch(() => {});
+    throw error;
   });
+  let result;
+  let state: Awaited<ReturnType<typeof effectiveProjectState>>;
+  let perPromptBytes = 1600;
+  try {
+    state = await effectiveProjectState(rawState, library.entry.projectId);
+    const tau = numericSetting(state, "retrieval.tau", (value) => Number.isFinite(value) && value >= 0);
+    const scopeExcerptBytes = numericSetting(state, "retrieval.scopeExcerptBytes", (value) => Number.isSafeInteger(value) && value > 0);
+    perPromptBytes = numericSetting(state, "injection.perPromptBytes", (value) => Number.isSafeInteger(value) && value > 0);
+    result = await recallPersistent({
+      // Its own index: the recall verb's documents are built another way and must not answer here.
+      cacheKey: `prompt-hook:${state.metadata.workspaceId}:${state.configurationProjectId ?? "library"}`,
+      checkpoint: `${state.headEventHash}:${digest}`,
+      documents: () => recallDocuments(recallInputsFromState(state, cards, { scopeExcerptBytes, ...(projectId === undefined ? {} : { projectId }) })),
+      query: prompt,
+      tau,
+    }, library.libraryPath, prepared);
+  } catch (error) {
+    await prepared?.handle.close().catch(() => {});
+    throw error;
+  }
   // TCRN-CROSS-SUB-426 (MIN-239 D5, D6): the index holds valid decisions only, so the hook never
   // recalls an obsolete one; a work or card hit that points at one says which decision replaced it.
   const lines = recallContextLines(recallDecisionHints(state, cards, result.records), perPromptBytes);

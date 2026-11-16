@@ -9,7 +9,8 @@
 | 字段 | 含义 | 新门的缺省值 |
 | --- | --- | --- |
 | `command` | 要运行的命令，写成 argv 数组，不经过 shell。 | 必填 |
-| `root` | 命令在项目的哪个目录里运行；这个目录下的 Git 改动决定是否选中这道门。 | `.` |
+| `repository` | 可选的规范 Git 远端身份，例如 `example.org/team/project`，由本机登记或显式选择的工作树解析。 | 无 |
+| `root` | 设置 `repository` 时相对该仓库，否则沿用项目相对目录。目录下的 Git 改动参与选门。 | `.` |
 | `covers` | 选择门的 `root` 路径 glob，或精确 work id `work:<24 位小写十六进制>`：写 Story 的 id，门适用于这张 Story；写 Epic 或 Initiative 的 id，门适用于其下每一张 Story。 | `**` |
 | `required` | Story 转为完成之前是否必须为绿。 | `true` |
 | `enabled` | 是否启用。 | `true` |
@@ -19,7 +20,7 @@
 路径 glob 相对 `root` 匹配整条路径：`**` 必须独占一段，匹配任意多段；`*`、`?` 与 `[...]` 只在一段之内匹配。`*.md` 是 `root` 下第一层的 Markdown 文件，`**/*.md` 是任意深度的 Markdown 文件，以 `/` 结尾的 glob 覆盖那个目录下的一切。路径匹配会选择并运行门，但当前没有可信的 Story 到路径映射，所以路径匹配不把门绑定到任何 Story，release 模式也一样。`work:<24 位小写十六进制>` 是 work id，不作为路径 glob 编译：写 Story 的 id，门适用于这张 Story；写 Epic 或 Initiative 的 id，门适用于其下每一张 Story（见「完成判据」）。
 
 ```text
-gates-config-set --name <门名> --command '<JSON argv>' [--root <目录>] [--covers <glob-or-work-id,...>] [--required true|false] [--enabled true|false] [--release-only true|false] [--order <正整数>] --at <时刻>
+gates-config-set --name <门名> --command '<JSON argv>' [--repository <规范 Git 远端身份>] [--root <目录>] [--covers <glob-or-work-id,...>] [--required true|false] [--enabled true|false] [--release-only true|false] [--order <正整数>] --at <时刻>
 gates-config-list
 gates-config-remove --name <门名> --at <时刻>
 ```
@@ -30,12 +31,20 @@ gates-config-remove --name <门名> --at <时刻>
 
 模型也可以引用 Owner 的决定来声明或删除门（TCRN-CROSS-STORY-526）：给这两条命令加 `--decided-in minutes:<id>#D<n>`，`<id>` 是纪要 id（`minutes-show` 读得到；`TCRN-CROSS-MIN-256#D8` 这类外部键号写法不认，报 `malformed`），`<n>` 是决定序号。引擎在写入前按这次写入读到的状态核对这条决定，四条都满足才写入：纪要能找到（先在本库找，本库没有时按本库链身份里的协调库 id，到本设备注册表登记的协调库里只读查找）；这份纪要的 `decidedBy` 含 `owner:governance`；这条决定仍有效（被取代或撤回的不算）；决定正文写出了这道门的门名，前后不紧接字母、数字或 `._:-`，或者写出 `<前缀>.*` 而门名以 `<前缀>.` 开头。核对通过时照常写入，写入的每条事件另记 `decidedIn`（完整的决定编号）、`decidedInLibraryId`（纪要所在库的 id）与 `surface: cli`；核对不通过报 `MODEL_WRITE_AUTHORIZATION_INVALID`，错误带 `decidedIn`、`target` 与 `reason`（`malformed`、`not-found`、`not-owner-decided`、`obsolete`、`target-not-named`，也写在错误文本里），库里不追加任何事件。Atelier 的写入记 `surface: atelier`。引用只让写入可追溯到一条决定，不证明 Owner 真的做了这个决定：模型自己记一份 `decidedBy` 写着 `owner:governance` 的纪要再引用它，同样能通过。
 
+## 跨设备仓库根
+
+共享声明可用 `--repository example.org/team/project --root packages/core` 将命令绑定到仓库身份与仓内目录。每台设备通过 `library-register` 为对应库和项目登记实际克隆路径，目录名与嵌套层级可以不同。`--project <工作树>` 可选择同一远端的独立 Git worktree。解析会检查实际 Git 远端、目录存在及仓内路径边界。
+
+多个有效克隆返回 `GATES_REPOSITORY_AMBIGUOUS`，使用 `--project` 选择目标。缺失登记或目录返回 `GATES_REPOSITORY_MISSING`，实际仓库身份不符返回 `GATES_REPOSITORY_MISMATCH`。修正本机登记后可继续使用原共享声明。相对根越界或经符号链接逃逸返回 `GATES_ROOT_INVALID`。
+
+历史声明保留项目相对语义。迁移时在同一道门上设置 `--repository` 和仓内 `--root`，旧事件保留。计划、运行和结单均使用同一解析规则。仓库绑定变化会改变声明摘要，需要在当前声明上取得门禁结果。
+
 ## 提交待批准
 
 模型要改门声明有两条路（TCRN-CROSS-STORY-541，MIN-258 D3）：手里有点名这道门的 Owner 决定时，直接用上一节的 `gates-config-set` 或 `gates-config-remove` 加 `--decided-in` 写入，不必提议；没有决定时，提交一条待批准的改动，由人在 Atelier 的门页里批准或拒绝（TCRN-CROSS-STORY-527）：
 
 ```text
-gates-config-propose --name <门名> [--action set|remove] [--command '<JSON argv>'] [--root <目录>] [--covers <glob-or-work-id,...>] [--required true|false] [--enabled true|false] [--release-only true|false] [--order <正整数>] --actor <行动者> --at <时刻>
+gates-config-propose --name <门名> [--action set|remove] [--command '<JSON argv>'] [--repository <规范 Git 远端身份>] [--root <目录>] [--covers <glob-or-work-id,...>] [--required true|false] [--enabled true|false] [--release-only true|false] [--order <正整数>] --actor <行动者> --at <时刻>
 gates-config-list --status pending|rejected
 proposal-approve --key gate:<门名> --proposed-at <提交时刻> --actor <行动者> --at <时刻>
 proposal-reject --key gate:<门名> --proposed-at <提交时刻> --actor <行动者> --at <时刻>
@@ -56,7 +65,7 @@ gates-plan [--project <目录>] [--base <提交>] [--base-by-root <JSON 对象>]
 
 计划按顺序列出选中的门，这也是显示与运行的顺序：有 `order` 的门在前，按顺序从小到大；没有的在后，按名字；顺序相同的几道之间也按名字。没有任何门带顺序时，计划与从前一样按名字排列。
 
-跨仓库时，`--base` 是各根的默认基线；可用 `--base-by-root '{"engine":"<engine SHA>","helper":"<helper SHA>"}'` 按门声明的相对 `root` 指定不同提交。映射只能包含已启用声明的根，每个值必须在对应仓库中解析为提交；不会把一个仓库的 SHA 默认为另一个仓库的提交。非发布计划只对可在本次模式运行的根比较基线，不要求仅发布门的仓库拥有该 SHA；所有启用声明与根仍保留在运行绑定摘要中，必需门语义不变。没有可运行根时仍校验项目自身的默认基线。
+跨仓库时，`--base` 是各根的默认基线；可用 `--base-by-root '{"engine":"<engine SHA>","helper":"<helper SHA>"}'` 按计划中的根键指定不同提交。历史声明的根键为相对 `root`，仓库绑定声明的根键为 `git://<repository>?root=<URL-encoded root>`，例如 `git://example.org/team/project?root=packages%2Fcore`。映射只能包含已启用声明的根，每个值必须在对应仓库中解析为提交；不会把一个仓库的 SHA 默认为另一个仓库的提交。非发布计划只对可在本次模式运行的根比较基线，不要求仅发布门的仓库拥有该 SHA；所有启用声明与根仍保留在运行绑定摘要中，必需门语义不变。没有可运行根时仍校验项目自身的默认基线。
 
 ## gates-run：跑门
 
@@ -72,7 +81,7 @@ gates-run [--project <目录>] [--base <提交>] [--base-by-root <JSON 对象>] 
 - 一道门红了不会中断后面的门；全部跑完之后一次报出所有红门：`reds` 列出全部红门，`requiredReds` 列出其中的必需门。
 - 每道门的输出（stdout 与 stderr 按到达顺序）写进文件，超过上限的部分截断。超时的门连同它的整个进程组一起停止，门结束时它留在进程组里的进程也会被停止。
 - 门进程能读到同次运行里在它之前结束的门（TCRN-CROSS-STORY-537）：环境变量 `EINZBERN_GATE_RUN_PRIOR` 是 canonical JSON，`runId` 为这次运行的 id，`gates` 按运行顺序列出每道门的 `name`、声明的 `root`、实际运行的目录 `directory`、`command`、`ok`、输出是否截断的 `truncated` 与输出文件的绝对路径 `outputFile`，第一道门读到的 `gates` 是空列表；它覆盖调用方环境里的同名变量，不写进运行记录。
-- 每次运行都记在设备目录的 `cache/<库 id>/gate-runs/<运行 id>.json`（`einzbern.gate-run.v1`），并记录目标 Story id、各门匹配的路径与它适用的 Story id，以及运行时那棵树的摘要（`einzbern.gate-tree.v3`）。不带 `--work-id` 的运行（含 `--release`）记每个启用门 `root` 的 `HEAD` 提交，加上每个改动文件与未跟踪文件的内容。带 `--work-id` 的运行只计 Story 提交涉及的文件，不含 `HEAD`（TCRN-CROSS-STORY-530、534）：引擎从工单记录取 Story 与它全部 Subtask 的键号（计划的 `subjectKeys`），在 `HEAD` 可达的提交里找说明写了其中一个键号、且键号后面不是数字的提交（`STORY-52` 不算 `STORY-525` 的提交），按这些提交涉及的路径逐条读当前内容，不论 Git 看它改没改；运行记录在 `trees[].paths` 列出这些路径，在 `trees[].files` 给出每条路径与它的内容摘要（文件为 `sha256:…`，符号链接为 `link:…`，目录为 `directory`，其他类型为 `other`，已删除为 `deleted`）。还没有提交的 `root` 照旧记 `HEAD` 与全部改动；这些键号在任何 `root` 下都还没有提交时，整次运行按不带 `--work-id` 的取法记，摘要不会是一个常量。
+- 每次运行都记在设备目录的 `derived-cache/<库 id>/gate-runs/<运行 id>.json`（`einzbern.gate-run.v1`），并记录目标 Story id、各门匹配的路径与它适用的 Story id，以及运行时那棵树的摘要（`einzbern.gate-tree.v3`）。不带 `--work-id` 的运行（含 `--release`）记每个启用门 `root` 的 `HEAD` 提交，加上每个改动文件与未跟踪文件的内容。带 `--work-id` 的运行只计 Story 提交涉及的文件，不含 `HEAD`（TCRN-CROSS-STORY-530、534）：引擎从工单记录取 Story 与它全部 Subtask 的键号（计划的 `subjectKeys`），在 `HEAD` 可达的提交里找说明写了其中一个键号、且键号后面不是数字的提交（`STORY-52` 不算 `STORY-525` 的提交），按这些提交涉及的路径逐条读当前内容，不论 Git 看它改没改；运行记录在 `trees[].paths` 列出这些路径，在 `trees[].files` 给出每条路径与它的内容摘要（文件为 `sha256:…`，符号链接为 `link:…`，目录为 `directory`，其他类型为 `other`，已删除为 `deleted`）。还没有提交的 `root` 照旧记 `HEAD` 与全部改动；这些键号在任何 `root` 下都还没有提交时，整次运行按不带 `--work-id` 的取法记，摘要不会是一个常量。
 
 ## 工单字段 gates 与继承
 
@@ -149,3 +158,7 @@ development target. Leave out `--project-id`: each Story runs in its own
 project's scope. Given, it must name the project of every covered Story, or the
 command refuses with `GATES_PROJECT_MISMATCH` before any gate runs. Work no gate
 of the coordination library applies to keeps the results described above.
+
+An empty `--repository ""` removes an existing repository binding and restores
+project-relative root resolution. Atelier saves the same change when the
+repository field is cleared. Omitted flags preserve the current declaration.

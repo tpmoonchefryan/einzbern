@@ -102,7 +102,6 @@
     "BuiltInRule",
     "builtInRule",
     "BuiltInRuleId",
-    "cachePath",
     "calculateKnowledgeSourceDigest",
     "canonicalDependencyDigest",
     "CanonicalRoot",

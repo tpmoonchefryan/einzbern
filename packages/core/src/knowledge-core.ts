@@ -5,6 +5,8 @@ import { scopedWorkspaceState } from "./project-scope.js";
 // SPDX-License-Identifier: Apache-2.0
 
 import { createHash, randomBytes } from "node:crypto";
+import { deserialize, serialize } from "node:v8";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { constants, readFileSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import {
@@ -49,8 +51,7 @@ import {
 } from "./knowledge-language.js";
 import type { KnowledgeExpansions, KnowledgeLanguagePolicy, KnowledgeLanguageProvider } from "./knowledge-language.js";
 import { chainIdentity, isSharedLibrary } from "./chain-identity.js";
-import { activeWorkspaceRoot, materializeWorkspace, withWorkspaceWriteLock } from "./workspace.js";
-import type { ProjectRecord, WorkspaceState } from "./workspace.js";
+import type { ProjectRecord, WorkspaceMetadata, WorkspaceState } from "./workspace.js";
 import { SETTINGS_CATALOG, resolveKnowledgeArticlesPath } from "./settings.js";
 import { hasLibraryManifest, openLibrary } from "./ether-library.js";
 import {
@@ -75,9 +76,14 @@ import type { FileLock } from "./file-lock.js";
 import { readUserCrestPath } from "./machine-settings.js";
 import { DIRECTORY, LEGACY_CONTROL_DIRECTORY, LEGACY_KNOWLEDGE_DIRECTORY } from "./names.js";
 import { assertKnowledgeNotRecorded } from "./knowledge-duplicates.js";
-import { readRegistry } from "./registry.js";
-import { cardFamilies, familiesApart } from "./work-family.js";
-import type { WorkFamilyState } from "./work-family.js";
+import { assessKnowledgePair, knowledgeTopicTokens } from "./knowledge-conflict.js";
+import { archivedKnowledgeScope, bindArchivedKnowledgeScope, inheritArchivedKnowledgeScope, intrinsicScopeMatchesProject, resolveIntrinsicKnowledgeScope } from "./knowledge-scope.js";
+import { localTreeIdentity } from "./local-file-identity.js";
+import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
+import { observeCacheReason } from "./recall-observation.js";
+import { crestProjectionProof } from "./crest-source-proof.js";
+
+const KNOWLEDGE_PROJECTION_VERSION = "intrinsic-scope-conflict-v2";
 
 export const KNOWLEDGE_CORE_VERSION = "tcrn.knowledge-core.v1" as const;
 export const KNOWLEDGE_STORE_SCHEMA_VERSION = "tcrn.knowledge-store.v1" as const;
@@ -164,6 +170,7 @@ export const KNOWLEDGE_REASON_CODES = Object.freeze([
   "KNOWLEDGE_SOURCES_ALIGNED",
   "KNOWLEDGE_SOURCE_MISSING",
   "KNOWLEDGE_SOURCE_UNCHECKABLE",
+  "KNOWLEDGE_SNAPSHOT_CHANGED",
   "KNOWLEDGE_SPECIAL_FILE",
   "KNOWLEDGE_STORE_INITIALIZED",
   "KNOWLEDGE_STORE_REBASED",
@@ -429,6 +436,12 @@ export interface KnowledgeListQuery extends KnowledgeScopedReadOptions {
   readonly includeExplicitOnly?: boolean;
   readonly limit?: number;
   readonly offset?: number;
+  /** Explicit diagnostic pages, separate from the metadata result window. */
+  readonly diagnostics?: "summary" | "ids" | "conflicts" | "audit";
+  readonly diagnosticLimit?: number;
+  readonly diagnosticOffset?: number;
+  /** Required for continuation pages; rejects any change in source, scope, time or projection. */
+  readonly snapshot?: string;
 }
 
 export interface KnowledgeBodyReadOptions extends KnowledgeScopedReadOptions {
@@ -624,8 +637,6 @@ interface KnowledgeMutationClaim extends ExclusiveFile {
   readonly acquiredAt: string;
 }
 
-const migratedKnowledgeScopes = new WeakMap<KnowledgeUnitMetadata, readonly string[]>();
-
 interface ScannedKnowledgeUnit {
   readonly metadataPath: string;
   readonly bodyPath: string;
@@ -684,7 +695,7 @@ interface CrestScan {
   // seeing the other, which the write-time conflict check would have refused. Each pair is in
   // canonical id order and so is the list. Both cards stay readable; default selection leaves
   // them out until a write resolves the pair (projectCrestUnits). TCRN-CROSS-SUB-504: found without
-  // a chain, every pair is here; a read leaves out those of INIT families apart (familySplitScan).
+  // a chain, every unacknowledged same-domain contradictory pair is here.
   readonly unresolvedConflicts: readonly (readonly string[])[];
   // TCRN-CROSS-SUB-413 (STORY-476 D7): every id more than one writer wrote with differing metadata,
   // in canonical id order, resolved or not. Their versions are not in `units`.
@@ -708,6 +719,7 @@ interface CrestScan {
   // Every body file the crest's device streams name, with its card: what a device clears from its own
   // stream once the card is removed. Empty for an old-layout store.
   readonly streamBodies: readonly CrestStreamBody[];
+  readonly sourceDigest?: string;
 }
 
 // The user crest, read: no library, no chain head and no links to check a card against beyond
@@ -822,6 +834,7 @@ function sourceReferenceIsFile(reference: string): boolean {
 async function sourceRoots(workspaceRoot: string, workspace: WorkspaceState): Promise<readonly string[]> {
   const roots = workspace.metadata.roots.map((root) => root.canonicalPath);
   const projectId = (workspace as WorkspaceState & { readonly configurationProjectId?: string | null }).configurationProjectId ?? undefined;
+  const { readRegistry } = await import("./registry.js");
   const registered = (await readRegistry()).entries.filter((entry) => entry.libraryId === workspace.metadata.workspaceId && entry.projectId === projectId);
   const articlesRoot = resolveKnowledgeArticlesPath(workspaceRoot, articleSettingValue(workspace));
   return [...new Set([articlesRoot, ...registered.map((entry) => entry.projectPath), workspaceRoot, ...roots])];
@@ -1210,6 +1223,7 @@ function libraryKnowledgeView(storeRoot: string, options: KnowledgeReadOptions =
  */
 export async function withCrestWriteLock<T>(workspaceRoot: string, operation: () => Promise<T>): Promise<T> {
   if (!(await hasLibraryManifest(resolve(workspaceRoot)))) return operation();
+  const { withWorkspaceWriteLock } = await import("./workspace.js");
   return withWorkspaceWriteLock(workspaceRoot, () => operation());
 }
 
@@ -2056,7 +2070,12 @@ function knowledgeIndex(marker: KnowledgeStoreMarker, metadata: readonly Knowled
 }
 
 // One value's canonical form as an entry of a canonical list: canonicalJson without its terminal LF.
+const projectedCanonicalTexts = new WeakMap<object, string>();
 function canonicalEntryText(value: JsonValue): string {
+  if (value !== null && typeof value === "object") {
+    const cached = projectedCanonicalTexts.get(value);
+    if (cached !== undefined) return cached;
+  }
   return canonicalJson(value).slice(0, -1);
 }
 
@@ -2291,11 +2310,11 @@ interface KnowledgeViewPlace {
 // bytes differ is written again, the pages before the head, and a page file past the pages the head
 // names is removed. It is a cache, so nothing here fails the read, or the committed write, that asks
 // for it: what cannot be projected is left for the next read to project again.
-async function projectKnowledgeView(place: KnowledgeViewPlace, index: KnowledgeIndex): Promise<void> {
+async function projectKnowledgeView(place: KnowledgeViewPlace, index: KnowledgeIndex, precomputedFiles?: readonly KnowledgeViewFile[]): Promise<void> {
   try {
     const folder = await place.folder();
     if (folder === null) return;
-    const files = knowledgeViewFiles(index);
+    const files = precomputedFiles ?? knowledgeViewFiles(index);
     for (const file of files) {
       const backend = place.file(file.name);
       const cached = await backend.readKnowledgeView().then((bytes) => bytes.toString("utf8"), () => null);
@@ -2319,9 +2338,17 @@ interface KnowledgeStorePlace {
   readonly storePath: string;
 }
 
+function activeWorkspaceRoot(metadata: WorkspaceMetadata): string | undefined {
+  let binding = metadata.roots;
+  for (const entry of metadata.relocations ?? []) {
+    if (entry.stage === "adopted") binding = entry.to;
+  }
+  return binding.find((root) => root.kind === "workspace")?.canonicalPath;
+}
+
 async function knowledgeStorePlace(workspaceRootInput: string, authority?: RecallAuthority): Promise<KnowledgeStorePlace> {
   // Recall may reuse only its raw authority read, never a project-derived state.
-  const workspace = authority === undefined ? await materializeWorkspace(workspaceRootInput) : await recallAuthorityState(workspaceRootInput, authority);
+  const workspace = authority === undefined ? await (await import("./workspace.js")).materializeWorkspace(workspaceRootInput) : await recallAuthorityState(workspaceRootInput, authority);
   if ("configurationProjectId" in workspace) fail("KNOWLEDGE_PATH_INVALID", "knowledge requires raw authority state");
   const workspaceRoot = await boundDirectory(workspaceRootInput);
   // WSR-1: read the ACTIVE binding, not the raw roots array, so this stays the
@@ -2640,11 +2667,27 @@ async function scanLibraryCrest(
     const archivedWorkspace = { ...workspace, metadata: { ...workspace.metadata, workspaceId: source.manifest.libraryId } };
     const archived = await scanLibraryCrest(archivedWorkspace, workspaceRoot, join(workspaceRoot, source.archive, "crest"), options, false, bodyMode, rebase, true);
     if (archived.awaitingChain.length) fail("KNOWLEDGE_PARTIAL_STATE", "imported knowledge is awaiting its original chain");
-    for (const unit of archived.units) importedUnits.push({ ...unit, lineage: `${source.manifest.libraryId}/${unit.lineage}` });
-    for (const duplicate of archived.duplicates) for (const unit of duplicate.versions) importedUnits.push({ ...unit, lineage: `${source.manifest.libraryId}/${unit.lineage}` });
+    for (const unit of crestRecords(archived)) {
+      bindArchivedKnowledgeScope(unit.metadata, {
+        projectIds: source.bindings.map((binding) => binding.projectId),
+        workspaceGlobal: false,
+      });
+      importedUnits.push({ ...unit, lineage: `${source.manifest.libraryId}/${unit.lineage}` });
+    }
     importedRemovals.push(...archived.sourceRemovalEvents ?? []);
   }
-  const projection = projectCrestUnits([...legacyUnits, ...streams.units, ...importedUnits], [...streams.removals, ...importedRemovals], workspace, true);
+  const originalUnits = [...legacyUnits, ...streams.units];
+  if (!imported && isSharedLibrary(workspace)) for (const unit of originalUnits) {
+    if (unit.metadata.projectId !== null) continue;
+    const source = workspace.library?.consolidation?.sources.find((source) =>
+      source.manifest.libraryId === workspace.metadata.workspaceId && source.inventory.some((file) => join(workspaceRoot, file.path) === unit.metadataPath));
+    if (source !== undefined) bindArchivedKnowledgeScope(unit.metadata, {
+      projectIds: source.bindings.map((binding) => binding.projectId),
+      workspaceGlobal: false,
+    });
+    else if (unit.event === null && workspace.library?.consolidation !== undefined) bindArchivedKnowledgeScope(unit.metadata, null);
+  }
+  const projection = projectCrestUnits([...originalUnits, ...importedUnits], [...streams.removals, ...importedRemovals], workspace, true);
   const { removals, unresolvedConflicts } = projection;
   // TCRN-CROSS-SUB-425 R18: a removed card's record of the metadata/body layout may hold no body, since
   // knowledge-bodies-migrate --clear-removed clears it there; every other live record still holds its own.
@@ -2663,12 +2706,6 @@ async function scanLibraryCrest(
   // TCRN-CROSS-SUB-413: the cards and every version of a duplicate. TCRN-CROSS-SUB-310 R17 (MIN-238
   // D1): however many body bytes the merged streams hold, the read answers; nothing sums them.
   const records = crestRecords({ units, duplicates });
-  if (!imported && isSharedLibrary(workspace)) for (const unit of records) {
-    if (unit.metadata.projectId !== null) continue;
-    const source = workspace.library?.consolidation?.sources.find(source => unit.metadataPath.startsWith(join(workspaceRoot, source.archive, "crest") + "/") ||
-      (source.manifest.libraryId === workspace.metadata.workspaceId && source.inventory.some(file => join(workspaceRoot, file.path) === unit.metadataPath)));
-    migratedKnowledgeScopes.set(unit.metadata, source?.bindings.map(binding => binding.projectId) ?? []);
-  }
   // WSC-2: the current record of each card is bound to the chain this read replayed. Rebase defers
   // scope/project liveness into the offender list; dangling work references are diagnostics.
   // TCRN-CROSS-SUB-414 (R16, C-R16-1): a project deleted after a card was written -- or by another
@@ -3263,14 +3300,30 @@ function projectCrestUnits(
   for (const unit of units) written.set(unit.metadata.id, [...(written.get(unit.metadata.id) ?? []), unit]);
   const byId = new Map<string, CrestUnit>();
   const divergent = new Map<string, readonly CrestUnit[]>();
-  // The writer that first wrote each card: the one whose record replaces nothing.
-  const origins = new Map<string, string>();
+  // Original instants validate history; they do not waive same-writer contradictions.
   const firstRecordedAt = new Map<string, string>();
   for (const [id, records] of written) {
     const distinct: CrestUnit[] = [];
     for (const unit of [...records].sort(compareCrestRecords)) {
       if (distinct.some((kept) => kept.storedDigest === unit.storedDigest)) continue;
       distinct.push(unit);
+    }
+    // Reverification/refresh of an archived card keeps the original applicability even when the
+    // new event lives in the native stream. Follow only its authenticated replaces chain; other
+    // versions of a duplicate may have different provenance and must retain their own domains.
+    const byDigest = new Map(distinct.map((unit) => [unit.storedDigest, unit]));
+    for (const unit of distinct) {
+      const ancestors: CrestUnit[] = [];
+      const seen = new Set<string>();
+      let previous = unit.replaces;
+      while (previous !== null && !seen.has(previous)) {
+        seen.add(previous);
+        const ancestor = byDigest.get(previous);
+        if (ancestor === undefined) break;
+        ancestors.push(ancestor);
+        previous = ancestor.replaces;
+      }
+      for (const ancestor of ancestors.reverse()) inheritArchivedKnowledgeScope(ancestor.metadata, unit.metadata);
     }
     // Original events retain their write instant in metadata.updatedAt even after refreshes.
     // Legacy/incomplete histories have only the earliest available record, not a proven creation.
@@ -3289,7 +3342,6 @@ function projectCrestUnits(
     const replaced = new Set(distinct.flatMap((unit) => unit.replaces === null ? [] : [unit.replaces]));
     const current = [...latest.values()].filter((unit) => !replaced.has(unit.storedDigest));
     if (current.length === 0) fail("KNOWLEDGE_PARTIAL_STATE", `${id}: its records replace one another`);
-    origins.set(id, (distinct.find((unit) => unit.replaces === null) ?? current[0] as CrestUnit).lineage);
     if (current.length === 1) byId.set(id, current[0] as CrestUnit);
     else divergent.set(id, current);
   }
@@ -3321,6 +3373,7 @@ function projectCrestUnits(
     const metadata = linkState === null
       ? validateExistingMetadataShape(replacedMetadata, null)
       : validateMetadataShape(replacedMetadata as unknown as Readonly<Record<string, JsonValue>>, linkState, true);
+    inheritArchivedKnowledgeScope(unit.metadata, metadata);
     return { ...unit, metadata };
   };
   const projected = [...byId.values()].map(projectReplaced)
@@ -3343,7 +3396,7 @@ function projectCrestUnits(
     if (!live(left)) continue;
     for (let rightIndex = leftIndex + 1; rightIndex < projected.length; rightIndex += 1) {
       const right = projected[rightIndex] as CrestUnit;
-      if (!live(right) || origins.get(left.metadata.id) === origins.get(right.metadata.id)) continue;
+      if (!live(right)) continue;
       const conflicts = knowledgeProjectionConflict(left.metadata, right.metadata, firstRecordedAt.get(left.metadata.id)!, firstRecordedAt.get(right.metadata.id)!);
       const acknowledged = left.metadata.extensions.coexistsWith?.includes(right.metadata.id) === true ||
         right.metadata.extensions.coexistsWith?.includes(left.metadata.id) === true;
@@ -3353,64 +3406,18 @@ function projectCrestUnits(
   return { units: projected, unresolvedConflicts, duplicates, removals };
 }
 
-/**
- * Deterministic projection direction: the later-recorded card's subject queries the earlier card,
- * just as creation does. The caller supplies original-event instants (metadata.updatedAt on the
- * original record), or earliest available instants for incomplete/legacy histories. Per-device
- * sequences are not a global clock: this is comparison order, not proof of concurrent visibility.
- * Canonical id breaks equal-time ties. Scoring and acknowledgement rules are unchanged.
- */
+/** Same-domain mutual exclusion is symmetric; timestamps and writer identity cannot waive it. */
 export function knowledgeProjectionConflict(left: KnowledgeUnitMetadata, right: KnowledgeUnitMetadata, leftWrittenAt: string, rightWrittenAt: string): boolean {
-  const leftAt = parseStrictInstant(leftWrittenAt);
-  const rightAt = parseStrictInstant(rightWrittenAt);
-  const order = leftAt === rightAt ? compareCanonicalText(left.id, right.id) : leftAt < rightAt ? -1 : 1;
-  const earlier = order <= 0 ? left : right;
-  const later = order <= 0 ? right : left;
-  return knowledgeConflictHits([earlier], later.subject, [later.id]).length > 0;
+  // Keep validating historical instants, but mutual exclusion is symmetric and independent of
+  // query view or writer enumeration order. Ordering is not evidence of contradictory claims.
+  parseStrictInstant(leftWrittenAt);
+  parseStrictInstant(rightWrittenAt);
+  return assessKnowledgePair(left, right).relation === "conflicting";
 }
 
 // The ids of the cards an unresolved conflict holds out of default selection.
 function unresolvedConflictIds(scan: Pick<CrestScan, "unresolvedConflicts">): ReadonlySet<string> {
   return new Set(scan.unresolvedConflicts.flat());
-}
-
-/**
- * TCRN-CROSS-SUB-504 (TCRN-CROSS-STORY-539 GWT2, MIN-256 D6 C5): the scan as a read answers it, its
- * unresolved pairs read in the chain `state` holds. The scan finds the pairs without a chain
- * (projectCrestUnits), and its cache keeps them so; a read leaves out each pair whose two cards are of
- * INIT families apart, both known (cardFamilies, familiesApart) -- the write-time guard would have
- * written either card beside the other (TCRN-CROSS-SUB-485), so neither is unresolved -- and with it
- * the pair's hold on default selection. A pair of one family, or one either card of which has no known
- * family, stands as before, and so does every pair when there is no chain to read (`state` null).
- */
-function familySplitScan<T extends CrestScan>(scan: T, state: WorkFamilyState | null): T {
-  if (state === null || scan.unresolvedConflicts.length === 0) return scan;
-  const cards = new Map(scan.units.map((unit) => [unit.metadata.id, unit.metadata]));
-  const families = new Map<string, readonly string[] | null>();
-  const familiesOf = (id: string): readonly string[] | null => {
-    if (!families.has(id)) {
-      const card = cards.get(id);
-      families.set(id, card === undefined ? null : cardFamilies(state, card));
-    }
-    return families.get(id) ?? null;
-  };
-  const unresolvedConflicts = scan.unresolvedConflicts.filter(([left, right]) => !familiesApart(familiesOf(left ?? ""), familiesOf(right ?? "")));
-  return unresolvedConflicts.length === scan.unresolvedConflicts.length ? scan : { ...scan, unresolvedConflicts };
-}
-
-/**
- * TCRN-CROSS-SUB-504: the chain a read of the user crest names families in -- the library the read
- * goes through, as a user-crest write's guard names them there (TCRN-CROSS-SUB-485) -- read only when
- * the crest holds a pair. A library the read cannot open names none, and every pair stands.
- */
-async function userCrestFamilyState(scan: UserCrestScan, workspaceRoot: string, authority?: RecallAuthority): Promise<WorkFamilyState | null> {
-  if (scan.unresolvedConflicts.length === 0) return null;
-  try {
-    return authority === undefined ? await materializeWorkspace(workspaceRoot) : (await knowledgeStorePlace(workspaceRoot, authority)).workspace;
-  } catch (error) {
-    if (typeof (error as { readonly reasonCode?: unknown }).reasonCode !== "string") throw error;
-    return null;
-  }
 }
 
 // TCRN-CROSS-SUB-413: a duplicate is unresolved while one of its versions is still live -- not
@@ -3942,6 +3949,7 @@ async function writeUserCrestSnapshot(scan: UserCrestScan, fingerprint: string):
   await ensureDeviceDirectory(dirname(path));
   const document = {
     schemaVersion: USER_CREST_SNAPSHOT_SCHEMA_VERSION,
+    projectionVersion: KNOWLEDGE_PROJECTION_VERSION,
     storeRoot: scan.storeRoot,
     fingerprint,
     eventHeads: scan.eventHeads,
@@ -3994,7 +4002,7 @@ async function loadUserCrestSnapshot(location: UserCrestLocation, options: Knowl
   } catch {
     return null;
   }
-  if (value === null || typeof value !== "object" || value.schemaVersion !== USER_CREST_SNAPSHOT_SCHEMA_VERSION || value.storeRoot !== storeRoot || typeof value.fingerprint !== "string" ||
+  if (value === null || typeof value !== "object" || value.schemaVersion !== USER_CREST_SNAPSHOT_SCHEMA_VERSION || value.projectionVersion !== KNOWLEDGE_PROJECTION_VERSION || value.storeRoot !== storeRoot || typeof value.fingerprint !== "string" ||
     !Array.isArray(value.eventHeads) || !Array.isArray(value.units) || !Array.isArray(value.duplicates) || !Array.isArray(value.removals) ||
     !Array.isArray(value.unresolvedConflicts) || !Array.isArray(value.streamBodies) || value.marker === null || typeof value.marker !== "object" ||
     value.index === null || typeof value.index !== "object") {
@@ -4147,7 +4155,7 @@ async function recoverKnowledgeStoreUnlocked(workspaceRoot: string, options: Kno
   if (claim !== null) await assertKnowledgeWritable(workspaceRoot);
   if (claim !== null && processIsAlive(claim.pid)) fail("KNOWLEDGE_LOCKED", "knowledge mutation claim belongs to a live process");
   const publications = await hasLibraryManifest(workspaceRoot)
-    ? await recoverCrestPublications(claimedRoot, deviceHome(), await materializeWorkspace(workspaceRoot)) : 0;
+    ? await recoverCrestPublications(claimedRoot, deviceHome(), await (await import("./workspace.js")).materializeWorkspace(workspaceRoot)) : 0;
   if (claim === null) {
     if (publications > 0) {
       if (await crestInitializationIncomplete(claimedRoot, false)) {
@@ -4197,10 +4205,14 @@ function crash(point: KnowledgeFaultPoint, selected?: KnowledgeFaultPoint): void
   }
 }
 
+// Cache only the immutable timestamp parse. Every card still evaluates its
+// policy against the supplied at; no freshness result crosses a query.
+let lastEvaluationInstant: { readonly text: string; readonly value: bigint } | undefined;
 function computeFreshness(metadata: KnowledgeUnitMetadata, at: string): KnowledgeFreshnessState {
   let now: bigint;
   try {
-    now = parseStrictInstant(at);
+    if (lastEvaluationInstant?.text !== at) lastEvaluationInstant = { text: at, value: parseStrictInstant(at) };
+    now = lastEvaluationInstant.value;
   } catch (error) {
     fail("KNOWLEDGE_INPUT_INVALID", String(error));
   }
@@ -4429,7 +4441,7 @@ export async function initializeKnowledgeStore(workspaceRootInput: string, optio
 }
 
 async function initializeKnowledgeStoreUnlocked(workspaceRootInput: string, options: { readonly disposableAcknowledged?: boolean } = {}): Promise<Readonly<Record<string, JsonValue>>> {
-  const workspace = await materializeWorkspace(workspaceRootInput);
+  const workspace = await (await import("./workspace.js")).materializeWorkspace(workspaceRootInput);
   // WSC-1: the store is a disposable derived index that is never the system of record, and
   // every initialization acknowledges that explicitly. Old-layout FIXTURE- workspaces used to be
   // admitted implicitly; a library has no workspace key to carry that mark, and an old-layout
@@ -4556,82 +4568,17 @@ export async function validateKnowledgeStore(workspaceRoot: string, options: Kno
   };
 }
 
-/**
- * TCRN-CROSS-STORY-531 (MIN-256 D6 C5; TCRN-CROSS-SUB-485): one card a write was admitted beside
- * although it scores as a possible conflict, because it is of another INIT family (`families`, the
- * Initiatives its source references lead to, and since TCRN-CROSS-SUB-503 its linked work). The
- * receipt names each under `warnings`; the card records it in coexistsWith.
- */
-interface KnowledgeConflictWarning {
-  readonly reasonCode: "KNOWLEDGE_POSSIBLE_CONFLICT";
-  readonly id: string;
-  readonly families: readonly string[];
-  readonly message: string;
-}
-
-// How a write's conflicts stand: `blocking` refuses it, `otherFamily` it stands beside with a warning.
-interface ConflictFamilyVerdict {
-  readonly blocking: readonly string[];
-  readonly otherFamily: readonly KnowledgeConflictWarning[];
-}
-
-// TCRN-CROSS-SUB-485: a write that names neither --supersedes nor --coexist is refused only for the
-// conflicts of its own INIT family. The families are read from the source references
-// (referenceFamilies, Q11): the new card's, and those of every scored version of a conflicting card,
-// since a duplicate's versions can point at different work. TCRN-CROSS-SUB-503 (STORY-539): and from
-// the linked work (cardFamilies) on both sides, a reference that is the external key of a work record
-// this library holds naming that record's family. A conflict all of whose versions are of
-// families apart from the new card's is stood beside; one of a shared family, or one either side of
-// which has no known family, refuses the write as before. A write that names --supersedes or
-// --coexist is admitted beside every conflict, as it always was.
-function conflictFamilyVerdict(
-  state: WorkspaceState,
+// INIT-093: once scope intersection and contradictory assertions are confirmed, INIT lineage
+// cannot waive a conflict. Historical coexistsWith acknowledgements remain authoritative in the
+// projection; a new acknowledgement requires --coexist or an explicit supersession.
+function assertKnowledgeConflictsAcknowledged(
   metadata: KnowledgeUnitMetadata,
   conflicts: readonly string[],
-  scored: readonly KnowledgeUnitMetadata[],
   input: Pick<CreateKnowledgeUnitInput, "coexist">,
-): ConflictFamilyVerdict {
-  if (conflicts.length === 0 || metadata.supersedes !== null || input.coexist === true) return { blocking: [], otherFamily: [] };
-  const own = cardFamilies(state, metadata);
-  const blocking: string[] = [];
-  const otherFamily: KnowledgeConflictWarning[] = [];
-  for (const id of conflicts) {
-    const families = new Set<string>();
-    let apart = own !== null;
-    for (const version of scored) {
-      if (!apart) break;
-      if (version.id !== id) continue;
-      const theirs = cardFamilies(state, version);
-      if (theirs === null || !familiesApart(own, theirs)) apart = false;
-      else for (const family of theirs) families.add(family);
-    }
-    if (!apart || families.size === 0) {
-      blocking.push(id);
-      continue;
-    }
-    const named = [...families].sort(compareCanonicalText);
-    otherFamily.push({
-      reasonCode: "KNOWLEDGE_POSSIBLE_CONFLICT",
-      id,
-      families: named,
-      message: `${id} is close in subject but of another INIT family (${named.join(", ")}); the card is written beside it (coexistsWith)`,
-    });
+): void {
+  if (conflicts.length > 0 && metadata.supersedes === null && input.coexist !== true) {
+    fail("KNOWLEDGE_POSSIBLE_CONFLICT", conflicts.join(","), { conflicts: [...conflicts] });
   }
-  return { blocking, otherFamily };
-}
-
-// The refusal's details: the conflicts that refuse the write, and those of another family it would
-// stand beside once they are answered.
-function conflictRefusalDetails(verdict: ConflictFamilyVerdict): Readonly<Record<string, JsonValue>> {
-  return {
-    conflicts: [...verdict.blocking],
-    ...(verdict.otherFamily.length === 0 ? {} : { otherFamilyConflicts: verdict.otherFamily.map((entry) => entry.id) }),
-  };
-}
-
-// The receipt's warnings: one per conflict of another family the write stood beside, none otherwise.
-function conflictWarnings(verdict: ConflictFamilyVerdict): { readonly warnings?: JsonValue } {
-  return verdict.otherFamily.length === 0 ? {} : { warnings: verdict.otherFamily as unknown as JsonValue };
 }
 
 /**
@@ -4653,6 +4600,50 @@ export async function createKnowledgeUnit(workspaceRoot: string, input: CreateKn
   return optimisticCrestWrite(workspaceRoot, (commitUnderLock) => createLibraryCrestEvent(workspaceRoot, input, options, commitUnderLock));
 }
 
+async function readBackKnowledgeWrite(
+  scan: CrestScan, head: CrestEventHead, written: KnowledgeUnitMetadata,
+  workspace: WorkspaceState | null, options: KnowledgeReadOptions,
+): Promise<Readonly<Record<string, JsonValue>>> {
+  const boundary = { localCommitted: true, remoteVerification: "unverified" };
+  try {
+    // The event commits this write. A peer's partially delivered card can prevent a whole-store
+    // projection while this device's own committed event and body are both readable.
+    const eventsRoot = await boundDirectory(resolve(scan.storeRoot, CREST_EVENTS_DIRECTORY), scan.storeRoot);
+    const streamRoot = await boundDirectory(resolve(eventsRoot, head.deviceId), eventsRoot);
+    const name = `${String(head.sequence).padStart(8, "0")}-${head.eventHash}.json`;
+    const read = workspace === null ? readUserCrestFile : readLibraryCrestFile;
+    const value = parseCanonicalObject(await read(resolve(streamRoot, name), CREST_EVENT_MAXIMUM_BYTES, options), "crest event", "KNOWLEDGE_RECORD_INVALID");
+    const observed = workspace === null
+      ? validateUserCrestEvent(value, head.deviceId, name)
+      : validateLibraryCrestEvent(value, head.deviceId, name, workspace);
+    if (observed.body === null) fail("KNOWLEDGE_RECORD_INVALID", `${written.id}:missing created body`);
+    validateMetadataBody(observed.metadata, await read(resolve(streamRoot, observed.body.file), KNOWLEDGE_LIMITS.maximumBodyBytes, options), workspace);
+    const verifiedReadback = canonicalJson(observed.metadata) === canonicalJson(written);
+    return {
+      ...boundary, verifiedReadback, ok: verifiedReadback,
+      readback: {
+        storeId: scan.marker.workspaceId, version: scan.marker.version + 1, basis: "committed-event",
+        deviceId: observed.deviceId, sequence: observed.sequence,
+        records: [{
+          id: observed.metadata.id, revision: observed.metadata.revision, status: observed.metadata.lifecycle,
+          headEventHash: observed.eventHash, recordDigest: canonicalSha256(observed.metadata),
+        }],
+      },
+      ...(verifiedReadback ? {} : {
+        reasonCode: "KNOWLEDGE_WRITE_READBACK_UNVERIFIED",
+        remedy: "read the target card and compare its revision before retrying the write",
+      }),
+    };
+  } catch (error) {
+    return {
+      ...boundary, verifiedReadback: false, ok: false,
+      reasonCode: "KNOWLEDGE_WRITE_READBACK_UNVERIFIED",
+      readback: { id: written.id, error: String(error) },
+      remedy: "read the target card and compare its revision before retrying the write",
+    };
+  }
+}
+
 async function createUserCrestEvent(
   workspaceRoot: string,
   input: CreateKnowledgeUnitInput,
@@ -4661,7 +4652,7 @@ async function createUserCrestEvent(
 ): Promise<Readonly<Record<string, JsonValue>>> {
   assertBoundedString(input.body, KNOWLEDGE_LIMITS.maximumBodyBytes, "body");
   const body = Buffer.from(input.body, "utf8");
-  const workspace = await materializeWorkspace(workspaceRoot);
+  const workspace = await (await import("./workspace.js")).materializeWorkspace(workspaceRoot);
   const sourceDigest = input.sourceDigest && input.sourceDigest.length > 0
     ? input.sourceDigest
     : await calculateKnowledgeSourceDigest(workspaceRoot, scopedWorkspaceState(workspace, input.projectId ?? undefined), input.sourceReferences, input.body);
@@ -4697,17 +4688,14 @@ async function createUserCrestEvent(
   const scored = records.filter((unit) => !scan.removals.has(unit.metadata.id)).map((unit) => unit.metadata);
   const conflicts = [...new Set(knowledgeConflictHits(
     scored,
-    metadata.subject,
+    metadata,
     metadata.supersedes === null ? [metadata.id] : [metadata.id, metadata.supersedes],
   ))];
-  // TCRN-CROSS-SUB-485: the families are read in the library this write goes through; a card of the
-  // crest that points at another library's work has none this library can name, and still refuses.
-  const verdict = conflictFamilyVerdict(workspace, metadata, conflicts, scored, input);
-  if (verdict.blocking.length > 0) {
-    fail("KNOWLEDGE_POSSIBLE_CONFLICT", verdict.blocking.join(","), conflictRefusalDetails(verdict));
-  }
+  // A confirmed same-domain contradiction requires an explicit acknowledgement, regardless of
+  // which library's work the card cites.
+  assertKnowledgeConflictsAcknowledged(metadata, conflicts, input);
   // TCRN-CROSS-SUB-310: the conflicts this write saw and was admitted beside -- with --coexist, or
-  // beside the card it supersedes, or of another INIT family (TCRN-CROSS-SUB-485) -- are recorded in
+  // beside the card it supersedes -- are recorded in
   // the card, so a reader tells them from a conflict no writer saw (projectCrestUnits). A library's
   // write records them the same way (TCRN-CROSS-SUB-414, createLibraryCrestEvent).
   const written: KnowledgeUnitMetadata = conflicts.length === 0
@@ -4762,10 +4750,7 @@ async function createUserCrestEvent(
   // TCRN-CROSS-SUB-425 (MIN-239 D4): this device's stream gives up the bodies of the removed cards,
   // the one this write superseded among them.
   await clearRemovedBodies(scan, device.deviceId, [...scan.removals.keys(), ...(metadata.supersedes === null ? [] : [metadata.supersedes])]);
-  // TCRN-CROSS-SUB-310 (R14 (d)): the event is committed, so the answer is the write's own: nothing
-  // after this point re-reads the crest. An event another device delivered meanwhile cannot turn a
-  // committed write into a refusal; the next read reports any conflict it forms. The version is
-  // the one this write's scan projected, advanced by this event.
+  // The receipt keeps the committed version and separately reports the authoritative readback.
   return {
     schemaVersion: "tcrn.knowledge-create-result.v1",
     reasonCode: "KNOWLEDGE_UNIT_CREATED",
@@ -4776,7 +4761,7 @@ async function createUserCrestEvent(
     scope: "user",
     ...(conflicts.length > 0 ? { conflicts: [...conflicts] } : {}),
     ...(metadata.supersedes === null ? {} : { superseded: metadata.supersedes }),
-    ...conflictWarnings(verdict),
+    ...await readBackKnowledgeWrite(scan, event, written, null, options),
   };
 }
 
@@ -4895,7 +4880,7 @@ async function createLibraryCrestEvent(
   assertBoundedString(input.body, KNOWLEDGE_LIMITS.maximumBodyBytes, "body");
   await assertKnowledgeWritable(resolve(workspaceRoot));
   const body = Buffer.from(input.body, "utf8");
-  const workspace = await materializeWorkspace(workspaceRoot);
+  const workspace = await (await import("./workspace.js")).materializeWorkspace(workspaceRoot);
   const sourceDigest = input.sourceDigest && input.sourceDigest.length > 0
     ? input.sourceDigest
     : await calculateKnowledgeSourceDigest(workspaceRoot, scopedWorkspaceState(workspace, input.projectId ?? undefined), input.sourceReferences, input.body);
@@ -4911,20 +4896,16 @@ async function createLibraryCrestEvent(
   if (metadata.supersedes !== null && replacedRecords.every((unit) => unit.metadata.lifecycle === "retired")) {
     fail("KNOWLEDGE_LINK_INVALID", `${metadata.id}:supersedes:${metadata.supersedes}`);
   }
-  // TCRN-CROSS-STORY-365: score before writing. Above the threshold the writer must have said which
-  // it is -- this card replaces those (--supersedes) or stands beside them (--coexist) -- and the
-  // refusal hands back the hit list rather than only naming it. TCRN-CROSS-SUB-485: a conflict of
-  // another INIT family, read in the chain the scan read, is stood beside without being asked.
+  // Confirm same-domain contradictions before writing. The writer must say whether this card
+  // replaces them (--supersedes) or stands beside them (--coexist), and the
+  // refusal hands back the confirmed hit list rather than only naming it.
   const scored = records.filter((unit) => !scan.removals.has(unit.metadata.id)).map((unit) => unit.metadata);
   const conflicts = [...new Set(knowledgeConflictHits(
     scored,
-    metadata.subject,
+    metadata,
     metadata.supersedes === null ? [metadata.id] : [metadata.id, metadata.supersedes],
   ))];
-  const verdict = conflictFamilyVerdict(scan.workspace, metadata, conflicts, scored, input);
-  if (verdict.blocking.length > 0) {
-    fail("KNOWLEDGE_POSSIBLE_CONFLICT", verdict.blocking.join(","), conflictRefusalDetails(verdict));
-  }
+  assertKnowledgeConflictsAcknowledged(metadata, conflicts, input);
   const written: KnowledgeUnitMetadata = conflicts.length === 0
     ? metadata
     : { ...metadata, extensions: { coexistsWith: conflicts.slice(0, KNOWLEDGE_LIMITS.maximumQueryResults) } };
@@ -4954,10 +4935,11 @@ async function createLibraryCrestEvent(
   if (records.some((unit) => unit.metadata.id === metadata.id || unit.metadata.externalKey === metadata.externalKey)) {
     fail("KNOWLEDGE_DUPLICATE", metadata.id);
   }
-  await commitUnderLock(scan, async () => {
+  const committed = await commitUnderLock(scan, async () => {
     const head = await appendLibraryCrestEvent(scan, written, body, null, options.faultAt);
     await clearRemovedBodies(scan, head.deviceId, removalsAfter.keys());
     await projectViewAfterWrite(scan, projectedMetadata, options);
+    return head;
   });
   return {
     schemaVersion: "tcrn.knowledge-create-result.v1",
@@ -4968,7 +4950,7 @@ async function createLibraryCrestEvent(
     version: scan.marker.version + 1,
     ...(conflicts.length > 0 ? { conflicts: [...conflicts] } : {}),
     ...(metadata.supersedes === null ? {} : { superseded: metadata.supersedes }),
-    ...conflictWarnings(verdict),
+    ...await readBackKnowledgeWrite(scan, committed, written, scan.workspace, options),
   };
 }
 
@@ -5172,7 +5154,7 @@ export async function createKnowledgeArticle(
     try { assertProtocolId(evidenceId); } catch (error) { fail("KNOWLEDGE_PROVENANCE_INVALID", String(error)); }
     if (!evidenceId.startsWith("evidence:")) fail("KNOWLEDGE_PROVENANCE_INVALID", evidenceId);
   }
-  const workspace = scopedWorkspaceState(await materializeWorkspace(workspaceRoot), input.projectId);
+  const workspace = scopedWorkspaceState(await (await import("./workspace.js")).materializeWorkspace(workspaceRoot), input.projectId);
   const article = await articlePathFor(workspaceRoot, workspace, input.path);
   const markdown = articleMarkdown(input.category, input.title, input.content);
   const body = articleIndexBody(input.title, input.summary, input.path);
@@ -5380,6 +5362,16 @@ function normalizeListQuery(query: KnowledgeListQuery): NormalizedListQuery {
   assertSelection(selection);
   const status = query.status ?? "valid";
   assertStatusFilter(status);
+  if (query.scope === "user" && query.projectId !== undefined) fail("KNOWLEDGE_INPUT_INVALID", "a user-crest read has no project binding");
+  const diagnostics = query.diagnostics ?? "summary";
+  if (!["summary", "ids", "conflicts", "audit"].includes(diagnostics)) fail("KNOWLEDGE_INPUT_INVALID", "diagnostics");
+  if (query.diagnosticLimit !== undefined && (!Number.isSafeInteger(query.diagnosticLimit) || query.diagnosticLimit < 1 || query.diagnosticLimit > 256)) {
+    fail("KNOWLEDGE_INPUT_INVALID", "diagnostic-limit must be between 1 and 256");
+  }
+  if (query.diagnosticOffset !== undefined && (!Number.isSafeInteger(query.diagnosticOffset) || query.diagnosticOffset < 0)) fail("KNOWLEDGE_INPUT_INVALID", "diagnostic-offset");
+  if (diagnostics === "summary" && (query.diagnosticLimit !== undefined || query.diagnosticOffset !== undefined)) fail("KNOWLEDGE_INPUT_INVALID", "diagnostic windows require ids or conflicts");
+  if ((query.diagnosticOffset ?? 0) > 0 && query.snapshot === undefined) fail("KNOWLEDGE_INPUT_INVALID", "diagnostic continuation requires snapshot");
+  if (query.snapshot !== undefined && !/^[a-f0-9]{64}$/u.test(query.snapshot)) fail("KNOWLEDGE_INPUT_INVALID", "snapshot");
   let search: string | undefined;
   if (query.search !== undefined) {
     if (typeof query.search !== "string" || query.search.length === 0 || !query.search.isWellFormed()) {
@@ -5442,23 +5434,21 @@ export function knowledgeRelevanceScore(metadata: KnowledgeUnitMetadata, search:
     + metadata.tags.reduce((tagScore, tag) => tagScore + (tag.toLowerCase() === token ? 12 : occurrenceCount(tag.toLowerCase(), token) * 3), 0), 0);
 }
 
-// TCRN-CROSS-STORY-365: the write-time conflict threshold, in the units the scorer above
-// already produces. A subject-field token hit is worth 8, so 16 is two of them: the point
-// at which an existing card is about the same thing rather than merely sharing one word.
-// A one-token subject therefore cannot by itself raise a conflict -- with a single token
-// the scorer has nothing to discriminate on, and a verdict drawn from it would fire on
-// every card that happens to contain the word.
+// Retained public compatibility constant. Conflict guards use the two-stage assertion resolver;
+// retrieval relevance keeps its independent, unchanged ranking formula.
 export const KNOWLEDGE_CONFLICT_SCORE_THRESHOLD = 16 as const;
 
-/** Live cards that score at or above the threshold against a subject, in canonical id order. */
+/** Exact topic candidates for subject-only hints; confirmed same-domain contradictions for writes. */
 export function knowledgeConflictHits(
   existing: readonly KnowledgeUnitMetadata[],
-  subject: string,
+  subject: string | KnowledgeUnitMetadata,
   excluded: readonly string[] = [],
 ): readonly string[] {
   return existing
     .filter((metadata) => metadata.lifecycle !== "retired" && metadata.extensions?.supersededBy === undefined && !excluded.includes(metadata.id) &&
-      knowledgeRelevanceScore(metadata, subject) >= KNOWLEDGE_CONFLICT_SCORE_THRESHOLD)
+      (typeof subject === "string"
+        ? [...knowledgeTopicTokens({ subject, summary: "", snippet: "", tags: [] })].filter((token) => knowledgeTopicTokens(metadata).has(token)).length >= 2
+        : assessKnowledgePair(metadata, subject).relation === "conflicting"))
     .map((metadata) => metadata.id)
     .sort(compareCanonicalText);
 }
@@ -5500,7 +5490,7 @@ function selectKnowledgeMetadata(
     const freshness = computeFreshness(metadata, query.at);
     const explicitCorpus = includeExplicitOnly && (query.includeExplicitOnly === true || search !== undefined);
     if (selection === "default" && !(explicitCorpus ? explicitlySelectable(metadata, query.at) : isDefaultSelectable(metadata, query.at))) return false;
-    return (!query.projectId || metadata.projectId === query.projectId || (migratedKnowledgeScopes.has(metadata) && (migratedKnowledgeScopes.get(metadata)!.length === 0 || migratedKnowledgeScopes.get(metadata)!.includes(query.projectId)))) &&
+    return intrinsicScopeMatchesProject(metadata, query.projectId) &&
       (!query.roleScope || metadata.roleScopes.includes(query.roleScope)) &&
       (!query.category || metadata.category === query.category) && (!query.kind || metadata.kind === query.kind) &&
       (!query.tag || metadata.tags.includes(query.tag)) && (!query.freshness || freshness === query.freshness) &&
@@ -5553,16 +5543,6 @@ const ABSENT_STORE_DISCLOSURE: Readonly<Record<string, JsonValue>> = Object.free
 // the records awaiting chain events this device has not received (TCRN-CROSS-SUB-414) and the live
 // records whose project the chain no longer holds (TCRN-CROSS-SUB-414 R16). Nothing when it holds
 // none of them.
-function mergedCrestDisclosure(scan: CrestScan): Readonly<Record<string, JsonValue>> {
-  const duplicates = unresolvedDuplicates(scan);
-  return {
-    ...(scan.unresolvedConflicts.length === 0 ? {} : { unresolvedConflicts: scan.unresolvedConflicts as unknown as JsonValue }),
-    ...(duplicates.length === 0 ? {} : { unresolvedDuplicates: duplicates.map(duplicateDiagnostic) }),
-    ...(scan.awaitingChain.length === 0 ? {} : { awaitingChain: awaitingChainDiagnostic(scan.awaitingChain) }),
-    ...(scan.unresolvedScopes.length === 0 ? {} : { unresolvedScopes: unresolvedScopeDiagnostic(scan.unresolvedScopes) }),
-  };
-}
-
 // The records of one id awaiting chain events, and those of it whose project the chain no longer
 // holds, as a read of that id carries them at its top.
 function awaitingReadDisclosure(scan: CrestScan, id: string): Readonly<Record<string, JsonValue>> {
@@ -5583,6 +5563,7 @@ function withheldCardIds(scan: CrestScan): ReadonlySet<string> {
     ...unresolvedDuplicates(scan).map((duplicate) => duplicate.id),
     ...scan.awaitingChain.map((entry) => entry.id),
     ...scan.unresolvedScopes.map((entry) => entry.id),
+    ...crestRecords(scan).filter((unit) => resolveIntrinsicKnowledgeScope(unit.metadata).kind === "unresolved-legacy").map((unit) => unit.metadata.id),
   ]);
 }
 
@@ -5600,25 +5581,254 @@ function withheldCardIds(scan: CrestScan): ReadonlySet<string> {
  * whose project the chain no longer holds, whose cards default selection leaves out until a card
  * supersedes them. TCRN-CROSS-INIT-053 R46 (I04): a library whose store was never created answers an
  * empty list with `knowledgeStore: "absent"`; every other store state answers as it did.
- * TCRN-CROSS-SUB-504 (TCRN-CROSS-STORY-539): a pair whose two cards are of INIT families apart is no
- * unresolved conflict of the answer, and holds neither card out of default selection
- * (familySplitScan); the user crest's cards name their families in the library `workspaceRoot` names.
+ * INIT-093: intrinsic scope and explicit acknowledgements determine conflict selection;
+ * INIT lineage alone cannot waive a confirmed same-domain contradiction.
  */
 export async function listKnowledgeMetadata(workspaceRoot: string, query: KnowledgeListQuery, authority?: RecallAuthority): Promise<Readonly<Record<string, JsonValue>>> {
   const normalized = normalizeListQuery(query);
   assertStoreScope(query.scope);
   if (query.scope === "user") {
     return readUserCrest(query, async (scan) => {
-      if (scan === null) return knowledgeListAnswer([], query, normalized, USER_CREST_DISCLOSURE);
-      return mergedCrestList(familySplitScan(scan, await userCrestFamilyState(scan, workspaceRoot, authority)), query, normalized, USER_CREST_DISCLOSURE);
+      if (scan === null) return knowledgeListAnswer([], query, normalized, { ...USER_CREST_DISCLOSURE, ...knowledgeReadEvidence(null, query, normalized) });
+      return mergedCrestList(scan, query, normalized, USER_CREST_DISCLOSURE);
     });
   }
   const place = await knowledgeStorePlace(workspaceRoot, authority);
   // TCRN-CROSS-INIT-053 R46 (I04): a library whose store was never created holds no card yet: an empty
   // inventory that says so, never a refusal.
-  if (await libraryStoreNeverCreated(place)) return knowledgeListAnswer([], query, normalized, ABSENT_STORE_DISCLOSURE);
-  const scan = await scanKnowledgeStoreAt(place, query, false, "metadata-only", false, false);
-  return mergedCrestList(familySplitScan(scan, scan.workspace), query, normalized, trailingDisclosure(scan));
+  const scan = await cachedKnowledgeListScan(place, query, authority !== undefined);
+  if (scan === null) return knowledgeListAnswer([], query, normalized, { ...ABSENT_STORE_DISCLOSURE, ...knowledgeReadEvidence(null, query, normalized, place.workspace) });
+  return mergedCrestList(scan, query, normalized, trailingDisclosure(scan), scan.workspace);
+}
+
+type CachedCrestUnit = ReturnType<typeof snapshotUnitDocument> & {
+  readonly archiveScope: ReturnType<typeof archivedKnowledgeScope>;
+  readonly canonicalText: string;
+};
+type CachedLibraryCrest = Omit<KnowledgeStoreScan, "workspace" | "units" | "duplicates" | "index"> & {
+  readonly packedUnits: Buffer;
+};
+type CachedLibraryCrestView = {
+  readonly index: KnowledgeIndex;
+  readonly viewFiles: readonly KnowledgeViewFile[];
+};
+
+/** Cache the timeless projection. Selection below still evaluates query.at on
+ * every call, including a new process at the same chain head. */
+async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: KnowledgeListQuery, skipViewRepair = false): Promise<KnowledgeStoreScan | null> {
+  const full = async (): Promise<KnowledgeStoreScan | null> => await libraryStoreNeverCreated(place) ? null : scanKnowledgeStoreAt(place, query, false, "metadata-only", false, false);
+  if (query.beforeDescriptorReadForTest !== undefined || query.afterDescriptorOpenForTest !== undefined || !await hasLibraryManifest(place.workspaceRoot)) return full();
+  const library = await openLibrary(place.workspaceRoot);
+  const roots = [place.storePath, ...(place.workspace.library?.consolidation?.sources ?? [])
+    .filter(source => source.manifest.libraryId !== place.workspace.metadata.workspaceId && source.inventory.some(file => file.path === "crest/store.json"))
+    .map(source => join(place.workspaceRoot, source.archive, "crest"))];
+  const proof = await crestProjectionProof(library, place.workspace, roots, KNOWLEDGE_PROJECTION_VERSION);
+  const boundary = async (): Promise<string | null> => {
+    if (proof !== null) return proof.binding;
+    const trees = await Promise.all(roots.map(root => localTreeIdentity(root)));
+    if (trees.some(tree => tree === null)) return null;
+    const heads = await Promise.all(roots.map(root => currentCrestHeads(root)));
+    return createHash("sha256")
+      .update(`7\0${KNOWLEDGE_PROJECTION_VERSION}\0${place.workspace.headEventHash}\0${roots.join("\0")}\0${trees.join("\0")}\0${heads.join("\0")}`)
+      .digest("hex");
+  };
+  try {
+    const saved = await readProtectedProjection<CachedLibraryCrest>(library, "crest", boundary);
+    const view = saved === null || skipViewRepair ? null : await readProtectedProjection<CachedLibraryCrestView>(library, "crest-view", boundary);
+    if (saved !== null && (skipViewRepair || view !== null)) {
+      if (proof !== null && !await proof.finish()) return full();
+      const restore = (stored: CachedCrestUnit): CrestUnit => {
+        const { archiveScope, canonicalText, ...fields } = stored;
+        const unit = { ...fields, body: null, streamBody: null } as unknown as CrestUnit;
+        if (archiveScope.bound) bindArchivedKnowledgeScope(unit.metadata, archiveScope.binding);
+        projectedCanonicalTexts.set(unit.metadata, canonicalText);
+        return unit;
+      };
+      const index = view?.index ?? { schemaVersion: "einzbern.knowledge-index.v1" } as unknown as KnowledgeIndex;
+      if (view !== null) {
+        // Disposable local views still receive ordinary repair, including paged
+        // indexes and surplus-page cleanup. They are outside the source set.
+        await projectKnowledgeView(libraryKnowledgeView(place.storePath, query), view.index, view.viewFiles);
+      }
+      observeCacheReason("crest-projection-hit");
+      const { packedUnits, ...rest } = saved;
+      const decoded = deserialize(inflateRawSync(packedUnits)) as {
+        readonly units: readonly CachedCrestUnit[];
+        readonly duplicates: readonly { readonly id: string; readonly externalKey: string; readonly versions: readonly CachedCrestUnit[] }[];
+      };
+      return { ...rest, index, workspace: place.workspace, units: decoded.units.map(restore),
+        duplicates: decoded.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(restore) })) };
+    }
+    const scan = await full();
+    if (scan === null) return null;
+    if (proof !== null && !await proof.finish()) return full();
+    const binding = await boundary();
+    const metaBinding = await (await import("./knowledge-read.js")).crestMetaBoundary(roots, place.workspace.headEventHash, undefined, proof?.binding)();
+    if (binding !== null && binding === await boundary()) {
+      const save = (unit: CrestUnit): CachedCrestUnit => {
+        const { streamBody: _sb, ...doc } = snapshotUnitDocument(unit);
+        return { ...doc, streamBody: null, archiveScope: archivedKnowledgeScope(unit.metadata),
+          canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue) };
+      };
+      const { workspace: _workspace, index, units, duplicates, ...fields } = scan;
+      const packedUnits = deflateRawSync(serialize({
+        units: units.map(save),
+        duplicates: duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(save) })),
+      }));
+      const sourceDigest = crestSourceDigest(scan);
+      if (metaBinding !== null) {
+        await writeProtectedProjection(library, "crest-meta", metaBinding, {
+        layout: scan.layout,
+        marker: scan.marker,
+        sourceDigest,
+        units: units.map(unit => ({
+          metadata: unit.metadata,
+          canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue),
+          archiveScope: archivedKnowledgeScope(unit.metadata),
+        })),
+        removedIds: [...scan.removals.keys()],
+        unresolvedConflicts: scan.unresolvedConflicts,
+        duplicates: duplicates.map(duplicate => ({
+          id: duplicate.id,
+          externalKey: duplicate.externalKey,
+          versions: duplicate.versions.map(version => ({
+            ...recordIdentity(version),
+            metadata: version.metadata,
+            canonicalText: canonicalEntryText(version.metadata as unknown as JsonValue),
+            archiveScope: archivedKnowledgeScope(version.metadata),
+          })),
+        })),
+        awaitingChain: scan.awaitingChain,
+        unresolvedScopes: scan.unresolvedScopes,
+      } satisfies import("./knowledge-read.js").CachedCrestMeta);
+      }
+      await writeProtectedProjection(library, "crest-view", binding, { index, viewFiles: knowledgeViewFiles(index) } satisfies CachedLibraryCrestView);
+      await writeProtectedProjection(library, "crest", binding, { ...fields, sourceDigest, packedUnits } satisfies CachedLibraryCrest);
+      observeCacheReason("crest-projection-build");
+    }
+    return scan;
+  } finally { proof?.close(); }
+}
+
+function crestSourceDigest(scan: CrestScan | null): string {
+  return canonicalListSha256([
+    canonicalJson(scan?.marker ?? null), canonicalJson(scan?.eventHeads ?? []),
+    ...(scan === null ? [] : crestRecords(scan)).map(unit => canonicalJson({ digest: unit.storedDigest, scope: resolveIntrinsicKnowledgeScope(unit.metadata) })),
+    canonicalJson(scan === null ? [] : [...scan.removals]), canonicalJson(scan?.unresolvedConflicts ?? []),
+  ]);
+}
+
+/** Counts use the scoped active records before search/pagination, independently of selection.
+ * active = eligible + withheld + ineligible; withheld is exactly the otherwise selectable records
+ * excluded by projection. Duplicate versions count as records, affected IDs count identities.
+ */
+function knowledgeReadEvidence(
+  scan: CrestScan | null,
+  query: KnowledgeListQuery,
+  normalized: NormalizedListQuery,
+  workspace?: WorkspaceState,
+): Readonly<Record<string, JsonValue>> {
+  const effectiveScope = {
+    kind: query.scope === "user" ? "user" : query.projectId === undefined ? "library" : "project",
+    projectId: query.projectId ?? null,
+    binding: query.scope === "user" ? "user-crest" : query.projectId === undefined ? "library" : "explicit-project-id",
+  };
+  const records = scan === null ? [] : crestRecords(scan);
+  const scopedRecords = normalized.status === "removed" ? [] : selectKnowledgeMetadata(
+    { units: records.filter((unit) => !scan!.removals.has(unit.metadata.id)) },
+    query,
+    { ...normalized, selection: "all", search: undefined },
+  );
+  const scoped = scopedRecords.filter((metadata) => metadata.lifecycle === "active" && isLiveRecord(metadata));
+  const scopedIds = new Set(scoped.map((metadata) => metadata.id));
+  // A global card remains withheld in every view even if its peer is outside that view.
+  const pairs = scan?.unresolvedConflicts.filter((pair) => pair.some((id) => scopedIds.has(id))) ?? [];
+  const duplicates = scan === null ? [] : unresolvedDuplicates(scan).filter((entry) => scopedIds.has(entry.id));
+  const awaiting = scan?.awaitingChain.filter((entry) => scopedIds.has(entry.id)) ?? [];
+  const scopes = scan?.unresolvedScopes.filter((entry) => scopedIds.has(entry.id)) ?? [];
+  const unknown = scoped.filter((metadata) => resolveIntrinsicKnowledgeScope(metadata).kind === "unresolved-legacy");
+  const reasons = new Map<string, Set<string>>();
+  const mark = (id: string, reason: string): void => {
+    if (scopedIds.has(id)) reasons.set(id, new Set([...(reasons.get(id) ?? []), reason]));
+  };
+  for (const id of pairs.flat()) mark(id, "conflict");
+  for (const entry of duplicates) mark(entry.id, "duplicate");
+  for (const entry of awaiting) mark(entry.id, "awaiting-chain");
+  for (const entry of scopes) mark(entry.id, "unresolved-scope");
+  for (const entry of unknown) mark(entry.id, "unresolved-legacy");
+  const explicitCorpus = query.includeExplicitOnly === true || normalized.search !== undefined;
+  const selectable = scoped.filter((metadata) => explicitCorpus ? explicitlySelectable(metadata, query.at) : isDefaultSelectable(metadata, query.at));
+  const withheld = selectable.filter((metadata) => reasons.has(metadata.id));
+  const affected = [...reasons].sort(([a], [b]) => compareCanonicalText(a, b)).map(([id, why]) => ({
+    id, reasons: [...why].sort(compareCanonicalText),
+    versions: scoped.filter((metadata) => metadata.id === id).length,
+    intrinsicScope: resolveIntrinsicKnowledgeScope(scoped.find((metadata) => metadata.id === id)!),
+  }));
+  const reasonCounts = Object.fromEntries(["conflict", "duplicate", "awaiting-chain", "unresolved-scope", "unresolved-legacy"].map((reason) =>
+    [reason, withheld.filter((metadata) => reasons.get(metadata.id)?.has(reason)).length]));
+  const sourceVersion = {
+    workspaceId: workspace?.metadata.workspaceId ?? scan?.marker.workspaceId ?? USER_CREST_ID,
+    version: workspace?.version ?? scan?.marker.version ?? 0,
+    headEventHash: workspace?.headEventHash ?? null,
+    crestDigest: scan?.sourceDigest ?? crestSourceDigest(scan),
+  };
+  const snapshot = canonicalSha256({
+    sourceVersion, effectiveScope, projectionVersion: KNOWLEDGE_PROJECTION_VERSION, at: query.at,
+    selection: normalized.selection, status: normalized.status, search: normalized.search ?? null, explicitCorpus,
+    filters: [query.roleScope ?? null, query.category ?? null, query.kind ?? null, query.tag ?? null, query.freshness ?? null, query.promotionState ?? null],
+  });
+  if (query.snapshot !== undefined && query.snapshot !== snapshot) fail("KNOWLEDGE_SNAPSHOT_CHANGED", "source, query or projection changed; restart from the first page", { expected: query.snapshot, actual: snapshot });
+  const diagnostics = {
+    affectedIdCount: affected.length, conflictPairCount: pairs.length, duplicateIdCount: duplicates.length,
+    awaitingChainCount: awaiting.length, unresolvedScopeCount: scopes.length, unresolvedLegacyCount: new Set(unknown.map((metadata) => metadata.id)).size,
+    reasonCounts, idExamples: affected.slice(0, 2).map((entry) => entry.id), conflictExamples: pairs.slice(0, 2),
+    truncated: affected.length > 2 || pairs.length > 2 || duplicates.length > 1 || awaiting.length > 1 || scopes.length > 1,
+  };
+  // Preserve small legacy diagnostics as samples. No field may turn the summary into an unbounded
+  // metadata dump: large duplicate versions and long legacy values are retrieved via explicit reads.
+  const legacy: Record<string, JsonValue> = {};
+  const sample = (key: string, entries: readonly JsonValue[]): void => {
+    if (entries.length === 0) return;
+    const first = entries.slice(0, key === "unresolvedConflicts" ? 2 : 1);
+    if (Buffer.byteLength(JSON.stringify(first), "utf8") < 768) legacy[key] = first;
+    else diagnostics.truncated = true;
+  };
+  sample("unresolvedConflicts", pairs as JsonValue[]);
+  sample("unresolvedDuplicates", duplicates.slice(0, 1).map(duplicateDiagnostic));
+  sample("awaitingChain", awaitingChainDiagnostic(awaiting.slice(0, 1)) as readonly JsonValue[]);
+  sample("unresolvedScopes", unresolvedScopeDiagnostic(scopes.slice(0, 1)) as readonly JsonValue[]);
+  const mode = query.diagnostics ?? "summary";
+  const rows = mode === "conflicts" ? pairs : mode === "audit" ? scopedRecords.map((metadata) => ({
+    id: metadata.id, metadataDigest: canonicalSha256(metadata as unknown as JsonValue),
+    intrinsicScope: resolveIntrinsicKnowledgeScope(metadata), lifecycle: metadata.lifecycle,
+    reasons: [...(reasons.get(metadata.id) ?? [])].sort(compareCanonicalText),
+    eligible: selectable.includes(metadata) && !reasons.has(metadata.id),
+    withheld: selectable.includes(metadata) && reasons.has(metadata.id),
+  })) : affected;
+  const offset = query.diagnosticOffset ?? 0;
+  const limit = query.diagnosticLimit ?? 64;
+  const page = rows.slice(offset, offset + limit);
+  const evidence: Record<string, JsonValue> = {
+    effectiveScope, sourceVersion, projectionVersion: KNOWLEDGE_PROJECTION_VERSION, snapshot,
+    activeCount: scoped.length, eligibleCount: selectable.length - withheld.length, withheldCount: withheld.length,
+    ineligibleCount: scoped.length - selectable.length, diagnostics, ...legacy,
+    ...(mode === "summary" ? {} : { diagnosticPage: {
+      kind: mode, snapshot, total: rows.length, offset, limit,
+      truncated: offset + page.length < rows.length,
+      nextOffset: offset + page.length < rows.length ? offset + page.length : null,
+      records: page as unknown as JsonValue,
+    } }),
+  };
+  // Reserve room for the list envelope. This cap applies only to diagnostic overhead; record
+  // metadata and explicitly requested pages retain every legal byte.
+  const { diagnosticPage: _page, ...summary } = evidence;
+  for (const key of Object.keys(legacy)) {
+    if (Buffer.byteLength(JSON.stringify(summary), "utf8") < 3500) break;
+    delete summary[key];
+    delete evidence[key];
+    diagnostics.truncated = true;
+  }
+  return evidence;
 }
 
 // TCRN-CROSS-SUB-425 (MIN-239 D6): a list answers the valid cards unless it asks for another status.
@@ -5629,6 +5839,7 @@ function mergedCrestList(
   query: KnowledgeListQuery,
   normalized: NormalizedListQuery,
   disclosure: Readonly<Record<string, JsonValue>>,
+  workspace?: WorkspaceState,
 ): Readonly<Record<string, JsonValue>> {
   const withheld = withheldCardIds(scan);
   const valid = normalized.status === "removed"
@@ -5637,7 +5848,7 @@ function mergedCrestList(
       .filter((metadata) => normalized.selection !== "default" || !withheld.has(metadata.id));
   const removed = normalized.status === "valid" ? [] : selectRemovedCards(scan, query, normalized);
   const matched = normalized.status === "all" ? rankedRecords(valid, removed, normalized.search) : [...valid, ...removed];
-  return knowledgeListAnswer(matched, query, normalized, { ...disclosure, ...mergedCrestDisclosure(scan) });
+  return knowledgeListAnswer(matched, query, normalized, { ...disclosure, ...knowledgeReadEvidence(scan, query, normalized, workspace) });
 }
 
 // A removed card's relevance to a search: its subject is all it keeps, weighted as a subject is.
@@ -6181,8 +6392,8 @@ export async function exportKnowledgeCheckpoint(workspaceRoot: string, at: strin
   const scan = await scanKnowledgeStore(workspaceRoot, { ...options, allowTrailing: false }, false, "metadata-only");
   assertScopesResolve(scan);
   assertChainHoldsCrest(scan);
-  // TCRN-CROSS-SUB-504: the default selection's corpus, a pair of INIT families apart withholding nothing.
-  const withheld = withheldCardIds(familySplitScan(scan, scan.workspace));
+  // The same intrinsic-scope conflict projection defines the default checkpoint corpus.
+  const withheld = withheldCardIds(scan);
   // TCRN-CROSS-SUB-425: a removed card is in no checkpoint.
   const records = scan.units.map((unit) => unit.metadata).filter((metadata) => !withheld.has(metadata.id) && !scan.removals.has(metadata.id) && isDefaultSelectable(metadata, at));
   records.sort((left, right) => compareCanonicalText(left.id, right.id));

@@ -72,6 +72,31 @@ flags are handled first. Providing both or neither retains
 `CLI_ARGUMENT_MALFORMED` and the verb's existing message. The pair uses an
 existing optional string field, so the strict v1 field set still validates.
 
+### Work lists and write receipts
+
+`work-list` returns compact record summaries and an `effectiveScope` header.
+Summaries include identity, kind, status, title, summary, parent and revision,
+plus project, timestamps and lease information used by list consumers.
+`--full true` includes complete fields and typed content. Search results retain
+their existing bounded excerpts unless full output is requested.
+
+`work-create`, `work-transition`, `work-annotate`, `work-batch`,
+`minutes-record` and `knowledge-create` read the committed business records back
+before returning `verifiedReadback`. A successful readback reports record
+revisions, status and digests together with the observed source head.
+`localCommitted: true` records that the write committed locally.
+`remoteVerification: "unverified"` requires the destination readback described
+in `shared-submit-v1.md` for cross-device submission.
+
+If a post-commit readback fails or differs, the receipt returns `ok: false`,
+`verifiedReadback: false` and a repair instruction. Read the target records and
+compare their revisions before retrying. An exception before a commit receipt
+leaves the write outcome unknown and also requires readback before retrying.
+
+`minutes-record --decisions` rejects trailing comma-separated fragments that
+start with an assignment such as `effort=max`. Put complete decision strings in
+a JSON array and pass `--decisions-file` when a decision contains commas.
+
 ### Recall for agents
 
 Use `recall --view agent` with the same query and selection flags for bounded

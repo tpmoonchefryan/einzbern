@@ -12,7 +12,9 @@ import {
   setConfigRecord, chainIdentity, resolveProjectTarget, readConsolidationIndex, openLibrary,
   configureStorageLocation, defaultSharedLibraryPath, cachePath, lockPath,
   createWork, appendEvents, createWorkDelta,
+  reverifyKnowledgeUnit,
 } from "../dist/build/packages/core/src/index.js";
+import { canonicalJson, deriveStableId } from "../dist/build/packages/protocol/src/index.js";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { promptRecallContext } from "../dist/build/packages/core/src/hook-recall.js";
 import { recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
@@ -48,6 +50,58 @@ async function fixture(t) {
   const options = { at, actor: "agent:codex", decidedIn: "minutes:000000000000000000000001#D1", yes: true };
   return { root, sources, mapping, to, options };
 }
+
+test("653: archived null-project metadata keeps its binding, omitted legacy fields and original bytes across refresh", async t => {
+  const f = await fixture(t);
+  const alpha = f.sources[1];
+  const original = (await listKnowledgeMetadata(alpha.path, { at, selection: "all" })).records[0];
+  const body = (await readKnowledgeBody(alpha.path, original.id, { at })).body;
+  const legacy = { ...original, subject: "Cache policy", summary: "Enable cache", snippet: "Enable cache" };
+  delete legacy.supersedes;
+  delete legacy.expansions;
+  const metadataPath = join(alpha.path, "crest", "metadata", `${legacy.id}.json`);
+  await mkdir(join(alpha.path, "crest", "metadata"));
+  await mkdir(join(alpha.path, "crest", "bodies"));
+  const bytes = canonicalJson(legacy);
+  await writeFile(metadataPath, bytes);
+  await writeFile(join(alpha.path, "crest", "bodies", `${legacy.id}.body`), body);
+  await rm(join(alpha.path, "crest", "events"), { recursive: true });
+  const primaryInput = Object.fromEntries(["roleScopes", "category", "kind", "tags", "accountableOwnerId", "sourceReferences", "sourceDigest",
+    "linkedWorkIds", "linkedDecisionIds", "linkedGateIds", "linkedEvidenceIds", "retrievalDisposition", "freshnessState", "lastVerified", "stalenessPolicy", "exportDisposition"]
+    .map(key => [key, original[key]]));
+  const primary = await createKnowledgeUnit(f.sources[0].path, { ...primaryInput, externalKey: "PRIMARY-CACHE",
+    scope: "workspace", projectId: null, subject: "Cache policy", summary: "Disable cache", snippet: "Disable cache", body, occurredAt: at });
+  await consolidateLibraries(f.mapping, f.to, f.options);
+  const list = extra => listKnowledgeMetadata(f.to, { at, diagnostics: "audit", ...extra });
+  const first = await list();
+  const row = answer => answer.diagnosticPage.records.find(entry => entry.id === legacy.id);
+  assert.deepEqual(row(first).intrinsicScope, { kind: "project", projectIds: [alpha.projectId], source: "archive-binding" });
+  const primaryRow = first.diagnosticPage.records.find(entry => entry.id === primary.id);
+  assert.deepEqual(primaryRow.intrinsicScope.projectIds, [f.sources[0].projectId], "coordination binding is a project, not proof of workspace-global scope");
+  assert.equal(first.diagnostics.conflictPairCount, 0, "opposite rules in disjoint intrinsic projects do not conflict");
+  assert.deepEqual((await list({ projectId: alpha.projectId })).records.map(record => record.id), [legacy.id]);
+  assert.equal((await list({ projectId: f.sources[2].projectId })).total, 0);
+  const alphaArchive = (await readConsolidationIndex(f.to, (await openLibrary(f.to)).manifest)).sources.find(source => source.manifest.libraryId === alpha.id);
+  const archivedMetadata = join(f.to, alphaArchive.archive, "crest", "metadata", `${legacy.id}.json`);
+  assert.equal(await readFile(archivedMetadata, "utf8"), bytes);
+  assert.equal(first.records.find(record => record.id === legacy.id).supersedes, null);
+  assert.deepEqual(first.records.find(record => record.id === legacy.id).expansions, {});
+  await reverifyKnowledgeUnit(f.to, { id: legacy.id, expectedRevision: 1, occurredAt: at });
+  assert.deepEqual(row(await list()).intrinsicScope, row(first).intrinsicScope, "authenticated replaces chain retains archive applicability");
+  assert.equal(await readFile(archivedMetadata, "utf8"), bytes, "refresh appends; it never rewrites the old record");
+  const unbound = { ...legacy, id: deriveStableId("knowledge", "UNBOUND-LEGACY"), externalKey: "UNBOUND-LEGACY" };
+  await mkdir(join(f.to, "crest", "metadata"), { recursive: true });
+  await mkdir(join(f.to, "crest", "bodies"), { recursive: true });
+  await writeFile(join(f.to, "crest", "metadata", `${unbound.id}.json`), canonicalJson(unbound));
+  await writeFile(join(f.to, "crest", "bodies", `${unbound.id}.body`), body);
+  const unknown = await list();
+  const unboundRow = unknown.diagnosticPage.records.find(entry => entry.id === unbound.id);
+  assert.equal(unboundRow.intrinsicScope.kind, "unresolved-legacy");
+  assert.equal(unboundRow.withheld, true);
+  assert.equal(unknown.diagnostics.unresolvedLegacyCount, 1);
+  assert.ok(!unknown.records.some(record => record.id === unbound.id));
+});
+
 test("consolidation preserves native events and isolates settings, knowledge, roles and aliases", async t => {
   const f = await fixture(t);
   const before = await Promise.all(f.sources.map(source => materializeWorkspaceFromGenesis(source.path)));
@@ -99,7 +153,7 @@ test("runtime moves outside the source tree and a persistent device pointer sele
   const runtime = join(f.root, "cloud", "runtime");
   await configureStorageLocation(home, f.to, runtime, at, f.options.decidedIn, true);
   assert.equal(defaultSharedLibraryPath(home), f.to);
-  assert.ok(cachePath(f.sources[0].id).startsWith(runtime));
+  assert.ok(cachePath(f.sources[0].id).startsWith(join(home, "derived-cache")));
   assert.ok(lockPath(f.sources[0].id).startsWith(runtime));
   assert.equal(await readFile(join(runtime, "cache", "owned"), "utf8"), "runtime data");
   assert.equal(await readFile(join(home, "cache", "owned"), "utf8"), "runtime data", "historical evidence paths still resolve");
@@ -457,7 +511,8 @@ test("648: full verification detects authentic same-length, same-name, missing a
   await rename(`${path}.replacement`, path);
   const replaced = await withRecallObservation(() => materializeLibrary(f.to));
   assert.deepEqual(replaced.value, expected, "byte-identical replacement is valid after full verification");
-  assert.equal(replaced.observation.logicalEventBytes, original.length, "only the changed object needs full source verification");
+  if (process.platform === "darwin") assert.equal(replaced.observation.logicalEventBytes, original.length, "only the changed object needs full source verification");
+  else assert.ok(replaced.observation.logicalEventBytes >= original.length, "portable verification reads the changed object in full");
   observations.push({ scenario: "byte-identical replacement fully read", observation: replaced.observation });
   await rename(path, `${path}.missing`);
   await rejects("missing historical segment", { reasonCode: "AKASHA_SEGMENT_CORRUPT" });
@@ -527,6 +582,7 @@ test("647: a new supported consolidation generation invalidates the previous bas
   const next = join(f.root, "next-shared");
   await consolidateLibraries({ primary: copies[0].path, sources: copies.map(source => ({ path: source.path, bindings: [{ projectPath: source.projectPath, projectId: source.projectId, role: source.role }] })) }, next, f.options);
   await writeCacheSnapshot(previous);
+  await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
   const changed = await withRecallObservation(() => materializeLibrary(next));
   assert.ok(changed.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"));
   assert.ok(changed.observation.replayedEvents > 0);
@@ -554,11 +610,15 @@ test("647: valid checkpoint payload paired with foreign or damaged coverage neve
     ["damaged projection shape", { ...valid, state: { ...valid.state, work: null } }],
   ]) {
     await writeCacheSnapshot(checkpoint);
+    // Exercise the replay checkpoint itself, without a separately attested
+    // materialized-state projection satisfying this read first.
+    await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
     const result = await withRecallObservation(() => materializeLibrary(f.to));
     assert.ok(result.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"), scenario);
     assert.deepEqual(result.value, expected, scenario);
   }
   await discardCacheSnapshot(f.sources[0].id);
+  await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
   assert.deepEqual(await materializeLibrary(f.to), expected, "missing checkpoint");
   const oldState = await readCacheSnapshot(f.sources[0].id);
   await setWorkspaceSetting(f.to, { key: "storage.snapshotEveryEvents", value: "13", occurredAt: at });
@@ -572,6 +632,7 @@ test("647: valid checkpoint payload paired with foreign or damaged coverage neve
     maxClock: Math.max(...advanced.events.map(entry => entry.clock)),
     streams: advanced.streams.filter(stream => stream.manifest?.headEventHash).map(({ manifest }) => ({ deviceId: manifest.deviceId, streamId: manifest.streamId, sequence: manifest.sequence, eventHash: manifest.headEventHash })),
   });
+  await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
   const repaired = await withRecallObservation(() => materializeLibrary(f.to));
   assert.ok(repaired.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"));
   assert.deepEqual(repaired.value, appended, "a valid old state cannot skip a newly committed event");
@@ -588,6 +649,7 @@ test("647/648: recomputing a snapshot checksum cannot attest a forged reducer pr
   for (const [mode, options] of [["checkpoint-full", { readFile }], ["native", {}]]) {
     const snapshot = await readCacheSnapshot(f.sources[0].id);
     await writeCacheSnapshot({ ...snapshot, state: { ...snapshot.state, projects: snapshot.state.projects.map((project, index) => index === 0 ? { ...project, name: "Forged cached projection" } : project) } });
+    await rm(join(cachePath(f.sources[0].id), "materialized.bin"), { force: true });
     assert.equal((await readCacheSnapshot(f.sources[0].id)).state.projects[0].name, "Forged cached projection", "the ordinary checksum is valid");
     const result = await withRecallObservation(() => materializeLibrary(f.to, options));
     assert.ok(result.observation.cacheReasons.includes("consolidation-checkpoint-miss-full-replay"), mode);

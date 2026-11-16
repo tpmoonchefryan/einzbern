@@ -1,0 +1,869 @@
+{
+  "schemaVersion": "einzbern.decision-delivery-cases.v1",
+  "sourcePolicy": "Source-derived public regression questions; source-disjoint holdout withheld from tuning. Not independent blind user prompts.",
+  "sources": [
+    {
+      "key": "EVAL-MIN-1",
+      "split": "development",
+      "identityDigests": [
+        "004ba43963c27539925a3a5f7372ee73eb487c7a08caf0a02293bcc8f887baf8",
+        "8d6c4391b4c06fc97d0fd0814b10408fd794ace489f3feaaa77564e333623ff5",
+        "934e2a8063f9ca92694ea00c8c6cb26907d311241f6daba42627160df8c6f26d",
+        "b113b0c5669517f9a7d2b3110af2a1e54366d5e4d4f1d5c4efa59710d17dc914",
+        "23287023b318e682395926093ee8fda1fa69395f4dbb75b6b1d21a2698533686",
+        "53e98bc26a15a6c5eb27eab7975d69c20c052aa7f8ee538d5987215bf7fe3cde",
+        "b596e129fbf5675b4acfb038c242ce92e95fcdf40627d6e0ee5b4b49c8b906d3",
+        "e11eaf5adfcfe42da7e9b03fce1895a7d7018b3a5266215c502645be1e6c2a31",
+        "605357e63957eb4225552f3d18373ffd779b631deb7fccaca2737304ed144d4d",
+        "a10da935373b577714fffe9245cb38a50fc6bf93ac5587c00321c4a75e335586",
+        "b1064971d0355aba6715ef3e1d3a1858e9ef512057020477d41d4d57ca01ba73"
+      ],
+      "contentDigest": "a4055b14631d87b08fa2bd9271c8e8fdb43abe55f47d7ee7f9121db9ae30b017",
+      "title": "采用阶段化验收与输入优化接续裁定",
+      "summary": "Owner采用阶段解阻与输入优化；独立复核已区分发布前准备验收和安装后最终结项。",
+      "decisions": [
+        "采用OWNER-PHASE-01阶段解阻：候选与publication仍执行顶层根；仅有因果证据证明是尚未受信安装当前候选导致的live检查red可单列post-install-required而不阻断本系列发布；原始exit/red保留。不得将未知/新增/无关red一并放行，源码安全兼容包身份链验证仍须通过",
+        "原始doctor/roster判据不改，stageDisposition单列。acceptanceVerdicts已运行成功的engine/DS行必须真实重绑定；只有指向被明确后置live检查的原始red可以后置，不以自写green解除递归",
+        "批准CI后受信安装及精确host-render：只补两宿主SubagentStart/Stop telemetry的--host claude或--host codex；计划可比较性先核销，必要备份/并发检查/用户字段保护/字节回读及真实触发证据分离；禁止硬改comparable或猜填未批模型",
+        "准备验收只要求415有效brief、416方案/同输入对照、417只读计划及当前候选阶段适用证据；416全程报告与417安装后动作不作为发布前置，其Story可进行中；不能要求新Goal或所有Story先complete才发布",
+        "保留当前engine1bfb521/helper5c5e617/DS610和PACK-A/B、Astra十二项决策与LUNA-R1/R2成果；新裁定使相关阶段绑定更新，不重跑原包实施；进入新的SolMax子代理统一验收",
+        "采用审计全部输入优化：当前有效brief需scopeDigest/逐条来源/覆盖索引/阶段文件清单；历史原件不删，必读scope及技能要求不摘要替代；主任务只收结构化差异与索引，按需读取原始日志",
+        "同轮完整已读未变资料不重复cat；合并小型只读探测；使用游标/摘要失效判定。Goal无变化续跑只核能改变动作的状态，保留工具连续三轮blocked纪律，不反复重跑全部doctor/技能参考",
+        "新Goal真实同口径计量纳入主与所有子代理：去重response_id，分输入/缓存/未缓存/输出/可见字节/时段/未知，不把隐藏或加密字段算零、不把工作量差异当现金节省；同输入对照不重做产品任务",
+        "新增STORY415/416归EPIC134，STORY417归EPIC128；399承接阶段验收与发布核销，386承接可信包与安装。主SolMax只编排，LunaMax实施及发布，全部准备包完成/blocked后按既有批量流程交AstraHigh或新SolMax，失败整包处理",
+        "Owner已清除目标旧Goal；派工目标保持01a09911及Code本地根，先get_goal确认后create_goal，不设token预算、不假完成或改内部状态。新Goal覆盖准备/验收/发布/CI/受信安装/live复核/计量；不主动回执至本产品讨论任务"
+      ]
+    },
+    {
+      "key": "EVAL-MIN-2",
+      "split": "development",
+      "identityDigests": [
+        "01cf21e905a972a871ab45c431995651292f0e271c77d84a9f53d1d238e822cc",
+        "29e32a867a14e812af0756ea8cad151dc6efd96d3fa3872591df835c49e54df2",
+        "7647264018753cbd874a67c7608aa5ebde4fd5b2a4af98dc26ae03e2ff7f874a",
+        "29775a939813c5cc4290449aeef74609bf7e315026091089b11b8fc661ef9813",
+        "16d2d65ae216ce12f222c8c1738f4c510db6903008d292e7bc4c64dc5ab39f7f",
+        "fb1ac5af1b967e43383d7d9a2e8ece9466ad38d981f7bc4ea1a04e3e8af5c658",
+        "85da92a2138f6866d24e0e9a5bfff2cc49861d35ef05471a6c2988c9520ef8ab",
+        "22085deff432d05cdd162fc9e6f6da0a679ace08e301522a598ec10a446d0a65",
+        "905e2b214e600676c2cc40238d88cd484e3b07d7fa4e63ff085ed48260248383",
+        "162944022252f08ec0cde1c860c513bfcd9a9fbc605a213826543a54747ee4d5",
+        "d143b8b719e87cbb2e8b8a7d23449269853a37edb889990f4f4be1e4245ff002"
+      ],
+      "contentDigest": "b3c202372021ea21dccc2440bf8d8e799b0c6a2b19bae099dd6d619e41c69d1d",
+      "title": "INIT-022 门户轨验收会:GATE-006 关闭、S218/S220 与 INC-127/128 收口",
+      "summary": "INIT-022 门户轨验收会(单上下文,立场为主线程转录非分头独立)。两张 INC 的复核命令由验收会独立重跑而非采信自述:INC-127 两副本均 INSTALLED_COPY_VALIDATED 且争议文件字节一致;INC-128 部署副本已在重铸谱系、dist 认识新状态、五分区全可读。S220 的 npm run proof 全绿含六条红腿实测。关 GATE-006,四单推 done,EPIC-066 done;钉完定义仅余第(7)项。",
+      "decisions": [
+        "GATE-006 关闭:钉完定义(5)成立",
+        "门户三面经公开面走通且红腿可辨",
+        "S218/S220 推 done;EPIC-066 done",
+        "INC-127 与 INC-128 验收通过推 done",
+        "复核命令由验收会独立重跑",
+        "门户五语言与配置项说明一并验收:语言集取自 ui-copy-state 契约",
+        "两条契约约束各有机器门",
+        "settings-catalog 未暴露 allowedValues 立 [key]",
+        "门户不硬写枚举成员",
+        "钉完定义仅余第(7)项 helper 重钉发布;推送与重钉继续 park 待单独授权"
+      ]
+    },
+    {
+      "key": "EVAL-MIN-3",
+      "split": "tuning",
+      "identityDigests": [
+        "034256a0f1523c459685e066d57536f2c90b42f74e00980111fe692c77f2e10b",
+        "57f0e2c867daf7a3b9b1fb8066b20dc5ea328a7ba2aecc1548cd3584e9929d5c",
+        "be8989122d069bec33f2a9c3966c2fba4d96a56b90b5897282abe14492d58c81",
+        "65f5809a0b138583258824f20c0f141cb0b6063affb0c0fcf8669e4f02bd7016",
+        "60a217dd75d82f468a71a9fd88ae2b789c34b0f9a4cff5aaca960c59e8f78380",
+        "bc74dde8374d36395311ae5d836d939162560a8e4311c39971ec7f8a572e852f",
+        "259e0fa0792638bad391cc129961c5031e6424ea69319f3b68a59e8c48386ec8",
+        "c26eaa5faf66e456339c564210b129573a56bbd8218c135c3def1abbba86eb8d",
+        "d55b16d22cf744fc597af4348f433284fff8c90a4d3d5211fcf851307a57da55",
+        "2e8feb76037b2187f5511574ebdf158d7b2f43c098d7902c03534b87f64c00d0",
+        "d5bb740b79960e3154d061c895e7329567fac9f844876d451ae241004c02b39d",
+        "4740f7af62b2d569778d0cbedda79524bea25ba6ad243ac730f9f540e65f32e5",
+        "aa6ee08d9930f6ae205e7bdb992a2ec9928609c040c1194043de2392ad7e2589",
+        "e5d27c79be81511afda11ac443e6f64f56733393a6f4ef45bbbb00a7674e6153"
+      ],
+      "contentDigest": "872232c0c8037c43cdaa946744391b94754c0cf4f1272ba635e866826b976245",
+      "title": "EPIC-002 开工：gate-v1 身份强制点裁定与 Story 职责表",
+      "summary": "扇出后读源立到新事实：事件哈希无密钥，尾部追加伪造对所有事件类型今天已然成立。据此证伪标记门控回放的首要收益（伪造者同样能补上回放所查条目，其反驳隐含隐晦即安全），而致砖代价属实。裁定采 verb-only，并将授权决策记入 gate extensions 供审计、回放只校验形状不重读文件。成文边界写三句。E02 六 Story 职责表随附。",
+      "decisions": [
+        "新事实 canonicalSha256 是无密钥纯 sha256（全链路无 HMAC）：任何有事件日志写权限者可读 head、构造 payload、自算自洽 hash 在尾部追加回放全绿的事件——对今天所有事件类型已然成立，非 gate-v1 引入",
+        "据此证伪 opus 所举手工伪造 gate.updated 在标记门控回放下同样不被挡住：伪造者既能追加事件亦能追加回放所查的身份条目（回放所查每项皆由同机公开数据可导出）；其立场隐含前提是伪造者不知格式，属隐晦即安全",
+        "裁定 采 (a) verb-only：强制点在 gate-transition 现场",
+        "修正 授权决策记入 gate 事件 extensions（执行 actor＋当时在册 authority 文件 digest）；回放只校验该条目形状精确（与既有 locator extensions 同一纪律），绝不重读外部文件、绝不把文件在场当作重放前提",
+        "驳回理由 (b) 首要收益是幻觉而致砖代价是实的：正常运维会让外部文件合法缺席，(b) 下整链不可读且与身份无关的历史一并陪葬",
+        "成文边界三句 交付 authorization 非 authentication／回放不防尾部追加伪造／任何非密码学的回放检查都不可能防它——闭合它属外部锚点程序不属 gate-v1",
+        "职责表 STORY-001 身份权威文件 schema 与 pins 轨读取器（复用 readAuthorityFile；含 actor→outcome-class 许可表）",
+        "职责表 STORY-002 gate-transition 消费该权威：现场核验执行 actor 是否被许可关此 outcome-class 的门",
+        "职责表 STORY-003 授权决策入 extensions 并令回放校验其形状精确（不重读文件）",
+        "职责表 STORY-004 负例证明：未被许可身份现场被拒且零链写入；无文件或 digest 不符现场被拒",
+        "职责表 STORY-005 兼容性证明：三条生产链原字节回放全绿；含身份门的链在完全无 authority 文件的机器上回放成功",
+        "职责表 STORY-006 边界证明与文档：以测试证明绕过 verb 的拼接事件回放予以接受（边界不靠口头承认）；成文三句并审查对外措辞不得写防篡改或审计轨迹",
+        "执行序 001→002→003→004／005 并行→006 收口；Subtask 各 Story 开工时按需裁"
+      ]
+    },
+    {
+      "key": "EVAL-MIN-4",
+      "split": "tuning",
+      "identityDigests": [
+        "09d433cb3542d606bd1a2618302a793f6280822a229f83658ba922a057ee657b",
+        "47596aa9fc0a217d894d25dea63d3e35b2642f340cdb8f00e24bcbb353db6954",
+        "884bff0eb3589ee04a66fccd2a69ad383a583e76ea7a4f98ff2dd30eade4f804",
+        "d568ec43aaefea0c6d6399d84c77b6fcf04b09d3ec73d92ab8e8d0181a3eaf2c",
+        "6caf1d885689f7de14f0d75cf5c062b7fdd4c9aae489aee208b7a529a60a97ea",
+        "a015f471eefc88733e3d863af859aedd2e0f3e3401ae1b1595ce1f786c5f120f",
+        "2fbc1851970b2575a7904099b275e1642386c191c4f677e39e1dedb935b003ea",
+        "fd57f0fdd80844ad9135a92bcd87e684183639bdb0740bd489a4a7dfdb74e136",
+        "59780d86ec328f496d858cae5805c26ccf6acebb2f573028f41c152f75bc9c7c",
+        "4d6ba93cbee4bfbee79d0b7df10c68ea1a16bad61bbf54d60ecffc2d9d4055e9"
+      ],
+      "contentDigest": "431aaa28842e9af5dfb0313917749bd3dd5d8dea6138b16d29c45dd2a3b5d4b3",
+      "title": "Owner批准机器模式与实际子代理派工一致性",
+      "summary": "Owner模式接线与推版重装授权已采用；独立主力文本复核通过，实际实施验收仍待执行。",
+      "decisions": [
+        "Owner批准非抢占纠偏，当前在途子代理/测试/事务保持，安全单元结束后纳入426/427；下一常规成果验收直接新的SolMax，不设置每轮必经Astra技术预审",
+        "当前cross-project工作区允许配置codex三档flagship=gpt-6-astra/high、main=gpt-5.6-sol/max、economy=gpt-5.6-luna/max，并选择frontier；保留其它宿主与未知字段，不将本机模型写成所有部署默认",
+        "明确问题决策/成果验收/实施分类，当前工作区frontier子代理映射分别flagship/main/economy；旧dispatch-review兼容语义明示，主编排Sol独立固定；eco原义保留并隔离测试，不盲改",
+        "派工前读取真实引擎mode/class/host解析结果作为实际spawn模型参数来源；Agent调用原生子代理，引擎不依赖App内部或兄弟仓；空结果/缺配置/未知类/漂移拒派，不自动升级旗舰",
+        "实际spawn与可得turn_context/遥测必须对照引擎解析及配置版本digest、work/Pack/phase，不只比较caller自报expected；不可观察字段unknown，不假身份认证",
+        "隔离环境先验证模式切换/空tiers/错model-effort/分类混用/配置漂移和正确解析，不等重装后再测试；必要真实宿主派工有界只读，不为测试扰乱live正在执行",
+        "426/427纳入重装前新SolMax最终验收，通过动态必要发布门后Owner授权正常推送新版本及对应新tag/release；随后精确适用CI成功或严格既定N/A、信任/备份/目标/受管条件齐后重装本机Workflow/helper并验证实际模式派工",
+        "旧历史清理/对象删除范围不扩大，2.40/2.50及其它预算保持，不force-push或移旧tag，不关安全检查或伪造信任；未批准的其它Owner-only事项仍独立",
+        "保持原目标Code本地根和Sol只编排/Luna实施/Astra整批决策/新Sol验收，全角色每新轮新实例fork_turns=none；旧Goal按真实机制接续，不主动回执到产品讨论任务"
+      ]
+    },
+    {
+      "key": "EVAL-MIN-5",
+      "split": "holdout",
+      "identityDigests": [
+        "0ec7014d67942c782f1c62a7737e59c3b512430effc4d2df8e007518e5ebfcac",
+        "b620354eda1bdf2e62743667af248036e309666c493a29fa6e3b702b3afd078a",
+        "4ada444ea5a0ecd856b41914b18d0f5a1f0c439459e446262a35efe55109f68f",
+        "97507257ed904bb62fda3a32f622c4aad858253a61ec9b1201dd6d7f9167923f",
+        "c8884368d9f94249332a590414bf05c71bedf6a15b56dd3980d820a868fd4a24",
+        "59508fb4a4b08f507ec97c2234b2ef037a5b431405bd87d0f63b06e19ecbdadd",
+        "fe44e68cd32a47655a9541fbc49d50db9abd3f6e2a74265a4a537805b6b3025c",
+        "bf889f8804a94db730617c8d5b57da14d3f889a69667d9ec96fcf855eaf1c1a7",
+        "8fe466b7674a3f9e4c1c199ebc99f1699a51d902bd75a4ecef363670b5b8a6ee",
+        "3255c40787cc34fac0221a4da4bdc8ed264aaacd0ceb895fed1d8552d7a94028",
+        "65ea22c483b97040782f73bd74509da5741f7d5ccbec03f92606ac3ce2c80efa",
+        "895e8247410ccaf88c91ccf01c83c6f7e34c33dfe26ef9d5f26cd5fecb68a6ae",
+        "9593044228d3e9357e260d6d147d618eef73a3594ba204b0871fe6f2e24293b3",
+        "6708d37fb4b1d0b8ee3b4ea74cb27095a76a6535ea44ac61c3d66b5f953cb059",
+        "ff36ea2e2bdfccb21add448b1fce02b9216fc1f75c56b8e9c9a0622f4a1f136b",
+        "60b30bff8e2618841c4d8155e86201d823eda4ab1df7c60f1d0e6ea825b4174c"
+      ],
+      "contentDigest": "8461db875f0505f1e98dfaf05bf984627dc5300d3511c743a6cb72a34962d560",
+      "title": "dsh-tcrn-workflow-plugin MVP 一次性裁决与分区收编",
+      "summary": "Owner 对 dsh-tcrn-workflow-plugin MVP 裁决包 v4 一次性裁决:O-1..O-7 全部按推荐项(a)批准,D1-D12 十二行协调文本整包采纳(D12 两段默认含 P6 拆分修正);补充要求执行 ②=A 就地新建分区 dsh-tcrn-workflow-plugin(DSH-TWP-)并划分工单落区:INIT-047+STORY-320..328 落新分区,既有 INIT-045/046、STORY-310..318、收编 Incident、上游 INC、backlog 锚留 cross-project。",
+      "decisions": [
+        "[\"O-1 对等参照物=adapter 惰性/KEEP INERT 面",
+        "零 Stop 面保持",
+        "stop-pact 不追\"",
+        " \"O-2 同等能力口径=与参照 adapter 实际出货能力同等\"",
+        " \"O-3 上游零字节例外=接受 AGENTS.md 拓扑行增改+chain-validate 6→7 为 ②=A 显式例外\"",
+        " \"O-4 零 Stop×fail-open 摘要真空=显式接受为已知边界\"",
+        " \"O-5 agent:dsh=不预登记",
+        "实际执笔者实名",
+        "确需先登记再使用\"",
+        " \"O-6 INIT-047 单一承载两阶段",
+        "STORY-326 改题诚实面边界登记\"",
+        " \"O-7 D1-D12 十二行协调文本整包采纳",
+        "D12 两段默认含 P6 拆分修正\"",
+        " \"②=A 就地新建分区 dsh-tcrn-workflow-plugin(DSH-TWP-)",
+        "落区划分按 Owner 补充要求\"]"
+      ]
+    },
+    {
+      "key": "EVAL-MIN-6",
+      "split": "holdout",
+      "identityDigests": [
+        "1363099521dd3ee1e3ddc2846e9e054e8effa6d05ce861e1c901c4f05464ee1c",
+        "f5922a31787c5610e22d345d62976880181ac6776ecd836ef3335c9bdad041da",
+        "d4cfd171218abec54048f3448c422f1b4ba2e5662271d6fd9eb0d0453f24c4c0",
+        "182c8862b485e22f4540af2c640a3237e0c2898a5b04e252be0021d0cfa6f05a",
+        "a1edf3863ad036edc5ea6db90e63dd06a56976081c456931c2c91c6bb949dcd5",
+        "74cfc8caa32d78c35d114b69d1bd6e5c958d24be4ffc8ba97c8bcca10375655d",
+        "ef375e1bdf7e2d6380409ff4807ecab4e0862a4041a991ecdd94597f38876b27",
+        "163015a4d60f4b70d90ba0023582412887e5213883729151a48b979285f27f5c",
+        "fd3864491859330c57c9fd0abcff9b8ab03f4c4fa26ba46d0c684c00206da094",
+        "621351d29622774b664017fd41b294cd5b47b4da3096292815f9c7c12efbe166",
+        "24083961ed299c29cfdb9eac03ef433f6124bb4726cc0f5cacc3fdfd12cf4dd9"
+      ],
+      "contentDigest": "f618c480c2658eeb4182d592e5215fefc3d1b9f7a7315a5bbf98feb351fd2680",
+      "title": "EPIC135 fourth machine closeout independent decision",
+      "summary": "EPIC135第四轮：仍需控制器闭环与三份派生产物末修；预算非唯一Owner项；已绿证据保留。",
+      "decisions": [
+        "Fourth independent review still requires one minimal Luna final-repair pack. Budget is not the sole Owner-only item. New Sol final acceptance is not authorized. Matrix SHA25614e21b206c26f910d70414298f87727749f1ebcf31b249efec02251a6742a2e6 and pack SHA2562ce387caea082a39304a1555ae7de9f473b1b58d83a7e6ca8cd46e804ff76d45 are in ASTRA-CLOSEOUT-DECISION.",
+        "PROOF_ARTIFACTS_STALE is independently reproduced and is ordinary in-scope generated closure work. Source-allowlist has the same set with changed canonical ordering; verification-map retains9claims but7fixture digests change from package.json/allowlist inputs; rc1 manifest follows verification-map and remains accepted=false. Run the existing generator after the last code change and verify CURRENT; no separate Owner authorization or new work scope is needed.",
+        "Formal runner0 is appropriate while actual reds remain. However the current path has no source-bound implementation-unit completion receipt interface and still checks active Story status directly; index says formal gates after lane acceptance. This creates a latent acceptance cycle even after reds are fixed. Add the approved stage-completion-to-qualification path without faking Story done and prove valid/absent/drifted receipt cases.",
+        "Production now calls the dynamic planner/executor but its source observation ignores committed changes: clean09e sourceDigest is hash(empty array) despite10 committed delta files. Before/after getInputs returns the same captured impact object. Production does not look up prior successful evidence. Relative in-scope process commands can become unknown then be dropped from agent/write reports. Close the actual baseline/input/issuer/runtime-scope loop in the two controller files.",
+        "Self-written receipts with public tcrn-code-owned-runner markers and arbitrary storeRoot still reuse; an untrusted push-gate suffix is accepted. Resealing public planDigest after removing a required root still returns executable=true with0execution. Production writer descriptor lacks the reader-required nested status fields and its official relative command also fails the regex. Unify real writer/reader and use controlled issuance/query authority and trusted original required coverage; marker strings and self-hashes are not provenance. No new actor PKI is required.",
+        "Retain actual fixes: coverage green with4tests/17assertions;417 native renderer subject and all3 resealed group mutation negatives pass;416 duplicate aggregation counts once and conflict/missing IDs remain refusal/unknown. Do not reimplement these or replay midpoint103 and unchanged DS/history.",
+        "Candidate identity is genuinely fixed for this subject: clean commit09e89576b1e02f725efb10fb66b2a2b794862e1d/treecbc90af2bc42081677f829fde33f51f091185898; all602tar members match Git blobs;9asset pairs and61manifest files match;570raw offline streams and139fault cases are checked without rerunning the sweep. Candidate is untrusted/unpublished and later repaired source requires matching final closure.",
+        "Budget remains64427/27706=2.3254 over2.2067 with3289conservative lines. No exception is approved. Generic fixture-compatibility retention and zero savings do not establish sole-Owner status while machine defects remain. After the bounded repair use final measurements and concrete replacement/retention evidence; global max(exceptions) has no automatic expiry. Do not repeatedly dump AST or promise unproved line removal.",
+        "Three-step next package only: two-file controller closure and targeted existing tests; deterministic3file proof generation; normal final source/plan/receipt packaging. Correct cwd/tuple/stage declarations from actual producer data. Wait until the last real source/policy change before redoing affected candidate/offline proof; exact matching four-input reusable roots execute0times.",
+        "Prior receipt-gap and timestamp corrections remain; real host/model reception and final cost comparison are later or unknown. No product source or budget policy or work status or acceptance verdict or publication/install/live action or393/INIT closeout was changed by this review. These two review records use native fresh numeric CAS and actual UTC agent:codex with absolute partition attestation and readback."
+      ]
+    },
+    {
+      "key": "EVAL-HOOK-1",
+      "split": "development",
+      "identityDigests": [
+        "5a3e6ca21cd09f7b497ba60d3faec15111fcaebc8a7f13138acdad56212aff69",
+        "e9e18ae3fe057e683d6f3a36cefd423e31fcbacc95b5bf19aa128c62b012c84f",
+        "703a5e86e591e3e7e55a08a75d0ec1eca4fe41ad96dd7c4951eb6247aed5a810",
+        "9c594b980e3e59facd0c79f60738f30366a278e4e2617b5da617485de928dab9"
+      ],
+      "contentDigest": "311139cee3fc768c01015259ada46f068a8f4fa716040251cbefe6035f028f05",
+      "title": "Owner: add the SubagentStop hook to the current Codex first",
+      "summary": "Prioritize the current Codex hook wiring and real trigger verification.",
+      "decisions": [
+        "Owner 于本对话明确要求「本次先在codex加好hook」。优先在当前 Codex 宿主添加并接线本次 SubagentStop hook，所需脚本、宿主 hook 配置与官方审查信任由模型办理；随后验证实际触发。此指令是对 MIN-385 D3 开发/隔离验证范围的当前宿主 hook 落地补充，不代表整个引擎安装、其他宿主接入或新 hook 的发布/推送已经获准。原有最小收集协议、全新代理、不复用结束代理和主对话不活动轮询的限制继续适用。"
+      ]
+    },
+    {
+      "key": "EVAL-PREDECESSOR-1",
+      "split": "development",
+      "identityDigests": [
+        "63037f7c673d920fb33448cf50d83b332d2def33b49f1a85522ffdf55f4f7e33",
+        "b54032ac59a06852dbc83e75e4ec2efed7c4ab05fb5ac092a88b6e206f100e9f",
+        "7faa38f2d461a387b7c4b3f825a86da591636a4dcc6e6675f26064cc0787c028",
+        "33f355c0ca526fef08c2ff1cbb1847378175332d469ab9b3e7a5690d4f7c4439",
+        "db57c4dc79cb9ffc3df70c24ecae5a6aeb0680334c63252d9b16ca8d8404e2bb",
+        "9c7baa27a912ab0410db820350f25968e93c64c219b3707048799907ae01d3e3",
+        "5123e7f0cf5d9ca17ded8b434c4b9aa2ebd73086604bcf6e6b8014e030b36c46",
+        "bde5b6e7d1c17b5d3b080290d56d4c3245b2a234957021c681bf00e781b835e1",
+        "e396ce5028a5b20cb2c402f43e82ba2b660709bd49a997073f9b3c34f5b53d1c",
+        "7d4689980b6b1bc58f3a2a7b742eecb8e77a7134cdf8f0281f4cb30762b81200",
+        "7d81537a5bc62c703110f5220bee8047380694216ef1f133f3679c60937772e0",
+        "dfe9c227dfdc8eebc14f66ae3ea88099d7774dc1aefeb8a7d1758d65d3ac89cf",
+        "0da2f0989a601cbb705348fa1af29d624dc64c3efe90190505577f5056238375",
+        "0059ec31e13b191cdb1bbd3b0abd6b58679b0f13a555ff9c42bdd936ce7b967e",
+        "bdda91afb09583d43b854223298f6678c69c117c015abf858ba6cfdda703aeaf",
+        "81d2f62f3811ed831b064d69fcb1245325a8e72d15515dbceaf16b6d996c39af",
+        "eee8c367b1f72d427c9dba859829e20da2775f9255691b58b77a3caff344b9fd",
+        "2380e3b3c03f5ce5bc2a01819e8105fe050232520679081fcd201c0a68f7f47d",
+        "236fe11119ad0ad421fe69012d2742f9596d55a7ac596b54fb76f9f6874b7a2c",
+        "030ff5e158b96d7d9b6e8ac420677a54994b109d545a7e0c9a95a14a74761778",
+        "4632518adae6353fb6d4b1d134aaf87989b8e841048b82169f5a42e3e10287a6",
+        "bc93162115fd2d0bcc72f6acd78ed6db5fc33a60ff5f9f65a619e23a427e4ea4",
+        "4c57b19f23671b14d96a514eee4a209a566cbf63ae28b0f0b632d052ac94db48",
+        "6ad686a9695167c166b9a0555e82afcdc1ccd7e88fd79cc4a8930224c745badb",
+        "1bc4c2aee6975f66cffbc7352afb8fd202c9d5a300b7bdc9e805dff86bc03ce1",
+        "3a1bb576b06b936a316b97ee3ac41cd2c4a1168ad49c7986f35ed8bf52effb9a",
+        "3fa0fc1cf4ecaa95d7b3c2f7f8e372f011b17a823a8c58e7f4ca68260b617b46",
+        "8dad9c17e9e0c7852068603f81f90e9cf663d88def750849bce29e488af2af41",
+        "58f3d018f91a77a2b001d01fe3a9c8c41dceae0a204c98e76c37b99aa38104c0",
+        "e8412824e16a201b6cf4d1e7927c92a28458ca4d8ae7f0366861480cb16383c9",
+        "8944b880f105bce2c0cbdcbf45e33e9ac7dab16a27c8d7aac33a56aa8200a28b",
+        "70563b8707776cbc9161368d37e486faa9fc37afb258bdf9485824ae43ac3ac8",
+        "a7a9fd74f152e4384e21eb409cc3e1ee431c5ca90788570dc51d472d3daf9b18",
+        "423132f36160141152e45b0139c2a62f3afa19dc21d82342c550130c984895f8",
+        "eaedfd76321432f0e083e9e378e31d0ebd53fc011098047bf7f3a19bd69d91b2",
+        "14342cbabacadd7c38b291fccf496d9648cf896d9603d2b71751aea532309357",
+        "90f61b0f5c89ba45309854dc5ee7f97f5fa5386f201aceb9cc99415c7540ef05"
+      ],
+      "contentDigest": "880141af42c4a2122e865b7ef992b0fd2ef05eebdd253ac3cd8d7ee4c3a8ea8f",
+      "title": "Owner：以双对话协调作为 Codex 唯一 workflow 替换旧 hook 路线",
+      "summary": "Owner 选择替换旧 Codex hook 工作流，唯一采用 Desktop Sol/Luna 独立双对话协调；不影响其他宿主，沿用 INIT076。",
+      "decisions": [
+        "（Owner）在本次预算评估后的选项中明确选择「替换现有 hook 流程」，随后进一步限定「Codex Desktop 双对话协调模式 将作为Codex workflow的唯一方案存在，不影响其他宿主」。本次在已有 INIT-076/[reference] 与 EPIC175 接续，不创建第二 INIT，保留原身份、历史与已终态记录。",
+        "（Owner 本轮替换裁定的当前 Codex 执行契约）以独立 Sol 决策对话与独立 Luna 批次协调对话组成 Codex Desktop 唯一工作流。Sol 给定整批目标、阶段和下一批后停止空轮询；Luna 按当前引擎分档和原批段派新鲜工作代理、等待并收回，批末一次回报唤起 Sol。明确区分协调者与可按已批准批段使用的收集者：收集者只收集原始状态与结果位置，不擅自派工、集成、判断或取代协调者。不再要求每批强制一个 collector，不再以 SubagentStop 身份拦截和原生父子退出回传作为 Codex 工作流。保存可恢复的批次、阶段、工作版本、实际代理/attempt、结果位置及报告交付状态；恢复不得重复派工或重放完成批。此裁定替代 MIN-388 D2 中旧 Codex hook/collector 执行路线，不将该旧路线保留为 Codex 活动备选。",
+        "（保留不冲突边界）仅替换 Codex；Claude Code、DSH、dot 等其他宿主的配置、生成规则、有效行为均保持。保留当前任务分类及真实模型/effort解析、代理新鲜实例与宿主硬容量，保留原实施、集成、独立验收、判断、链写和发布职责。沿用当前批量方法、已有 INIT076/EPIC175/Story/Subtask 身份；旧 16 逻辑槽与 E1/E2/F/H 的独立职责在新范围中作显式退役/保留映射，不静默删除判据或新加执行阶段。引擎仍是治理唯一写入者，运行状态只作执行记账，不作为授权或第二条链。",
+        "（研发交付）将唯一 Codex 模式、角色边界、幂等派工/回报、压缩或中断后的恢复、旧 Codex owned hook 正常更新退役及兼容性写入 E 权威源码，按既有 E→M 同源生成路径交付，不手改 live Skill 或控制树。测试覆盖重复/迟到通知、unknown/失败/取消、身份或版本漂移、恢复不重复执行、非 Codex 不受影响及正常打包引用。新源码、模拟、已运行 DS 双对话证据、当前候选真实 Desktop/安装升级事实分开记录；未测试的候选能力保持未验证。",
+        "（预算与权限）研发输入为本次 11小时35分钟、45对话、3748唯一响应的审计证据 .tcrn-artifacts/audits/ds-luna-overnight-20261030/；932.03 Standard 参考credits、协调同量改用Luna的92.2%单价差异不等于订阅账单或受控实测节省。开发时间/token/维护预算保持未知，按原批方法一次处置。源码与必要本地验证获本次固化请求覆盖；不据此执行安装、live host 配置切换、推送、tag、发布、部署或代签 Owner 目视。"
+      ]
+    },
+    {
+      "key": "EVAL-RETIRE-1",
+      "split": "development",
+      "identityDigests": [
+        "4632518adae6353fb6d4b1d134aaf87989b8e841048b82169f5a42e3e10287a6",
+        "c533b6fe02daafbd6651b7f1e208cfdff337ecb97eb61b3e931da45f487ee4c1",
+        "bc93162115fd2d0bcc72f6acd78ed6db5fc33a60ff5f9f65a619e23a427e4ea4",
+        "60aceb846f9a38c7b3b42e2daa4d9069490e7ec593e39023ce070a08f8ce9c06",
+        "599316dc88e775a5c9fa7b3b202c657899cdc8ba1c50ceab39f1077efe6ec982",
+        "505890e1e0e8b0e2a1f3e40fda74b75932aa51d91694cab61d2f29b894a484c4",
+        "6ad686a9695167c166b9a0555e82afcdc1ccd7e88fd79cc4a8930224c745badb",
+        "cdf540f6d454a2cab2c21753a6c60fe7941c06240924da7fb2a50cfc12ea1385",
+        "1bc4c2aee6975f66cffbc7352afb8fd202c9d5a300b7bdc9e805dff86bc03ce1",
+        "43652d98fed250971e7ce05dd419bd54669c679d39fe867771a2e1cca1264820",
+        "b650a15c13f1c2313c6d2224c33596aa662403e97be4cdeda3711215f60f84a8",
+        "85b06ad455637619142df1db289366746ec743481c11bbece12f5f3282d8d2e5"
+      ],
+      "contentDigest": "51f14f630dd27667e545f6b370ab6bd2c5f7f0c472ddb3ce7d4022c7bee0564d",
+      "title": "Owner：Codex 类别化双对话、无收集者、可选旗舰与 PR 实施授权",
+      "summary": "沿用 INIT076；类别化主力/经济，旗舰可选，完全移除 Codex collector，采用 Owner 本地验证并授权实现和 PR Ready for Review。",
+      "decisions": [
+        "（Owner 修订）Codex 唯一工作流为主力独立决策对话与经济独立批次协调对话；方案仅使用主力/经济类别，不指定 Sol/Luna 等具体模型。主力给定整批目标、阶段与下一批后停止空轮询；经济协调对话按当前任务类别路由与退回阈值派新鲜工作子代理、直接等待和读取批次结果、批末一次回报。完全移除 Codex collector 子代理机制，包括可选角色、cap 豁免、专用槽位、SubagentStop/CollectorWait 保活与活动 fallback；历史证据保留。主力/经济双对话不成为另一层 collector。",
+        "（Owner 安装配置要求）main/主力与 economy/经济是双对话模式必需的稳定 category；flagship/旗舰作为默认分组之一一并引导，但用户可以不配置其模型组。安装引导应提供三个分类，并经受支持配置入口完成当前所选宿主的真实模型组、effort、任务路由及升档策略；不硬编码特定模型、不将空分类当配置完成。用户暂缓配置时仅相关模式未就绪；更新/修复幂等补缺，保留已有有效模型、旗舰与自定义分类及其他宿主策略。",
+        "（Owner 已验证事实与测试边界）Owner 明确多独立对话协调在本地已连续运行一晚无问题，无需 dot 再验证其可行性；随后明确「多对话协调机制你无需测试也无法在dot环境下独立测试，写好后我会在本地审阅PR」。因此本轮不派真实本机多对话测试、不把 dot 无法重做真实唤醒试验设为 PR 交付阻点。保留源码/自动化回归、规则语义、安装升级与非 Codex 隔离检查；Owner 本地审阅属于独立验收，不伪称 dot 已测试或最终候选已通过 Owner 审阅。",
+        "（Owner 研发与发布授权）修订现有 INIT-076 后直接拆单实施，按既有 A/B/C/D/E1/E2/F/G/H 职责与依赖推进并走 PR 流程。用户连发「本次明确授权PR推送和Ready for」及「Review」，合并理解为明确授权 PR 推送及 Ready for Review。保持标准贡献分支/PR 审阅流程，不据此代替 Owner 审批、合并、发布、部署或改动真实宿主配置。旧预算审计 11小时35分钟/45对话/3748唯一响应及参考 credits 保持历史来源，不作为本轮实测节省；开发成本未知按实际记录。",
+        "（保留并具体化宿主隔离）本次工作流替换仅 Codex 生效。Claude Code 与 DSH 保留单主对话协调子代理及原生完成通知；dot 保持自身独立策略。安装接线、设备 hosts.codex 策略、专属规则导航和执行入口均以明确宿主分流；未知宿主不得默认启用双对话。正常升级仅退役已核验归属的旧 Codex owned hook，保留用户修改及无关 hooks。E 权威源码经正常 E→M 生成交付，不手改安装技能或受治理投影。恢复/重复/迟到/unknown/取消/漂移及实际硬容量契约保留，运行记账不创造授权。"
+      ],
+      "supersedes": [
+        {
+          "decision": "EVAL-PREDECESSOR-1#D2",
+          "by": "D1"
+        },
+        {
+          "decision": "EVAL-PREDECESSOR-1#D4",
+          "by": "D3"
+        },
+        {
+          "decision": "EVAL-PREDECESSOR-1#D5",
+          "by": "D4"
+        }
+      ]
+    }
+  ],
+  "cases": [
+    {
+      "id": "source-1-topic-2",
+      "source": "EVAL-MIN-1",
+      "split": "development",
+      "category": "D2",
+      "query": "原始doctor/roster判据不改，stageDisposition单列。acceptanceVerdicts已运行成功的engine/DS行必须真实重绑定；只有指向被明确后置live检查的原始r",
+      "decision": 2,
+      "excerpt": "原始doctor/roster判据不改，stageDis"
+    },
+    {
+      "id": "source-1-key-2",
+      "source": "EVAL-MIN-1",
+      "split": "development",
+      "category": "exact-key",
+      "query": "EVAL-MIN-1#D2",
+      "decision": 2,
+      "excerpt": "原始doctor/roster判据不改，stageDis"
+    },
+    {
+      "id": "source-1-topic-8",
+      "source": "EVAL-MIN-1",
+      "split": "development",
+      "category": "D8",
+      "query": "新Goal真实同口径计量纳入主与所有子代理：去重response_id，分输入/缓存/未缓存/输出/可见字节/时段/未知，不把隐藏或加密字段算零、不把工作量差异当现金节省；同输入对照不重做产品任务",
+      "decision": 8,
+      "excerpt": "新Goal真实同口径计量纳入主与所有子代理：去重resp"
+    },
+    {
+      "id": "source-1-key-8",
+      "source": "EVAL-MIN-1",
+      "split": "development",
+      "category": "exact-key",
+      "query": "EVAL-MIN-1#D8",
+      "decision": 8,
+      "excerpt": "新Goal真实同口径计量纳入主与所有子代理：去重resp"
+    },
+    {
+      "id": "source-1-topic-9",
+      "source": "EVAL-MIN-1",
+      "split": "development",
+      "category": "D9",
+      "query": "新增STORY415/416归EPIC134，STORY417归EPIC128；399承接阶段验收与发布核销，386承接可信包与安装。主SolMax只编排，LunaMax实施及发布，全部准备包完成/b",
+      "decision": 9,
+      "excerpt": "新增STORY415/416归EPIC134，STORY"
+    },
+    {
+      "id": "source-1-key-9",
+      "source": "EVAL-MIN-1",
+      "split": "development",
+      "category": "exact-key",
+      "query": "EVAL-MIN-1#D9",
+      "decision": 9,
+      "excerpt": "新增STORY415/416归EPIC134，STORY"
+    },
+    {
+      "id": "source-2-topic-2",
+      "source": "EVAL-MIN-2",
+      "split": "development",
+      "category": "D2",
+      "query": "门户三面经公开面走通且红腿可辨",
+      "decision": 2,
+      "excerpt": "门户三面经公开面走通且红腿可辨"
+    },
+    {
+      "id": "source-2-key-2",
+      "source": "EVAL-MIN-2",
+      "split": "development",
+      "category": "exact-key",
+      "query": "EVAL-MIN-2#D2",
+      "decision": 2,
+      "excerpt": "门户三面经公开面走通且红腿可辨"
+    },
+    {
+      "id": "source-2-topic-8",
+      "source": "EVAL-MIN-2",
+      "split": "development",
+      "category": "D8",
+      "query": "settings-catalog 未暴露 allowedValues 立 [key]",
+      "decision": 8,
+      "excerpt": "settings-catalog 未暴露 allowed"
+    },
+    {
+      "id": "source-2-key-8",
+      "source": "EVAL-MIN-2",
+      "split": "development",
+      "category": "exact-key",
+      "query": "EVAL-MIN-2#D8",
+      "decision": 8,
+      "excerpt": "settings-catalog 未暴露 allowed"
+    },
+    {
+      "id": "source-2-topic-9",
+      "source": "EVAL-MIN-2",
+      "split": "development",
+      "category": "D9",
+      "query": "门户不硬写枚举成员",
+      "decision": 9,
+      "excerpt": "门户不硬写枚举成员"
+    },
+    {
+      "id": "source-2-key-9",
+      "source": "EVAL-MIN-2",
+      "split": "development",
+      "category": "exact-key",
+      "query": "EVAL-MIN-2#D9",
+      "decision": 9,
+      "excerpt": "门户不硬写枚举成员"
+    },
+    {
+      "id": "source-3-topic-2",
+      "source": "EVAL-MIN-3",
+      "split": "tuning",
+      "category": "D2",
+      "query": "据此证伪 opus 所举手工伪造 gate.updated 在标记门控回放下同样不被挡住：伪造者既能追加事件亦能追加回放所查的身份条目（回放所查每项皆由同机公开数据可导出）；其立场隐含前提是伪造者不知",
+      "decision": 2,
+      "excerpt": "据此证伪 opus 所举手工伪造 gate.update"
+    },
+    {
+      "id": "source-3-key-2",
+      "source": "EVAL-MIN-3",
+      "split": "tuning",
+      "category": "exact-key",
+      "query": "EVAL-MIN-3#D2",
+      "decision": 2,
+      "excerpt": "据此证伪 opus 所举手工伪造 gate.update"
+    },
+    {
+      "id": "source-3-topic-8",
+      "source": "EVAL-MIN-3",
+      "split": "tuning",
+      "category": "D8",
+      "query": "职责表 STORY-002 gate-transition 消费该权威：现场核验执行 actor 是否被许可关此 outcome-class 的门",
+      "decision": 8,
+      "excerpt": "职责表 STORY-002 gate-transitio"
+    },
+    {
+      "id": "source-3-key-8",
+      "source": "EVAL-MIN-3",
+      "split": "tuning",
+      "category": "exact-key",
+      "query": "EVAL-MIN-3#D8",
+      "decision": 8,
+      "excerpt": "职责表 STORY-002 gate-transitio"
+    },
+    {
+      "id": "source-3-topic-9",
+      "source": "EVAL-MIN-3",
+      "split": "tuning",
+      "category": "D9",
+      "query": "职责表 STORY-003 授权决策入 extensions 并令回放校验其形状精确（不重读文件）",
+      "decision": 9,
+      "excerpt": "职责表 STORY-003 授权决策入 extensio"
+    },
+    {
+      "id": "source-3-key-9",
+      "source": "EVAL-MIN-3",
+      "split": "tuning",
+      "category": "exact-key",
+      "query": "EVAL-MIN-3#D9",
+      "decision": 9,
+      "excerpt": "职责表 STORY-003 授权决策入 extensio"
+    },
+    {
+      "id": "source-4-topic-2",
+      "source": "EVAL-MIN-4",
+      "split": "tuning",
+      "category": "D2",
+      "query": "当前cross-project工作区允许配置codex三档flagship=gpt-6-astra/high、main=gpt-5.6-sol/max、economy=gpt-5.6-luna/max",
+      "decision": 2,
+      "excerpt": "当前cross-project工作区允许配置codex三"
+    },
+    {
+      "id": "source-4-key-2",
+      "source": "EVAL-MIN-4",
+      "split": "tuning",
+      "category": "exact-key",
+      "query": "EVAL-MIN-4#D2",
+      "decision": 2,
+      "excerpt": "当前cross-project工作区允许配置codex三"
+    },
+    {
+      "id": "source-4-topic-8",
+      "source": "EVAL-MIN-4",
+      "split": "tuning",
+      "category": "D8",
+      "query": "旧历史清理/对象删除范围不扩大，2.40/2.50及其它预算保持，不force-push或移旧tag，不关安全检查或伪造信任；未批准的其它Owner-only事项仍独立",
+      "decision": 8,
+      "excerpt": "旧历史清理/对象删除范围不扩大，2.40/2.50及其它"
+    },
+    {
+      "id": "source-4-key-8",
+      "source": "EVAL-MIN-4",
+      "split": "tuning",
+      "category": "exact-key",
+      "query": "EVAL-MIN-4#D8",
+      "decision": 8,
+      "excerpt": "旧历史清理/对象删除范围不扩大，2.40/2.50及其它"
+    },
+    {
+      "id": "source-4-topic-9",
+      "source": "EVAL-MIN-4",
+      "split": "tuning",
+      "category": "D9",
+      "query": "保持原目标Code本地根和Sol只编排/Luna实施/Astra整批决策/新Sol验收，全角色每新轮新实例fork_turns=none；旧Goal按真实机制接续，不主动回执到产品讨论任务",
+      "decision": 9,
+      "excerpt": "保持原目标Code本地根和Sol只编排/Luna实施/A"
+    },
+    {
+      "id": "source-4-key-9",
+      "source": "EVAL-MIN-4",
+      "split": "tuning",
+      "category": "exact-key",
+      "query": "EVAL-MIN-4#D9",
+      "decision": 9,
+      "excerpt": "保持原目标Code本地根和Sol只编排/Luna实施/A"
+    },
+    {
+      "id": "source-5-topic-2",
+      "source": "EVAL-MIN-5",
+      "split": "holdout",
+      "category": "D2",
+      "query": "零 Stop 面保持",
+      "decision": 2,
+      "excerpt": "零 Stop 面保持"
+    },
+    {
+      "id": "source-5-key-2",
+      "source": "EVAL-MIN-5",
+      "split": "holdout",
+      "category": "exact-key",
+      "query": "EVAL-MIN-5#D2",
+      "decision": 2,
+      "excerpt": "零 Stop 面保持"
+    },
+    {
+      "id": "source-5-topic-8",
+      "source": "EVAL-MIN-5",
+      "split": "holdout",
+      "category": "D8",
+      "query": "实际执笔者实名",
+      "decision": 8,
+      "excerpt": "实际执笔者实名"
+    },
+    {
+      "id": "source-5-key-8",
+      "source": "EVAL-MIN-5",
+      "split": "holdout",
+      "category": "exact-key",
+      "query": "EVAL-MIN-5#D8",
+      "decision": 8,
+      "excerpt": "实际执笔者实名"
+    },
+    {
+      "id": "source-5-topic-9",
+      "source": "EVAL-MIN-5",
+      "split": "holdout",
+      "category": "D9",
+      "query": "确需先登记再使用\"",
+      "decision": 9,
+      "excerpt": "确需先登记再使用\""
+    },
+    {
+      "id": "source-5-key-9",
+      "source": "EVAL-MIN-5",
+      "split": "holdout",
+      "category": "exact-key",
+      "query": "EVAL-MIN-5#D9",
+      "decision": 9,
+      "excerpt": "确需先登记再使用\""
+    },
+    {
+      "id": "source-6-topic-2",
+      "source": "EVAL-MIN-6",
+      "split": "holdout",
+      "category": "D2",
+      "query": "PROOF_ARTIFACTS_STALE is independently reproduced and is ordinary in-scope generated closure work. S",
+      "decision": 2,
+      "excerpt": "PROOF_ARTIFACTS_STALE is ind"
+    },
+    {
+      "id": "source-6-key-2",
+      "source": "EVAL-MIN-6",
+      "split": "holdout",
+      "category": "exact-key",
+      "query": "EVAL-MIN-6#D2",
+      "decision": 2,
+      "excerpt": "PROOF_ARTIFACTS_STALE is ind"
+    },
+    {
+      "id": "source-6-topic-8",
+      "source": "EVAL-MIN-6",
+      "split": "holdout",
+      "category": "D8",
+      "query": "Budget remains64427/27706=2.3254 over2.2067 with3289conservative lines. No exception is approved. Ge",
+      "decision": 8,
+      "excerpt": "Budget remains64427/27706=2."
+    },
+    {
+      "id": "source-6-key-8",
+      "source": "EVAL-MIN-6",
+      "split": "holdout",
+      "category": "exact-key",
+      "query": "EVAL-MIN-6#D8",
+      "decision": 8,
+      "excerpt": "Budget remains64427/27706=2."
+    },
+    {
+      "id": "source-6-topic-9",
+      "source": "EVAL-MIN-6",
+      "split": "holdout",
+      "category": "D9",
+      "query": "Three-step next package only: two-file controller closure and targeted existing tests; deterministic",
+      "decision": 9,
+      "excerpt": "Three-step next package only"
+    },
+    {
+      "id": "source-6-key-9",
+      "source": "EVAL-MIN-6",
+      "split": "holdout",
+      "category": "exact-key",
+      "query": "EVAL-MIN-6#D9",
+      "decision": 9,
+      "excerpt": "Three-step next package only"
+    },
+    {
+      "id": "handoff-1",
+      "source": "EVAL-RETIRE-1",
+      "split": "development",
+      "category": "technical-short",
+      "query": "Codex hook SubagentStop",
+      "decision": 1,
+      "excerpt": "完全移除 Codex collector 子代理机制"
+    },
+    {
+      "id": "handoff-2",
+      "source": "EVAL-HOOK-1",
+      "split": "development",
+      "category": "historical",
+      "query": "历史上为什么添加 SubagentStop hook",
+      "decision": 1,
+      "excerpt": "优先在当前 Codex 宿主添加"
+    },
+    {
+      "id": "handoff-3",
+      "source": "EVAL-RETIRE-1",
+      "split": "development",
+      "category": "current-action",
+      "query": "当前 Codex collector 子代理机制是否保留",
+      "decision": 1,
+      "excerpt": "完全移除 Codex collector 子代理机制"
+    },
+    {
+      "id": "handoff-4",
+      "source": "EVAL-RETIRE-1",
+      "split": "development",
+      "category": "long-compound",
+      "query": "Codex 主力经济类别独立对话协调，保持宿主隔离、不硬编码模型，SubagentStop collector 专用槽位和活动 fallback 现在如何处理",
+      "decision": 1,
+      "excerpt": "完全移除 Codex collector 子代理机制"
+    },
+    {
+      "id": "handoff-5",
+      "source": "EVAL-RETIRE-1",
+      "split": "development",
+      "category": "technical-short",
+      "query": "main economy flagship",
+      "decision": 2,
+      "excerpt": "main/主力与 economy/经济"
+    },
+    {
+      "id": "handoff-6",
+      "source": "EVAL-RETIRE-1",
+      "split": "development",
+      "category": "budget-empty",
+      "query": "EVAL-RETIRE-1#D1",
+      "decision": 1,
+      "excerpt": "完全移除 Codex collector 子代理机制",
+      "budget": 8,
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-1",
+      "split": "development",
+      "category": "negative",
+      "query": "帮我写一首关于春天的诗",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-2",
+      "split": "development",
+      "category": "negative",
+      "query": "what is the weather like in Paris today",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-3",
+      "split": "development",
+      "category": "negative",
+      "query": "红烧肉怎么做才好吃",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-4",
+      "split": "development",
+      "category": "negative",
+      "query": "name the capital of Australia",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-5",
+      "split": "tuning",
+      "category": "negative",
+      "query": "明天早上七点叫我起床",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-6",
+      "split": "tuning",
+      "category": "negative",
+      "query": "how many calories are in a banana",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-7",
+      "split": "tuning",
+      "category": "negative",
+      "query": "周末去爬山要带些什么",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-8",
+      "split": "tuning",
+      "category": "negative",
+      "query": "write a poem about the sea",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-9",
+      "split": "holdout",
+      "category": "negative",
+      "query": "今天地铁还有几班车",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-10",
+      "split": "holdout",
+      "category": "negative",
+      "query": "can you recommend a movie",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-11",
+      "split": "holdout",
+      "category": "negative",
+      "query": "我的纸质笔记本用哪种彩笔",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-12",
+      "split": "holdout",
+      "category": "negative",
+      "query": "which shoes fit a rainy walk",
+      "allowEmpty": true
+    },
+    {
+      "id": "retired-current",
+      "source": "EVAL-RETIRE-1",
+      "split": "development",
+      "category": "current-action",
+      "query": "Codex collector 主力 经济 类别 工作流",
+      "decision": 1,
+      "excerpt": "完全移除 Codex collector 子代理机制",
+      "forbiddenCurrent": [
+        "EVAL-PREDECESSOR-1#D2"
+      ]
+    },
+    {
+      "id": "retired-history",
+      "source": "EVAL-PREDECESSOR-1",
+      "split": "development",
+      "category": "historical",
+      "query": "历史 EVAL-PREDECESSOR-1#D2 收集者只收集原始状态",
+      "decision": 2,
+      "excerpt": "收集者只收集原始状态",
+      "status": "all",
+      "obsolete": true
+    },
+    {
+      "id": "negative-long-1",
+      "split": "development",
+      "category": "negative-long",
+      "query": "write a short poem about the sea and the sky and recommend a good novel for a long train ride while I compare a photo calendar and a beginner piano sheet",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-long-2",
+      "split": "development",
+      "category": "negative-long",
+      "query": "今天想安排周末旅行，先看看天气和高铁时间，再推荐电影和好吃的红烧肉，最后写一首春天的小诗，提醒我早上七点起床喝水",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-long-3",
+      "split": "tuning",
+      "category": "negative-long",
+      "query": "I want to book a flight to Tokyo in May and get a refund for shoes while reading a good novel with a photo of the sea and sky on my tablet",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-long-4",
+      "split": "tuning",
+      "category": "negative-long",
+      "query": "帮我安排一份轻松的周末菜单，算一下香蕉的热量，再推荐电影、爬山要带的东西和雨天鞋子，晚上看一眼天气然后早点休息",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-long-5",
+      "split": "holdout",
+      "category": "negative-long",
+      "query": "how many calories are in a banana and how long does a photo print take to dry while I listen to music on a train and think of the capital of Australia",
+      "allowEmpty": true
+    },
+    {
+      "id": "negative-long-6",
+      "split": "holdout",
+      "category": "negative-long",
+      "query": "我想给小朋友写一个春天旅行的故事，里面有猫咪喝水、火车进站和海边的天空，再帮我选择一本适合旅途阅读的小说",
+      "allowEmpty": true
+    }
+  ],
+  "limits": {
+    "perPromptBytes": 1600
+  },
+  "floors": {
+    "deliveryRate": 0.8,
+    "historyRate": 1,
+    "exactRate": 1,
+    "negativeRateBelow": 0.05,
+    "obsoleteCurrent": 0
+  },
+  "sizes": {
+    "small": 0,
+    "mid": 64,
+    "large": 512
+  }
+}

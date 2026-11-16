@@ -14,6 +14,7 @@ import test from "node:test";
 import { appendProgressIfConfigured, readProgressDelta } from "../scripts/lib/incremental-output.mjs";
 import { admitLegacyOutputSessionReceipt, bindOutputSessionProcessGroup, readBoundClaim, recoverStaleOutputSessionLock, safeWriteOutput, withExclusiveOutputSession } from "../scripts/lib/safe-io.mjs";
 import { privateHeavyEnvironment } from "./helpers/heavy-slots.mjs";
+import { copyTaskRuntimeInputs } from "./helpers/task-runtime-fixture.mjs";
 
 const ownerSchema = "tcrn.output-session-owner.v1";
 async function fixture(context, { tempRoot = tmpdir(), prefix = "tcrn-output-session-", resolvePath = true } = {}) {
@@ -209,18 +210,15 @@ async function taskEntrypointFixture(context, testSource, { includeEngineSources
     await cp(resolve(productRoot, "tsconfig.json"), resolve(root, "tsconfig.json"));
     await cp(resolve(productRoot, "package.json"), resolve(root, "package.json"));
   } else {
-    await writeFile(resolve(root, "package.json"), "{\"name\":\"tcrn-task-entrypoint-fixture\",\"type\":\"module\"}\n", { mode: 0o600 });
-    // The real builder carries its core-owned native resource even when this
-    // fixture deliberately has no TypeScript engine sources.
-    await mkdir(resolve(root, "packages/core/src"), { recursive: true });
-    await cp(resolve(productRoot, "packages/core/src/darwin-source-identity.mjs"), resolve(root, "packages/core/src/darwin-source-identity.mjs"));
+    const runtimeManifest = await copyTaskRuntimeInputs(root);
+    await writeFile(resolve(root, "package.json"), `${JSON.stringify({ name: "tcrn-task-entrypoint-fixture", type: "module", ...runtimeManifest })}\n`, { mode: 0o600 });
   }
   await writeFile(resolve(root, ".gitignore"), "dist/\nnode_modules/\n", { mode: 0o600 });
   await writeFixtureTest(root, testSource);
   runGit(root, ["init", "--quiet"]);
   runGit(root, ["config", "user.email", "tcrn-fixture"]);
   runGit(root, ["config", "user.name", "TCRN Fixture"]);
-  runGit(root, ["add", "package.json", ".gitignore", "scripts", "tests", "packages", ...(includeEngineSources ? ["tsconfig.json"] : [])]);
+  runGit(root, ["add", "package.json", ".gitignore", "scripts", "tests", "packages", "tsconfig.json"]);
   runGit(root, ["commit", "--quiet", "-m", "fixture"]);
   assert.equal(spawnSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }).stdout, "");
   return root;

@@ -5,7 +5,7 @@ import { BRANCH_LIFECYCLE_BODY, ruleBody } from "../dist/build/packages/core/src
 // but the archive's files, the engine lists its commands and creates and reads a library with
 // Node.js alone, Atelier reaches the engine beside it, and the hook entry answers nothing on an
 // older Node.js. The manifest states the install-tree digest of the unpacked directory (without
-// manifest.json itself), the skill directory holds SKILL.md and the seven references, and the
+// manifest.json itself), the skill directory holds SKILL.md and its shipped references, and the
 // launchers are the templates as they are. scripts/lib/tar.mjs writes the bytes P8's independent
 // rebuild writes, reads them back, and refuses the entries an unpacker must not follow.
 
@@ -47,7 +47,7 @@ const SOURCE_COREPACK_HOME = resolve(process.env.COREPACK_HOME ?? join(
   process.env.XDG_CACHE_HOME ?? process.env.LOCALAPPDATA ?? join(homedir(), process.platform === "win32" ? "AppData/Local" : ".cache"),
   "node/corepack",
 ));
-const REFERENCES = Object.freeze(["doctor.md", "install.md", "kiro-specs.md", "migrate.md", "restore.md", "uninstall.md", "update.md"]);
+const REFERENCES = Object.freeze(["doctor.md", "install.md", "kiro-specs.md", "migrate.md", "owner-extensions.md", "restore.md", "uninstall.md", "update.md"]);
 const SPECIFICATIONS = Object.freeze([
   "coding-style-v1.md",
   "installed-paths-v2.md", "work-practices-v1.md", "dot-task-recovery-v1.md", "batch-execution-v1.md", "resource-cleanup-v1.md", "unattended-execution-v1.md", "design-consumption-v1.md", "configuration-contract-v1.md", "settings-catalog-v1.md",
@@ -223,7 +223,7 @@ test("Codex peer receipt commands are packaged without the retired collector run
   const hook = files.get("scripts/einzbern-hook.mjs").toString("utf8");
   for (const retired of ["CODEX_STOP_CAPABILITY_UNAVAILABLE", "EINZBERN_CODEX_NATIVE_HOOK_SOCKET", "runCodexCollectorWait"]) assert.equal(hook.includes(retired), false, retired);
   const cli = files.get("scripts/einzbern.mjs").toString("utf8");
-  for (const entry of ["execution-codex-peer-record", "execution-codex-peer-evidence", "tcrn.codex-peer-batch.v1"]) assert.ok(cli.includes(entry), entry);
+  for (const entry of ["execution-codex-peer-record", "execution-codex-peer-evidence", "tcrn.codex-peer-batch.v1", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence", "tcrn.antigravity-swarm-batch.v1"]) assert.ok(cli.includes(entry), entry);
 });
 
 test("605: every contract referenced by the shipped Skill resolves to manifest-verified archive bytes", async () => {
@@ -236,6 +236,7 @@ test("605: every contract referenced by the shipped Skill resolves to manifest-v
     for (const [reference] of bytes.toString("utf8").matchAll(/\b(?:specs|docs)\/[A-Za-z0-9._/-]+\.md\b/gu)) references.add(reference);
   }
   assert.ok(references.has("docs/codex-native-controller.md"));
+  assert.ok(references.has("docs/antigravity-swarm-controller.md"));
   assert.ok(references.has("specs/context-v1.md"));
   assert.ok(references.has("specs/work-content-v1.md"));
   assert.ok(references.has("specs/coding-style-v1.md"));
@@ -255,8 +256,8 @@ test("605: a packaging-list omission is refused from the actual Skill reference 
     const copy = join(base, `missing-${specification}`);
     await mkdir(join(copy, "scripts/lib"), { recursive: true });
     const mutated = reference.startsWith("specs/")
-      ? inputs.replace(`, "${specification}"`, "")
-      : inputs.replace(`"${reference}"`, "");
+      ? inputs.replace(`, "${specification}"`, "").replace(`"${specification}", `, "")
+      : inputs.replace(`, "${reference}"`, "").replace(`"${reference}", `, "").replace(`"${reference}"`, "");
     assert.notEqual(mutated, inputs);
     await writeFile(join(copy, "scripts/pack-release.mjs"), source);
     await writeFile(join(copy, "scripts/lib/release-package-inputs.mjs"), mutated);
@@ -266,7 +267,7 @@ test("605: a packaging-list omission is refused from the actual Skill reference 
     for (const name of await readdir(join(repositoryRoot, "scripts"))) {
       if (name !== "pack-release.mjs" && name !== "lib") await symlink(join(repositoryRoot, "scripts", name), join(copy, "scripts", name));
     }
-    for (const name of ["package.json", "packages", "dist", "portal", "specs", "docs"]) await symlink(join(repositoryRoot, name), join(copy, name));
+    for (const name of ["package.json", "packages", "dist", "portal", "specs", "docs", "native"]) await symlink(join(repositoryRoot, name), join(copy, name));
     const out = join(copy, "out");
     const run = node([join(copy, "scripts/pack-release.mjs"), "--out", out]);
     assert.equal(run.status, 1, safeDiagnostic(run.stderr));
@@ -359,9 +360,10 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
   const template = await filesUnder(join(repositoryRoot, "skill/mana-orchestrate"));
   const expected = [
     "scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/library-catalog-worker.mjs", "launchers/einzbern.mjs", "launchers/hook.mjs",
+    "scripts/source-attestor-host.mjs", "scripts/build-source-lease.mjs", "native/linux-source-lease.c", "docs/design/continuous-source-attestor.md",
     "atelier/portal.mjs", "atelier/ds-static-bridges.snapshot.js", "atelier/atelier-brand-mark.svg", "atelier/index.html", "atelier/locales.js", "atelier/tokens.css",
     "skill/mana-orchestrate/SKILL.md", ...template.map((path) => `skill/mana-orchestrate/${path}`),
-    ...SPECIFICATIONS.map(name => `specs/${name}`), "docs/codex-native-controller.md", "docs/design/memory-admission.md",
+    ...SPECIFICATIONS.map(name => `specs/${name}`), "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md",
     "scripts/lib/memory-budget.mjs", "scripts/lib/memory-worker-check.mjs", "scripts/lib/storage-location.mjs", "scripts/lib/memory-executors.json",
     ...readmes, "CHANGELOG.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "manifest.json",
   ];
@@ -378,7 +380,7 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
     "dot-execution-v1.md": ["actualCapabilityEvidenceRefs", "authorizationEvidenceRef", "occupancyObservation", "revisionBinding", "contextRead", "effectiveRoots", "exactDelegation"],
     "native-tool-evidence-v1.md": ["rawResponseValue", "statusPointer", "statusMapping", "terminalObservation", "providerPointers", "NativeRetryReconciliation", "--prior", "--retry-from", "--reconciliation"],
     "kiro-host-v1.md": ["SessionStart", "UserPromptSubmit", "PreToolUse", "KIRO_API_KEY", "mcp-startup-failure"],
-    "antigravity-host-v1.md": ["SessionStart", "PreInvocation", "PreToolUse", "ANTIGRAVITY_CONFIG_DIR", "invoke_subagent", "agy-run.mjs"],
+    "antigravity-host-v1.md": ["SessionStart", "PreInvocation", "PreToolUse", "ANTIGRAVITY_CONFIG_DIR", "invoke_subagent", "agy-run.mjs", "execution-antigravity-swarm-record", "docs/antigravity-swarm-controller.md"],
     "shared-submit-v1.md": ["completeInventoryDigest", "engineOutputMembers", "writerHandoff", "observedAt", "contentBase64", "memberSetDigest", "lastError"],
   })) for (const field of fields) assert.ok(byPath.get(`specs/${name}`).bytes.toString("utf8").includes(field), `${name} documents ${field}`);
   assert.ok(byPath.get("atelier/ds-static-bridges.snapshot.js").bytes.equals(await readFile(join(repositoryRoot, "portal/ds-static-bridges.snapshot.js"))), "the archive retains exact published bridge bytes");
@@ -398,6 +400,54 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
   const header = gunzipSync(archive).subarray(0, 512);
   assert.equal(header.subarray(136, 148).toString("latin1"), "00000000000\0");
   assert.equal(header.subarray(108, 124).toString("latin1"), "0000000\0".repeat(2));
+});
+
+test("optional source lease builds outside a relocated release and the packaged CLI reuses live proof", { skip: process.platform !== "linux" }, async t => {
+  const { tree } = await packedRelease();
+  const isolated = await environment("optional-source-lease");
+  const native = join(isolated.root, "source-lease.node");
+  const build = node([join(tree, "scripts/build-source-lease.mjs"), join(tree, "native/linux-source-lease.c"), native], { env: isolated.env });
+  assert.equal(build.status, 0, build.stderr);
+  const library = join(isolated.root, "library"), entry = join(tree, "scripts/einzbern.mjs"), at = "2026-11-13T00:00:00Z";
+  // The filesystem IPC endpoint must fit sockaddr_un in this relocated fixture.
+  const home = await realpath(await mkdtemp(join(tmpdir(), "pl-")));
+  const env = { ...isolated.env, EINZBERN_HOME: home, EINZBERN_SOURCE_ATTESTOR_ROOT: library, EINZBERN_SOURCE_LEASE_MODULE: native, EINZBERN_RECALL_OBSERVATION: "1" };
+  const saved = { root: process.env.EINZBERN_SOURCE_ATTESTOR_ROOT, module: process.env.EINZBERN_SOURCE_LEASE_MODULE };
+  t.after(async () => {
+    process.env.EINZBERN_SOURCE_ATTESTOR_ROOT = library; process.env.EINZBERN_SOURCE_LEASE_MODULE = native;
+    const { controlSourceAttestor } = await import("../dist/build/packages/core/src/source-attestor-client.js");
+    await controlSourceAttestor(library, env.EINZBERN_HOME, "stop").catch(() => undefined);
+    // A packaged host has its own runtime identity, distinct from this source
+    // test's client. Retire only the PID from our private descriptor whose
+    // actual executable arguments still name that exact packaged companion.
+    const directory = join(home, "source-attestor");
+    for (const name of await readdir(directory).catch(() => [])) {
+      const path = join(directory, name, "endpoint.json");
+      const descriptor = await readFile(path, "utf8").then(JSON.parse).catch(() => null);
+      if (!Number.isSafeInteger(descriptor?.pid) || descriptor.pid <= 0) continue;
+      const args = await readFile(`/proc/${descriptor.pid}/cmdline`, "utf8").catch(() => "");
+      if (!args.split("\0").includes(join(tree, "scripts/source-attestor-host.mjs"))) continue;
+      process.kill(descriptor.pid, "SIGTERM");
+      for (let n = 0; n < 100 && existsSync(path); n++) await new Promise(resolve => setTimeout(resolve, 10));
+      assert.equal(existsSync(path), false, "owned packaged helper removed its descriptor");
+      assert.equal(existsSync(descriptor.endpoint), false, "owned packaged socket was closed");
+      t.diagnostic(JSON.stringify({ cleanupPid: descriptor.pid, endpointRemoved: true }));
+    }
+    await rm(home, { recursive: true, force: true });
+    if (saved.root === undefined) delete process.env.EINZBERN_SOURCE_ATTESTOR_ROOT; else process.env.EINZBERN_SOURCE_ATTESTOR_ROOT = saved.root;
+    if (saved.module === undefined) delete process.env.EINZBERN_SOURCE_LEASE_MODULE; else process.env.EINZBERN_SOURCE_LEASE_MODULE = saved.module;
+  });
+  const invoke = args => { const r = node([entry, ...args], { env, cwd: isolated.cwd }); assert.equal(r.status, 0, r.stderr); return r; };
+  invoke(["init", "--workspace", library, "--project", isolated.cwd, "--at", at]);
+  invoke(["project-create", "--workspace", library, "--external-key", "PACK-ATTEST", "--name", "Calibration", "--at", at]);
+  const args = ["recall", "--workspace", library, "--view", "agent", "--at", at, "--query", "PACK-ATTEST", "--allow-trailing", "true"];
+  const first = invoke(args), warm = invoke(args); assert.equal(warm.stdout, first.stdout);
+  const logs = (await readFile(join(env.EINZBERN_HOME, "log/hook.ndjson"), "utf8")).trim().split("\n").map(JSON.parse);
+  const observation = logs.at(-1).observation;
+  assert.equal(observation.logicalEventBytes, 0);
+  assert.ok(observation.cacheReasons.includes("source-attestor-finish-valid"), JSON.stringify(observation.cacheReasons));
+  assert.equal(existsSync(join(tree, "dist")), false);
+  assert.equal(existsSync(join(tree, "native/linux-source-lease.node")), false);
 });
 
 test("481-AC1: unpacked where there is only Node.js, the engine lists its commands, creates a library and reads it", async () => {
@@ -465,7 +515,7 @@ test("481-R2: the manifest states the install-tree digest of the unpacked direct
   }
 });
 
-test("481-R2: the skill directory holds SKILL.md for this version and the seven references", async () => {
+test("481-R2: the skill directory holds SKILL.md for this version and its shipped references", async () => {
   const { tree } = await packedRelease();
   const skill = join(tree, "skill/mana-orchestrate");
   const markdown = await readFile(join(skill, "SKILL.md"), "utf8");
@@ -585,7 +635,7 @@ test("R45 U11: the packed Atelier carries the lock and device-home modules once 
 test("R45 U11: a registry-lock bridge whose lock or device-home re-export is not found exactly once is refused", async () => {
   const bridge = await readFile(join(repositoryRoot, "scripts/lib/registry-lock.mjs"), "utf8");
   const lockSpecifier = "\"../../dist/build/packages/core/src/file-lock.js\"";
-  const homeExport = "export { registryPath } from \"../../dist/build/packages/core/src/device-home.js\";";
+  const homeExport = "export { registryPath, cachePath } from \"../../dist/build/packages/core/src/device-home.js\";";
   assert.equal(bridge.split(lockSpecifier).length, 2, "the bridge re-exports the lock build once");
   assert.equal(bridge.split(homeExport).length, 2, "the bridge re-exports the device directory build once");
   const mutations = [
@@ -602,7 +652,7 @@ test("R45 U11: a registry-lock bridge whose lock or device-home re-export is not
       if (entry !== "registry-lock.mjs") await symlink(join(repositoryRoot, "scripts/lib", entry), join(copy, "scripts/lib", entry));
     }
     await writeFile(join(copy, "scripts/lib/registry-lock.mjs"), mutated);
-    for (const path of ["scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern-launcher.mjs", "scripts/einzbern-hook-launcher.mjs", "scripts/task.mjs", "scripts/verify-portal.mjs", "scripts/portal-tests.mjs", "scripts/release.mjs", "scripts/test-controller-bootstrap.mjs", "scripts/test-controller-child-policy.mjs", "portal/portal.mjs", "dist", "packages", "package.json"]) {
+    for (const path of ["scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern-launcher.mjs", "scripts/einzbern-hook-launcher.mjs", "scripts/task.mjs", "scripts/build-source-lease.mjs", "native", "scripts/verify-portal.mjs", "scripts/portal-tests.mjs", "scripts/release.mjs", "scripts/test-controller-bootstrap.mjs", "scripts/test-controller-child-policy.mjs", "portal/portal.mjs", "dist", "packages", "package.json"]) {
       await symlink(join(repositoryRoot, path), join(copy, path));
     }
     const out = join(copy, "out");

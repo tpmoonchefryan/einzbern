@@ -126,7 +126,9 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
         return null;
       }
       if (host === "antigravity") {
-        const observation = antigravityReadGuardObservation(body, directory);
+        const observation = body?.toolCall?.name === "swarm"
+          ? (await import("../dist/build/packages/core/src/antigravity-swarm.js")).antigravitySwarmPreToolObservation(body, directory, deviceHome(process.env))
+          : antigravityReadGuardObservation(body, directory);
         noteRecall(deviceHome(process.env), event, directory, observation.reasonCode, host);
         if (observation.status === "denied") {
           return `${JSON.stringify({ decision: "deny", reason: observation.reason })}\n`;

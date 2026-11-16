@@ -31,7 +31,7 @@ import { realpath } from "node:fs/promises";
 import { canonicalJson, compareCanonicalText } from "../../protocol/src/index.js";
 import { listGates } from "./gates-config.js";
 import type { NamedGate } from "./gates-config.js";
-import { gateAppliesTo, gateDeclarationsDigest, resolveGateRoot, storyCommitPaths } from "./gates-plan.js";
+import { gateAppliesTo, gateDeclarationsDigest, gateRootBinding, gateRootBindings, gateRootKey, resolveGateRoot, storyCommitPaths } from "./gates-plan.js";
 import { gateTreeState, latestGateRun } from "./gates-run.js";
 import type { GateRun, GateTreeState } from "./gates-run.js";
 import { effectiveWorkGates, workAncestorIds, workSubjectKeys } from "./work-gates.js";
@@ -137,7 +137,13 @@ export async function assertDoneGates(input: {
     });
   }
   const projectRoot = typeof input.projectRoot === "string" ? input.projectRoot : await input.projectRoot();
-  const roots = [...new Set(gates.map((gate) => gate.root))].sort(compareCanonicalText);
+  const roots = [...new Set(gates.map(gateRootKey))].sort(compareCanonicalText);
+  const resolution = {
+    libraryId: input.library.metadata.workspaceId,
+    ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }),
+    ...(input.deviceHome === undefined ? {} : { deviceHome: input.deviceHome }),
+    rootBindings: gateRootBindings(gates),
+  };
   const declarationsDigest = gateDeclarationsDigest(gates);
   // The tree as each run saw it, read again over the files the run recorded (TCRN-CROSS-STORY-534:
   // run.trees[].files); runs that recorded the same files share one reading.
@@ -148,7 +154,7 @@ export async function assertDoneGates(input: {
     const key = canonicalJson(paths);
     let reading = readings.get(key);
     if (reading === undefined) {
-      reading = gateTreeState(projectRoot, roots, { paths });
+      reading = gateTreeState(projectRoot, roots, { paths, ...resolution });
       readings.set(key, reading);
     }
     return reading;
@@ -163,7 +169,9 @@ export async function assertDoneGates(input: {
         const project = await realpath(projectRoot);
         const keys = workSubjectKeys(input.library.work, [id]);
         const byRoot = new Map<string, readonly string[]>();
-        for (const root of roots) byRoot.set(root, storyCommitPaths(await resolveGateRoot(project, root), keys));
+        for (const root of roots) {
+          byRoot.set(root, storyCommitPaths(await resolveGateRoot(project, root, gateRootBinding(resolution.rootBindings, root), resolution), keys));
+        }
         return byRoot;
       })();
       storyFiles.set(id, files);
@@ -203,7 +211,7 @@ export async function assertDoneGates(input: {
   const notRun = bound.filter((entry) => !runs.has(entry.id)).map((entry) => entry.id);
   if (notRun.length > 0) {
     // The digest a run made now for these Stories would record.
-    const now = await gateTreeState(projectRoot, roots, { keys: workSubjectKeys(input.library.work, notRun) });
+    const now = await gateTreeState(projectRoot, roots, { keys: workSubjectKeys(input.library.work, notRun), ...resolution });
     const changedPaths = new Set<string>();
     const addedPaths = new Set<string>();
     for (const id of notRun) {

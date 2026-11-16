@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { canonicalSha256 } from "../../protocol/src/index.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { withFileLock } from "./file-lock.js";
-import { isCodexNativeSpawn } from "./native-tool-evidence.js";
+import { isCodexNativeSpawn } from "./codex-tool-identity.js";
 
 type ObjectValue = Record<string, unknown>;
 const READ = "mcp__codex_app__read_thread";

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createPlan, sourceInput, loadRules, checkConsumers, documentReaderClosure, documentReaderSources, categoryReaderAudit, categoryInputAudit, sourceDependencyGraph, sourceAuditDigest } from "../../scripts/ci/impact-plan.mjs";
 import { privateHeavyEnvironment, heavyLockDirectoryUnder } from "./heavy-slots.mjs";
+import { copyTaskRuntimeInputs } from "./task-runtime-fixture.mjs";
 
 export const componentSourceRoot = resolve(import.meta.dirname, "../..");
 const sorted = (items) => [...new Set(items)].sort();
@@ -88,17 +89,20 @@ export async function createCiComponentFixture(context, { production = false, fi
   const repo = join(directory, "repo");
   try {
     await mkdir(repo);
+    let runtimeManifest = {};
     if (production) {
       await cp(join(componentSourceRoot, "scripts"), join(repo, "scripts"), { recursive: true });
-      await mkdir(join(repo, "packages/core/src"), { recursive: true });
-      await cp(join(componentSourceRoot, "packages/core/src/darwin-source-identity.mjs"), join(repo, "packages/core/src/darwin-source-identity.mjs"));
+      runtimeManifest = await copyTaskRuntimeInputs(repo);
       // Task's imports need the already installed Ajv and TypeScript dependencies.
       // The actual node_modules directory is excluded by the unchanged walker.
       await mkdir(join(repo, "node_modules"));
-      for (const dependency of ["ajv", "typescript"]) await symlink(await realpath(join(componentSourceRoot, "node_modules", dependency)), join(repo, "node_modules", dependency), "dir");
+      for (const dependency of ["ajv", "typescript", "@types/node"]) {
+        await mkdir(dirname(join(repo, "node_modules", dependency)), { recursive: true });
+        await symlink(await realpath(join(componentSourceRoot, "node_modules", dependency)), join(repo, "node_modules", dependency), "dir");
+      }
     }
     const defaults = {
-      "package.json": JSON.stringify({ name: "ci-component", type: "module", private: true }),
+      "package.json": JSON.stringify({ name: "ci-component", type: "module", private: true, ...runtimeManifest }),
       ".gitignore": "dist/\nnode_modules/\n",
       "README.md": "old\n",
       "tests/a.test.mjs": harmlessTest("a"),
@@ -127,6 +131,7 @@ export async function createCiComponentFixture(context, { production = false, fi
     const env = privateHeavyEnvironment(heavyLockDirectoryUnder(directory), {
       ...process.env, GITHUB_EVENT_PATH: eventPath, GITHUB_EVENT_NAME: "push", GITHUB_REPOSITORY: "example/project",
       GITHUB_RUN_ID: runId, GITHUB_RUN_ATTEMPT: "1", TMPDIR: directory,
+      NODE_COMPILE_CACHE: join(directory, "compiler-cache"),
       EINZBERN_HOME: join(directory, "device"), EINZBERN_TEST_DEVICE_ROOT: join(directory, "devices"),
       CI_COMPONENT_OBSERVED: join(directory, "observed.txt"),
     });
@@ -228,7 +233,7 @@ export async function createOfflineScannerFixture(context, { unexpectedSource = 
     const unixPathBudget = assertOfflineUnixFixturePathBudget(join(temporaryRoot, `${offlineUnixFixtureLayout.directoryPrefix}${offlineUnixFixtureLayout.suffix}`));
     await mkdir(join(root, ".git"), { recursive: true });
     await cp(join(componentSourceRoot, "scripts"), join(root, "scripts"), { recursive: true });
-    for (const path of ["skill/mana-orchestrate/scripts/install.mjs", "tests/offline-boundary.test.mjs", "tests/ci-light-evidence.test.mjs", "tests/helpers/ci-component-fixture.mjs", "tests/helpers/heavy-slots.mjs", "package.json", ".npmrc", "portal/tests/ui-presence-support.mjs", "portal/tests/disposable-portal-fetch.test.mjs", "portal/tests/helpers/disposable-portal-fetch.mjs"]) {
+    for (const path of ["skill/mana-orchestrate/scripts/install.mjs", "tests/offline-boundary.test.mjs", "tests/ci-light-evidence.test.mjs", "tests/source-attestor.test.mjs", "packages/core/src/source-attestor-client.ts", "packages/core/src/source-attestor-service.ts", "packages/core/src/source-attestor-protocol.ts", "tests/helpers/ci-component-fixture.mjs", "tests/helpers/heavy-slots.mjs", "tests/helpers/task-runtime-fixture.mjs", "package.json", ".npmrc", "portal/tests/ui-presence-support.mjs", "portal/tests/disposable-portal-fetch.test.mjs", "portal/tests/helpers/disposable-portal-fetch.mjs"]) {
       await mkdir(dirname(join(root, path)), { recursive: true });
       await cp(join(componentSourceRoot, path), join(root, path));
     }

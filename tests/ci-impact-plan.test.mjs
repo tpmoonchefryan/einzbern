@@ -252,6 +252,8 @@ test("actual input tokens exclude comments, output paths and arbitrary basename 
     ["portal/scripts/e2e-demo.mjs", 'import { writeFile, mkdtemp } from "node:fs/promises"; import { join } from "node:path"; const base = await mkdtemp("demo-"); await writeFile(join(base, "docs", "decisions", "README.md"), "# output");\n'],
     ["scripts/write-doc.py", 'from pathlib import Path\nPath("README.md").write_text("output")\nopen("docs/wiki/Gates.md", "w").write("output")\n'],
     ["scripts/copy-doc.mjs", 'import { copyFileSync } from "node:fs"; copyFileSync("fixture.txt", "README.md");\n'],
+    ["scripts/copy-tree.mjs", 'import { cpSync } from "node:fs"; cpSync("test-inputs", "README.md", { recursive: true });\n'],
+    ["test-inputs/source.txt", "fixture"],
     ["scripts/lib/privacy.mjs", "export const value = 1;\n"],
     ["packages/core/src/names.ts", "// checked by scripts/verify-staged-privacy.mjs\nexport const value = 1;\n"],
     ["scripts/log.mjs", "export const value = 1;\n"],
@@ -263,6 +265,7 @@ test("actual input tokens exclude comments, output paths and arbitrary basename 
   assert.deepEqual(documentReaderClosure(texts, ["README.md"], graph), ["scripts/real-doc.py", "tests/actual.test.mjs"]);
   assert.deepEqual(documentReaderClosure(texts, ["docs/wiki/Gates.md"], graph), []);
   assert.equal(graph.get("tests/catalog.test.mjs").has("scripts/log.mjs"), false);
+  assert.ok(graph.get("scripts/copy-tree.mjs").has("test-inputs/source.txt"));
   const audit = categoryReaderAudit(texts, { privacyPaths: ["scripts/lib/privacy.mjs"], portalPaths: [] }, graph);
   assert.deepEqual(audit.privacy.readers, ["scripts/lib/privacy.mjs"]);
   assert.deepEqual(audit.portal.readers, []);
@@ -1010,8 +1013,8 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify heavy-runs inc263-closeout inc275-mcp-absent memory-budget
     native-tool-evidence no-sibling-dependency node-floor offline-boundary operational-audit-boundaries output-session-lifecycle
     p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor privacy-boundary project-chain-model
-    push-gate-p1-coverage readme-render release-lockstep release-readiness release-tag-gate release-tooling-audit-boundaries release-trust
-    render-helper-docs review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
+    push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate release-tooling-audit-boundaries release-trust
+    render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
     story-346-pg-disabled story-378-incident-replay story-rule-conservation`);
   const ordinaryWiki = ["Atelier", "CLI-Reference", "Ether-Layout", "FAQ", "Gates", "Glossary", "Home", "Install-Wizard", "Managed-Sections-and-Command-Spell", "Migrating-from-TCRN-Workflow", "Multi-Device-and-Cloud", "Variables", "_Sidebar"].map((name) => `docs/wiki/${name}.md`);
   assert.deepEqual(Object.keys(rules.docs).sort(), ["README.md", ...ordinaryWiki].sort());
@@ -1024,8 +1027,8 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     config-backup-format configuration-contract cross-repo-privacy dependency-materialization dependency-policy dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify
     heavy-runs inc263-closeout inc275-mcp-absent local-command-byte-fidelity memory-budget native-tool-evidence no-sibling-dependency node-floor offline-boundary
     operational-audit-boundaries otel-privacy-guard output-session-lifecycle p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor
-    privacy-boundary privacy-git-metadata privacy-normalization project-chain-model push-gate-p1-coverage readme-render release-lockstep release-readiness release-tag-gate
-    release-tooling-audit-boundaries release-trust render-helper-docs review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
+    privacy-boundary privacy-git-metadata privacy-normalization project-chain-model push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate
+    release-tooling-audit-boundaries release-trust render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
     staged-privacy-origin-diagnostics staged-privacy-reviewed-paths storage-defensive-maintenance story-346-pg-disabled story-378-incident-replay story-rule-conservation token-attribution`);
   const pr33 = JSON.parse(readFileSync(new URL("./fixtures/ci-impact/pr-33.json", import.meta.url)));
   assert.deepEqual(pr33.records.flatMap((record) => record.paths), ["scripts/lib/privacy.mjs", "tests/privacy-git-metadata.test.mjs"]);

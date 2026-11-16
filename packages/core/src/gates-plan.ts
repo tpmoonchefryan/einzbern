@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { pathIsInside as inside } from "./path-containment.js";
 import { canonicalSha256, compareCanonicalText } from "../../protocol/src/index.js";
 import type { NamedGate } from "./gates-config.js";
+import { normalizeGitRemote, readRegistry } from "./registry.js";
 
 export const GATES_PLAN_REASON_CODES = Object.freeze([
   "GATES_BASE_INVALID",
@@ -31,6 +32,9 @@ export const GATES_PLAN_REASON_CODES = Object.freeze([
   "GATES_GIT_UNAVAILABLE",
   "GATES_GLOB_INVALID",
   "GATES_ROOT_INVALID",
+  "GATES_REPOSITORY_MISSING",
+  "GATES_REPOSITORY_AMBIGUOUS",
+  "GATES_REPOSITORY_MISMATCH",
   "GATES_WORK_ID_INVALID",
 ] as const);
 
@@ -265,6 +269,7 @@ export interface GatesPlan {
   // TCRN-CROSS-STORY-485 R3, R4 (SUB-344): the root of every enabled gate, planned or not, and a
   // digest of every enabled gate's declaration. A run records both; the done check compares them.
   readonly roots: readonly string[];
+  readonly rootBindings?: Readonly<Record<string, GateRootBinding>>;
   readonly declarationsDigest: string;
   // TCRN-CROSS-STORY-525 (Q10): the names a target's gates field gives that the project declares no
   // gate by, sorted; present only when there is one. Such a gate never runs, so its Story is not done.
@@ -275,14 +280,94 @@ export interface GatesPlan {
   readonly subjectKeys?: readonly string[];
 }
 
+export interface GateRootBinding {
+  readonly repository: string;
+  readonly root: string;
+}
+
+export interface GateRepositoryScope {
+  readonly libraryId?: string;
+  readonly projectId?: string;
+  readonly deviceHome?: string;
+}
+
+/** The URI prefix keeps repository-bound roots distinct from legacy relative paths. */
+export function gateRootKey(gate: Pick<NamedGate, "root" | "repository">): string {
+  return gate.repository === undefined ? gate.root : `git://${gate.repository}?root=${encodeURIComponent(gate.root)}`;
+}
+
+export function gateRootBindings(gates: readonly NamedGate[]): Readonly<Record<string, GateRootBinding>> {
+  return Object.fromEntries(gates.flatMap((gate) => gate.repository === undefined ? [] : [
+    [gateRootKey(gate), { repository: gate.repository, root: gate.root }],
+  ]));
+}
+
+export function gateRootBinding(bindings: GatesPlan["rootBindings"], root: string): GateRootBinding | undefined {
+  return bindings !== undefined && Object.hasOwn(bindings, root) ? bindings[root] : undefined;
+}
+
+function repositoryIdentity(directory: string): string | null {
+  const names = (git(directory, ["remote"]) ?? "").split("\n").filter(Boolean);
+  const name = names.includes("origin") ? "origin" : names.sort(compareCanonicalText)[0];
+  if (name === undefined) return null;
+  const remote = git(directory, ["remote", "get-url", name])?.trim();
+  return remote ? normalizeGitRemote(remote) : null;
+}
+
+async function repositoryDirectory(projectRoot: string, binding: GateRootBinding, scope: GateRepositoryScope): Promise<string> {
+  const repository = binding.repository;
+  // An explicitly selected checkout can be an unregistered worktree of the registered remote.
+  if (repositoryIdentity(projectRoot) === repository) {
+    const top = git(projectRoot, ["rev-parse", "--show-toplevel"])?.trim();
+    if (top) return realpath(top);
+  }
+  const entries = (await readRegistry(scope.deviceHome)).entries.filter((entry) =>
+    entry.gitRemote === repository &&
+    (scope.libraryId === undefined || entry.libraryId === scope.libraryId) &&
+    (scope.projectId === undefined || entry.projectId === scope.projectId));
+  const candidates = new Set<string>();
+  for (const entry of entries) {
+    let directory: string;
+    try { directory = await realpath(entry.projectPath); } catch {
+      fail("GATES_REPOSITORY_MISSING", `the registered checkout of ${repository} is unavailable`, {
+        repository, remedy: "register the current checkout with library-register, or pass --project with the selected worktree",
+      });
+    }
+    const top = git(directory, ["rev-parse", "--show-toplevel"])?.trim();
+    if (!top || repositoryIdentity(directory) !== repository) {
+      fail("GATES_REPOSITORY_MISMATCH", `the registered checkout no longer identifies ${repository}`, {
+        repository, remedy: "correct the local library-register binding to the intended Git repository",
+      });
+    }
+    candidates.add(await realpath(top));
+  }
+  const insideProject = [...candidates].filter((directory) => inside(projectRoot, directory));
+  const selected = insideProject.length > 0 ? insideProject : [...candidates];
+  if (selected.length === 1) return selected[0]!;
+  if (selected.length === 0) {
+    fail("GATES_REPOSITORY_MISSING", `no local checkout is registered for ${repository}`, {
+      repository, remedy: "use library-register for this library and project, or pass --project with the selected worktree",
+    });
+  }
+  return fail("GATES_REPOSITORY_AMBIGUOUS", `multiple local checkouts identify ${repository}`, {
+    repository, remedy: "pass --project with the selected checkout or a directory containing one registered checkout",
+  });
+}
+
 /** A gate's root as a real directory inside the project, or GATES_ROOT_INVALID. */
-export async function resolveGateRoot(projectRoot: string, root: string): Promise<string> {
+export async function resolveGateRoot(projectRoot: string, root: string, binding?: GateRootBinding, scope: GateRepositoryScope = {}): Promise<string> {
+  if (binding !== undefined) {
+    const repository = await repositoryDirectory(projectRoot, binding, scope);
+    return resolveGateRoot(repository, binding.root);
+  }
   const target = root === "." ? projectRoot : join(projectRoot, ...root.split("/"));
   let real: string;
   try {
     real = await realpath(target);
   } catch {
-    return fail("GATES_ROOT_INVALID", `the gate root ${root} does not exist in the project`, { root });
+    return fail("GATES_ROOT_INVALID", `the gate root ${root} does not exist in the project`, {
+      root, remedy: "for a legacy project-relative root, explicitly migrate with gates-config-set --repository <remote-identity> --root <repository-relative-path>",
+    });
   }
   if (!inside(projectRoot, real) || !(await stat(real)).isDirectory()) {
     fail("GATES_ROOT_INVALID", `the gate root ${root} is not a directory inside the project`, { root });
@@ -301,7 +386,7 @@ export function gateDeclarationsDigest(gates: readonly NamedGate[]): string {
     gates: [...gates]
       .filter((gate) => gate.enabled)
       .sort((left, right) => compareCanonicalText(left.name, right.name))
-      .map((gate) => ({ name: gate.name, command: gate.command, root: gate.root, covers: gate.covers, required: gate.required, enabled: gate.enabled, releaseOnly: gate.releaseOnly })),
+      .map((gate) => ({ name: gate.name, command: gate.command, root: gate.root, ...(gate.repository === undefined ? {} : { repository: gate.repository }), covers: gate.covers, required: gate.required, enabled: gate.enabled, releaseOnly: gate.releaseOnly })),
   });
 }
 
@@ -317,7 +402,7 @@ function planningOrder(left: NamedGate, right: NamedGate): number {
 }
 
 function planned(gate: NamedGate, reason: PlannedGate["reason"], matched: readonly string[], matchedWorkIds: readonly string[]): PlannedGate {
-  return { name: gate.name, root: gate.root, command: gate.command, required: gate.required, releaseOnly: gate.releaseOnly, reason, matched, matchedWorkIds };
+  return { name: gate.name, root: gateRootKey(gate), command: gate.command, required: gate.required, releaseOnly: gate.releaseOnly, reason, matched, matchedWorkIds };
 }
 
 const WORK_ID = /^work:[0-9a-f]{24}$/u;
@@ -352,7 +437,7 @@ function gateBindsByWork(gate: NamedGate, workId: string, subject: GateSubject |
  * explicit valid Git base. Disabled gates are never listed. The gates are listed in their planning
  * order (planningOrder): by name while no gate holds an order.
  */
-export async function planGates(input: {
+export async function planGates(input: GateRepositoryScope & {
   readonly projectRoot: string;
   readonly gates: readonly NamedGate[];
   readonly release?: boolean;
@@ -379,9 +464,11 @@ export async function planGates(input: {
     .filter((gate) => gate.enabled)
     .sort(planningOrder);
   const gates = enabled.filter((gate) => release || !gate.releaseOnly);
+  const rootBindings = gateRootBindings(enabled);
   const roots = new Map<string, string>();
   for (const gate of enabled) {
-    if (!roots.has(gate.root)) roots.set(gate.root, await resolveGateRoot(projectRoot, gate.root));
+    const key = gateRootKey(gate);
+    if (!roots.has(key)) roots.set(key, await resolveGateRoot(projectRoot, key, gateRootBinding(rootBindings, key), input));
   }
   const base = input.base ?? null;
   const baseByRoot = input.baseByRoot;
@@ -397,6 +484,7 @@ export async function planGates(input: {
   const declared = {
     ...(baseByRoot === undefined ? {} : { baseByRoot: Object.fromEntries(Object.entries(baseByRoot).sort(([left], [right]) => compareCanonicalText(left, right))) }),
     roots: [...roots.keys()].sort(compareCanonicalText),
+    ...(Object.keys(rootBindings).length === 0 ? {} : { rootBindings }),
     declarationsDigest: gateDeclarationsDigest(enabled),
     ...(unknownGates.length === 0 ? {} : { unknownGates }),
     ...(subjectKeys.length === 0 ? {} : { subjectKeys }),
@@ -408,13 +496,13 @@ export async function planGates(input: {
     ...declared,
   };
   const changed = new Map<string, readonly string[]>();
-  const eligibleRoots = [...new Set(gates.map((gate) => gate.root))];
+  const eligibleRoots = [...new Set(gates.map(gateRootKey))];
   for (const root of eligibleRoots) {
     const directory = roots.get(root);
     if (directory === undefined) continue;
     const rootBase = baseByRoot !== undefined && Object.hasOwn(baseByRoot, root) ? baseByRoot[root]! : input.base!;
     const files = changedFiles(directory, { base: rootBase });
-    if (gates.some((gate) => gate.root === root)) changed.set(root, files);
+    changed.set(root, files);
   }
   // Even an empty plan or a declaration set containing only release-only gates must reject a
   // missing Git project or a base that names no commit.
@@ -422,7 +510,7 @@ export async function planGates(input: {
   const selected: PlannedGate[] = [];
   for (const gate of gates) {
     const covers = gate.covers.filter((cover) => !cover.startsWith("work:")).map((glob) => compileGlob(glob));
-    const matched = (changed.get(gate.root) ?? []).filter((file) => covers.some((glob) => glob.test(file)));
+    const matched = (changed.get(gateRootKey(gate)) ?? []).filter((file) => covers.some((glob) => glob.test(file)));
     const matchedWorkIds = appliesTo(gate);
     if (matched.length > 0 || matchedWorkIds.length > 0) {
       const reason: PlannedGate["reason"] = matched.length > 0

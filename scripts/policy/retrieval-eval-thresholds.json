@@ -69,5 +69,16 @@
   },
   "externalKey": {
     "exactRankAtMost": 1
+  },
+  "decisionDelivery": {
+    "manifest": "decision-delivery-freeze.json",
+    "manifestDigest": "a2ec65d11fb48c8d888a89a96877afa6d12d64a3d7560ac26c682cd205c75e13",
+    "floors": {
+      "deliveryRate": 0.8,
+      "historyRate": 1,
+      "exactRate": 1,
+      "negativeRateBelow": 0.05,
+      "obsoleteCurrent": 0
+    }
   }
 }

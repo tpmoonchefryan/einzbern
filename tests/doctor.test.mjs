@@ -136,7 +136,7 @@ test("605: a dot-only device has six applicable checks and does not acquire trad
   for (const path of [".claude", ".codex", ".agents"]) await assert.rejects(lstat(join(fixture.home, path)), { code: "ENOENT" });
   const traditional = await doctor(fixture);
   assert.equal(traditional.length, 8);
-  assert.deepEqual(traditional.filter((entry) => !entry.ok).map((entry) => entry.check), ["hooks-present", "skill-copies"]);
+  assert.deepEqual(traditional.filter((entry) => !entry.ok).map((entry) => entry.check), []);
   assert.deepEqual((await doctor(fixture, { executionTarget: "traditional" })).map((entry) => [entry.check, entry.ok]), traditional.map((entry) => [entry.check, entry.ok]));
   await rm(join(fixture.deviceHome, "engine", "current"));
   const broken = await doctor(fixture, { executionTarget: "chatgpt-dot" });
@@ -489,4 +489,47 @@ test("doctor separates structural hook files from native readiness and exposes k
   const damaged = byCheck(await doctor(f), "hooks-present").detail.codexGuard;
   assert.equal(damaged.roleRecovery.ready, false);
   assert.equal(damaged.roleRecovery.roles[0].status, "error");
+});
+
+test("667: an unused host stays inapplicable while a selected host keeps its missing-hook check", async (context) => {
+  const fixture = await healthy(context, { traditional: false });
+  await mkdir(join(fixture.home, ".codex"));
+  const before = byCheck(await doctor(fixture), "hooks-present");
+  assert.ok(before.detail.causes.includes("HOOK_MISSING"));
+  const unused = before.detail.hosts.find((host) => host.host === "claude-code");
+  assert.equal(unused.applicability, "not-selected");
+  assert.deepEqual(unused.causes, []);
+  await applyHostHooks(await readHostHooks(planHostHooks({ host: "codex", scope: "user", deviceHome: fixture.deviceHome, userHome: fixture.home }),
+    { root: fixture.home, home: fixture.home }), { at: AT });
+  assert.equal(byCheck(await doctor(fixture), "hooks-present").ok, true);
+});
+
+test("671: doctor distinguishes configured sections, missing AGENTS bytes and unverified host loading", async (context) => {
+  const fixture = await healthy(context);
+  await rm(join(fixture.project, "AGENTS.md"));
+  const check = byCheck(await doctor(fixture), "managed-sections");
+  assert.equal(check.ok, false);
+  assert.ok(check.detail.causes.includes("MANAGED_FILE_MISSING"));
+  const observation = check.detail.fileReadbacks.find((entry) => entry.file === "AGENTS.md");
+  assert.deepEqual(observation, { file: "AGENTS.md", exists: false, sha256: null, hostLoad: "unverified" });
+});
+
+
+test("667: selected file-host combinations retain integration checks and unused hosts require no launcher", async (context) => {
+  for (const selected of [[], ["claude-code"], ["codex"], ["claude-code", "codex"]]) {
+    const fixture = await healthy(context, { traditional: false });
+    for (const host of selected) {
+      await applyHostHooks(await readHostHooks(planHostHooks({ host, scope: "user", deviceHome: fixture.deviceHome, userHome: fixture.home }),
+        { root: fixture.home, home: fixture.home }), { at: AT });
+    }
+    const checked = await doctor(fixture);
+    assert.equal(byCheck(checked, "hooks-present").ok, true);
+    const skills = byCheck(checked, "skill-copies");
+    assert.equal(skills.ok, selected.length === 0);
+    assert.deepEqual(skills.detail.copies.map(copy => copy.host), selected.map(host => host === "claude-code" ? "claude" : host));
+    await rm(join(fixture.deviceHome, "engine", "hook.mjs"));
+    const missing = byCheck(await doctor(fixture), "hooks-present");
+    assert.equal(missing.ok, selected.length === 0);
+    assert.equal(missing.detail.causes.includes("HOOK_LAUNCHER_MISSING"), selected.length > 0);
+  }
 });

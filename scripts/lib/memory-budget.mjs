@@ -112,6 +112,15 @@ function writeAtomic(path, value) {
   try { writeFileSync(fd, `${JSON.stringify(value)}\n`); fsyncSync(fd); } finally { closeSync(fd); }
   renameSync(temp, path);
 }
+/** Linux pam_umask(8) user-private-group defaults leave g+w (0o020) when uid === gid > 0; shared groups and world-write remain unsafe. */
+function unsafeWritableMode(metadata) {
+  if ((metadata.mode & 0o002) !== 0) return true;
+  if ((metadata.mode & 0o020) === 0) return false;
+  if (process.platform !== "linux" || typeof process.getuid !== "function" || typeof process.getgid !== "function") return true;
+  const uid = process.getuid();
+  return uid === 0 || uid !== process.getgid() || metadata.uid !== uid || metadata.gid !== uid;
+}
+
 /** Only the registered default locks forwarding may resolve through a link. */
 export function resolveMemoryDirectory(deviceHome, directory) {
   if (!isAbsolute(directory)) fail("MEMORY_DOMAIN_INVALID");
@@ -121,7 +130,7 @@ export function resolveMemoryDirectory(deviceHome, directory) {
     try {
       let pointer;
       try { pointer = lstatSync(join(deviceHome, "storage-location.json")); } catch (error) { if (error.code !== "ENOENT") throw error; }
-      if (pointer && (!pointer.isFile() || pointer.isSymbolicLink() || pointer.nlink !== 1 || (pointer.mode & 0o022) !== 0 || (typeof process.getuid === "function" && pointer.uid !== process.getuid()))) fail("MEMORY_DOMAIN_INVALID");
+      if (pointer && (!pointer.isFile() || pointer.isSymbolicLink() || pointer.nlink !== 1 || unsafeWritableMode(pointer) || (typeof process.getuid === "function" && pointer.uid !== process.getuid()))) fail("MEMORY_DOMAIN_INVALID");
       location = readStorageLocation(deviceHome);
     } catch { fail("MEMORY_DOMAIN_INVALID"); }
     if (location) {
@@ -133,7 +142,7 @@ export function resolveMemoryDirectory(deviceHome, directory) {
   }
   mkdirSync(target, { recursive: true, mode: 0o700 });
   const metadata = lstatSync(target);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o022) !== 0 || (typeof process.getuid === "function" && metadata.uid !== process.getuid())) fail("MEMORY_DOMAIN_INVALID");
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || unsafeWritableMode(metadata) || (typeof process.getuid === "function" && metadata.uid !== process.getuid())) fail("MEMORY_DOMAIN_INVALID");
   return realpathSync(target);
 }
 

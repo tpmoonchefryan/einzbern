@@ -19,7 +19,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 
 import { assertProtocolId, compareCanonicalText } from "../../protocol/src/index.js";
 import type { WorkRecord } from "../../protocol/src/index.js";
-import { WorkspaceError } from "./workspace.js";
+import { WorkspaceError } from "./workspace-error.js";
 import type { WorkspaceState } from "./workspace.js";
 
 export const RELATIONS_EXTENSION_KEY = "advisory:relations" as const;

@@ -287,7 +287,20 @@ async function assertCrestAnswers(fx, count) {
   const recalled = await cli(["recall", "--workspace", fx.workspace, "--at", AT, "--query", `${word(1_500)} lesson`, "--tau", "0"]);
   assert.equal(recalled.reasonCode, "RECALL_READY");
   assert.equal(recalled.records[0]?.id, idOf(1_500), "the card is recalled by its own word");
-  assert.deepEqual(recalled.knowledgeStores[fx.store], { reasonCode: "KNOWLEDGE_LIST_READY", cards: count });
+  const evidence = recalled.knowledgeStores[fx.store];
+  assert.deepEqual([evidence.reasonCode, evidence.cards], ["KNOWLEDGE_LIST_READY", count]);
+  assert.deepEqual(evidence.effectiveScope, {
+    kind: fx.scope === "user" ? "user" : "library", projectId: null, binding: fx.scope === "user" ? "user-crest" : "library",
+  });
+  assert.deepEqual([evidence.activeCount, evidence.eligibleCount, evidence.withheldCount, evidence.ineligibleCount], [count, count, 0, 0]);
+  assert.equal(evidence.activeCount, evidence.eligibleCount + evidence.ineligibleCount);
+  assert.equal(evidence.snapshot, whole.snapshot, "Recall and the complete list describe the same source and query snapshot");
+  assert.deepEqual(evidence.sourceVersion, whole.sourceVersion);
+  assert.equal(evidence.projectionVersion, whole.projectionVersion);
+  assert.deepEqual(evidence.diagnostics, whole.diagnostics);
+  assert.equal(evidence.diagnostics.affectedIdCount, 0);
+  assert.equal(evidence.diagnostics.conflictPairCount, 0);
+  assert.equal(evidence.diagnostics.truncated, false);
   assert.equal(recalled.projectCrestDegraded, undefined);
   assert.equal(recalled.userCrestDegraded, undefined);
   assert.equal((await readKnowledgeHintCards(fx.workspace, AT)).length, count, "the knowledge hint reads every card");

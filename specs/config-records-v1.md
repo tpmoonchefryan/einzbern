@@ -72,6 +72,47 @@ is corrupt, and a record write to it refuses with `LEGACY_WORKSPACE_READ_ONLY`.
 
 ## Merged state and cache
 
+Disposable library and user-Crest projections live under the device home's
+`derived-cache/`, independently of a synchronized runtime or a historical
+`cache/` forwarding link. Library locks, backups, identity and shared event bytes
+keep their existing locations and contracts. Missing or corrupt derived files
+are rebuilt from validated sources; source corruption remains a refusal.
+
+Ordinary reads can reuse a protected local verification only when the current
+validated manifests, segment SHA-256 values and observed file identities match,
+and the actual source content has been hashed for this read. Writable mappings
+can change bytes without changing even Linux multigrain ctime. Boot, mount,
+device, inode birth identity, generation and timestamps bind objects; none is
+proof of unchanged content. The existing Linux/Darwin capability checks select
+projection reuse, with complete content hashing before and after reuse. Unknown
+capabilities use the ordinary full source reader. There is no segment-count
+ceiling. Doctor, shared submission, genesis reads and reads while holding the
+write lock continue to validate full source bytes. This conservative fallback
+does not claim the zero historical-byte scan acceptance criterion is met.
+
+A consolidated Linux state projection retains the complete event history as a
+verified compressed payload, decoding it on demand. Crest projections bind chain
+head, each stream's commit point, source identities and projection logic, and
+restore intrinsic archive scope beside immutable metadata. Freshness is always
+evaluated against the current query's `at`. The persistent local FTS5 projection
+binds its checkpoint and logic version; transactional copies update only changed
+record and clause rows. A damaged or busy SQLite artifact can be discarded and
+rebuilt without changing the source or weakening query selection.
+An independently protected record binds the database's full SHA-256. Every open,
+including a repeated request in one process, hashes the actual database bytes.
+Crest tree bindings likewise include every file's content digest. A valid Crest
+projection still repairs its disposable index views and pages on every read.
+
+`node scripts/performance/read-cache-bench.mjs spec.json new-private-output.jsonl`
+runs the built candidate's normal CLI and Hook in separate new processes. The
+spec names `repository`, `library`, `cwd`, `at`, `query`, `cacheState`
+(`cold-build` or `existing-derived-cache`), and optionally `samples` (default 20),
+`entries`, `host` and `cliArguments`. Build serially before sampling. Samples
+retain argv, PID, source head, code identity, logical bytes, verified segments,
+actual replay count, end-to-end wall time and output digests, without returned
+record prose. A cold cache build and subsequent existing-cache processes are
+separate populations. Never infer another platform's latency from these samples.
+
 `WorkspaceState.configRecords` lists every record as `{collection, key, value}` with optional
 `projectId`, sorted by project identity, collection and key. Legacy records without a project
 identity are library defaults. A declared project uses its own record first, then explicit

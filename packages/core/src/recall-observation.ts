@@ -174,6 +174,13 @@ export function observeAuthorityWork<T>(kind: AuthorityWork, operation: () => T)
   try { return operation(); } finally { recordAuthorityWork(counters, kind, started, cpu); }
 }
 
+export async function observeAuthorityWorkAsync<T>(kind: AuthorityWork, operation: () => Promise<T>): Promise<T> {
+  const counters = active?.getStore();
+  if (counters === undefined) return operation();
+  const started = performance.now(), cpu = process.cpuUsage();
+  try { return await operation(); } finally { recordAuthorityWork(counters, kind, started, cpu); }
+}
+
 export async function observeMetadataRead<T>(operation: () => Promise<T>): Promise<T> {
   const counters = active?.getStore();
   if (counters === undefined) return operation();

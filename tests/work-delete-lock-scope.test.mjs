@@ -11,9 +11,12 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import test from "node:test";
 
-import { materializeWorkspace } from "../dist/build/packages/core/src/index.js";
+import { materializeWorkspace, openLibrary } from "../dist/build/packages/core/src/index.js";
+import { lockPath } from "../dist/build/packages/core/src/device-home.js";
 import { workLease } from "../dist/build/packages/core/src/work-lease.js";
 import { cli, cliProcess, instant, workspaceFixture } from "./helpers/workspace-fixture.mjs";
 
@@ -47,19 +50,23 @@ function lineWaiter(stream, exited) {
  * Another process that takes the library's write lock, as a write verb does, and gives it back
  * `milliseconds` after it took it. Given `during` -- statements run with the core module as `core` --
  * it waits under the lock until write() is called, runs them there, as another writer whose turn came
- * first would, and only then lets the rest of the time run out.
+ * first would, and waits for release(). Write duration cannot consume the interval
+ * in which the test must observe the delete still waiting.
  */
 async function holdLibraryLock(context, workspace, milliseconds, during = null) {
   const script = `import { withWorkspaceWriteLock } from ${JSON.stringify(workspaceModule)};
 import * as core from ${JSON.stringify(coreModule)};
 import { once } from "node:events";
+import { createInterface } from "node:readline";
+${during === null ? "" : 'const input = createInterface({ input: process.stdin }); const lines = input[Symbol.asyncIterator]();'}
 await withWorkspaceWriteLock(${JSON.stringify(workspace)}, async () => {
   const heldAt = Date.now();
   process.stdout.write("held\\n");
-  ${during === null ? "" : `await once(process.stdin, "data");
+  ${during === null ? "" : `await lines.next();
   ${during}
-  process.stdout.write("written\\n");`}
-  await new Promise((resolve) => setTimeout(resolve, Math.max(0, ${milliseconds} - (Date.now() - heldAt))));
+  process.stdout.write("written\\n");
+  await lines.next(); input.close();`}
+  ${during === null ? `await new Promise((resolve) => setTimeout(resolve, Math.max(0, ${milliseconds} - (Date.now() - heldAt))));` : ""}
 }, { command: "einzbern work-annotate" });`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: [during === null ? "ignore" : "pipe", "pipe", "pipe"], env: process.env });
   let stderr = "";
@@ -78,9 +85,10 @@ await withWorkspaceWriteLock(${JSON.stringify(workspace)}, async () => {
     heldAt: Date.now(),
     released: exited,
     async write() {
-      child.stdin.end("write\n");
+      child.stdin.write("write\n");
       await printed("written");
     },
+    release() { child.stdin.end("release\n"); },
   };
 }
 
@@ -93,6 +101,30 @@ async function timed(operation) {
 function settle(promise) {
   const state = { done: false };
   return { state, promise: promise.then((value) => { state.done = true; return value; }, (error) => { state.done = true; throw error; }) };
+}
+
+async function deleteWaitingForLock(workspace, operation) {
+  const path = lockPath((await openLibrary(workspace)).manifest.libraryId);
+  const original = fs.open;
+  const { promise: waiting, resolve: waited, reject } = Promise.withResolvers();
+  const timer = setTimeout(() => reject(new Error("delete did not reach LibraryLock within the existing observation interval")), 1000);
+  fs.open = async function (name, flags, ...args) {
+    try { return await original.call(this, name, flags, ...args); }
+    catch (error) {
+      if (name === path && flags === "wx" && error.code === "EEXIST") waited();
+      throw error;
+    }
+  };
+  syncBuiltinESMExports();
+  const deleting = settle(operation());
+  try {
+    await Promise.race([waiting, deleting.promise.then(() => { throw new Error("delete completed before waiting for LibraryLock"); })]);
+    return deleting;
+  } finally {
+    clearTimeout(timer);
+    fs.open = original;
+    syncBuiltinESMExports();
+  }
 }
 
 const pause = (milliseconds) => new Promise((resolve) => { setTimeout(resolve, milliseconds); });
@@ -168,12 +200,12 @@ test("538 GWT2: a lease another process claims on the item after work-delete rea
   const before = await materializeWorkspace(workspace);
   const holder = await holdLibraryLock(context, workspace, 3000,
     `await core.claimWork(${JSON.stringify(workspace)}, { id: ${JSON.stringify(item)}, actorId: ${JSON.stringify(CLAIMER)}, occurredAt: ${JSON.stringify(instant(9))} });`);
-  const deleting = settle(cli(["work-delete", "--workspace", workspace, "--at", instant(10), "--id", item, "--actor", DELETER]).then(() => null, (error) => error));
-  await pause(1000);
+  const deleting = await deleteWaitingForLock(workspace, () => cli(["work-delete", "--workspace", workspace, "--at", instant(10), "--id", item, "--actor", DELETER]).then(() => null, (error) => error));
   assert.equal(deleting.state.done, false, "the delete read the item, with no lease, and waits for the lock to append");
   await holder.write();
   await pause(300);
   assert.equal(deleting.state.done, false, "it passed its checks before the claim landed, so it still waits");
+  holder.release();
   const releasedAt = await holder.released;
   const refused = await deleting.promise;
   assert.ok(Date.now() >= releasedAt, "the refusal came at the append, once the lock was free");
@@ -193,10 +225,10 @@ test("538 GWT2: a lease released after work-delete read it is not removed a seco
   const before = await materializeWorkspace(workspace);
   const holder = await holdLibraryLock(context, workspace, 3000,
     `await core.releaseWork(${JSON.stringify(workspace)}, { id: ${JSON.stringify(item)}, actorId: ${JSON.stringify(HOLDER)}, occurredAt: ${JSON.stringify(instant(9))} });`);
-  const deleting = settle(cli(["work-delete", "--workspace", workspace, "--at", instant(10), "--id", item, "--actor", DELETER]));
-  await pause(1000);
+  const deleting = await deleteWaitingForLock(workspace, () => cli(["work-delete", "--workspace", workspace, "--at", instant(10), "--id", item, "--actor", DELETER]));
   assert.equal(deleting.state.done, false, "the delete read the item and its lease, and waits for the lock to append");
   await holder.write();
+  holder.release();
   await holder.released;
   const receipt = await deleting.promise;
   assert.deepEqual([receipt.record.id, receipt.ids], [item, [item]], "the delete wrote work.deleted alone");
@@ -216,12 +248,12 @@ test("538 GWT2: a lease another process claims on an item of the project after p
     externalKey: "DELETE-LOCK-LATE-ITEM", kind: "Initiative", parentId: null, title: "Created and claimed in between", occurredAt: ${JSON.stringify(instant(8))} });
   const item = created.work.find((record) => record.projectId === ${JSON.stringify(target)} && !record.tombstone);
   await core.claimWork(${JSON.stringify(workspace)}, { id: item.id, actorId: ${JSON.stringify(CLAIMER)}, occurredAt: ${JSON.stringify(instant(9))} });`);
-  const deleting = settle(cli(["project-delete", "--workspace", workspace, "--at", instant(10), "--id", target, "--actor", DELETER]).then(() => null, (error) => error));
-  await pause(1000);
+  const deleting = await deleteWaitingForLock(workspace, () => cli(["project-delete", "--workspace", workspace, "--at", instant(10), "--id", target, "--actor", DELETER]).then(() => null, (error) => error));
   assert.equal(deleting.state.done, false, "the delete read the project, which owned nothing, and waits for the lock to append");
   await holder.write();
   await pause(300);
   assert.equal(deleting.state.done, false, "it passed its checks before the claim landed, so it still waits");
+  holder.release();
   await holder.released;
   const refused = await deleting.promise;
   assert.equal(refused?.reasonCode, "WORK_LEASED", refused?.message);

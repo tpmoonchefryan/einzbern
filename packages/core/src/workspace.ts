@@ -1,3 +1,4 @@
+import { libraryHeadDigest } from "./library-head-digest.js";
 import { validateSettingValue } from "./settings.js";
 import { observeMaterialization, observeStage, observeCheckpoint, observeCacheReason, observeReplay } from "./recall-observation.js";
 import { WORK_CONTENT_KEY, workContent, validateWorkContent, contentFail } from "./work-content.js";
@@ -313,17 +314,8 @@ export type WorkspaceCrashPoint =
   | "before-write"
   | "after-event-commit";
 
-export class WorkspaceError extends Error {
-  readonly reasonCode: WorkspaceReasonCode;
-  readonly details: Readonly<Record<string, string>> | undefined;
-
-  constructor(reasonCode: WorkspaceReasonCode, message: string, details?: Readonly<Record<string, string>>) {
-    super(message);
-    this.name = "WorkspaceError";
-    this.reasonCode = reasonCode;
-    this.details = details;
-  }
-}
+import { WorkspaceError } from "./workspace-error.js";
+export { WorkspaceError };
 
 // WSR-1: the relocation ledger. An APPEND-ONLY record of address rebindings that
 // travels inside the control tree it describes. It is a TENTH, OPTIONAL metadata
@@ -3296,7 +3288,7 @@ export async function initializeLibrary(options: InitializeLibraryOptions): Prom
 // TCRN-CROSS-STORY-468 R4, STORY-469: a library's metadata in the shape the reducer reads. A
 // library has no roots to bind and no external key of its own; its id is the workspace id
 // every record and receipt reports.
-export const LIBRARY_HEAD_SCHEMA_VERSION = "einzbern.library-head.v1" as const;
+export { LIBRARY_HEAD_SCHEMA_VERSION, libraryHeadDigest } from "./library-head-digest.js";
 
 export function libraryWorkspaceMetadata(library: Library): WorkspaceMetadata {
   const identity = library.manifest.libraryId.slice(library.manifest.libraryId.indexOf(":") + 1);
@@ -3311,15 +3303,6 @@ export function libraryWorkspaceMetadata(library: Library): WorkspaceMetadata {
     segmentEventLimit: AKASHA_SEGMENT_BYTES_DEFAULT,
     roots: [{ kind: "workspace", path: library.root, canonicalPath: library.root, portableIdentity: rootPortableIdentity(library.root) }],
   };
-}
-
-/** A library's head: one digest over every stream's head, so it moves whenever any stream does. */
-export function libraryHeadDigest(streams: readonly Pick<LibraryStreamHead, "deviceId" | "headEventHash">[]): string | null {
-  const heads = streams
-    .filter((stream) => stream.headEventHash !== null)
-    .map((stream) => [stream.deviceId, stream.headEventHash as string])
-    .sort((left, right) => compareCanonicalText(left[0] as string, right[0] as string));
-  return heads.length === 0 ? null : canonicalSha256({ schemaVersion: LIBRARY_HEAD_SCHEMA_VERSION, heads });
 }
 
 function streamHead(manifest: StreamManifest): LibraryStreamHead {
@@ -3661,8 +3644,10 @@ async function replayLibraryResultThroughCache(library: Library, read: LibraryRe
 }
 
 async function replayLibraryThroughCache(library: Library, read: LibraryRead): Promise<WorkspaceState> {
-  const forceAuthorityReplay = read.consolidation !== undefined && (await import("./source-verification.js")).hasPendingSourceVerification();
-  return (await replayLibraryResultThroughCache(library, read, forceAuthorityReplay)).state;
+  // A newly validated segment does not invalidate an independently attested
+  // reducer prefix. Source heads and exact prefix coverage are checked before
+  // resuming it; a proof miss still forces every source through authority replay.
+  return (await replayLibraryResultThroughCache(library, read)).state;
 }
 
 /** Read every stream of a library and replay them merged, through this device's cache. */
@@ -3671,19 +3656,23 @@ export async function materializeLibrary(libraryOrRoot: Library | string, option
   const library = typeof libraryOrRoot === "string" ? await openLibrary(libraryOrRoot) : libraryOrRoot;
   // Ordinary reads need no native callback or retained verification envelope.
   if (options.readFile !== undefined || options.timeoutMs !== undefined || options.archivedManifest !== undefined
-    || process.platform !== "darwin" || library.manifest.consolidation === undefined) {
+    || heldWriteLocks.getStore()?.has(library.root) === true
+    || (library.manifest.consolidation === undefined && (await listStreamDevices(library.root)).length === 0)
+    || (process.platform !== "linux" && (process.platform !== "darwin" || library.manifest.consolidation === undefined))) {
     const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
     const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
     observeCheckpoint(state.headEventHash);
     return state;
   }
   const { withSourceVerification } = await import("./source-verification.js");
-  return withSourceVerification(library, async () => {
+  const state = await withSourceVerification(library, async () => {
     const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
     const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
     observeCheckpoint(state.headEventHash);
     return { value: state, read, accepted: (state.library?.rejectedEvents.length ?? 0) === 0 };
   });
+  observeCheckpoint(state.headEventHash);
+  return state;
 }
 
 /** The keys a record was renamed from, and the records renamed away from its key (TCRN-CROSS-STORY-468 R5). */
@@ -4117,6 +4106,50 @@ async function commitAppend(prepared: PreparedAppend, options: WorkspaceMutation
       aliases: state.library?.aliases ?? [],
     },
   };
+}
+
+/** Verify a completed write against a fresh authoritative projection, including business fields. */
+export async function readBackWorkspaceWrite(
+  workspaceRoot: string,
+  committed: WorkspaceState,
+  ids: readonly string[],
+): Promise<Readonly<Record<string, JsonValue>>> {
+  const boundary = { localCommitted: true, remoteVerification: "unverified" };
+  try {
+    const actual = await materializeWorkspace(workspaceRoot);
+    const expectedRecords = new Map([...committed.work, ...committed.minutes, ...committed.projects].map((record) => [record.id, record]));
+    const actualRecords = new Map([...actual.work, ...actual.minutes, ...actual.projects].map((record) => [record.id, record]));
+    const records = ids.map((id) => {
+      const expected = expectedRecords.get(id);
+      const observed = actualRecords.get(id);
+      const matches = expected !== undefined && observed !== undefined && canonicalJson(expected) === canonicalJson(observed);
+      return {
+        id, matches,
+        revision: observed?.revision ?? null,
+        status: observed !== undefined && "status" in observed ? observed.status : null,
+        title: observed !== undefined && "title" in observed ? observed.title : null,
+        summary: observed !== undefined && "summary" in observed ? observed.summary : null,
+        recordDigest: observed === undefined ? null : canonicalSha256(observed),
+      };
+    });
+    const verifiedReadback = actual.metadata.workspaceId === committed.metadata.workspaceId &&
+      actual.version >= committed.version && records.length > 0 && records.every((record) => record.matches);
+    return {
+      ...boundary, verifiedReadback, ok: verifiedReadback,
+      readback: { workspaceId: actual.metadata.workspaceId, version: actual.version, headEventHash: actual.headEventHash, records },
+      ...(verifiedReadback ? {} : {
+        reasonCode: "WORKSPACE_WRITE_READBACK_UNVERIFIED",
+        remedy: "read the target records and compare their revisions before retrying the write",
+      }),
+    };
+  } catch (error) {
+    return {
+      ...boundary, verifiedReadback: false, ok: false,
+      reasonCode: "WORKSPACE_WRITE_READBACK_UNVERIFIED",
+      readback: { error: String(error), ids: [...ids] },
+      remedy: "read the target records and compare their revisions before retrying the write",
+    };
+  }
 }
 
 // Where one stream stands: its device, its sequence and its head event.

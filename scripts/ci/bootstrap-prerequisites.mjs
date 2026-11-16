@@ -10,7 +10,7 @@ import { validateSelectedTests } from "../lib/test-roster.mjs";
 
 const fullModes = ["p1", "pf2-h1"];
 const shardModes = { "p1-checks": "checks", "p1-core": "core", "p1-portal": "portal" };
-const releaseTest = "tests/release-lockstep.test.mjs";
+const releaseTests = ["tests/release-lockstep.test.mjs", "tests/integration-release.test.mjs"];
 
 // This acquisition-only guard checks the plan envelope and the exact core input.
 // It does not admit verification: the later independent source/provenance plan
@@ -42,7 +42,7 @@ export function corepackBootstrapRequired(mode, plan, basis) {
     || Object.keys(shards).some((key) => !["checks", "core", "portal"].includes(key))
     || Object.hasOwn(shards, "portal") && canonical(shards.portal) !== canonical(["portal"])
     || !Object.hasOwn(shards, shard)) throw new Error("Bootstrap impact plan shard mismatch");
-  return shard === "core" && selected.includes(releaseTest);
+  return shard === "core" && releaseTests.some((path) => selected.includes(path));
 }
 
 function checkoutBasis(root, env) {

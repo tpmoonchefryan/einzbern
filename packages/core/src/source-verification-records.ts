@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 // Reducer checkpoint proof is also required on the full-source path. Keep its
 // device boundary independent of the optional native descriptor/helper reader.
-import { constants } from "node:fs";
+import { constants, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative } from "node:path";
 import { canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { cachePath, deviceHome, libraryDirectoryName } from "./device-home.js";
-import { readDevice } from "./device-identity.js";
+import { readDevice, readDeviceSync } from "./device-identity.js";
 import type { Library } from "./ether-library.js";
 import type { CacheSnapshotHeader } from "./library-cache.js";
 import { FRAMEWORK_VERSION } from "./framework-version.js";
@@ -36,17 +36,53 @@ function object(value: unknown): value is Record<string, unknown> {
 /** This is the existing identity/registry/engine boundary, not runtimeHome.
  * Synchronization controls library/runtime subtrees, never this sibling. No
  * chmod, secret, issuer or claim against a writer of local config is involved. */
+export function recordBoundarySync(library: Library, recordDirectory = RECORD_DIRECTORY): VerificationBoundary | null {
+  try {
+    const home = realpathSync(deviceHome());
+    const device = readDeviceSync(home);
+    if (device === null) return null;
+    const root = realpathSync(library.root);
+    if (inside(root, home)) return null;
+    const storage = readStorageLocation(deviceHome());
+    const records = join(home, recordDirectory, libraryDirectoryName(library.manifest.libraryId));
+    const cache = join(cachePath(library.manifest.libraryId), "verified-segments");
+    const localCache = cachePath(library.manifest.libraryId);
+    mkdirSync(localCache, { recursive: true, mode: 0o700 });
+    const cacheInfo = lstatSync(localCache);
+    if (!cacheInfo.isDirectory() || cacheInfo.isSymbolicLink()) return null;
+    const cacheRoot = realpathSync(localCache);
+    const writerRoots = [root, cacheRoot];
+    const existingCache = lstatSync(cache, { throwIfNoEntry: false }) ?? null;
+    if (existingCache !== undefined && existingCache !== null) writerRoots.push(realpathSync(cache));
+    if (storage !== null) writerRoots.push(realpathSync(storage.library), realpathSync(storage.runtime));
+    if (writerRoots.some(writer => inside(writer, records))) return null;
+    if (!lstatSync(home).isDirectory()) return null;
+    for (const directory of [join(home, recordDirectory), records]) {
+      const info = lstatSync(directory, { throwIfNoEntry: false }) ?? null;
+      if (info !== undefined && info !== null && (!info.isDirectory() || info.isSymbolicLink())) return null;
+    }
+    return { library: { ...library, root }, home, deviceIdentity: canonicalSha256(device), records, cache };
+  } catch {
+    return null;
+  }
+}
+
 export async function recordBoundary(library: Library, recordDirectory = RECORD_DIRECTORY): Promise<VerificationBoundary | null> {
   try {
     const home = await realpath(deviceHome());
     const device = await readDevice(home);
     if (device === null) return null;
     const root = await realpath(library.root);
+    if (inside(root, home)) return null;
     const storage = readStorageLocation(deviceHome());
     const records = join(home, recordDirectory, libraryDirectoryName(library.manifest.libraryId));
     const cache = join(cachePath(library.manifest.libraryId), "verified-segments");
     // Resolve existing ancestors, including relocated cache forwarding links.
-    const cacheRoot = await realpath(cachePath(library.manifest.libraryId)).catch(() => realpath(join(cachePath(library.manifest.libraryId), "..")));
+    const localCache = cachePath(library.manifest.libraryId);
+    await mkdir(localCache, { recursive: true, mode: 0o700 });
+    const cacheInfo = await lstat(localCache);
+    if (!cacheInfo.isDirectory() || cacheInfo.isSymbolicLink()) return null;
+    const cacheRoot = await realpath(localCache);
     const writerRoots = [root, cacheRoot];
     const existingCache = await lstat(cache).catch(error => { if (error.code === "ENOENT") return null; throw error; });
     if (existingCache !== null) writerRoots.push(await realpath(cache));

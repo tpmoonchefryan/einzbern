@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tests in this file run sequentially; Node isolates each file in a process.
 import { R46_AT, R47_COORDINATION_KEYS, RETIRED_PERSONA_ACTIONS, TEST_ACTOR, appendHistoricalAttestationEnable, asDevice, assert, cli, cliRefusal, ensureProjectCoordination, execFileAsync, forgeOwnStream, join, managedSection, mkdir, mkdtemp, normalizedSection, portalRoot, readBoot, readFile, readOptions, realpath, registeredLibrary, request, rm, scratch, sectionDigest, startPortal, test, tmpdir, unordered, unregisterLibrary, withoutSource, writeFile, writeOptions } from "./portal-support.mjs";
+import { cachePath } from "../../scripts/lib/registry-lock.mjs";
 
 
 
@@ -578,17 +579,19 @@ test("STORY-485: Atelier edits gate declarations and reads each library's latest
 
   const updated = await request(url, "/api/gates", writeOptions(boot.token, "POST", {
     name: "portal", command: ["pnpm", "verify:portal"], root: "portal", covers: ["portal/**"],
+    repository: "example.org/team/portable",
     enabled: false, required: false, releaseOnly: true,
   }));
   assert.equal(updated.response.status, 200);
   assert.equal(updated.body.gate.enabled, false);
   assert.equal(updated.body.gate.required, false);
   assert.equal(updated.body.gate.releaseOnly, true);
+  assert.equal(updated.body.gate.repository, "example.org/team/portable");
   assert.deepEqual(updated.body.gate.covers, ["portal/**"]);
   assert.equal((await latestNow()).run, null);
 
   const writeRun = async (libraryId, runId, at, gateName, ok) => {
-    const directory = join(fixture.deviceEnv.EINZBERN_HOME, "cache", libraryId.replace(":", "-"), "gate-runs");
+    const directory = join(cachePath(libraryId, fixture.deviceEnv.EINZBERN_HOME), "gate-runs");
     await mkdir(directory, { recursive: true });
     await writeFile(join(directory, `${runId}.json`), JSON.stringify({
       schemaVersion: "einzbern.gate-run.v1", runId, libraryId, projectId: libraryId === boot.library.libraryId ? fixture.projectId : fixture.second.projectId, workIds: [], at, release: false, base: null,

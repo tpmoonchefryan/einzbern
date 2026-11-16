@@ -1,6 +1,4 @@
 import { isProjectArtifactBinding, resolveProjectArtifactBinding } from "../../core/src/portable-path.js";
-import { withRecallObservation } from "../../core/src/recall-observation.js";
-import { readRecallAuthority } from "../../core/src/recall-authority.js";
 import { MEMORY_LEASE_VARIABLE } from "../../../scripts/lib/memory-budget.mjs";
 import { readWorkContentImpact } from "../../core/src/work-requirements.js";
 import { workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
@@ -11,19 +9,11 @@ import { readDotExtensionSource } from "../../core/src/dot-agents.js";
 import type { HostExecutionRequest } from "../../core/src/execution-fallback.js";
 
 import { readEngineModelPolicyFile } from "../../core/src/engine-model-policy.js";
-import { recommendHostFallbacks, validateHostExecutionRequest } from "../../core/src/execution-fallback.js";
 import { deviceHome } from "../../core/src/device-home.js";
-import { isSharedLibrary } from "../../core/src/chain-identity.js";
 import { readFile } from "node:fs/promises";
-import { configureStorageLocation } from "../../core/src/storage-configure.js";
-import { consolidateStorage, refreshLibraryReadme } from "../../core/src/storage-consolidate.js";
-import { consolidateLibraries, cleanConsolidatedSources } from "../../core/src/consolidate.js";
 import type { ConsolidationMapping } from "../../core/src/consolidate.js";
 // SPDX-License-Identifier: Apache-2.0
-import { prepareDispatch, recordDispatch, writeDispatchArtifact } from "../../core/src/dispatch-workflow.js";
-import { normalizeDispatchAdmissionEvidence } from "../../core/src/dispatch-evidence.js";
-import { discardRelocationPreparation } from "../../core/src/relocate.js";
-import { planConfigurationProjectionRefresh, refreshConfigurationProjections, diagnoseLegacySharedPaths } from "../../core/src/configuration-projections.js";
+import type { normalizeDispatchAdmissionEvidence } from "../../core/src/dispatch-evidence.js";
 import { CONFIG_BACKUP_COMMAND_CATALOG, runConfigBackupCommand } from "./config-backup-commands.js";
 import type { ConfigBackupCommandContext } from "./config-backup-commands.js";
 import type { ConfigBackupSource, ConfigBackupSourceVersion, ConfigBackupRetainedContainer } from "../../core/src/config-backup.js";
@@ -37,14 +27,11 @@ import { readDevice } from "../../core/src/device-identity.js";
 import { CONFIG_BACKUP_LOCAL_BINDING_DIRECTORY, validateConfigBackupRetentionPolicy } from "../../core/src/config-backup-retention.js";
 import { NATIVE_TOOL_COMMAND_CATALOG, runNativeToolCommand } from "./native-tool-commands.js";
 import type { DotExecutionRequest } from "../../core/src/dot-execution.js";
-import { AGENT_OUTPUT_MAX_BYTES } from "../../core/src/runtime-input-contract.js";
 import type { RuntimeCommandCatalogEntry, RuntimeCommandFlag } from "../../core/src/runtime-input-contract.js";
-import type { RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { ExecutionAdmissionRequest } from "../../core/src/execution-admission.js";
 import { readMachineSettings } from "../../core/src/machine-settings.js";
 import { configurationContract, annotateConfigValue } from "../../core/src/configuration-contract.js";
 import { evaluateExecutionQuota, resolveExecutionConcurrency } from "../../core/src/execution-policy.js";
-import { ensureSetupProjectBinding } from "../../core/src/setup-fresh.js";
 import { DOT_AGENTS_TEMPLATE_VERSION, DOT_INSTALLATION_TARGET, SETUP_EXECUTION_TARGETS, dotEnabledRuleSources } from "../../core/src/dot-agents.js";
 import type { SetupExecutionTarget } from "../../core/src/dot-agents.js";
 import { resolveEngineExecutionPolicy, engineModelPolicyCatalogFromSnapshot } from "../../core/src/engine-model-policy.js";
@@ -66,6 +53,7 @@ import {
   withWriteLockOptions,
   assertLibraryWritable,
   recordAppends,
+  readBackWorkspaceWrite,
   recordIdsOfEvents,
   createKnowledgeArticle,
   createKnowledgeUnit,
@@ -135,7 +123,6 @@ import {
   KNOWLEDGE_STORE_SCOPES,
   knowledgeHintFor,
   readKnowledgeHintCards,
-  readRecallCards,
   assertDoneGates,
   listGates,
   approveProposal,
@@ -148,14 +135,6 @@ import {
   setGate,
   languageProviderFromBundle,
   parseLanguageBundle,
-  RECALL_DEFAULT_TAU,
-  recall,
-  readRuntimeKnowledgeLanguagePolicy,
-  recallContextLines,
-  recallDocuments,
-  recallInputsFromState,
-  formatRecallLine,
-  resolveQueryLanguage,
   templateBindingFromWorkRecord,
   probeHost,
   validateTemplateDocument,
@@ -201,7 +180,6 @@ import {
   minutesView,
   recordMinutes,
   DECISION_STATUS_FILTERS,
-  recallDecisionHints,
   workObsoleteDecisions,
   BRAND,
   SKILL_COPIES_FILES,
@@ -278,32 +256,23 @@ export const RELEASE_REQUIRED_ARGUMENTS = [
 export type ReleaseRequiredArgument =
   (typeof RELEASE_REQUIRED_ARGUMENTS)[number];
 
+import {
+  WorkflowCliError,
+  booleanValue,
+  fail,
+  integerValue,
+  parseArguments,
+  required,
+} from "./cli-args.js";
+import type { CliIo } from "./cli-args.js";
+import { runRecallCli, runRecallCommand } from "./recall-fast.js";
+
+export { WorkflowCliError, type CliIo };
+
 export function missingReleaseArguments(
   supplied: Readonly<Record<string, string | undefined>>,
 ): readonly ReleaseRequiredArgument[] {
   return RELEASE_REQUIRED_ARGUMENTS.filter((name) => !supplied[name]);
-}
-
-export class WorkflowCliError extends Error {
-  readonly reasonCode: string;
-  // TCRN-CROSS-INC-378: string facts a caller needs beside the code, such as whether the
-  // event was committed; the bin prints the keys it allows on stderr.
-  readonly details: Readonly<Record<string, string>> | undefined;
-
-  constructor(reasonCode: string, message: string, details?: Readonly<Record<string, string>>) {
-    super(message);
-    this.name = "WorkflowCliError";
-    this.reasonCode = reasonCode;
-    this.details = details;
-  }
-}
-
-export interface CliIo {
-  write(value: string): void;
-}
-
-function fail(reasonCode: string, message: string): never {
-  throw new WorkflowCliError(reasonCode, message);
 }
 
 const EXACTLY_ONE_FLAGS = {
@@ -325,62 +294,6 @@ function requireExactlyOne(command: ExactlyOneCommand, values: Readonly<Record<s
   if ((values[first.name] === undefined) === (values[second.name] === undefined)) {
     fail("CLI_ARGUMENT_MALFORMED", `${command} takes exactly one of --${first.name} and --${second.name}`);
   }
-}
-
-function parseArguments(arguments_: readonly string[], allowed: readonly string[]): Readonly<Record<string, string>> {
-  const values: Record<string, string> = {};
-  let index = 0;
-  while (index < arguments_.length) {
-    const token = arguments_[index];
-    let name: string;
-    let value: string;
-    if (token !== undefined && token.startsWith("--") && token.includes("=")) {
-      // Attached form --flag=value: split on the FIRST "=" so the value may itself
-      // contain "=" or legitimately begin with "--" (unrepresentable in two-token form).
-      const equalsAt = token.indexOf("=");
-      name = token.slice(2, equalsAt);
-      value = token.slice(equalsAt + 1);
-      index += 1;
-    } else {
-      const next = arguments_[index + 1];
-      // Two-token form is unchanged: a value beginning with "--" is still rejected,
-      // which doubles as missing-value (undefined next) detection.
-      if (!token?.startsWith("--") || next === undefined || next.startsWith("--")) {
-        fail("CLI_ARGUMENT_MALFORMED", String(token ?? "missing"));
-      }
-      name = token.slice(2);
-      value = next;
-      index += 2;
-    }
-    if (!allowed.includes(name)) {
-      fail("CLI_ARGUMENT_UNKNOWN", name);
-    }
-    if (Object.hasOwn(values, name)) {
-      fail("CLI_ARGUMENT_DUPLICATE", name);
-    }
-    values[name] = value;
-  }
-  return values;
-}
-
-function required(values: Readonly<Record<string, string>>, names: readonly string[]): void {
-  const missing = names.filter((name) => !values[name]);
-  if (missing.length > 0) {
-    fail("CLI_ARGUMENT_MISSING", missing.join(","));
-  }
-}
-
-// CQ-05(c): the single arbiter for integer-valued flags. A syntactically malformed value
-// fails at the CLI boundary with CLI_ARGUMENT_MALFORMED naming the offending flag, instead
-// of reaching core as NaN and being reported under a semantic reason code. The minimum is
-// optional; only non-integers and values below it are rejected here, and every other
-// integer reaches core for its own judgement.
-function integerValue(values: Readonly<Record<string, string>>, name: string, minimum: number = Number.MIN_SAFE_INTEGER): number {
-  const value = Number(values[name]);
-  if (!Number.isSafeInteger(value) || value < minimum) {
-    fail("CLI_ARGUMENT_MALFORMED", name);
-  }
-  return value;
 }
 
 // STORY-178: the file↔pg migration target. Only `file` and `pg` are legal; the
@@ -497,13 +410,6 @@ function nullableIntegerValue(values: Readonly<Record<string, string>>, name: st
   return integerValue(values, name);
 }
 
-function booleanValue(value: string | undefined, name: string): boolean {
-  if (value === undefined || value === "false") return false;
-  if (value === "true") return true;
-  fail("CLI_ARGUMENT_MALFORMED", name);
-}
-
-
 // TCRN-CROSS-STORY-364 requirement 3: the card write paths -- knowledge-capture,
 // knowledge-create and knowledge-batch's create members (conference-close --distill retired
 // with the conference write verbs, TCRN-CROSS-STORY-475 R3) --
@@ -583,6 +489,14 @@ function decisionsFromFile(path: string): readonly string[] {
     fail("CLI_ARGUMENT_MALFORMED", "decisions-file holds a JSON array of decision texts");
   }
   return document as readonly string[];
+}
+
+function decisionsFromList(value: string | undefined): readonly string[] {
+  const decisions = listValue(value);
+  if (decisions.slice(1).some((decision) => /^(?:--)?[A-Za-z_][\w.-]*\s*=/u.test(decision.trim()))) {
+    fail("CLI_ARGUMENT_MALFORMED", "decisions contains comma-separated parameter fragments; use --decisions-file with a JSON array of complete decision texts");
+  }
+  return decisions;
 }
 
 // TCRN-CROSS-SUB-426 (MIN-239 D3, D5): --supersedes pairs each decision a record makes obsolete with
@@ -744,10 +658,9 @@ function workSearchSummary(record: WorkRecord, scopeBytes: number): Readonly<Rec
   return { ...workSummary(record), scope: truncateUtf8(workScope(record), scopeBytes), fields: workFieldsExcerpt(record, scopeBytes) };
 }
 
-// TCRN-CROSS-STORY-473 R2: ordinary and searched listings have one four-field shape. The ordinary
-// page carries the goal, acceptance and body in full; --search keeps the bounded excerpts below.
+// Full content is explicit. Search retains its existing bounded excerpts.
 function workListSummary(record: WorkRecord): Readonly<Record<string, unknown>> {
-  return { ...workSummary(record), fields: storyFields(record) };
+  return { ...workSummary(record), fields: storyFields(record), content: workContent(record), scope: workScope(record) };
 }
 
 function workListPageJson(
@@ -755,7 +668,14 @@ function workListPageJson(
   records: readonly unknown[],
   values: Readonly<Record<string, string>>,
 ): string {
-  const page = paginate(state, "work", records, values);
+  const page = {
+    ...paginate(state, "work", records, values),
+    effectiveScope: {
+      projectId: values["project-id"] ?? null,
+      ...Object.fromEntries(["kind", "status", "parent-id", "sprint", "relation", "involved-project", "search"]
+        .filter((name) => values[name] !== undefined).map((name) => [name, values[name]])),
+    },
+  };
   try {
     return canonicalJson(page);
   } catch (error) {
@@ -1033,28 +953,6 @@ function statusFilterOption(value: string | undefined): { readonly status?: Know
 // all reads every card and every decision. Work records have no such status and are recalled as always.
 // A model adds it only when a user asked for them; the prompt hook takes none and reads valid records
 // only, always.
-const RECALL_STATUS_FILTERS = Object.freeze(["valid", "removed", "obsolete", "all"] as const);
-type RecallStatusFilter = typeof RECALL_STATUS_FILTERS[number];
-
-function recallStatusOption(value: string | undefined): { readonly status?: RecallStatusFilter } {
-  if (value === undefined) return {};
-  if (!(RECALL_STATUS_FILTERS as readonly string[]).includes(value)) {
-    fail("CLI_ARGUMENT_MALFORMED", `status=${value}; one of ${RECALL_STATUS_FILTERS.join(", ")}`);
-  }
-  return { status: value as RecallStatusFilter };
-}
-
-function recallCrestSummary(degraded: RecallUserCrestDegraded, store: RecallCardStoreRead): Readonly<Record<string, JsonValue>> {
-  return {
-    reasonCode: degraded.reasonCode,
-    withheldCards: degraded.withheldCards ?? null,
-    conflictPairs: store.unresolvedConflicts.length,
-    duplicateIds: store.unresolvedDuplicates.length,
-    unresolvedScopes: store.unresolvedScopes.length,
-    awaitingChain: store.awaitingChain.length,
-  };
-}
-
 // TCRN-CROSS-STORY-485 R1 (TCRN-CROSS-SUB-345): a gate's command is its argv, given as one JSON array
 // of strings; the engine checks every argument when the gate is declared.
 function gateCommandValue(value: string): unknown {
@@ -1126,6 +1024,8 @@ async function libraryGateResult(state: Awaited<ReturnType<typeof materializeWor
     projectRoot = await gatesProjectRoot(state.metadata.workspaceId, values.project, group.projectId, state);
     const plan = await planGates({
       projectRoot,
+      libraryId: state.metadata.workspaceId,
+      ...(group.projectId === undefined ? {} : { projectId: group.projectId }),
       gates: listGates(scopedWorkspaceState(state, group.projectId)),
       release: booleanValue(values.release, "release"),
       ...(values.base === undefined ? {} : { base: values.base }),
@@ -1180,14 +1080,18 @@ async function workGateTargets(state: Awaited<ReturnType<typeof materializeWorks
         }
         const target = await effectiveProjectState(await validateWorkspace(context.libraryPath), reference.projectId);
         if (target.metadata.workspaceId !== reference.libraryId || target.version !== context.version) throw new Error("target identity or configuration changed; resolve again");
-        const repositories = (context.repositoryContexts as { projectPath: string; binding: unknown }[]).filter(repository => values.project === undefined || resolve(values.project) === repository.projectPath);
+        const declarations = listGates(target);
+        const repositoryBound = declarations.filter(gate => gate.enabled).every(gate => gate.repository !== undefined);
+        const repositories = repositoryBound
+          ? [{ projectPath: await gatesProjectRoot(reference.libraryId, values.project, reference.projectId, target), binding: null }]
+          : (context.repositoryContexts as { projectPath: string; binding: unknown }[]).filter(repository => values.project === undefined || resolve(values.project) === repository.projectPath);
         if (!repositories.length) throw new Error("no registered repository matches this operation");
         for (const repository of repositories) {
           try {
           const currentWork = (await materializeWorkspace(values.workspace!)).work.find(record => record.id === workId && !record.tombstone);
           if (currentWork?.revision !== resolved.workRevision) throw new Error("work revision changed; resolve again");
-          const projectRoot = await gatesProjectRoot(reference.libraryId, repository.projectPath, reference.projectId);
-          const plan = await planGates({ projectRoot, gates: listGates(target), release: booleanValue(values.release, "release"), ...(values.base === undefined ? {} : { base: values.base }),
+          const projectRoot = repositoryBound ? repository.projectPath : await gatesProjectRoot(reference.libraryId, repository.projectPath, reference.projectId);
+          const plan = await planGates({ projectRoot, libraryId: reference.libraryId, projectId: reference.projectId, gates: declarations, release: booleanValue(values.release, "release"), ...(values.base === undefined ? {} : { base: values.base }),
       ...(values["base-by-root"] === undefined ? {} : { baseByRoot: argumentJsonValue(values["base-by-root"], "base-by-root") as Record<string, string> }), workIds: [workId], subjects: gateSubjects(state.work, [workId]), subjectKeys: workSubjectKeys(state.work, [workId]) });
           // This handoff is bound to the very target whose gates execute: the target's own handoff
           // (project-chain.ts, the object the native host dispatch passes for it), with the
@@ -1247,6 +1151,8 @@ async function prepareGates(values: Readonly<Record<string, string>>, execute: b
   const workIds = values["work-id"] === undefined ? [] : listValue(values["work-id"]);
   const plan = await planGates({
     projectRoot: await gatesProjectRoot(state.metadata.workspaceId, values.project, values["project-id"], native),
+    libraryId: state.metadata.workspaceId,
+    ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }),
     gates: listGates(state),
     release: booleanValue(values.release, "release"),
     ...(values.base === undefined ? {} : { base: values.base }),
@@ -1258,7 +1164,7 @@ async function prepareGates(values: Readonly<Record<string, string>>, execute: b
   return { state, plan };
 }
 
-type GatesLibrary = Pick<Awaited<ReturnType<typeof materializeWorkspace>>, "configRecords" | "metadata" | "projects">;
+type GatesLibrary = Awaited<ReturnType<typeof materializeWorkspace>>;
 
 // TCRN-CROSS-STORY-519 (D-519-3): whether a library's entries registered with no project answer for
 // `projectId`: only on a coordination chain, and only for a project the library holds, not deleted.
@@ -1297,6 +1203,13 @@ async function gatesProjectRoot(libraryId: string, project: string | undefined, 
       }
     }
     return root;
+  }
+  // Repository-bound declarations resolve through the local registry independently
+  // of a shared container layout. The current directory only selects a checkout
+  // when it actually has the declared Git identity.
+  if (library !== undefined) {
+    const gates = listGates(scopedWorkspaceState(library, projectId)).filter((gate) => gate.enabled);
+    if (gates.length > 0 && gates.every((gate) => gate.repository !== undefined)) return process.cwd();
   }
   let here: Awaited<ReturnType<typeof resolveLibrary>> | null = null;
   try {
@@ -1419,7 +1332,10 @@ function affectedProjectionTargets(state: Awaited<ReturnType<typeof materializeW
 }
 
 async function projectionRefreshReadback(state: Awaited<ReturnType<typeof materializeWorkspace>>, projectId?: string): Promise<Record<string, unknown>> {
-  try { return { plan: await planConfigurationProjectionRefresh({ libraryId: state.metadata.workspaceId, ...(projectId === undefined ? {} : { projectId }) }), refreshCommand: "configuration-projections-refresh --workspace <library> --at <instant>", coverage: "known-device-registry-only" }; }
+  try {
+    const { planConfigurationProjectionRefresh } = await import("../../core/src/configuration-projections.js");
+    return { plan: await planConfigurationProjectionRefresh({ libraryId: state.metadata.workspaceId, ...(projectId === undefined ? {} : { projectId }) }), refreshCommand: "configuration-projections-refresh --workspace <library> --at <instant>", coverage: "known-device-registry-only" };
+  }
   catch { return { plan: null, status: "unavailable", reason: "projection-discovery-unavailable", refreshCommand: "configuration-projections-plan --workspace <library>" }; }
 }
 
@@ -1816,9 +1732,9 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // TCRN-CROSS-STORY-527 (MIN-257 D6, Q6; TCRN-CROSS-SUB-478): a model proposes a gate declaration
   // (--action set, the default, with gates-config-set's flags) or a gate's removal (--action remove);
   // the proposal waits for Atelier and is not a declaration. A model's run is not refused.
-  { name: "gates-config-propose", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "action", required: false, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "gates-config-propose", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "action", required: false, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "gates-config-remove", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "gates-config-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "gates-config-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "gates-plan", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }] },
   { name: "gates-run", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }] },
   { name: "host-probe", availability: "cli", mutates: false, flags: [{ name: "host", required: true, valueKind: "string" }, { name: "model", required: true, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
@@ -1839,7 +1755,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   { name: "knowledge-create", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "host", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "external-key", required: true, valueKind: "string" }, { name: "scope", required: true, valueKind: "string" }, { name: "project-id", required: true, valueKind: "string", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "role-scopes", required: true, valueKind: "list" }, { name: "category", required: true, valueKind: "string" }, { name: "kind", required: true, valueKind: "string" }, { name: "tags", required: true, valueKind: "list" }, { name: "subject", required: true, valueKind: "string" }, { name: "summary", required: true, valueKind: "string" }, { name: "snippet", required: true, valueKind: "string" }, { name: "accountable-owner-id", required: true, valueKind: "string" }, { name: "source-references", required: true, valueKind: "list" }, { name: "source-digest", required: false, valueKind: "string" }, { name: "supersedes", required: false, valueKind: "string", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "work-ids", required: false, valueKind: "list" }, { name: "decision-ids", required: false, valueKind: "list" }, { name: "gate-ids", required: false, valueKind: "list" }, { name: "evidence-ids", required: false, valueKind: "list" }, { name: "coexist", required: false, valueKind: "boolean" }, { name: "lifecycle", required: false, valueKind: "string" }, { name: "retrieval", required: true, valueKind: "string" }, { name: "freshness", required: true, valueKind: "string" }, { name: "last-verified", required: true, valueKind: "instant", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "stale-days", required: true, valueKind: "integer", nullSentinel: "-", deprecatedAliases: ["null"] }, { name: "export", required: true, valueKind: "string" }, { name: "body", required: true, valueKind: "string" }, { name: "language-bundle", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "knowledge-freshness", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "allow-trailing", required: false, valueKind: "boolean" }] },
   { name: "knowledge-init", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "acknowledge-disposable", required: false, valueKind: "boolean" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "knowledge-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "scope", required: false, valueKind: "string" }, { name: "selection", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "role-scope", required: false, valueKind: "string" }, { name: "category", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "tag", required: false, valueKind: "string" }, { name: "freshness", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }, { name: "allow-trailing", required: false, valueKind: "boolean" }] },
+  { name: "knowledge-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "scope", required: false, valueKind: "string" }, { name: "selection", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "role-scope", required: false, valueKind: "string" }, { name: "category", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "tag", required: false, valueKind: "string" }, { name: "freshness", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }, { name: "diagnostics", required: false, valueKind: "string", valueShape: "summary (default), ids, conflicts, or audit" }, { name: "diagnostic-limit", required: false, valueKind: "integer" }, { name: "diagnostic-offset", required: false, valueKind: "integer" }, { name: "snapshot", required: false, valueKind: "string", valueShape: "SHA-256 from the first page; required for diagnostic continuation" }, { name: "allow-trailing", required: false, valueKind: "boolean" }] },
   { name: "knowledge-rebase", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "knowledge-recover", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "scope", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "knowledge-remove", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "reason", required: true, valueKind: "string" }, { name: "basis", required: true, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "superseded-by", required: false, valueKind: "string" }, { name: "scope", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
@@ -1948,7 +1864,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // decision naming the gate.
   { name: "work-gate-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "work-id", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
   { name: "work-gate-release", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "reason", required: true, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "work-list", availability: "cli", mutates: false, flags: [{ name: "involved-project", required: false, valueKind: "json" }, { name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "parent-id", required: false, valueKind: "string" }, { name: "sprint", required: false, valueKind: "string" }, { name: "relation", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "scope-bytes", required: false, valueKind: "integer" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
+  { name: "work-list", availability: "cli", mutates: false, flags: [{ name: "involved-project", required: false, valueKind: "json" }, { name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "parent-id", required: false, valueKind: "string" }, { name: "sprint", required: false, valueKind: "string" }, { name: "relation", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "scope-bytes", required: false, valueKind: "integer" }, { name: "full", required: false, valueKind: "boolean" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
   { name: "work-content-context", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "id", required: true, valueKind: "string" }, { name: "offset", required: false, valueKind: "integer", valueShape: "Nonnegative Unicode code-point offset within the document; default 0; nonzero requires digest" }, { name: "limit", required: false, valueKind: "integer", valueShape: "Positive Unicode code-point window length; omitted returns the full document subject to output capacity" }, { name: "digest", required: false, valueKind: "string", valueShape: "Exact SHA-256 from the first segment; pins direct and ancestor/source versions" }] },
   { name: "work-project-context", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "id", required: true, valueKind: "string" }, { name: "execution-request", required: false, valueKind: "string", valueShape: "Versioned HostExecutionRequest JSON for native hosts; legacy ExecutionAdmissionRequest / DotExecutionRequest retain historical semantics" }] },
   { name: "work-release", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "force", required: false, valueKind: "boolean" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
@@ -2086,36 +2002,8 @@ export function assertDeclaredOutputCategory(command: string, output: string): v
 }
 
 export async function runCli(arguments_: readonly string[], io: CliIo): Promise<void> {
-  if (arguments_[0] !== "recall" || process.env["EINZBERN_RECALL_OBSERVATION"] !== "1") return runCliUnobserved(arguments_, io);
-  const results: { reasonCode: string; outcome: string }[] = [];
-  let observation: import("../../core/src/recall-observation.js").RecallObservation | undefined;
-  try {
-    await withRecallObservation(() => runCliUnobserved(arguments_, { write(value) {
-      let reasonCode = "CLI_RECALL_RESULT";
-      try {
-        const parsed = JSON.parse(value) as { reasonCode?: unknown };
-        if (typeof parsed.reasonCode === "string") reasonCode = parsed.reasonCode;
-      } catch { /* Non-JSON output is not copied into telemetry. */ }
-      const outcome = reasonCode === "RECALL_READY" ? "hit"
-        : reasonCode === "RECALL_NO_STRONG_HIT" ? "no-hit" : "result";
-      results.push({ reasonCode, outcome });
-      io.write(value);
-    } }), value => { observation = value; });
-  } catch (error) {
-    const reason = (error as { reasonCode?: unknown }).reasonCode;
-    const queryPosition = arguments_.indexOf("--query");
-    const query = queryPosition < 0 ? undefined : arguments_[queryPosition + 1];
-    const empty = typeof query === "string" && query.trim().length === 0
-      && (error as { message?: unknown }).message === "query"
-      && (reason === "CLI_ARGUMENT_MISSING" || reason === "CLI_ARGUMENT_MALFORMED");
-    results.push({ reasonCode: typeof reason === "string" ? reason : "CLI_RECALL_FAILED", outcome: empty ? "empty" : "error" });
-    throw error;
-  } finally {
-    if (observation !== undefined) {
-      const { logCliRecall } = await import("../../core/src/recall-observation-log.js");
-      await logCliRecall(observation, results);
-    }
-  }
+  if (arguments_[0] === "recall" && !arguments_.includes("--help") && !arguments_.includes("-h")) return runRecallCli(arguments_, io);
+  return runCliUnobserved(arguments_, io);
 }
 
 async function runCliUnobserved(arguments_: readonly string[], io: CliIo): Promise<void> {
@@ -2601,6 +2489,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     io.write(canonicalJson(result));
     const receipt = result as Readonly<Record<string, JsonValue>>;
     if (command === "execution-host-prepare" && receipt.attempt === null) fail("HOST_PREPARATION_NOT_EXECUTABLE", "Only this action is not executable; inspect decision, not a claimed host rejection");
+    if (command === "execution-antigravity-swarm-record" && receipt.reasonCode === "ANTIGRAVITY_SWARM_RECORD_INVALID") fail("ANTIGRAVITY_SWARM_RECORD_INVALID", "Raw invalid swarm material retained; see problems");
     if (command === "execution-codex-peer-record" && receipt.reasonCode === "CODEX_PEER_GUARD_NOT_READY") fail("CODEX_PEER_GUARD_NOT_READY", "Receipt retained; durable role/native guard readiness failed; see actual diagnostics");
     if (command === "execution-codex-peer-record" && receipt.reasonCode === "CODEX_PEER_RECORD_INVALID") fail("CODEX_PEER_RECORD_INVALID", "Raw invalid peer material retained; see problems");
     if (command === "execution-host-record" && (receipt.validation as Readonly<Record<string, JsonValue>>)?.status !== "valid") fail("HOST_RECORD_INVALID", "Raw invalid material retained; see problems");
@@ -2621,6 +2510,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     try { observations = JSON.parse(readFileSync(values.observations!, "utf8")); }
     catch { fail("DISPATCH_EVIDENCE_INPUT_INVALID", "--observations must name a readable machine observations JSON file"); }
     if (values.action !== undefined && !["implementation", "research", "coordination"].includes(values.action)) fail("CLI_ARGUMENT_MALFORMED", "action");
+    const { prepareDispatch, writeDispatchArtifact } = await import("../../core/src/dispatch-workflow.js");
     const result = await prepareDispatch(await materializeWorkspace(values.workspace!), values.id!, {
       ...(values.action === undefined ? {} : { action: values.action as "implementation" | "research" | "coordination" }),
       host: values.host!, category: values.category!, rejections: integerValue(values, "rejections"), requestedAgents: integerValue(values, "requested-agents"),
@@ -2638,6 +2528,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       binding = JSON.parse(readFileSync(values.binding!, "utf8"));
       processReturn = JSON.parse(readFileSync(values["process-return"]!, "utf8"));
     } catch { fail("DISPATCH_EVIDENCE_INPUT_INVALID", "--binding and --process-return must name readable JSON files"); }
+    const { recordDispatch, writeDispatchArtifact } = await import("../../core/src/dispatch-workflow.js");
     const result = recordDispatch(binding, integerValue(values, "target"), processReturn);
     await writeDispatchArtifact(values.output!, result);
     io.write(`${JSON.stringify(result)}\n`);
@@ -2657,6 +2548,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     } catch {
       fail("DISPATCH_EVIDENCE_INPUT_INVALID", "--from-file must name a readable JSON evidence file");
     }
+    const { normalizeDispatchAdmissionEvidence } = await import("../../core/src/dispatch-evidence.js");
     const result = normalizeDispatchAdmissionEvidence(input);
     io.write(canonicalJson(result));
     if (!result.valid) fail("DISPATCH_EVIDENCE_INVALID", "Dispatch evidence association failed; see stdout problems");
@@ -2701,6 +2593,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     let initializedProjectId: string | undefined;
     if (values.project !== undefined) {
       await ensureProjectCoordination(realPath, values.at!);
+      const { ensureSetupProjectBinding } = await import("../../core/src/setup-fresh.js");
       initializedProjectId = await ensureSetupProjectBinding(values.project, realPath, { at: values.at!, deviceHome: (await import("../../core/src/device-home.js")).deviceHome() });
       state = await declareChainIdentity(realPath, { ...chainIdentity(await materializeWorkspace(realPath))!, primaryProjectId: initializedProjectId }, { occurredAt: values.at! });
     }
@@ -2795,7 +2688,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       navigation: { key: AGENTS_NAVIGATION_SETTING, value: navigation },
       sections: rendered.sections.map((section) => ({ id: section.id, file: section.file, result: section.result, state: section.state })),
       pending: rendered.pending.map((section) => ({ id: section.id, file: section.file })),
-      files: rendered.files.map((file) => ({ file: file.file, written: file.written, backupPath: file.backupPath })),
+      files: rendered.files.map((file) => ({ ...file })),
       backupDir: rendered.backupDir,
       withheld: rendered.withheld.map((entry) => ({ name: entry.name, reason: entry.reason })),
       recorded: rendered.recorded,
@@ -2995,18 +2888,21 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   if (command === "storage-configure") {
     const values = parseArguments(rest, ["library", "runtime", "at", "decided-in", "yes"]);
     required(values, ["library", "runtime", "at", "decided-in"]);
+    const { configureStorageLocation } = await import("../../core/src/storage-configure.js");
     io.write(canonicalJson(await configureStorageLocation(deviceHome(), values.library!, values.runtime!, values.at!, values["decided-in"]!, booleanValue(values.yes, "yes")) as JsonValue));
     return;
   }
   if (command === "storage-consolidate") {
     const values = parseArguments(rest, ["from", "to", "retire-runtime-root", "at", "decided-in", "yes", "actor"]);
     required(values, ["from", "to", "retire-runtime-root", "at", "decided-in", "actor"]);
+    const { consolidateStorage } = await import("../../core/src/storage-consolidate.js");
     io.write(canonicalJson(await consolidateStorage(deviceHome(), values.from!, values.to!, values["retire-runtime-root"]!, values.at!, values["decided-in"]!, booleanValue(values.yes, "yes"), values.actor!) as JsonValue));
     return;
   }
   if (command === "library-readme-refresh") {
     const values = parseArguments(rest, ["workspace", "at", "actor"]);
     required(values, ["workspace", "at", "actor"]);
+    const { refreshLibraryReadme } = await import("../../core/src/storage-consolidate.js");
     io.write(canonicalJson(await refreshLibraryReadme(values.workspace!, values.at!, values.actor!) as JsonValue));
     return;
   }
@@ -3014,6 +2910,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const values = parseArguments(rest, ["to", "copies", "at", "yes"]);
     required(values, ["to", "copies", "at"]);
     const copies = JSON.parse(await readFile(values.copies!, "utf8")) as { path: string; libraryId: string }[];
+    const { cleanConsolidatedSources } = await import("../../core/src/consolidate.js");
     io.write(canonicalJson(await cleanConsolidatedSources(values.to!, copies, values.at!, booleanValue(values.yes, "yes")) as JsonValue));
     return;
   }
@@ -3021,12 +2918,14 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const values = parseArguments(rest, ["mapping", "to", "at", "actor", "decided-in", "yes"]);
     required(values, ["mapping", "to", "at", "actor", "decided-in"]);
     const mapping = JSON.parse(await readFile(values.mapping!, "utf8")) as ConsolidationMapping;
+    const { consolidateLibraries } = await import("../../core/src/consolidate.js");
     io.write(canonicalJson(await consolidateLibraries(mapping, values.to!, { at: values.at!, actor: values.actor!, decidedIn: values["decided-in"]!, yes: booleanValue(values.yes, "yes") }) as JsonValue));
     return;
   }
   if (command === "workspace-relocate-discard") {
     const values = parseArguments(rest, ["workspace", "to", "transaction-id"]);
     required(values, ["workspace", "to", "transaction-id"]);
+    const { discardRelocationPreparation } = await import("../../core/src/relocate.js");
     io.write(canonicalJson(await discardRelocationPreparation(values.workspace!, values.to!, values["transaction-id"]!))); return;
   }
   if (command === "workspace-relocate") {
@@ -3364,6 +3263,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   }
   if (command === "execution-fallback-candidates") {
     const values = parseArguments(rest, ["request", "at"]); required(values, ["request", "at"]);
+    const { recommendHostFallbacks, validateHostExecutionRequest } = await import("../../core/src/execution-fallback.js");
     const request = validateHostExecutionRequest(JSON.parse(await readFile(values.request!, "utf8")));
     const policy = request.capabilities.hostKind === "dot" ? null : await readEngineModelPolicyFile();
     io.write(canonicalJson(recommendHostFallbacks(request, policy, values.at!))); return;
@@ -3420,6 +3320,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const source = { libraryId: state.metadata.workspaceId, ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }) };
     const outputKeys = values["output-keys"] === undefined ? undefined : argumentJsonValue(values["output-keys"], "output-keys");
     if (outputKeys !== undefined && (!Array.isArray(outputKeys) || outputKeys.some(key => typeof key !== "string"))) fail("CLI_ARGUMENT_MALFORMED", "output-keys must be a string array");
+    const { planConfigurationProjectionRefresh, refreshConfigurationProjections } = await import("../../core/src/configuration-projections.js");
     const result = applying ? await refreshConfigurationProjections(source, { occurredAt: values.at!, ...(values.actor === undefined ? {} : { actorId: values.actor }), ...(outputKeys === undefined ? {} : { outputKeys: outputKeys as string[] }) }) : await planConfigurationProjectionRefresh(source);
     io.write(canonicalJson({ reasonCode: applying ? "CONFIGURATION_PROJECTIONS_REFRESH_FINISHED" : "CONFIGURATION_PROJECTIONS_PLAN_READY", ...result })); return;
   }
@@ -3461,6 +3362,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       effect: "No floor, client, project policy, or accepted boundary is changed. Actual capable release and writer evidence remain required.",
     };
     const presentedSettings = chain?.role === "coordination" ? coordinationCatalogRows(state, catalog.settings) : markUnresolvedCommonDefault(catalog.settings, reading);
+    const { diagnoseLegacySharedPaths } = await import("../../core/src/configuration-projections.js");
     io.write(canonicalJson({ ...catalog, reasonCode: "SETTINGS_CATALOG_READY", chain, projectId: state.configurationProjectId,
       ...(reading.commonDefault === null ? {} : { commonDefault: reading.commonDefault as unknown as JsonValue }),
       projects: state.projects.filter(entry => !entry.tombstone).map(entry => ({ id: entry.id, externalKey: entry.externalKey, name: entry.name, parentProjectId: entry.parentProjectId ?? null })),
@@ -3881,7 +3783,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     // selected, and --scope user lists this user's crest instead of the library's. TCRN-CROSS-SUB-425:
     // left out, or valid, the valid cards; --status removed the removed cards alone and all every card,
     // each removed one as it is kept.
-    const values = parseArguments(rest, ["workspace", "at", "scope", "selection", "status", "project-id", "role-scope", "category", "kind", "tag", "freshness", "search", "limit", "offset", "allow-trailing"]);
+    const values = parseArguments(rest, ["workspace", "at", "scope", "selection", "status", "project-id", "role-scope", "category", "kind", "tag", "freshness", "search", "limit", "offset", "diagnostics", "diagnostic-limit", "diagnostic-offset", "snapshot", "allow-trailing"]);
     required(values, ["workspace", "at"]);
     io.write(canonicalJson(await listKnowledgeMetadata(values.workspace ?? "", {
       at: values.at ?? "",
@@ -3904,6 +3806,10 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // floor would pre-empt half of it while silently keeping the ceiling.
       ...(values.limit !== undefined ? { limit: integerValue(values, "limit") } : {}),
       ...(values.offset !== undefined ? { offset: integerValue(values, "offset") } : {}),
+      ...(values.diagnostics !== undefined ? { diagnostics: values.diagnostics as "summary" | "ids" | "conflicts" | "audit" } : {}),
+      ...(values["diagnostic-limit"] !== undefined ? { diagnosticLimit: integerValue(values, "diagnostic-limit") } : {}),
+      ...(values["diagnostic-offset"] !== undefined ? { diagnosticOffset: integerValue(values, "diagnostic-offset") } : {}),
+      ...(values.snapshot !== undefined ? { snapshot: values.snapshot } : {}),
     })));
     return;
   }
@@ -3999,198 +3905,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // the path the caller resolved rather than used to resolve one -- a hook whose path
   // resolution drifts gets a refusal instead of an answer from the wrong chain.
   if (command === "recall") {
-    // TCRN-CROSS-STORY-474: recall answers from one library, whatever directory it sits in; the
-    // partition flag went with the partition registry. --host stays: it names the prompt-language
-    // policy the answer is negotiated against.
-    // TCRN-CROSS-SUB-425 (MIN-239 D6), TCRN-CROSS-SUB-426 R17 续作修订三 (C-R18-1; STORY-514 R4): the
-    // cards and the decisions are the valid ones unless --status names a status of one family, which reads
-    // that family as its list verb does (removed: the removed cards alone; obsolete: the obsolete
-    // decisions alone; all: both families whole) and the other family's valid records; a model adds it
-    // only when a user asked for them. See recallStatusOption.
-    const values = parseArguments(rest, ["project-id", "workspace", "host", "at", "query", "limit", "tau", "allow-trailing", "status", "view"]);
-    required(values, ["workspace", "at", "query"]);
-    const status = recallStatusOption(values.status);
-    if (values.view !== undefined && values.view !== "agent") fail("CLI_ARGUMENT_MALFORMED", "view");
-    const cardStatus: KnowledgeStatusFilter = status.status === "removed" || status.status === "all" ? status.status : "valid";
-    const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
-    const workspace = values.workspace ?? "";
-    const query = values.query ?? "";
-    if (query.trim().length === 0 || query.length > RUNTIME_CAPACITY.stringCodeUnits || !query.isWellFormed()) fail("CLI_ARGUMENT_MALFORMED", "query");
-    const limit = values.limit === undefined ? undefined : integerValue(values, "limit");
-    if (limit !== undefined && (limit < 1 || !Number.isSafeInteger(limit))) fail("CLI_ARGUMENT_MALFORMED", "limit");
-    const { state: rawState, authority } = await readRecallAuthority(workspace, true);
-    const state = await effectiveProjectState(rawState, values["project-id"]);
-    // Legacy project selection chooses configuration only; shared libraries also isolate corpora.
-    const projectId = isSharedLibrary(state) ? values["project-id"] : undefined;
-    const settingValue = (key: string): string | undefined => state.settings.find((entry) => entry.key === key)?.value;
-    // The flag wins over the setting, the setting over the recorded default: the same
-    // order work-list's scope-bytes already uses.
-    const configuredTau = Number(settingValue("retrieval.tau") ?? String(RECALL_DEFAULT_TAU));
-    const tau = values.tau === undefined
-      ? (Number.isFinite(configuredTau) && configuredTau >= 0 ? configuredTau : RECALL_DEFAULT_TAU)
-      : Number(values.tau);
-    if (!Number.isFinite(tau) || tau < 0) fail("CLI_ARGUMENT_MALFORMED", "tau");
-    // TCRN-CROSS-STORY-364 requirement 4: a prompt whose language is outside the recorded
-    // prompt languages is answered, and the answer says the translation is owed and which
-    // model owes it. The engine calls no model; the hook holding it translates and asks
-    // again. Read-side is fail-open, unlike the write path, because a session with no
-    // answer is worse than an answer ranked in the wrong language.
-    const languageAnswer = resolveQueryLanguage(query, await readRuntimeKnowledgeLanguagePolicy(state.settings, values.host));
-    const scopeBytes = Number(settingValue("retrieval.scopeExcerptBytes") ?? "512");
-    const scopeExcerptBytes = Number.isSafeInteger(scopeBytes) && scopeBytes > 0 ? scopeBytes : 512;
-    // The byte budget of one prompt's answer (TCRN-CROSS-STORY-474 R2): the hit lines are cut to it
-    // at whole lines, which is what a host puts in front of the prompt.
-    const promptBytes = Number(settingValue("injection.perPromptBytes") ?? "1600");
-    const perPromptBytes = Number.isSafeInteger(promptBytes) && promptBytes > 0 ? promptBytes : 1600;
-    // TCRN-CROSS-STORY-476 R5 (TCRN-CROSS-SUB-311): the cards come from two stores, the library's
-    // crest and this user's crest, each read whole as an explicit search corpus (explicit-only
-    // article index cards admitted, the complete corpus before scoring so bm25 keeps its baseline)
-    // and each card labelled with its store. A store with no cards to give -- none initialized, or
-    // one trailing the chain while the caller did not admit a trailing read -- still leaves the
-    // work records and minutes to recall, and its reason code is reported rather than swallowed,
-    // so "no cards" is never indistinguishable from "no card matched". knowledgeReasonCode stays
-    // the library store's, as it always was.
-    // Each store answers the card status as knowledge-list does: removed, the removed cards alone; all,
-    // every card.
-    const cards = await readRecallCards(workspace, {
-      ...(projectId === undefined ? {} : { projectId }),
-      at: values.at ?? "",
-      allowTrailing: booleanValue(values["allow-trailing"], "allow-trailing"),
-      ...(cardStatus === "valid" ? {} : { status: cardStatus }),
-    }, authority);
-    // TCRN-CROSS-STORY-474 R1: what the index holds is decided in one place (recall-inputs.ts), so
-    // the verb and the prompt hook cannot index differently: the Stories, Incidents, Initiatives and
-    // Epics with their goal, body and parent titles, every minutes record, and the cards.
-    const inputs = recallInputsFromState(state, cards.cards, { scopeExcerptBytes, ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) });
-    const result = recall({
-      // Library identity stays path-independent; project-specific corpus inputs must not share an index.
-      cacheKey: `${state.metadata.workspaceId}:${values["project-id"] ?? ""}`,
-      // The storage checkpoint: the chain head the records were replayed from, and the
-      // digests of the two knowledge answers they were read with. Any one moving is a
-      // different corpus, and the index is rebuilt from the rows that actually changed.
-      // A library's head is one digest over every stream's head, so it moves with any
-      // entry of the version vector. An index of another status of decisions is another corpus
-      // at the same head, and names that status (the cards' status is in their digest).
-      checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}`,
-      documents: () => recallDocuments(inputs),
-      query,
-      tau,
-      ...(limit === undefined ? {} : { limit }),
-    });
-    // TCRN-CROSS-SUB-425, TCRN-CROSS-SUB-426 R17 续作修订三 (STORY-514 AC1): a hit on a removed card, which
-    // only --status removed or all reads, says so and carries the card's removal as knowledge-list
-    // answers it: the reason, basis, actor and instant, the card that superseded it, and its event.
-    const removals = new Map(cards.cards.flatMap((card) => (card.removal === undefined ? [] : [[card.id, card.removal] as const])));
-    const statusHits = result.records.map((hit) => {
-      const removal = hit.kind === "card" ? removals.get(hit.id) : undefined;
-      return removal === undefined ? hit : { ...hit, status: "removed", removal };
-    });
-    // TCRN-CROSS-SUB-426 (MIN-239 D5, D6): the valid decisions are indexed unless --status named
-    // obsolete (the obsolete ones alone) or all (every one); a work or card hit that points at an
-    // obsolete decision -- and, in a recall that indexed them, a minutes hit that holds one -- carries it
-    // under obsoleteDecisions, with the decision that superseded it (null when withdrawn), and its line
-    // says so.
-    const hits = recallDecisionHints(state, cards.cards, statusHits, { decisions });
-    const context = [...recallContextLines(hits, perPromptBytes)];
-    const source = {
-      workspaceId: state.metadata.workspaceId,
-      version: state.version,
-      headEventHash: state.headEventHash,
-    };
-    const knowledge = {
-      knowledgeReasonCode: cards.stores.project.reasonCode,
-      // Both stores' reads: each one's reason code and how many cards it gave.
-      knowledgeStores: {
-        project: { reasonCode: cards.stores.project.reasonCode, cards: cards.stores.project.cards },
-        user: { reasonCode: cards.stores.user.reasonCode, cards: cards.stores.user.cards },
-      },
-      // TCRN-CROSS-SUB-310 (MIN-235 D7): a user crest that gave fewer cards than it holds says so at
-      // the top of the answer -- its read refused (the refusal's reasonCode), or cards withheld in
-      // unresolved conflict (KNOWLEDGE_POSSIBLE_CONFLICT with unresolvedConflicts and withheldCards)
-      // -- so "no user card matched" never stands in for "the user crest was not read".
-      // TCRN-CROSS-SUB-413: every version of an id two devices wrote is withheld too, named under
-      // unresolvedDuplicates (KNOWLEDGE_DUPLICATE when no pair is withheld as well).
-      ...(cards.userCrestDegraded === null ? {} : { userCrestDegraded: cards.userCrestDegraded as unknown as JsonValue }),
-      // TCRN-CROSS-SUB-414 (C-R15-1): the cards the library's crest withheld are named the same way,
-      // in the same form: an unresolved pair (KNOWLEDGE_POSSIBLE_CONFLICT), versions of an unresolved
-      // duplicate (KNOWLEDGE_DUPLICATE when no pair is withheld), cards whose project the chain no
-      // longer holds, under unresolvedScopes (KNOWLEDGE_LINK_INVALID when neither is withheld; R16,
-      // C-R16-1), or records awaiting chain events this device has not received, under awaitingChain
-      // (KNOWLEDGE_HIGH_WATER_MISMATCH when they are all that is withheld), with withheldCards. A
-      // refused read stays knowledgeReasonCode.
-      ...(cards.projectCrestDegraded === null ? {} : { projectCrestDegraded: cards.projectCrestDegraded as unknown as JsonValue }),
-    };
-    if (values.view === "agent") {
-      const summary = {
-        schemaVersion: "tcrn.recall-agent.v1",
-        reasonCode: result.reasonCode,
-        ...source,
-        ...status,
-        indexed: result.indexed,
-        total: result.total,
-        perPromptBytes,
-        queryLanguage: languageAnswer.queryLanguage,
-        translationTarget: languageAnswer.queryTranslation?.to ?? null,
-        knowledgeReasonCode: knowledge.knowledgeReasonCode,
-        knowledgeStores: knowledge.knowledgeStores,
-        ...(cards.userCrestDegraded === null ? {} : { userCrestDegraded: recallCrestSummary(cards.userCrestDegraded, cards.stores.user) }),
-        ...(cards.projectCrestDegraded === null ? {} : { projectCrestDegraded: recallCrestSummary(cards.projectCrestDegraded, cards.stores.project) }),
-        diagnostics: {
-          schemaVersion: "tcrn.recall.v1",
-          knowledgeSha256: canonicalSha256(knowledge),
-          projectSnapshotDigest: cards.stores.project.digest === "absent" ? null : cards.stores.project.digest,
-          userSnapshotDigest: cards.stores.user.digest === "absent" ? null : cards.stores.user.digest,
-        },
-        outputLimitBytes: AGENT_OUTPUT_MAX_BYTES,
-      };
-      const output = canonicalJson({ ...summary, delivery: "complete", context });
-      const bytes = Buffer.byteLength(output, "utf8");
-      io.write(bytes <= AGENT_OUTPUT_MAX_BYTES
-        ? output
-        : canonicalJson({ ...summary, delivery: "over-budget", requiredBytes: bytes }));
-      return;
-    }
-    io.write(canonicalJson({
-      schemaVersion: "tcrn.recall.v1",
-      reasonCode: result.reasonCode,
-      ...source,
-      at: values.at ?? "",
-      ...status,
-      ...knowledge,
-      query,
-      queryTokens: [...result.tokens],
-      // The canonical protocol carries only safe integers, and a bm25 score is not one.
-      // These three are spoken the way every numeric setting in this engine is spoken --
-      // as a decimal string -- rather than scaled into an integer whose unit a reader
-      // would have to be told.
-      tau: result.tau.toFixed(4),
-      relativeFloor: result.relativeFloor.toFixed(4),
-      limit: result.limit,
-      scopeExcerptBytes,
-      queryLanguage: languageAnswer.queryLanguage,
-      queryTranslation: languageAnswer.queryTranslation,
-      telemetry: languageAnswer.telemetry,
-      indexed: result.indexed,
-      rebuilt: result.rebuilt,
-      total: result.total,
-      // TCRN-CROSS-STORY-474 R2, R3: each hit also as the one line a host shows (kind and status,
-      // title, key, id, the titles above it), and the answer as those lines cut to the prompt's
-      // budget. Below the strong-hit threshold the reason code is RECALL_NO_STRONG_HIT and both are
-      // empty: a prompt about nothing the library holds gets nothing, not its best weak guesses.
-      // A card hit names its store, "project" or "user" (TCRN-CROSS-STORY-476 R5), and its line
-      // marks a user card 「用户」.
-      records: hits.map((hit) => ({
-        kind: hit.kind, key: hit.key, id: hit.id, status: hit.status,
-        title: hit.title, summary: hit.summary, score: hit.score.toFixed(4),
-        line: formatRecallLine(hit), parentChain: [...hit.parentChain],
-        ...(hit.scope === undefined ? {} : { scope: hit.scope }),
-        ...(hit.involvedProjects === undefined ? {} : { involvedProjects: hit.involvedProjects }),
-        ...(hit.obsoleteDecisions === undefined ? {} : { obsoleteDecisions: hit.obsoleteDecisions.map((entry) => ({ ...entry })) }),
-        ...(hit.removal === undefined ? {} : { removal: { ...hit.removal } }),
-      })),
-      perPromptBytes,
-      context,
-    }));
+    await runRecallCommand(rest, io);
     return;
   }
   if (command === "knowledge-checkpoint") {
@@ -4344,7 +4059,10 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
         gates: verdict,
       };
     });
-    writeState(io, state, workSummary(state.work.find((entry) => entry.id === id)!), undefined, gates === null ? {} : { doneGates: gates });
+    writeState(io, state, workSummary(state.work.find((entry) => entry.id === id)!), undefined, {
+      ...(gates === null ? {} : { doneGates: gates }),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
+    });
     return;
   }
   if (command === "work-batch") {
@@ -4398,6 +4116,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     writeState(io, state, workBatchReceipt(state, members), undefined, {
       ...(hints.length === 0 ? {} : { knowledgeHints: doneIds.map((workId, index) => ({ workId, ...hints[index] })) }),
       ...(gates === null ? {} : { doneGates: gates }),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
     });
     return;
   }
@@ -4441,6 +4160,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     writeState(io, state, workSummary(transitioned), undefined, {
       ...(hint === undefined ? {} : { knowledgeHint: hint }),
       ...(gates === null ? {} : { doneGates: gates }),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
     });
     return;
   }
@@ -4475,7 +4195,10 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       ...(values.actor ? { actorId: values.actor } : {}),
     }));
     const updated = state.work.find((entry) => entry.id === (values.id ?? ""))!;
-    writeState(io, state, workSummary(updated), undefined, { contentImpact: readWorkContentImpact(updated) });
+    writeState(io, state, workSummary(updated), undefined, {
+      contentImpact: readWorkContentImpact(updated),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
+    });
     return;
   }
   if (command === "work-delete") {
@@ -4543,7 +4266,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     return;
   }
   if (command === "work-list") {
-    const values = parseArguments(rest, ["workspace", "project-id", "kind", "status", "parent-id", "sprint", "relation", "involved-project", "search", "scope-bytes", "limit", "offset"]);
+    const values = parseArguments(rest, ["workspace", "project-id", "kind", "status", "parent-id", "sprint", "relation", "involved-project", "search", "scope-bytes", "full", "limit", "offset"]);
     required(values, ["workspace"]);
     if (values.search !== undefined && (values.search.length === 0 || values.search.length > RUNTIME_CAPACITY.stringCodeUnits || !values.search.isWellFormed())) {
       fail("CLI_ARGUMENT_MALFORMED", "search");
@@ -4562,6 +4285,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const scopeBytes = values["scope-bytes"] === undefined ? Number(configuredScopeBytes ?? "512") : integerValue(values, "scope-bytes");
     if (scopeBytes < 1 || scopeBytes > Number.MAX_SAFE_INTEGER) fail("CLI_ARGUMENT_MALFORMED", "scope-bytes");
     const search = values.search?.toLowerCase();
+    const full = booleanValue(values.full, "full");
     // TCRN-CROSS-STORY-472 R3: the records that stand in the named relation to the given id.
     const involved = values["involved-project"] === undefined ? undefined : projectReference(jsonValue(values["involved-project"], "involved-project"));
     const related = relation === undefined ? undefined : relationFilter(state, relation.name, relation.id);
@@ -4586,7 +4310,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // silent wrong answer (total=0), not a cosmetic inconsistency. Sharing nullableValue
       // makes the round trip closed for every spelling the writer accepts, by construction.
       (values["parent-id"] === undefined || (nullableValue(values["parent-id"]) === null ? entry.parentId === null : entry.parentId === values["parent-id"])))
-      .map((entry) => search === undefined ? workListSummary(entry) : workSearchSummary(entry, scopeBytes))
+      .map((entry) => full ? workListSummary(entry) : search === undefined ? workSummary(entry) : workSearchSummary(entry, scopeBytes))
       // TCRN-CROSS-STORY-528 (SUB-458): each record's own lease, null when it holds none; active is
       // judged by this machine's clock as it reads, for reading only (MIN-256 R1 Q6).
       .map((summary) => ({ ...summary, lease: workLeaseView(state, String(summary.id), now) }));
@@ -4727,7 +4451,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const values = parseArguments(rest, [...shared, "project-id", "external-key", "title", "summary", ...EXACTLY_ONE_FLAGS[command].map(({ name }) => name), "decided-by", "work-ids", "supersedes", "withdraws", "coexists", "actor"]);
     required(values, [...requiredShared, "project-id", "title", "summary"]);
     requireExactlyOne(command, values);
-    const decisions = values["decisions-file"] === undefined ? listValue(values.decisions) : decisionsFromFile(values["decisions-file"]);
+    const decisions = values["decisions-file"] === undefined ? decisionsFromList(values.decisions) : decisionsFromFile(values["decisions-file"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
     const state = await withWriteLock(workspace, at, async () => recordMinutes(workspace, {
@@ -4764,6 +4488,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       ...(recorded.declarations === undefined ? {} : { declarations: recorded.declarations }),
       ...(hint === undefined ? {} : { knowledgeHint: hint }),
       ...(warnings.length === 0 ? {} : { warnings: warnings as unknown as JsonValue }),
+      ...await readBackWorkspaceWrite(workspace, state, written.ids ?? []),
     }));
     return;
   }
@@ -4835,7 +4560,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // Atelier only; a model's run is refused with MODEL_WRITE_REFUSED once its arguments parse, before
   // the library is read, so a model cannot declare the gate its own Story is then held to.
   if (command === "gates-config-set") {
-    const values = parseArguments(rest, ["project-id", ...shared, "name", "command", "root", "covers", "required", "enabled", "release-only", "order", "actor", "decided-in"]);
+    const values = parseArguments(rest, ["project-id", ...shared, "name", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "actor", "decided-in"]);
     required(values, [...requiredShared, "name"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
@@ -4850,6 +4575,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       const existing = listGates(scopedWorkspaceState(await materializeWorkspace(workspace), values["project-id"])).find((gate) => gate.name === name);
       if (commandValue === undefined && existing === undefined) fail("CLI_ARGUMENT_MISSING", "command");
       const order = orderValue ?? existing?.order;
+      const repository = values.repository === "" ? undefined : values.repository ?? existing?.repository;
       const authorized = await writeAuthorization(permit, workspace);
       return setGate(workspace, {
         occurredAt: at, ...configurationOptions(values),
@@ -4857,6 +4583,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
         gate: {
           command: commandValue ?? existing?.command,
           root: values.root ?? existing?.root ?? ".",
+          ...(repository === undefined ? {} : { repository }),
           covers: values.covers === undefined ? existing?.covers ?? ["**"] : listValue(values.covers),
           required: requiredValue ?? existing?.required ?? true,
           enabled: enabledValue ?? existing?.enabled ?? true,
@@ -4890,14 +4617,14 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // takes none of them. The proposal waits for Atelier: gates-config-list, gates-plan and gates-run do
   // not see it, and gates-config-list --status pending lists it. A model's run is not refused.
   if (command === "gates-config-propose") {
-    const values = parseArguments(rest, ["project-id", ...shared, "name", "action", "command", "root", "covers", "required", "enabled", "release-only", "order", "actor"]);
+    const values = parseArguments(rest, ["project-id", ...shared, "name", "action", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "actor"]);
     required(values, [...requiredShared, "name", "actor"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
     const name = values.name ?? "";
     const action = values.action ?? "set";
     if (action !== "set" && action !== "remove") fail("CLI_ARGUMENT_MALFORMED", "action");
-    if (action === "remove" && ["command", "root", "covers", "required", "enabled", "release-only", "order"].some((flag) => values[flag] !== undefined)) {
+    if (action === "remove" && ["command", "root", "repository", "covers", "required", "enabled", "release-only", "order"].some((flag) => values[flag] !== undefined)) {
       fail("CLI_ARGUMENT_MALFORMED", "a gate's removal takes no declaration flags");
     }
     const commandValue = values.command === undefined ? undefined : gateCommandValue(values.command);
@@ -4911,10 +4638,12 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
         const existing = listGates(scopedWorkspaceState(await materializeWorkspace(workspace), values["project-id"])).find((gate) => gate.name === name);
         if (commandValue === undefined && existing === undefined) fail("CLI_ARGUMENT_MISSING", "command");
         const order = orderValue ?? existing?.order;
+        const repository = values.repository === "" ? undefined : values.repository ?? existing?.repository;
         payload = {
           // A command that is not an argv is refused by the declaration's check (GATES_CONFIG_INVALID).
           command: (commandValue ?? existing?.command) as JsonValue,
           root: values.root ?? existing?.root ?? ".",
+          ...(repository === undefined ? {} : { repository }),
           covers: values.covers === undefined ? [...(existing?.covers ?? ["**"])] : [...listValue(values.covers)],
           required: requiredValue ?? existing?.required ?? true,
           enabled: enabledValue ?? existing?.enabled ?? true,

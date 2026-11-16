@@ -17,7 +17,7 @@ The Grail grants wishes. Einzbern remembers the wishes you made, the decisions y
 <td align="center" width="33%">
 
 ### 1
-hook<br><sub>one lookup before every prompt, silent unless strongly relevant</sub>
+retrieval entry<br><sub>one lookup before every prompt, silent unless strongly relevant</sub>
 
 </td>
 <td align="center" width="33%">
@@ -306,9 +306,9 @@ Parallelism, agent count and context boundaries can all change total usage. This
 
 ## Why it is designed this way
 
-**Provide memory, do not police method.** The previous version tried to fence the model in with gates, proofs, and Stop hooks: more than a hundred verbs, sixteen gates. We used it ourselves for two months. The cost far exceeded the benefit, and the model forgot what it was going to forget anyway. This version removes all of it and keeps records and retrieval.
+**Core records and retrieves project memory.** Work, decisions and knowledge enter the event stream. Projects can declare completion gates, and host integrations load instructions and enforce their configured runtime constraints.
 
-**One hook only.** A model does not know what it does not know, so retrieval must be triggered by the host before every prompt rather than waiting for the model to think of it. But the hook contains no rules. What to fetch and how much is the engine's decision.
+**Hooks follow each host integration.** UserPromptSubmit triggers retrieval. Codex role guards use PreToolUse, PostToolUse and Stop. Host health checks report their enabled state and native loading evidence.
 
 **AGENTS.md is your file.** Rules that must hold on both hosts can only live where both hosts read. So Einzbern does write to it, but only marked sections, only what you enabled, and never over your edits.
 
