@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-STORY-476 R5, AC3 at the core (TCRN-CROSS-SUB-310): the user-level crest. A card written
 // with scope "user" lands in this user's crest -- `crest` in the device directory, or the place the
 // device-level key crest.userPath names, which may be a cloud folder -- and not in the library it
@@ -433,8 +434,8 @@ test("R13: a legacy user crest stays readable as new events append, with its met
   const event = JSON.parse(await readFile(join(eventDirectory, eventFile), "utf8"));
   await mkdir(join(crest, "metadata"));
   await mkdir(join(crest, "bodies"));
-  const legacyMetadataPath = join(crest, "metadata", `${legacyCard.id}.json`);
-  const legacyBodyPath = join(crest, "bodies", `${legacyCard.id}.body`);
+  const legacyMetadataPath = storeRecordPath(join(crest, "metadata"), `${legacyCard.id}.json`);
+  const legacyBodyPath = storeRecordPath(join(crest, "bodies"), `${legacyCard.id}.body`);
   await writeFile(legacyMetadataPath, canonicalJson(event.metadata));
   await writeFile(legacyBodyPath, await readFile(join(eventDirectory, event.body.file)));
   await rm(join(crest, "events"), { recursive: true, force: true });
@@ -497,7 +498,7 @@ test("476-R5: crest.userPath puts the user crest in a cloud folder, stored as it
   await mkdir(cloud);
   // A cloud folder is often reached through a link; the setting keeps the real path, because the
   // crest refuses a link on its way in.
-  await symlink(cloud, join(base, "Cloud"));
+  await symlink(cloud, join(base, "Cloud"), process.platform === "win32" ? "junction" : "dir");
   const settings = await applyMachineSettingSet({ key: "crest.userPath", value: join(base, "Cloud", "crest"), occurredAt: at });
   assert.equal(settings.values["crest.userPath"], join(cloud, "crest"));
   assert.equal(await readUserCrestPath(), join(cloud, "crest"));
@@ -905,8 +906,8 @@ test("R14 (a) D7: cards one writer wrote -- here the metadata/body layout, whose
   for (const name of (await readdir(stream)).filter((entry) => entry.endsWith(".json"))) {
     const event = JSON.parse(await readFile(join(stream, name), "utf8"));
     const metadata = { ...event.metadata, extensions: {} };
-    await writeFile(join(crest, "metadata", `${metadata.id}.json`), canonicalJson(metadata));
-    await writeFile(join(crest, "bodies", `${metadata.id}.body`), bodies.get(event.body.file) ?? await readFile(join(stream, event.body.file)));
+    await writeFile(storeRecordPath(join(crest, "metadata"), `${metadata.id}.json`), canonicalJson(metadata));
+    await writeFile(storeRecordPath(join(crest, "bodies"), `${metadata.id}.body`), bodies.get(event.body.file) ?? await readFile(join(stream, event.body.file)));
   }
   await rm(join(crest, "events"), { recursive: true, force: true });
 
@@ -1139,8 +1140,8 @@ test("R15 D7 (SUB-413): a version the metadata/body layout holds and a device's 
   const legacyHeld = join(base, "legacy-held");
   await mkdir(join(legacyHeld, "metadata"), { recursive: true });
   await mkdir(join(legacyHeld, "bodies"), { recursive: true });
-  await writeFile(join(legacyHeld, "metadata", `${kestrel.id}.json`), canonicalJson(event.metadata));
-  await writeFile(join(legacyHeld, "bodies", `${kestrel.id}.body`), await readFile(join(crest, "events", stream, event.body.file)));
+  await writeFile(storeRecordPath(join(legacyHeld, "metadata"), `${kestrel.id}.json`), canonicalJson(event.metadata));
+  await writeFile(storeRecordPath(join(legacyHeld, "bodies"), `${kestrel.id}.body`), await readFile(join(crest, "events", stream, event.body.file)));
   await rm(join(crest, "events"), { recursive: true, force: true });
   const beaver = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-SHARED-LEGACY", { subject: "Beaver dam height", body: "Stream beaver body" })));
   for (const name of ["metadata", "bodies"]) await rename(join(legacyHeld, name), join(crest, name));
@@ -1308,8 +1309,8 @@ test("R14 (c) D7: recovering a crest that holds the metadata/body layout, event 
   const event = JSON.parse(await readFile(join(stream, (await readdir(stream)).find((name) => name.endsWith(".json"))), "utf8"));
   await mkdir(join(crest, "metadata"));
   await mkdir(join(crest, "bodies"));
-  await writeFile(join(crest, "metadata", `${legacyCard.id}.json`), canonicalJson(event.metadata));
-  await writeFile(join(crest, "bodies", `${legacyCard.id}.body`), await readFile(join(stream, event.body.file)));
+  await writeFile(storeRecordPath(join(crest, "metadata"), `${legacyCard.id}.json`), canonicalJson(event.metadata));
+  await writeFile(storeRecordPath(join(crest, "bodies"), `${legacyCard.id}.body`), await readFile(join(stream, event.body.file)));
   await rm(join(crest, "events"), { recursive: true, force: true });
   const legacyMarker = JSON.parse(await readFile(join(crest, "store.json"), "utf8"));
   legacyMarker.version = 1;

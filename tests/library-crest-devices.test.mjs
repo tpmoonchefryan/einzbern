@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 //
 // TCRN-CROSS-SUB-414 (TCRN-CROSS-STORY-476 D7, MIN-235 D7, O3): a library's crest written by two
 // devices. Each device appends its cards to its own event stream, crest/events/<device id>/, and
@@ -642,8 +643,8 @@ async function asOlderEngineCrest(fx, home) {
   await mkdir(join(fx.store, "metadata"));
   await mkdir(join(fx.store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(fx.store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(fx.store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(fx.store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(fx.store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(fx.store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -663,7 +664,7 @@ test("SUB-414: a crest an older engine left in the metadata/body layout, or with
   });
   await asOlderEngineCrest(fx, fx.homeA);
   const stored = async (id, change) => {
-    const path = join(fx.store, "metadata", `${id}.json`);
+    const path = storeRecordPath(join(fx.store, "metadata"), `${id}.json`);
     await writeFile(path, canonicalJson(change(JSON.parse(await readFile(path, "utf8")))));
   };
   await stored(ids.heronNew, (metadata) => ({ ...metadata, supersedes: ids.heron }));

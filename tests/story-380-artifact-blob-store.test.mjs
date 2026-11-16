@@ -108,7 +108,7 @@ test("GWT1: the path conditions are enforced, and each refusal names its own rul
   // artifact-store.ts at the moment the value is declared.
   await assert.rejects(assertGeneratedArtifactsRoot(fx.workspace, join(fx.base, "not-created")), { reasonCode: "ARTIFACT_PATH_INVALID" });
   const link = join(fx.base, "linked-artifacts");
-  await symlink(fx.cloud, link);
+  await symlink(fx.cloud, link, process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(assertGeneratedArtifactsRoot(fx.workspace, link), { reasonCode: "ARTIFACT_PATH_INVALID" });
 
   // A regular file where a directory was named.

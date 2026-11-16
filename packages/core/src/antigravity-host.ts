@@ -168,7 +168,8 @@ export function probeAntigravityHost(
         ideDataDir: directoryExistsSync(join(probeHome, ".gemini", "antigravity-ide")),
         appDataDir: directoryExistsSync(join(probeHome, ".gemini", "antigravity")),
       };
-  const timeout = input.timeoutMs ?? (process.platform === "win32" ? 5_000 : 2_000);
+  // The synchronous Windows probe includes cold PowerShell/Job Object startup.
+  const timeout = input.timeoutMs ?? (process.platform === "win32" ? 15_000 : 2_000);
   let candidate = input.executable ?? "agy";
   let run = spawnSync(candidate, ["--version"], {
     encoding: "utf8",

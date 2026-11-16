@@ -300,7 +300,7 @@ test("478 implementation notes: a section never renders an absolute path, and on
   const target = join(project, "SHARED.md");
   await writeFile(target, USER_TEXT);
   const linked = join(project, "LINKED.md");
-  await symlink(target, linked);
+  await symlink(project, linked, process.platform === "win32" ? "junction" : "dir");
   const error = await refusal(() => planManagedWrite({ filePath: linked, desired: [{ id: "navigation", body: NAV_V1 }], records: [] }));
   assert.equal(error.reasonCode, "MANAGED_SECTION_FILE_UNSUPPORTED");
   await render(path, [{ id: "navigation", body: NAV_V1 }], [], backups);

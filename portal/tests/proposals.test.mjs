@@ -58,7 +58,7 @@ async function scratch(t) {
 
 async function startPortal(fixture) {
   const listening = await fixture.start([join(portalRoot, "portal.mjs"), "--library", fixture.workspace, "--port", "0"], {
-    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: TEST_ACTOR, ...fixture.deviceEnv, HOME: fixture.home },
+    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: TEST_ACTOR, ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home },
   });
   const page = await (await loopback(listening.url)).text();
   const boot = JSON.parse(page.match(/const BOOT = (\{.*\});/u)[1]);

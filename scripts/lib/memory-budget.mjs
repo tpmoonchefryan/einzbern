@@ -8,7 +8,7 @@ import { availableParallelism, hostname, totalmem } from "node:os";
 import { basename, isAbsolute, join, resolve, dirname } from "node:path";
 
 import { readStorageLocation } from "./storage-location.mjs";
-import { hasPrivateWindowsPermissions, queryWindows } from "./windows-system.mjs";
+import { createPrivateWindowsDirectory, hasPrivateWindowsPermissions, queryWindows } from "./windows-system.mjs";
 
 export const MEMORY_POLICY_SETTING = "execution.memoryPolicy";
 export const MEMORY_LEASE_VARIABLE = "EINZBERN_MEMORY_LEASE";
@@ -159,13 +159,20 @@ export function resolveMemoryDirectory(deviceHome, directory) {
       target = resolve(location.runtime, "locks");
       let forwarding;
       try { forwarding = lstatSync(directory); } catch (error) { if (error.code !== "ENOENT") throw error; }
-      if (forwarding && (!forwarding.isSymbolicLink() || realpathSync(directory) !== realpathSync(target))) fail("MEMORY_DOMAIN_INVALID");
+      if (forwarding && (!forwarding.isSymbolicLink() || realpathSync.native(directory) !== realpathSync.native(target))) fail("MEMORY_DOMAIN_INVALID");
     }
   }
-  mkdirSync(target, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") {
+    if (!existsSync(target)) {
+      mkdirSync(dirname(target), { recursive: true });
+      createPrivateWindowsDirectory(target);
+    }
+  } else {
+    mkdirSync(target, { recursive: true, mode: 0o700 });
+  }
   const metadata = lstatSync(target);
   if (!metadata.isDirectory() || metadata.isSymbolicLink() || !privatePermissions(target, metadata)) fail("MEMORY_DOMAIN_INVALID");
-  return realpathSync(target);
+  return realpathSync.native(target);
 }
 
 function stateTransaction(directory, fn) {

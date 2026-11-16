@@ -10,6 +10,7 @@ import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { copyDependencyTree } from "./helpers/filesystem-fixture.mjs";
 
 import { P1_TASKS, runAllP1Legs } from "../scripts/p1-sequence.mjs";
 import { heavyLockDirectoryUnder, privateHeavyEnvironment } from "./helpers/heavy-slots.mjs";
@@ -75,12 +76,13 @@ test("MIN-280 D2: every leg, green or red, is timed in its own list and the leg 
 });
 
 async function p1Fixture(context) {
-  // A disposable repository carrying only scripts/ and node_modules/, the shape the other
+  // A disposable repository carrying scripts/, its Skill runtime and node_modules/, the shape the other
   // task-entry fixtures use; clean, so the runner's clean-basis precondition holds.
   const root = await mkdtemp(join(tmpdir(), "einzbern-p1-all-legs-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   await cp(resolve(productRoot, "scripts"), resolve(root, "scripts"), { recursive: true });
-  await cp(resolve(productRoot, "node_modules"), resolve(root, "node_modules"), { recursive: true });
+  await cp(resolve(productRoot, "skill"), resolve(root, "skill"), { recursive: true });
+  await copyDependencyTree(resolve(productRoot, "node_modules"), resolve(root, "node_modules"));
   await writeFile(resolve(root, "package.json"), "{\"name\":\"einzbern-p1-fixture\",\"type\":\"module\"}\n");
   await writeFile(resolve(root, ".gitignore"), "dist/\nnode_modules/\n");
   for (const argv of [
@@ -92,7 +94,7 @@ async function p1Fixture(context) {
     // `.git/objects` after spawnSync has returned and race the fixture's teardown.
     ["config", "maintenance.auto", "false"],
     ["config", "gc.auto", "0"],
-    ["add", "package.json", ".gitignore", "scripts"],
+    ["add", "package.json", ".gitignore", "scripts", "skill"],
     ["commit", "--quiet", "-m", "fixture"],
   ]) {
     const result = spawnSync("git", argv, { cwd: root, encoding: "utf8" });

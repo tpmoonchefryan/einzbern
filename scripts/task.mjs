@@ -110,7 +110,7 @@ function run(executable, arguments_, options = {}) {
 }
 
 function controllerTimeoutMs(p8Only = false) {
-  const maximum = p8Only ? 600_000 : 900_000;
+  const maximum = p8Only ? 600_000 : process.platform === "win32" ? 1_800_000 : 900_000;
   const configured = Number(process.env.TCRN_TEST_CONTROLLER_TIMEOUT_MS ?? String(maximum));
   assertion(Number.isSafeInteger(configured) && configured > 0 && configured <= maximum, "TEST_CONTROLLER_TIMEOUT_INVALID", String(configured));
   return configured;

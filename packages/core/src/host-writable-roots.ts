@@ -454,7 +454,7 @@ export interface WritableRootsInput {
 export function portableWritableRoots(current: string | null, host: WritableRootsHost, projectRoot: string, libraryPath: string, replacePaths: readonly string[] = []): string {
   const base = host === "claude-code" ? projectRoot : dirname(join(projectRoot, WRITABLE_ROOTS_FILES[host]));
   const portable = storePath(base, libraryPath);
-  const replace = [...replacePaths, libraryPath, ...replacePaths.map(value => storePath(base, value))];
+  const replace = [...replacePaths, libraryPath].flatMap(value => [value, storePath(base, value), relative(base, value)]);
   return host === "claude-code" ? claudeWritableRoots(current, portable, replace) : codexWritableRoots(current, portable, replace);
 }
 

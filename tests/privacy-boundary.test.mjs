@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -78,8 +78,9 @@ test("adversarial object-database shapes fail closed instead of shortening the s
     // that scanned for the framing LF instead of honouring the declared size would run
     // straight into the next object's header and lose the privacy-bearing path.
     const target = joinParts(["..", "..", "Users", "local-user", "secrets.txt"], "/");
-    await symlink(target, join(root, "link"));
-    fixtureGit(root, ["add", "-A"]);
+    await writeFile(join(root, "link"), target);
+    const objectId = fixtureGit(root, ["hash-object", "-w", "link"]).trim();
+    fixtureGit(root, ["update-index", "--add", "--cacheinfo", `120000,${objectId},link`]);
     fixtureGit(root, ["commit", "-q", "-m", "symlink fixture"]);
     const stream = fixtureGit(root, batchArguments, { raw: true });
     const records = parseGitObjectBatch(stream, declaredBatchBytes(root));

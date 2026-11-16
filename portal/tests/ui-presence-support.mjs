@@ -90,7 +90,7 @@ async function scratch(prefix) {
   // under HOME, so each fixture carries its own scratch HOME, removed with the fixture.
   const home = join(base, "home");
   await mkdir(home);
-  const deviceEnv = { EINZBERN_HOME: join(base, "device", "einzbern"), HOME: home };
+  const deviceEnv = { EINZBERN_HOME: join(base, "device", "einzbern"), HOME: home, USERPROFILE: home };
   const proseRoot = join(base, "project");
   const workspace = join(proseRoot, ".ether");
   // A registered key and an unregistered one in a registered namespace (the backup namespace
@@ -232,7 +232,7 @@ async function stopPortal(child, closed) {
 async function startPortal(fixture, env = {}) {
   assert.ok(fixture.home, "every portal child needs the fixture scratch HOME (TCRN-CROSS-INC-386)");
   const child = spawn(process.execPath, [join(portalRoot, "portal.mjs"), "--library", fixture.workspace, "--port", "0"], {
-    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: "agent:test-portal", ...fixture.deviceEnv, ...env, HOME: fixture.home },
+    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: "agent:test-portal", ...fixture.deviceEnv, ...env, HOME: fixture.home, USERPROFILE: fixture.home },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const closed = new Promise((resolve) => child.once("close", resolve));
@@ -526,7 +526,7 @@ function topbarFindings(document) {
 // arrived rather than with an empty-string diff. Callers wait for the *settle
 // signal* and assert content separately, so a genuine regression still surfaces as
 // an assertion difference rather than as a timeout.
-async function waitFor(predicate, label, timeoutMs = 15_000) {
+async function waitFor(predicate, label, timeoutMs = process.platform === "win32" ? 45_000 : 15_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = predicate();

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // STORY-341: knowledge bodies are disposable and can move to segmented local storage.
 
 import "./helpers/device-home.mjs";
@@ -38,8 +39,8 @@ async function asOlderEngineCrest(workspace) {
   await mkdir(join(store, "metadata"));
   await mkdir(join(store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));

@@ -12,6 +12,7 @@ import { configureStorageLocation } from "../dist/build/packages/core/src/storag
 import { readSnapshotManifestFile } from "../dist/build/packages/core/src/workspace-snapshot.js";
 import { memoryPackageTask } from "../dist/build/scripts/lib/memory-budget.mjs";
 import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
+import { resolveMemoryDirectory } from "../scripts/lib/memory-budget.mjs";
 import { storePath, loadPath } from "../dist/build/packages/core/src/stored-path.js";
 import { validateSettingValue } from "../dist/build/packages/core/src/settings.js";
 import { FileStoreBackend } from "../dist/build/packages/core/src/store-backend.js";
@@ -70,6 +71,14 @@ test("Windows path boundaries reject other volumes and accept normalized article
 test("the built resource adapter resolves its source executor on the native platform", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   assert.deepEqual(memoryPackageTask(["pnpm", "build"], root), { entry: "scripts/task.mjs", args: ["build"] });
+});
+
+test("Windows memory admission creates a private lock domain and reopens the same directory", { skip: process.platform !== "win32" }, async t => {
+  const root = await fixture(t);
+  const locks = join(root, "device", "locks");
+  const domain = resolveMemoryDirectory(undefined, locks);
+  assert.equal(hasPrivateWindowsPermissions(domain), true);
+  assert.equal(resolveMemoryDirectory(undefined, locks), domain);
 });
 
 test("Windows suite controller reports success, failures and a joined timeout", { skip: process.platform !== "win32" }, async t => {

@@ -46,9 +46,9 @@ test("Story649: direct absolute selection, project isolation, fresh reads, actua
   const invalidFile = join(base, "not-directory");
   await writeFile(invalidFile, "file");
   const link = join(base, "symlink");
-  await symlink(roots[0], link);
+  await symlink(roots[0], link, process.platform === "win32" ? "junction" : "dir");
   const alias = join(base, "control-alias");
-  await symlink(workspace, alias);
+  await symlink(workspace, alias, process.platform === "win32" ? "junction" : "dir");
   const controlChild = join(workspace, "control-child");
   await mkdir(controlChild);
   const deviceChild = join(process.env.EINZBERN_HOME, "artifact-boundary");

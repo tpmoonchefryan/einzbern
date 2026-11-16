@@ -3,7 +3,7 @@ import { asPinnedDevice } from "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, rename } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { appendEvents, initializeLibrary, createProject, materializeWorkspace, setWorkspaceSetting } from "../dist/build/packages/core/src/workspace.js";
 import { declareChainIdentity } from "../dist/build/packages/core/src/project-chain.js";
@@ -117,7 +117,7 @@ test("CLI plans and selectively refreshes registered outputs and reports value-f
   assert.equal(refreshed.reasonCode, "CONFIGURATION_PROJECTIONS_REFRESH_FINISHED");
   assert.equal(refreshed.outcomes[0].status, "refreshed");
   // Historical replay fixture only: the normal write surface must continue rejecting absolute shared paths.
-  const record = validateWorkspaceSettingRecord({ schemaVersion: "tcrn.workspace-setting.v1", layerKind: "workspace_configuration", key: "knowledge.articlesPath", value: "/fixture/private-history/articles", projectId: target.projectId, revision: 1, updatedAt: at, tombstone: false });
+  const record = validateWorkspaceSettingRecord({ schemaVersion: "tcrn.workspace-setting.v1", layerKind: "workspace_configuration", key: "knowledge.articlesPath", value: resolve("/fixture/private-history/articles"), projectId: target.projectId, revision: 1, updatedAt: at, tombstone: false });
   await appendEvents(lib.path, [state => ({ payload: { operation: "settings.updated", record }, projects: state.projects, work: state.work, settings: sortWorkspaceSettings([...state.settings, record]) })], { occurredAt: at });
   const catalog = await cli(["settings-catalog", ...args]);
   assert.equal(catalog.migrationDiagnostics.length, 1);

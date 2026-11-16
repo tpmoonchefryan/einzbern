@@ -10,6 +10,8 @@ import { BRANCH_LIFECYCLE_BODY, ruleBody } from "../dist/build/packages/core/src
 // rebuild writes, reads them back, and refuses the entries an unpacker must not follow.
 
 import "./helpers/device-home.mjs";
+import { copyDependencyTree, fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
+import { createPrivateWindowsDirectory } from "../scripts/lib/windows-system.mjs";
 import { runCaptureCliUpgradeMatrix } from "./helpers/capture-cli-upgrade.mjs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -247,6 +249,16 @@ test("605: every contract referenced by the shipped Skill resolves to manifest-v
   }
 });
 
+async function linkFixtureSource(source, destination) {
+  if (process.platform !== "win32") return symlink(source, destination);
+  if (source === join(repositoryRoot, "node_modules")) return copyDependencyTree(source, destination);
+  if (source === join(repositoryRoot, "dist")) {
+    await mkdir(destination);
+    return cp(join(source, "build"), join(destination, "build"), { recursive: true });
+  }
+  await cp(source, destination, { recursive: true });
+}
+
 test("605: a packaging-list omission is refused from the actual Skill reference before any archive is written", async () => {
   const source = await readFile(packScript, "utf8");
   const inputs = await readFile(join(repositoryRoot, "scripts/lib/release-package-inputs.mjs"), "utf8");
@@ -261,15 +273,16 @@ test("605: a packaging-list omission is refused from the actual Skill reference 
     await writeFile(join(copy, "scripts/pack-release.mjs"), source);
     await writeFile(join(copy, "scripts/lib/release-package-inputs.mjs"), mutated);
     for (const name of await readdir(join(repositoryRoot, "scripts/lib"))) {
-      if (name !== "release-package-inputs.mjs") await symlink(join(repositoryRoot, "scripts/lib", name), join(copy, "scripts/lib", name));
+      if (name !== "release-package-inputs.mjs") await linkFixtureSource(join(repositoryRoot, "scripts/lib", name), join(copy, "scripts/lib", name));
     }
     for (const name of await readdir(join(repositoryRoot, "scripts"))) {
-      if (name !== "pack-release.mjs" && name !== "lib") await symlink(join(repositoryRoot, "scripts", name), join(copy, "scripts", name));
+      if (name !== "pack-release.mjs" && name !== "lib") await linkFixtureSource(join(repositoryRoot, "scripts", name), join(copy, "scripts", name));
     }
-    for (const name of ["package.json", "packages", "dist", "portal", "specs", "docs"]) await symlink(join(repositoryRoot, name), join(copy, name));
+    for (const name of ["package.json", "packages", "dist", "portal", "specs", "docs", "skill", "node_modules"]) await linkFixtureSource(join(repositoryRoot, name), join(copy, name));
     const out = join(copy, "out");
     const run = node([join(copy, "scripts/pack-release.mjs"), "--out", out]);
     assert.equal(run.status, 1, safeDiagnostic(run.stderr));
+    assert.match(lastLine(run.stderr), /^\{/u, safeDiagnostic(run.stderr));
     const refusal = JSON.parse(lastLine(run.stderr));
     assert.equal(refusal.reasonCode, "PACK_SKILL_SPEC_MISSING");
     assert.equal(refusal.reference, reference);
@@ -285,7 +298,7 @@ async function environment(name) {
   await mkdir(join(root, "work"), { recursive: true });
   // TCRN-CROSS-STORY-526 (TCRN-CROSS-SUB-454): Atelier starts only with TCRN_PORTAL_ACTOR set, so the
   // release's Atelier runs here as agent:test-portal and reaches the registry check it is asked about.
-  const env = { ...process.env, HOME: join(root, "home"), EINZBERN_HOME: join(root, "home", "einzbern"), TCRN_PORTAL_ACTOR: "agent:test-portal" };
+  const env = { ...process.env, HOME: join(root, "home"), ...(process.platform === "win32" ? { USERPROFILE: join(root, "home") } : {}), EINZBERN_HOME: join(root, "home", "einzbern"), TCRN_PORTAL_ACTOR: "agent:test-portal" };
   for (const key of ["TCRN_WORKFLOW_CLI", "TCRN_PORTAL_LIBRARY", "TCRN_PORTAL_PORT"]) delete env[key];
   return { root, env, cwd: join(root, "work") };
 }
@@ -599,15 +612,17 @@ test("R45 U11: a registry-lock bridge whose lock or device-home re-export is not
     await mkdir(join(copy, "portal"), { recursive: true });
     await writeFile(join(copy, "scripts/pack-release.mjs"), await readFile(packScript));
     for (const entry of await readdir(join(repositoryRoot, "scripts/lib"))) {
-      if (entry !== "registry-lock.mjs") await symlink(join(repositoryRoot, "scripts/lib", entry), join(copy, "scripts/lib", entry));
+      if (entry !== "registry-lock.mjs") await linkFixtureSource(join(repositoryRoot, "scripts/lib", entry), join(copy, "scripts/lib", entry));
     }
     await writeFile(join(copy, "scripts/lib/registry-lock.mjs"), mutated);
-    for (const path of ["scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern-launcher.mjs", "scripts/einzbern-hook-launcher.mjs", "scripts/task.mjs", "scripts/verify-portal.mjs", "scripts/portal-tests.mjs", "scripts/release.mjs", "scripts/test-controller-bootstrap.mjs", "scripts/test-controller-child-policy.mjs", "portal/portal.mjs", "dist", "packages", "package.json"]) {
-      await symlink(join(repositoryRoot, path), join(copy, path));
+    await linkFixtureSource(join(repositoryRoot, "scripts/policy"), join(copy, "scripts/policy"));
+    for (const path of ["scripts/einzbern.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern-launcher.mjs", "scripts/einzbern-hook-launcher.mjs", "scripts/task.mjs", "scripts/verify-portal.mjs", "scripts/portal-tests.mjs", "scripts/release.mjs", "scripts/test-controller-bootstrap.mjs", "scripts/test-controller-child-policy.mjs", "portal/portal.mjs", "dist", "packages", "package.json", "skill", "node_modules"]) {
+      await linkFixtureSource(join(repositoryRoot, path), join(copy, path));
     }
     const out = join(copy, "out");
     const run = node([join(copy, "scripts/pack-release.mjs"), "--out", out]);
     assert.equal(run.status, 1, `${name}: ${safeDiagnostic(run.stderr)}`);
+    assert.match(lastLine(run.stderr), /^\{/u, safeDiagnostic(run.stderr));
     const refusal = JSON.parse(lastLine(run.stderr));
     assert.equal(refusal.reasonCode, "PACK_ATELIER_UNBOUND", `${name}: ${safeDiagnostic(run.stderr)}`);
     assert.match(refusal.error, /scripts\/lib\/registry-lock\.mjs/u, `${name}: the refusal names the bridge`);
@@ -943,7 +958,7 @@ test("memory admission ships the actual worker preload closure and validated dev
   const catalog = node([cli, "machine-settings-catalog", "--home", home], { env });
   assert.equal(catalog.status, 0, catalog.stderr);
   assert.equal(JSON.parse(catalog.stdout).settings.find(row => row.key === "execution.memoryPolicy").currentValue, value);
-  const preload = node(["--import", join(tree, "scripts/lib/memory-worker-check.mjs"), "--eval", "process.stdout.write('preload-ready')"], { env });
+  const preload = node(["--import", pathToFileURL(join(tree, "scripts/lib/memory-worker-check.mjs")).href, "--eval", "process.stdout.write('preload-ready')"], { env });
   assert.equal(preload.status, 0, preload.stderr); assert.equal(preload.stdout, "preload-ready");
 });
 
@@ -951,8 +966,10 @@ test("memory admission ships the actual worker preload closure and validated dev
 test("packaged CLI executes the verified source project's memory-admitted gate, not the installation root", async () => {
   const { tree, entries } = await packedRelease();
   const isolated = await environment("memory-gates-distribution");
+  if (process.platform === "win32") assert.equal(createPrivateWindowsDirectory(isolated.env.EINZBERN_HOME), true);
   const project = join(isolated.root, "project"), library = join(isolated.root, "library");
-  await cp(repositoryRoot, project, { recursive: true, filter: path => ![".git", "dist"].some(name => path === join(repositoryRoot, name) || path.startsWith(`${join(repositoryRoot, name)}/`)) });
+  await cp(repositoryRoot, project, { recursive: true, filter: path => ![".git", "dist", "node_modules"].some(name => path === join(repositoryRoot, name)) });
+  await copyDependencyTree(join(repositoryRoot, "node_modules"), join(project, "node_modules"));
   const initialized = spawnSync("git", ["init", "-q", project], { encoding: "utf8" });
   assert.equal(initialized.status, 0, initialized.stderr);
   const telemetry = join(isolated.root, "telemetry.mjs");
@@ -963,8 +980,8 @@ cp.execFileSync=function(p,a,...o){if(p==='/usr/bin/memory_pressure'&&a?.length=
   delete env.EINZBERN_MEMORY_LEASE; delete env.EINZBERN_HEAVY_SLOT; delete env.EINZBERN_HEAVY_LOCK_DIR;
   const entry = join(tree, "scripts/einzbern.mjs"), at = "2026-10-29T19:00:00Z";
   const invoke = args => {
-    const result = node(["--import", telemetry, entry, ...args], { env, cwd: project, timeout: 90_000 });
-    assert.equal(result.status, 0, `${args[0]}: ${safeDiagnostic(result.stderr)}`);
+    const result = node(["--import", pathToFileURL(telemetry).href, entry, ...args], { env, cwd: project, timeout: process.platform === "win32" ? 180_000 : 90_000 });
+    assert.equal(result.status, 0, `${args[0]}: ${safeDiagnostic(result.error?.code ?? result.stderr)}`);
     return JSON.parse(result.stdout);
   };
   invoke(["init", "--workspace", library, "--project", project, "--at", at]);
@@ -989,12 +1006,14 @@ cp.execFileSync=function(p,a,...o){if(p==='/usr/bin/memory_pressure'&&a?.length=
   assert.equal(contract.files["package.json"], sha256(await readFile(join(project, "package.json"))));
   // A same-named task without the matching instrumented closure never gains admission.
   await writeFile(join(project, "scripts/task.mjs"), "process.exit(0);\n");
-  const refused = node(["--import", telemetry, entry, "gates-run", "--workspace", library, "--project", project, "--project-id", projectId, "--release", "true", "--at", at], { env, cwd: project });
+  const refused = node(["--import", pathToFileURL(telemetry).href, entry, "gates-run", "--workspace", library, "--project", project, "--project-id", projectId, "--release", "true", "--at", at], { env, cwd: project });
   assert.equal(refused.status, 1);
   assert.ok(refused.stderr.includes("MEMORY_EXECUTOR_UNSUPPORTED"), safeDiagnostic(refused.stderr));
-  await rm(join(project, "scripts/task.mjs"));
-  await symlink(join(repositoryRoot, "scripts/task.mjs"), join(project, "scripts/task.mjs"));
-  const linked = node(["--import", telemetry, entry, "gates-run", "--workspace", library, "--project", project, "--project-id", projectId, "--release", "true", "--at", at], { env, cwd: project });
-  assert.equal(linked.status, 1);
-  assert.ok(linked.stderr.includes("MEMORY_EXECUTOR_UNSUPPORTED"), safeDiagnostic(linked.stderr));
+  if (await fileSymlinksAvailable(project)) {
+    await rm(join(project, "scripts/task.mjs"));
+    await symlink(join(repositoryRoot, "scripts/task.mjs"), join(project, "scripts/task.mjs"));
+    const linked = node(["--import", pathToFileURL(telemetry).href, entry, "gates-run", "--workspace", library, "--project", project, "--project-id", projectId, "--release", "true", "--at", at], { env, cwd: project });
+    assert.equal(linked.status, 1);
+    assert.ok(linked.stderr.includes("MEMORY_EXECUTOR_UNSUPPORTED"), safeDiagnostic(linked.stderr));
+  }
 });

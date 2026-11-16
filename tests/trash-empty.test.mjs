@@ -81,8 +81,8 @@ test("541 (MIN-259 D2): without --yes the tool prints the plan, each named trash
 
 test("541 (MIN-259 D2): a name out of the scratch root, a symbolic link, a name that is not trash and a wildcard are refused, and nothing is deleted even with --yes", async (context) => {
   const paths = await scratch(context);
-  await symlink(join(paths.outside, "trash"), join(paths.root, "trash-link"));
-  await symlink(paths.outside, join(paths.root, "via"));
+  await symlink(join(paths.outside, "trash"), join(paths.root, "trash-link"), process.platform === "win32" ? "junction" : "dir");
+  await symlink(paths.outside, join(paths.root, "via"), process.platform === "win32" ? "junction" : "dir");
   await mkdir(join(paths.root, "r4"));
   await writeFile(join(paths.root, "r4", "trash"), "a file, not a directory");
   await mkdir(join(paths.root, "trash-x", "inner", "trash"), { recursive: true });
@@ -135,7 +135,7 @@ test("541 (MIN-259 D2): the scratch root may not be the filesystem root, the hom
 
 test("541 (MIN-259 D2): with --yes the tool empties only the named trash directories, keeps them, and its receipt counts what it deleted", async (context) => {
   const paths = await scratch(context);
-  await symlink(join(paths.outside, "precious.txt"), join(paths.root, "r1", "trash", "link-to-precious"));
+  await symlink(paths.outside, join(paths.root, "r1", "trash", "link-to-precious"), process.platform === "win32" ? "junction" : "dir");
   const before = await everyFile(paths);
   const emptied = await run(paths, ["--scratch", paths.root, "r1/trash", "trash-r2", "--yes"]);
   assert.equal(emptied.code, 0);

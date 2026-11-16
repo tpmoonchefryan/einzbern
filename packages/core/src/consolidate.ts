@@ -2,7 +2,7 @@ import { consolidateStates } from "./consolidation-state.js";
 import type { WorkspaceState } from "./workspace.js";
 // SPDX-License-Identifier: Apache-2.0
 import { copyFile, lstat, mkdir, readFile, readdir, unlink, rm, realpath } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertStrictInstant, canonicalJson } from "../../protocol/src/index.js";
 import type { JsonValue } from "../../protocol/src/index.js";
 import { withFileLock } from "./file-lock.js";
@@ -23,7 +23,10 @@ export interface ConsolidationMapping {
 }
 function refuse(code: string, detail: string): never { throw new ConsolidationError(code, detail); }
 async function exists(path: string): Promise<boolean> { return lstat(path).then(() => true, error => { if (error.code === "ENOENT") return false; throw error; }); }
-function inside(parent: string, path: string): boolean { return path === parent || path.startsWith(`${parent}/`); }
+function inside(parent: string, path: string): boolean {
+  const relation = relative(parent, path);
+  return relation === "" || (!isAbsolute(relation) && relation !== ".." && !relation.startsWith(`..${sep}`));
+}
 async function inventory(root: string, prefix = ""): Promise<ConsolidationSource["inventory"]> {
   const files: { path: string; bytes: number; sha256: string }[] = [];
   for (const name of (await readdir(join(root, prefix))).sort()) {

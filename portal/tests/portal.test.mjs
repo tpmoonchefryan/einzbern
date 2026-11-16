@@ -1,6 +1,7 @@
+import { spawnCommand as spawn } from "../../skill/mana-orchestrate/scripts/process-launch.mjs";
 // SPDX-License-Identifier: Apache-2.0
 // Tests in this file run sequentially; Node isolates each file in a process.
-import { CLI, R46_AT, RETIRED_PERSONA_ACTIONS, RETIRED_ROUTES, TEST_ACTOR, appendHistoricalModelSetting, assert, cli, clientTargets, execFileAsync, httpRequest, join, mkdir, mkdtemp, portalRoot, readBoot, readFile, readOptions, realpath, request, rm, scratch, spawn, startPortal, startupRefusal, test, tmpdir, unregisterLibrary, writeFile, writeOptions } from "./portal-support.mjs";
+import { CLI, R46_AT, RETIRED_PERSONA_ACTIONS, RETIRED_ROUTES, TEST_ACTOR, appendHistoricalModelSetting, assert, cli, clientTargets, execFileAsync, httpRequest, join, mkdir, mkdtemp, portalRoot, readBoot, readFile, readOptions, realpath, request, rm, scratch, startPortal, startupRefusal, test, tmpdir, unregisterLibrary, writeFile, writeOptions } from "./portal-support.mjs";
 import { createConfigBackupInventoryFixture } from "../../tests/helpers/config-backup-fixture.mjs";
 
 
@@ -258,7 +259,7 @@ test("526 GWT4: without TCRN_PORTAL_ACTOR, or with it empty, Atelier and its gen
   const fixture = await scratch("tcrn-portal-no-actor-", "TCRN-PORTAL-NO-ACTOR");
   t.after(() => rm(fixture.base, { recursive: true, force: true }));
   for (const value of [undefined, "", "   "]) {
-    const refused = await startupRefusal(["--library", fixture.workspace], { ...fixture.deviceEnv, HOME: fixture.home, TCRN_PORTAL_ACTOR: value });
+    const refused = await startupRefusal(["--library", fixture.workspace], { ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home, TCRN_PORTAL_ACTOR: value });
     assert.deepEqual([refused.status, refused.lines, refused.report.ok, refused.report.reasonCode, refused.report.variable], [2, 1, false, "PORTAL_ACTOR_REQUIRED", "TCRN_PORTAL_ACTOR"], JSON.stringify(value));
   }
   // A generated launcher carries no actor: it passes on the one its environment holds, and without one Atelier refuses.
@@ -267,14 +268,14 @@ test("526 GWT4: without TCRN_PORTAL_ACTOR, or with it empty, Atelier and its gen
   const generator = join(portalRoot, "scripts", "generate-launchers.mjs");
   const report = JSON.parse((await execFileAsync(process.execPath, [generator, "--library", fixture.workspace, "--output-dir", outputDir, "--port", "0"], { encoding: "utf8" })).stdout);
   for (const file of report.files) assert.doesNotMatch(await readFile(file, "utf8"), /agent:|owner:|profile:/u, `${file} names no actor`);
-  const command = report.files.find((file) => file.endsWith(".command"));
-  const env = { ...process.env, TCRN_WORKFLOW_CLI: CLI, ...fixture.deviceEnv, HOME: fixture.home };
+  const command = report.files.find((file) => file.endsWith(process.platform === "win32" ? ".cmd" : ".command"));
+  const env = { ...process.env, TCRN_WORKFLOW_CLI: CLI, ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home };
   delete env.TCRN_PORTAL_ACTOR;
   const launched = await new Promise((resolveRun) => {
     const child = spawn(command, [], { env, stdio: ["ignore", "pipe", "pipe"] });
     let stderr = "";
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.on("exit", (code) => resolveRun({ status: code, lines: stderr.trim().split("\n") }));
+    child.on("close", (code) => resolveRun({ status: code, lines: stderr.trim().split("\n") }));
   });
   assert.deepEqual([launched.status, launched.lines.length, JSON.parse(launched.lines[0]).reasonCode], [2, 1, "PORTAL_ACTOR_REQUIRED"]);
 });
@@ -287,7 +288,7 @@ test("BL31 a busy loopback port returns a structured startup failure", async (t)
   t.after(async () => { running.child.kill(); await rm(fixture.base, { recursive: true, force: true }); });
   const port = new URL(running.url).port;
   await assert.rejects(execFileAsync(process.execPath, [join(portalRoot, "portal.mjs"), "--library", fixture.workspace, "--port", port], {
-    env: { ...process.env, ...fixture.deviceEnv, HOME: fixture.home, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: TEST_ACTOR }, encoding: "utf8",
+    env: { ...process.env, ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: TEST_ACTOR }, encoding: "utf8",
   }), (error) => {
     assert.equal(error.code, 1);
     const failure = JSON.parse(error.stderr.trim());

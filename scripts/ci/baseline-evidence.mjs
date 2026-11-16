@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-import { mkdtempSync, writeFileSync, readdirSync, lstatSync, unlinkSync, rmdirSync } from "node:fs";
+import { realpathSync, mkdtempSync, writeFileSync, readdirSync, lstatSync, unlinkSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -41,7 +41,7 @@ export async function collectBaseline(input, root, pinnedRun) {
     if (jobs.total_count !== jobs.jobs.length || jobs.jobs.filter((job) => job.name === "verify" && job.conclusion === "success").length !== 1) throw new Error("jobs-incomplete-or-failed");
     const artifacts = await api(`actions/runs/${run.id}/artifacts?per_page=100`);
     if (artifacts.total_count !== artifacts.artifacts.length) throw new Error("artifacts-incomplete");
-    temporary = mkdtempSync(join(tmpdir(), "einzbern-ci-baseline-"));
+    temporary = realpathSync.native(mkdtempSync(join(tmpdir(), "einzbern-ci-baseline-")));
     const receipts = [];
     for (const artifact of artifacts.artifacts) {
       if (!artifact.name.endsWith(`-${run.head_sha}-${run.run_attempt}`)) continue;

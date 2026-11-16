@@ -503,7 +503,7 @@ test("SUB-409 (STORY-508 R5): the settings routes carry every row's shape, group
   assert.deepEqual([policy?.shape, policy?.group, policy?.order], ["scalar", "general", 22], "one policy object is not a collection table");
   assert.ok(project.body.settings.every((row) => ["project", "library"].includes(row.layer) && typeof row.group === "string" && Number.isSafeInteger(row.order) && row.order > 0));
   const device = await request(url, "/api/machine-settings", readOptions(boot.token));
-  assert.deepEqual(layout(device.body.settings), layout((await cli(["machine-settings-catalog"], { ...fixture.deviceEnv, HOME: fixture.home })).settings));
+  assert.deepEqual(layout(device.body.settings), layout((await cli(["machine-settings-catalog"], { ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home })).settings));
   assert.ok(device.body.settings.every((row) => row.layer === "device" && row.shape === "scalar"));
   // An order is unique within its group across both catalogs, so a group has one display order.
   const rows = [...project.body.settings, ...device.body.settings];

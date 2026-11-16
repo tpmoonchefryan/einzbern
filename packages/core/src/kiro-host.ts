@@ -60,7 +60,7 @@ export function probeKiroHost(input: {
   const observedAt = input.now ?? new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
   let cli: KiroHostIdentity["cli"] = { status: "not-detected", executable: null, version: null, versionEvidence: null };
   try {
-    const result = spawnSync(executable, ["--version"], { encoding: "utf8", timeout: 5000, maxBuffer: 16_384, env, shell: false, windowsHide: true });
+    const result = spawnSync(executable, ["--version"], { encoding: "utf8", timeout: process.platform === "win32" ? 15_000 : 5_000, maxBuffer: 16_384, env, shell: false, windowsHide: true });
     if ((result.error as NodeJS.ErrnoException | null)?.code === "ENOENT") cli = { status: "not-detected", executable: null, version: null, versionEvidence: null };
     else if (result.error || result.status !== 0) cli = { status: "unavailable", executable, version: null, versionEvidence: "kiro-cli --version did not return successfully" };
     else {

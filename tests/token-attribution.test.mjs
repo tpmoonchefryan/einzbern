@@ -337,7 +337,19 @@ test('red proof: reading --file by truthiness turns an empty value into "no inpu
 // only went red under `pnpm test`. Letting `sh` open the file keeps the baseline a
 // regular file without any descriptor of ours crossing the boundary.
 function runParserToFile(argv, outputPath, { script = SOURCE_PATH } = {}) {
-  const result = spawnSync("/bin/sh", ["-c", 'exec "$@" > "$OUTPUT_PATH"', "sh", process.execPath, script, ...argv], {
+  const executable = process.platform === "win32" ? process.execPath : "/bin/sh";
+  const arguments_ = process.platform === "win32"
+    ? ["-e", `const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const descriptor = fs.openSync(process.argv[1], 'w');
+try {
+  const result = spawnSync(process.argv[2], process.argv.slice(3), { stdio: ['ignore', descriptor, 'inherit'] });
+  process.exitCode = result.status ?? 1;
+} finally {
+  fs.closeSync(descriptor);
+}`, outputPath, process.execPath, script, ...argv]
+    : ["-c", 'exec "$@" > "$OUTPUT_PATH"', "sh", process.execPath, script, ...argv];
+  const result = spawnSync(executable, arguments_, {
     cwd: workdir,
     stdio: "pipe",
     encoding: "utf8",
@@ -385,12 +397,14 @@ test("red proof: restoring process.exit() after the write truncates that report 
   assert.equal(mutant.report, null);
 });
 
+// On Windows, 24,000 Unicode characters stay below the UTF-16 command-line
+// limit while their UTF-8 representation still exceeds the pipe buffer.
 // The refusal path echoes argv back to the caller, so its payload length is the
 // caller's to choose — and the pre-R2 refusals called process.exit() straight after
 // their write. Measured on the shipped bytes: an 80 KiB --dir value came back as
 // 65,536 bytes of invalid JSON. This tool needs no clamp to be safe because it never
 // exits immediately; the sibling in verify-otel-privacy.mjs does, so it clamps.
-const OVERLONG_DIR = `/${"y".repeat(80000)}/no-such-projects-dir`;
+const OVERLONG_DIR = `/${process.platform === "win32" ? "界".repeat(24000) : "y".repeat(80000)}/no-such-projects-dir`;
 
 test("truncation: an over-long --dir value still yields a whole, parseable refusal", () => {
   const run = runParser(["--dir", OVERLONG_DIR]);

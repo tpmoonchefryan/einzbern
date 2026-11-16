@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { CLI, cli, scratch, rm, readBoot, readOptions, request } from "./portal-support.mjs";
 import { portalFixture } from "./helpers/portal-fixture.mjs";
 import { execFileSync } from "node:child_process";
@@ -18,7 +18,7 @@ for (const explicit of [false, true]) test(`catalog reads real shared-library re
   t.after(async () => { await server.cleanup(); await rm(fixture.base, { recursive: true, force: true }); });
   const trace = join(server.base, "processes.jsonl"), observer = join(server.base, "observe.mjs");
   await writeFile(observer, 'import { appendFileSync } from "node:fs"; appendFileSync(process.env.CATALOG_TRACE, JSON.stringify({pid:process.pid,argv:process.argv})+"\\n");\n');
-  const env = { ...process.env, ...fixture.deviceEnv, TCRN_PORTAL_ACTOR: "agent:test-catalog", CATALOG_TRACE: trace, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${observer}` };
+  const env = { ...process.env, ...fixture.deviceEnv, TCRN_PORTAL_ACTOR: "agent:test-catalog", CATALOG_TRACE: trace, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(observer).href}` };
   if (explicit) env.TCRN_WORKFLOW_CLI = CLI;
   else delete env.TCRN_WORKFLOW_CLI;
   const { url } = await server.start([portal, "--library", fixture.workspace, "--port", "0"], { env });

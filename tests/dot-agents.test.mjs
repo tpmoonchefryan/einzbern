@@ -73,7 +73,7 @@ test("DOT-I02: no relative, outside, missing, symlink or governed target root is
     { ...input.binding, root: join(input.binding.root, "absent"), agentsPath: join(input.binding.root, "absent", "AGENTS.md") },
     { ...input.binding, provenancePath: join(input.binding.root, ".git", "provenance") },
   ]) await assert.rejects(planDotAgents({ ...input, binding }));
-  const linked = join(input.binding.root, "linked"); await symlink(input.binding.root, linked);
+  const linked = join(input.binding.root, "linked"); await symlink(input.binding.root, linked, process.platform === "win32" ? "junction" : "dir");
   await rejects(planDotAgents({ ...input, binding: { ...input.binding, provenancePath: join(linked, "provenance") } }), "DOT_PATH_UNSUPPORTED");
   await rejects(planDotAgents({ ...input, executionTarget: "codex" }), "DOT_TARGET_UNSUPPORTED");
 });

@@ -212,16 +212,16 @@ const env={EINZBERN_HOME:home};const slot=await h.acquireHeavySlot({command:'tes
 const canonical=await realpath(join(runtime,'locks'));assert.equal(slot.path,join(canonical,'heavy.lock'));assert.equal(slot.memory.directory,canonical);assert.equal(JSON.parse(env.EINZBERN_MEMORY_LEASE).directory,canonical);assert.ok(env.EINZBERN_HEAVY_SLOT.endsWith(slot.path));
 const child=await h.acquireHeavySlot({command:'child',env:{...env},timeoutMs:0});assert.equal(child.inherited,true);assert.equal(child.memory.directory,canonical);child.release();slot.release();
 assert.deepEqual(JSON.parse(await readFile(join(canonical,'memory-budget.json'),'utf8')).leases,[]);
-await unlink(join(home,'locks'));const wrong=join(directory,'wrong');await mkdir(wrong);await symlink(wrong,join(home,'locks'),'dir');
+await unlink(join(home,'locks'));const wrong=join(directory,'wrong');await mkdir(wrong);await symlink(wrong,join(home,'locks'),process.platform === 'win32' ? 'junction' : 'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 `);
 });
 
 test("unregistered forwarding, explicit linked overrides and unsafe resource directories refuse", async t => {
   await isolatedAdapterFixture(t, `
-const target=join(directory,'target');await mkdir(target);await symlink(target,join(home,'locks'),'dir');
+const target=join(directory,'target');await mkdir(target);await symlink(target,join(home,'locks'),process.platform === 'win32' ? 'junction' : 'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
-const alias=join(directory,'alias');await symlink(target,alias,'dir');
+const alias=join(directory,'alias');await symlink(target,alias,process.platform === 'win32' ? 'junction' : 'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home,EINZBERN_HEAVY_LOCK_DIR:alias},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 await chmod(target,0o777);await assert.rejects(m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 `);

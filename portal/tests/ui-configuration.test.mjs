@@ -990,7 +990,7 @@ if (!MUTATION) {
       const retiredEconomySettingKey = "model.economyTier";
       assert.doesNotMatch(page.source, /\bSETTING_GROUPS\b/u, "the page's hard-coded key-to-group table is gone");
       const project = (await cli(["settings-catalog", "--workspace", page.workspace], page.deviceEnv)).settings;
-      const device = (await cli(["machine-settings-catalog"], { ...page.deviceEnv, HOME: page.fixture.home })).settings;
+      const device = (await cli(["machine-settings-catalog"], { ...page.deviceEnv, HOME: page.fixture.home, USERPROFILE: page.fixture.home })).settings;
       const rows = [...project.map((entry) => ({ ...entry })), ...device.map((entry) => ({ ...entry, layer: "device" }))];
       for (const row of rows) {
         assert.equal(page.source.includes(`"${row.key}": "${row.group}"`), false, `${row.key} has no group written into the page`);
@@ -1587,14 +1587,15 @@ if (!MUTATION) test("541 SUB-513: the Library tab declares the chain identity an
     assert.ok(document.querySelector("#chain-identity-current").textContent.startsWith(locales.en["chainIdentity.roleCoordination"]), "the tab shows the declared role");
 
     // The registry: the selected entry cannot be removed; another one is, after its plan.
-    const entry = (path) => document.querySelector(`[data-registry-entry="${path}"]`);
+    const rowForPath = (attribute, path) => [...document.querySelectorAll(`[${attribute}]`)].find(element => element.getAttribute(attribute) === path) ?? null;
+    const entry = path => rowForPath("data-registry-entry", path);
     await waitFor(() => entry(fixture.second.project)?.querySelector("[data-library-unregister]"), "the registry list");
     assert.ok(entry(fixture.proseRoot).querySelector("[data-registry-selected]"), "the selected entry says it cannot be removed");
     assert.equal(entry(fixture.proseRoot).querySelector("[data-library-unregister]"), null);
     assert.equal(entry(fixture.second.project).querySelectorAll('[data-path-exists="true"]').length, 2, "both paths of the entry exist");
     before = receiptText(document);
     entry(fixture.second.project).querySelector("[data-library-unregister]").click();
-    const plan = await waitFor(() => document.querySelector(`[data-registry-plan="${fixture.second.project}"]`), "the unregister plan");
+    const plan = await waitFor(() => rowForPath("data-registry-plan", fixture.second.project), "the unregister plan");
     assert.match(plan.textContent, /library-unregister|registry\.json/u);
     assert.equal((await cli(["library-list"], fixture.deviceEnv)).entries.length, 2, "the plan removes nothing");
     plan.querySelector("[data-library-unregister-confirm]").click();

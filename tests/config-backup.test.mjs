@@ -73,7 +73,7 @@ test("CFG-B02: explicit project and generated containers admit only dedicated sa
   }
   await writeFile(join(projectReserve, "source.ts"), "not a reservation");
   await assert.rejects(assertConfigBackupReservedRoot(projectReserve, protectedRoots, retained), { reasonCode: "CONFIG_BACKUP_ROOT_NOT_RESERVED" });
-  const alias = join(project, "alias"); await symlink(generatedReserve, alias);
+  const alias = join(project, "alias"); await symlink(generatedReserve, alias, process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(assertConfigBackupReservedRoot(alias, protectedRoots, retained), { reasonCode: "CONFIG_BACKUP_PATH_INVALID" });
   await assert.rejects(assertConfigBackupReservedRoot(`${generated}/../artifacts/retained`, protectedRoots, retained), { reasonCode: "CONFIG_BACKUP_PATH_INVALID" });
   // An enclosing output root is not an exemption for a library's control namespace.

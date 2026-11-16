@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-489 AC1, AC2, AC3, AC4 (fixture) (TCRN-CROSS-SUB-366; MIN-238 D4): a temporary
 // machine from before the rename, migrated end to end through the shipped entry. The home holds the
@@ -128,7 +129,7 @@ function hookCommands(document) {
 
 /** One CLI run through the shipped entry as this machine, optionally under the write tripwire. */
 function run(m, args, { tripwire = [] } = {}) {
-  return spawnSync(process.execPath, [...(tripwire.length === 0 ? [] : ["--import", tripwirePath]), cliPath, ...args], {
+  return spawnSync(process.execPath, [...(tripwire.length === 0 ? [] : ["--import", pathToFileURL(tripwirePath).href]), cliPath, ...args], {
     encoding: "utf8",
     env: {
       ...process.env,

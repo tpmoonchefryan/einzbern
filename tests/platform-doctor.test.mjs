@@ -564,7 +564,7 @@ test("S270 install wiring executes every safe manifest probe, including codex co
   const result = await inspectInstallFixture(fixture);
   const wiring = result.checks.find((item) => item.name === "installWiring");
   assert.equal(wiring.ok, true);
-  assert.equal(wiring.itemCount, INSTALL_MANIFEST.items.length);
+  assert.equal(wiring.itemCount, INSTALL_MANIFEST.items.filter(entry => entry.platforms === undefined || entry.platforms.includes(process.platform)).length);
   assert.equal(wiring.probes, "safe-manifest-expression");
 });
 
@@ -1104,7 +1104,7 @@ test("a recorded allowance that gained a consumer or lost its symbol is its own 
 test("SUB-414: unusedExports measured on this checkout names no unrecorded export and no stale allowance", async (context) => {
   const fixture = await completeInstallFixture(context);
   await mkdir(join(fixture.root, LOCAL_DIRECTORY_NAMES.classificationFolder), { recursive: true });
-  await symlink(join(import.meta.dirname, ".."), join(fixture.root, LOCAL_DIRECTORY_NAMES.engine));
+  await symlink(join(import.meta.dirname, ".."), join(fixture.root, LOCAL_DIRECTORY_NAMES.engine), process.platform === "win32" ? "junction" : "dir");
   const leg = (await inspectInstallFixture(fixture)).checks.find((entry) => entry.name === "unusedExports");
   assert.equal(leg.source, "live-engine-checkout");
   assert.notEqual(leg.comparable, false, "the checkout's policy and barrel were read");

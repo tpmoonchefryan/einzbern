@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import test from "node:test";
 
 import { inspectCrossRepoPrivacy } from "../scripts/cross-repo-privacy.mjs";
@@ -44,7 +44,7 @@ test("cross-repo privacy red leg names an absolute path and an identity marker, 
   const root = await fixture(context);
   await mkdir(join(root, "joi-button", ".tcrn-install-receipts"), { recursive: true });
   const receipt = join(root, "joi-button", ".tcrn-install-receipts", "claude.json");
-  const syntheticUsersPath = join("/", "Users", "fixture-user", "Code", "joi-button");
+  const syntheticUsersPath = posix.join("/", "Users", "fixture-user", "Code", "joi-button");
   await writeFile(receipt, JSON.stringify({ realpath: syntheticUsersPath, host: "fixture-host" }));
   const options = { manifest: syntheticManifest(), userName: "fixture-user", hostName: "fixture-host", governedHost: "fixture-governed-host" };
   const red = await inspectCrossRepoPrivacy(root, options);
@@ -61,4 +61,17 @@ test("cross-repo privacy requires a platform root", async () => {
   const result = await inspectCrossRepoPrivacy();
   assert.equal(result.ok, false);
   assert.equal(result.reasonCode, "PLATFORM_ROOT_REQUIRED");
+});
+
+test("Windows drive and UNC locations are detected in plain text and JSON", async context => {
+  const root = await fixture(context);
+  const file = join(root, "joi-button", "AGENTS.md");
+  for (const path of ["D:\\fixture\\private", "\\\\fixture-server\\share\\private"]) {
+    for (const content of [path, JSON.stringify({ path })]) {
+      await writeFile(file, content);
+      const result = await inspectCrossRepoPrivacy(root, { manifest: syntheticManifest() });
+      assert.equal(result.ok, false);
+      assert.ok(result.findings.some(entry => entry.findings.some(finding => finding.reasonCode === "CROSS_REPO_WINDOWS_PATH")));
+    }
+  }
 });

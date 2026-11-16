@@ -117,10 +117,12 @@ export async function correctiveProbe({ repo, mode, destination, source, keep = 
   await fs.mkdir(home);
   await fs.writeFile(path.join(home, "device.json"), JSON.stringify({ createdAt: AT, deviceId: "d".repeat(32), displayName: "pinned", schemaVersion: "einzbern.device.v1" }) + "\n");
   process.env.EINZBERN_HOME = home;
-  const api = await import(`${repo}/dist/build/packages/core/src/index.js`);
-  const workspace = await import(`${repo}/dist/build/packages/core/src/workspace.js`);
-  const protocol = await import(`${repo}/dist/build/packages/protocol/src/index.js`);
-  const perf = await import(`${repo}/dist/build/packages/core/src/workspace-perf-instrumentation.js`);
+  const { pathToFileURL } = await import("node:url");
+  const repoUrl = pathToFileURL(repo.endsWith(path.sep) ? repo : repo + path.sep).href;
+  const api = await import(new URL("dist/build/packages/core/src/index.js", repoUrl));
+  const workspace = await import(new URL("dist/build/packages/core/src/workspace.js", repoUrl));
+  const protocol = await import(new URL("dist/build/packages/protocol/src/index.js", repoUrl));
+  const perf = await import(new URL("dist/build/packages/core/src/workspace-perf-instrumentation.js", repoUrl));
   if (source) await fs.cp(source, root, { recursive: true });
   else {
     await api.initializeLibrary({ root, createdAt: AT });
@@ -254,10 +256,12 @@ export async function correctiveProbe({ repo, mode, destination, source, keep = 
 export async function singletonProbe({ repo, mode, destination, source, keep = false }) {
   const fs = await import("node:fs/promises"), path = await import("node:path"), os = await import("node:os");
   const assert = (await import("node:assert/strict")).default;
-  const api = await import(`${repo}/dist/build/packages/core/src/index.js`);
-  const perf = await import(`${repo}/dist/build/packages/core/src/workspace-perf-instrumentation.js`);
-  const { rootPortableIdentity } = await import(`${repo}/dist/build/packages/core/src/root-identity.js`);
-  const { canonicalSha256 } = await import(`${repo}/dist/build/packages/protocol/src/index.js`);
+  const { pathToFileURL } = await import("node:url");
+  const repoUrl = pathToFileURL(repo.endsWith(path.sep) ? repo : repo + path.sep).href;
+  const api = await import(new URL("dist/build/packages/core/src/index.js", repoUrl));
+  const perf = await import(new URL("dist/build/packages/core/src/workspace-perf-instrumentation.js", repoUrl));
+  const { rootPortableIdentity } = await import(new URL("dist/build/packages/core/src/root-identity.js", repoUrl));
+  const { canonicalSha256 } = await import(new URL("dist/build/packages/protocol/src/index.js", repoUrl));
   assert.equal(globalThis.__TCRN_OFFLINE_GUARD__, true);
   const AT = "2026-10-01T00:00:00Z";
   const base = await fs.realpath(await fs.mkdtemp(path.join(destination ?? os.tmpdir(), "init080-singleton-")));

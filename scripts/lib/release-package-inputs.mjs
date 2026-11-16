@@ -36,7 +36,7 @@ async function treeFiles(root, relativePath = "") {
 // Validate the consumer's references independently of SPECIFICATIONS. A valid manifest
 // can hash an incomplete tree; an installed Skill must also resolve its named contracts.
 export async function verifySkillSpecifications(tree, skillRoot) {
-  const files = new Set(await treeFiles(tree));
+  const files = new Set((await treeFiles(tree)).sort());
   for (const source of files) {
     if (!source.startsWith(`${skillRoot}/`) || !source.endsWith(".md")) continue;
     const markdown = await readFile(join(tree, ...source.split("/")), "utf8");

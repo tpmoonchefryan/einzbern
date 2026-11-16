@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-SUB-310 R17 (TCRN-CROSS-STORY-476 R3 and Feature Toggle as revised; MIN-238 D1, D5;
 // MIN-239 D1).
 //
@@ -121,8 +122,8 @@ async function asOlderEngineCrest(fx) {
   await mkdir(join(fx.store, "metadata"));
   await mkdir(join(fx.store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(fx.store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(fx.store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(fx.store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(fx.store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(fx.store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -246,7 +247,7 @@ test("R17 (MIN-238 D1): an older engine's crest past the old default is read by 
   // shapes is written now.
   await asOlderEngineCrest(fx);
   const rewrite = async (id, change) => {
-    const path = join(fx.store, "metadata", `${id}.json`);
+    const path = storeRecordPath(join(fx.store, "metadata"), `${id}.json`);
     const metadata = JSON.parse(await readFile(path, "utf8"));
     await writeFile(path, canonicalJson(change(metadata)));
   };

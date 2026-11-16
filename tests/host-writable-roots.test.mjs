@@ -13,6 +13,8 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, writeFi
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
+import { storePath } from "../dist/build/packages/core/src/stored-path.js";
 
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { applyWritableRoots, configureStorageLocation, planWritableRoots } from "../dist/build/packages/core/src/index.js";
@@ -78,7 +80,7 @@ test("storage relocation plans host roots for its target runtime before publishi
   assert.ok(plannedClaudeRoots.includes(targetRuntime));
   assert.ok(!plannedClaudeRoots.includes(currentRuntime));
   const plannedCodex = plan.files.find(file => file.host === "codex").after;
-  assert.ok(plannedCodex.includes(JSON.stringify(relative(join(root, ".codex"), targetRuntime))));
+  assert.ok(plannedCodex.includes(JSON.stringify(storePath(join(root, ".codex"), targetRuntime))));
   assert.ok(!plannedCodex.includes(JSON.stringify(relative(join(root, ".codex"), currentRuntime))));
   assert.deepEqual(await hostFiles(root), before, "preflight does not write the target host settings");
   assert.equal(resolve(home, JSON.parse(await readFile(join(home, "storage-location.json"), "utf8")).runtime), resolve(currentRuntime), "preflight does not publish the target pointer");
@@ -113,13 +115,13 @@ test("470-AC4: a library outside the project is named in both hosts' project set
   const applied = await applyWritableRoots(await planWritableRoots({ projectRoot: root, libraryPath: lib }), { at: AT });
   assert.deepEqual([applied.reasonCode, applied.projectRoot, applied.libraryPath, applied.libraryInsideProject], ["HOST_WRITABLE_ROOTS_WRITTEN", root, lib, false]);
   assert.deepEqual(applied.files.map((file) => [file.host, file.path, file.changed, file.trackedByGit]), [["claude-code", CLAUDE, true, false], ["codex", CODEX, true, false]]);
-  assert.deepEqual(JSON.parse(await readFile(join(root, CLAUDE), "utf8")), { permissions: { allow: ["Bash(ls)"], additionalDirectories: ["/opt/shared", relative(root, lib)] }, env: { KEEP: "1" } });
+  assert.deepEqual(JSON.parse(await readFile(join(root, CLAUDE), "utf8")), { permissions: { allow: ["Bash(ls)"], additionalDirectories: ["/opt/shared", storePath(root, lib)] }, env: { KEEP: "1" } });
   assert.equal(await readFile(join(root, CODEX), "utf8"), [
     "# the user's own Codex settings",
     "model = \"gpt-test\"",
     "",
     "[sandbox_workspace_write]",
-    `writable_roots = [${JSON.stringify(relative(join(root, ".codex"), lib))}]`,
+    `writable_roots = [${JSON.stringify(storePath(join(root, ".codex"), lib))}]`,
     "network_access = true",
     "",
     "[profiles.keep]",
@@ -141,7 +143,7 @@ test("470-R5: wiring again changes nothing, and an existing writable_roots array
   await writeFile(join(root, CODEX), "[sandbox_workspace_write]\nwritable_roots = [\n  \"/opt/a\", # kept\n  '/opt/b',\n]\nnetwork_access = false\n");
   assert.equal((await applyWritableRoots(await planWritableRoots({ projectRoot: root, libraryPath: lib }), { at: AT })).reasonCode, "HOST_WRITABLE_ROOTS_WRITTEN");
   const once = await hostFiles(root);
-  assert.equal(once.codex, `[sandbox_workspace_write]\nwritable_roots = [\n  "/opt/a", # kept\n  '/opt/b', ${JSON.stringify(relative(join(root, ".codex"), lib))},\n]\nnetwork_access = false\n`);
+  assert.equal(once.codex, `[sandbox_workspace_write]\nwritable_roots = [\n  "/opt/a", # kept\n  '/opt/b', ${JSON.stringify(storePath(join(root, ".codex"), lib))},\n]\nnetwork_access = false\n`);
 
   const again = await planWritableRoots({ projectRoot: root, libraryPath: lib });
   assert.deepEqual(again.files.map((file) => file.changed), [false, false], "a second plan has nothing to change");
@@ -179,8 +181,8 @@ test("470-R5: a library inside its project needs nothing, and a missing host fil
   const outside = await library(join(base, "outside"));
   const created = await applyWritableRoots(await planWritableRoots({ projectRoot: bare, libraryPath: outside }), { at: AT });
   assert.deepEqual([created.reasonCode, created.backupDir], ["HOST_WRITABLE_ROOTS_WRITTEN", null], "no file existed, so none was backed up");
-  assert.deepEqual(JSON.parse(await readFile(join(bare, CLAUDE), "utf8")), { permissions: { additionalDirectories: [relative(bare, outside)] } });
-  assert.equal(await readFile(join(bare, CODEX), "utf8"), `[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(relative(join(bare, ".codex"), outside))}]\n`);
+  assert.deepEqual(JSON.parse(await readFile(join(bare, CLAUDE), "utf8")), { permissions: { additionalDirectories: [storePath(bare, outside)] } });
+  assert.equal(await readFile(join(bare, CODEX), "utf8"), `[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(storePath(join(bare, ".codex"), outside))}]\n`);
 });
 
 test("470-R5: a host file Git tracks is still wired, and the result says it is tracked", async (context) => {
@@ -240,13 +242,15 @@ test("470-R5: a host file the wiring cannot edit safely, or one that changed aft
   await writeFile(join(root, CODEX), before.codex);
 
   // A linked host file is refused rather than replaced by a regular file.
-  const elsewhere = join(base, "dotfiles.json");
-  await writeFile(elsewhere, before.claude);
-  await rm(join(root, CLAUDE));
-  await symlink(elsewhere, join(root, CLAUDE));
-  await assert.rejects(planWritableRoots({ projectRoot: root, libraryPath: lib }), refused(CLAUDE));
-  await rm(join(root, CLAUDE));
-  await writeFile(join(root, CLAUDE), before.claude);
+  if (await fileSymlinksAvailable(root)) {
+    const elsewhere = join(base, "dotfiles.json");
+    await writeFile(elsewhere, before.claude);
+    await rm(join(root, CLAUDE));
+    await symlink(elsewhere, join(root, CLAUDE));
+    await assert.rejects(planWritableRoots({ projectRoot: root, libraryPath: lib }), refused(CLAUDE));
+    await rm(join(root, CLAUDE));
+    await writeFile(join(root, CLAUDE), before.claude);
+  }
 
   // A file that changes between the plan and the write stops the write before anything is replaced.
   const plan = await planWritableRoots({ projectRoot: root, libraryPath: lib });
@@ -277,8 +281,8 @@ test("470-AC4: workspace-relocate wires every project registered for the library
     [first, "HOST_WRITABLE_ROOTS_WRITTEN"],
     [second, "HOST_WRITABLE_ROOTS_FILE_UNSUPPORTED"],
   ]);
-  assert.deepEqual(JSON.parse(await readFile(join(first, CLAUDE), "utf8")), { permissions: { additionalDirectories: [relative(first, target)] } });
-  assert.equal(await readFile(join(first, CODEX), "utf8"), `[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(relative(join(first, ".codex"), target))}]\n`);
+  assert.deepEqual(JSON.parse(await readFile(join(first, CLAUDE), "utf8")), { permissions: { additionalDirectories: [storePath(first, target)] } });
+  assert.equal(await readFile(join(first, CODEX), "utf8"), `[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(storePath(join(first, ".codex"), target))}]\n`);
   assert.deepEqual(await hostFiles(second), { claude: "not json\n", codex: null }, "the project whose wiring failed got nothing");
 
   // The move stands: the registry follows it and the old place keeps its tombstone.

@@ -80,7 +80,7 @@ test("one changed byte refuses the tree and names both digests", async (context)
 test("a symbolic link or other non-regular file in the tree is refused, never followed", async (context) => {
   const root = await treeFixture(context, releaseFiles());
   const outside = await treeFixture(context, { "secret.txt": "outside the tree\n" });
-  await symlink(join(outside, "secret.txt"), join(root, "scripts", "linked.txt"));
+  await symlink(outside, join(root, "scripts", "linked.txt"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(() => computeInstallTreeDigest(root), (error) => error instanceof InstallTreeError && error.reasonCode === "INSTALL_TREE_ENTRY_NOT_REGULAR");
   const cli = runVerifier(["--tree", root, "--sha256", "0".repeat(64)]);
   assert.equal(cli.status, 1);

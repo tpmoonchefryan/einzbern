@@ -89,7 +89,7 @@ test("Skill docs contracts require canonical paths and readable regular packaged
     await mkdir(contract);
     await assert.rejects(verifySkillSpecifications(root, "skill/mana-orchestrate"), { reasonCode: "PACK_SKILL_SPEC_MISSING" });
     await rm(contract, { recursive: true });
-    await symlink(skill, contract);
+    await symlink(join(skill, ".."), contract, process.platform === "win32" ? "junction" : "dir");
     await assert.rejects(verifySkillSpecifications(root, "skill/mana-orchestrate"), { reasonCode: "PACK_TREE_INVALID" });
   } finally { await rm(root, { recursive: true, force: true }); }
 });

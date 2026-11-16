@@ -174,8 +174,11 @@ async function assertRepository(root, expectedName, { clean = false, env = proce
 }
 
 function ensureSeparateRepositories(engineRoot, helperRoot) {
-  const common = (left, right) => left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
-  if (common(engineRoot, helperRoot)) {
+  const contains = (parent, child) => {
+    const path = relative(parent, child);
+    return !isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`);
+  };
+  if (contains(engineRoot, helperRoot) || contains(helperRoot, engineRoot)) {
     refuse("RELEASE_REPOSITORIES_OVERLAP", "engine and helper working trees must be separate repositories", { engineRoot, helperRoot });
   }
 }

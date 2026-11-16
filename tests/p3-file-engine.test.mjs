@@ -1,3 +1,4 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -606,6 +607,7 @@ test("Akasha refuses a non-derived stream identity and linked or malformed inter
     try {
       await createProjectHistory(fixture);
       const { directory, manifest } = await readOwnStream(fixture.workspace);
+      if (kind === "symlink" && !await fileSymlinksAvailable(fixture.base)) continue;
       const path = join(directory, file);
       const outside = join(fixture.base, `${kind}-${file}`);
       if (kind === "symlink") {
@@ -662,13 +664,14 @@ test("device identity refuses non-canonical, symbolic-link and hard-link files",
   await link(join(linkedHome, "device.json"), join(base, "device-hardlink.json"));
   await assert.rejects(readDevice(linkedHome), (error) => error?.reasonCode === "DEVICE_FILE_INVALID");
 
-  const symbolicHome = join(base, "symlink-home");
-  await mkdir(symbolicHome);
-  const symbolicTarget = join(base, "device-target.json");
-  await writeFile(symbolicTarget, canonicalJson(device));
-  await symlink(symbolicTarget, join(symbolicHome, "device.json"));
-  await assert.rejects(readDevice(symbolicHome), (error) => error?.reasonCode === "DEVICE_FILE_INVALID");
-
+  if (await fileSymlinksAvailable(base)) {
+    const symbolicHome = join(base, "symlink-home");
+    await mkdir(symbolicHome);
+    const symbolicTarget = join(base, "device-target.json");
+    await writeFile(symbolicTarget, canonicalJson(device));
+    await symlink(symbolicTarget, join(symbolicHome, "device.json"));
+    await assert.rejects(readDevice(symbolicHome), (error) => error?.reasonCode === "DEVICE_FILE_INVALID");
+  }
   const noncanonicalHome = join(base, "noncanonical-home");
   await mkdir(noncanonicalHome);
   await writeFile(join(noncanonicalHome, "device.json"), `${JSON.stringify(device)}\n`);
@@ -682,7 +685,7 @@ test("a library root symlink and an imported legacy stream still read", async (t
   const libraryRoot = join(base, "legacy-stream.ether");
   await importLegacyWorkspace(root, libraryRoot, { createdAt: instant(0) });
   const alias = join(base, "legacy-stream-alias");
-  await symlink(libraryRoot, alias);
+  await symlink(libraryRoot, alias, process.platform === "win32" ? "junction" : "dir");
   const state = await materializeWorkspace(alias);
   assert.equal(state.version, LEGACY_FIXTURE_EXPECTED.version);
   assert.equal(state.library.streams[0].identityScheme, "legacy");

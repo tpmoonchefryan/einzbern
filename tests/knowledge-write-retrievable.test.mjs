@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-SUB-308 (TCRN-CROSS-STORY-476 R1, R2, AC1, AC2; TCRN-CROSS-MIN-227 D9).
 //
 // A card is retrievable the moment it is written: there is no candidate state to write and no
@@ -16,7 +17,7 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 
 import { COMMAND_CATALOG, runCli } from "../dist/build/packages/cli/src/index.js";
@@ -147,8 +148,8 @@ async function asOlderEngineCrest(fx) {
   await mkdir(join(fx.store, "metadata"));
   await mkdir(join(fx.store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(fx.store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(fx.store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(fx.store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(fx.store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(fx.store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -309,7 +310,7 @@ test("historical records stay readable, and knowledge-recover still completes a 
   const retirement = { schemaVersion: "tcrn.knowledge-retirement.v1", id: swept.id, reason: "zero-retrieval-zero-reference", retrievalCount: 0, referenceCount: 0, observedEvents: 1, windowDays: 90, windowStart: "2026-06-03T00:00:00.000Z", windowEnd: "2026-08-31T23:59:59.999Z", sweptAt: "2026-09-01T00:47:10.039Z" };
   // The retire as 1.2.0 wrote it, stopped after its metadata: the record is retired, its body is
   // still on disk, and the mutation claim of a process that is gone is left behind.
-  const metadataPath = join(fx.store, "metadata", `${swept.id}.json`);
+  const metadataPath = storeRecordPath(join(fx.store, "metadata"), `${swept.id}.json`);
   const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
   await writeFile(metadataPath, canonicalJson({ ...metadata, lifecycle: "retired", revision: metadata.revision + 1, updatedAt: retirement.sweptAt, retirement }));
   const marker = await readKnowledgeStoreMarker(fx.workspace);
@@ -322,7 +323,7 @@ test("historical records stay readable, and knowledge-recover still completes a 
   assert.deepEqual([recovered.reasonCode, recovered.reclaimedRetiredBodies], ["KNOWLEDGE_RECOVERED", 1]);
   assert.deepEqual(await readFile(join(fx.store, "store.json")), manifest, "the recovery wrote no root manifest");
   assert.equal((await recoverKnowledgeStore(fx.workspace)).reasonCode, "KNOWLEDGE_RECOVERY_NOT_NEEDED");
-  assert.equal((await readdir(join(fx.store, "bodies"))).includes(`${swept.id}.body`), false, "the retired body is reclaimed once");
+  assert.equal((await readdir(join(fx.store, "bodies"))).includes(basename(storeRecordPath(join(fx.store, "bodies"), `${swept.id}.body`))), false, "the retired body is reclaimed once");
 
   const storeJson = join(fx.store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), lastSweepAt: "2026-09-01T00:47:10.039Z" }));

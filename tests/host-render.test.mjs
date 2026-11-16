@@ -10,8 +10,9 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { storePath } from "../dist/build/packages/core/src/stored-path.js";
 import { fileURLToPath } from "node:url";
 
 import { renderHostHooks, renderWritableRoots } from "../scripts/host-render.mjs";
@@ -34,7 +35,7 @@ async function machine(t, prefix) {
   const home = join(base, "home");
   const device = join(base, "device");
   await mkdir(home);
-  return { base, home, device, env: { ...process.env, HOME: home, EINZBERN_HOME: device } };
+  return { base, home, device, env: { ...process.env, HOME: home, USERPROFILE: home, EINZBERN_HOME: device } };
 }
 
 function run(args, env) {
@@ -120,9 +121,10 @@ test("477-R1, R3: --scope project renders the hook into the project and leaves t
   assert.deepEqual(JSON.parse(await readFile(join(device, "backups", "20260926T100000Z", "host-hooks", root, ".claude", "settings.json"), "utf8")), before);
 });
 
-test("477-R5: a cross-volume Windows binding refuses instead of persisting an absolute fallback", async (t) => {
+test("477-R5: a cross-volume Windows binding uses an encoded device path", async (t) => {
   const { home } = await machine(t, "einzbern-host-render-win32-");
-  await assert.rejects(renderHostHooks({ host: "codex", scope: "user", home, device: "D:\\Einzbern\\device", platform: "win32", planOnly: true }), { reasonCode: "HOST_HOOKS_PATH_UNSUPPORTED" });
+  const result = await renderHostHooks({ host: "codex", scope: "user", home, device: "D:\\Einzbern\\device", platform: "win32", planOnly: true });
+  assert.ok(JSON.stringify(result).includes("Buffer.from("));
   assert.deepEqual(await readdir(home), []);
 });
 
@@ -178,10 +180,10 @@ test("TCRN-CROSS-STORY-470 R5, AC4: the writable-roots scope names a library out
     assert.deepEqual([again.reasonCode, again.wrote, again.backupDir], ["HOST_RENDER_ALREADY_CURRENT", false, null], `${host}: rendering again changes nothing`);
   }
   assert.deepEqual(JSON.parse(await readFile(join(project, ".claude", "settings.local.json"), "utf8")), {
-    permissions: { allow: ["Read(/**)"], additionalDirectories: [relative(project, library)] },
+    permissions: { allow: ["Read(/**)"], additionalDirectories: [storePath(project, library)] },
     model: "user-model",
   });
-  assert.equal(await readFile(join(project, ".codex", "config.toml"), "utf8"), `[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(relative(join(project, ".codex"), library))}]\n`);
+  assert.equal(await readFile(join(project, ".codex", "config.toml"), "utf8"), `[sandbox_workspace_write]\nwritable_roots = [${JSON.stringify(storePath(join(project, ".codex"), library))}]\n`);
   // The Claude file existed and its original went to the device directory first.
   const backups = join(base, "device", "backups", "20260926T100000Z", "writable-roots");
   const [projectDigest] = await readdir(backups);
@@ -213,7 +215,7 @@ test("TCRN-CROSS-STORY-470 R5: the native CLI renders the writable-roots scope w
 
   const receipt = run(["--host", "claude-code", "--root", project, "--library", library], env);
   assert.deepEqual([receipt.reasonCode, receipt.scope, receipt.backupDir], ["HOST_RENDER_COMMITTED", "writable-roots", null]);
-  assert.deepEqual(JSON.parse(await readFile(join(project, ".claude", "settings.local.json"), "utf8")), { permissions: { additionalDirectories: [relative(project, library)] } });
+  assert.deepEqual(JSON.parse(await readFile(join(project, ".claude", "settings.local.json"), "utf8")), { permissions: { additionalDirectories: [storePath(project, library)] } });
 
   // A library inside the project needs nothing.
   const own = join(project, ".ether");

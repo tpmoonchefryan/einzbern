@@ -31,11 +31,16 @@ handle also terminates its descendants.
 
 The standard and selectively planned test entries use the Windows job controller.
 It preserves the selected roster, memory admission, timeout result, raw output
-and file-level diagnostics. The Python CI observer holds output descriptors until
+and file-level diagnostics. The full Windows suite has a 30-minute controller
+limit, configurable downward with `TCRN_TEST_CONTROLLER_TIMEOUT_MS`. Its POSIX
+process-group recovery fixtures run on Linux. Native Job Object and NTFS recovery
+fixtures run on Windows. The Python CI observer holds output descriptors until
 it has retained and verified the bytes, then removes the captured Windows files.
 
 PATH and PATHEXT lookup support native executables and `.cmd` or `.bat` shims.
 Batch arguments preserve spaces, Unicode, quotes and shell metacharacters.
+Generated Portal `.cmd` launchers use encoded PowerShell arguments and forward
+UTF-8 output and exit codes.
 Kiro and Antigravity runners send prompts through stdin. Kiro discovery checks
 the executable and product metadata in per-user and Program Files installations.
 

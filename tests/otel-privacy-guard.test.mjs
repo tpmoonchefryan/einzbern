@@ -488,7 +488,19 @@ test("red proof: without the empty-sink layer, an empty sink reports CLEAN at ex
 // went red under `pnpm test`. `sh` opens the file itself, so no descriptor of ours
 // crosses the boundary while the guard's stdout is still a regular file.
 function runGuardToFile(argv, outputPath, { script = SOURCE_PATH } = {}) {
-  const result = spawnSync("/bin/sh", ["-c", 'exec "$@" > "$OUTPUT_PATH"', "sh", process.execPath, script, ...argv], {
+  const executable = process.platform === "win32" ? process.execPath : "/bin/sh";
+  const arguments_ = process.platform === "win32"
+    ? ["-e", `const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
+const descriptor = fs.openSync(process.argv[1], 'w');
+try {
+  const result = spawnSync(process.argv[2], process.argv.slice(3), { stdio: ['ignore', descriptor, 'inherit'] });
+  process.exitCode = result.status ?? 1;
+} finally {
+  fs.closeSync(descriptor);
+}`, outputPath, process.execPath, script, ...argv]
+    : ["-c", 'exec "$@" > "$OUTPUT_PATH"', "sh", process.execPath, script, ...argv];
+  const result = spawnSync(executable, arguments_, {
     cwd: workdir,
     stdio: "pipe",
     encoding: "utf8",
@@ -539,10 +551,12 @@ test("red proof: restoring process.exit() after the write truncates that report 
   assert.equal(mutant.report, null);
 });
 
+// On Windows, 24,000 Unicode characters stay below the UTF-16 command-line
+// limit while their UTF-8 representation still exceeds the pipe buffer.
 // The refusal path carries argv back to the caller, so its payload length is the
 // caller's to choose. An 80 KiB --sink value made the refusal truncatable too.
 test("truncation: an over-long --sink value still yields a whole, parseable refusal", () => {
-  const overlong = `/${"x".repeat(80000)}/no-such-sink.jsonl`;
+  const overlong = `/${process.platform === "win32" ? "界".repeat(24000) : "x".repeat(80000)}/no-such-sink.jsonl`;
   const run = runGuard(["--sink", overlong]);
   assert.equal(run.status, 2);
   assert.ok(run.report, `expected parseable JSON, got ${Buffer.byteLength(run.stdout, "utf8")} bytes`);
@@ -552,7 +566,7 @@ test("truncation: an over-long --sink value still yields a whole, parseable refu
 });
 
 test("red proof: without the refusal clamp, an over-long --sink value truncates the refusal", async (t) => {
-  const overlong = `/${"x".repeat(80000)}/no-such-sink.jsonl`;
+  const overlong = `/${process.platform === "win32" ? "界".repeat(24000) : "x".repeat(80000)}/no-such-sink.jsonl`;
   const mutantPath = await writeMutant("clamp-refusal", ["clampRefusal"]);
   const mutant = runGuard(["--sink", overlong], { script: mutantPath });
   // Same race as the exit-after-write red leg above: on hosts whose pipe reader

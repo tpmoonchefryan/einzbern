@@ -345,13 +345,17 @@ test("J01/J10 approval binding and retry/history files remain explicit transient
   }
 });
 
-test("full-core controller defaults and caps at 900000ms while P8 and explicit smaller budgets remain bounded", async () => {
+test("full-core controller uses bounded platform budgets and keeps P8 bounded", async () => {
   const text = await source("scripts/task.mjs");
   const body = namedFunction(text, "controllerTimeoutMs");
-  const budget = (value, p8Only = false) => vm.runInNewContext(`${body}\ncontrollerTimeoutMs(p8Only)`, {
-    process: { env: value === undefined ? {} : { TCRN_TEST_CONTROLLER_TIMEOUT_MS: value } }, p8Only,
+  const budget = (value, p8Only = false, platform = "linux") => vm.runInNewContext(`${body}\ncontrollerTimeoutMs(p8Only)`, {
+    process: { platform, env: value === undefined ? {} : { TCRN_TEST_CONTROLLER_TIMEOUT_MS: value } }, p8Only,
     assertion: (condition, reasonCode, detail) => { if (!condition) throw Object.assign(new Error(detail), { reasonCode }); },
   });
+  assert.equal(budget(undefined, false, "win32"), 1_800_000);
+  assert.equal(budget(undefined, true, "win32"), 600_000);
+  assert.equal(budget("1800000", false, "win32"), 1_800_000);
+  assert.throws(() => budget("1800001", false, "win32"), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
   assert.equal(budget(undefined), 900_000);
   assert.equal(budget(undefined, true), 600_000);
   for (const value of ["1", "100", "3000", "599999", "600000", "600001", "899999", "900000", " 100 ", "1e3", "0x64"]) assert.equal(budget(value), Number(value));
@@ -359,7 +363,7 @@ test("full-core controller defaults and caps at 900000ms while P8 and explicit s
   for (const p8Only of [false, true]) for (const value of ["", " ", "0", "-1", "1.5", "900001", "9007199254740992", "Infinity", "-Infinity", "NaN", "abc"]) assert.throws(() => budget(value, p8Only), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
   for (const value of ["600001", "899999", "900000"]) assert.throws(() => budget(value, true), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
   assert.ok(text.includes("const timeoutMs = controllerTimeoutMs(p8Only);"));
-  assert.ok(text.includes("}, tests, p8Only);"));
+  assert.ok(text.includes("coreTestArgv(tests), environment, tests, p8Only);"));
   assert.ok(text.includes('const dogfood = await runTests({ p8Only: true });'));
   assert.ok(text.includes('return runTests();'));
 });

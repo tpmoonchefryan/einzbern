@@ -1,3 +1,4 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-480 R1, R2, R5, R6, AC1, AC2 (TCRN-CROSS-SUB-323): setup --mode fresh. A plan
 // lists every file it would write and writes none; the apply with the default answers leaves the
@@ -181,7 +182,7 @@ function trackedWarnings(files = HOST_FILES) {
 async function planUnderTripwire(f, options) {
   const script = join(f.base, "plan-only.mjs");
   await writeFile(script, `import { planSetup } from ${JSON.stringify(setupModule)};\nprocess.stdout.write(JSON.stringify(await planSetup(JSON.parse(process.argv[2]))));\n`);
-  const run = spawnSync(process.execPath, ["--import", tripwirePath, script, JSON.stringify(options)], {
+  const run = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, script, JSON.stringify(options)], {
     encoding: "utf8",
     env: { ...process.env, HOME: f.home, EINZBERN_HOME: f.deviceHome, EINZBERN_TRIPWIRE_ROOT: [f.home, f.deviceHome, f.project].join(delimiter) },
   });
@@ -438,24 +439,25 @@ test("480-R2: a library outside the project gets the project's host write roots;
 
 test("480-R5: a host file that is a symbolic link, or a library already at the chosen place, stops the plan and the apply writes nothing", async (context) => {
   const f = await fixture(context);
-  const dotfiles = join(f.base, "dotfiles");
-  await mkdir(dotfiles);
-  await writeFile(join(dotfiles, "settings.json"), "{}\n");
-  await mkdir(join(f.home, ".claude"));
-  await symlink(join(dotfiles, "settings.json"), join(f.home, ".claude", "settings.json"));
-  const planned = await plan(f);
-  assert.deepEqual(planned.blockers.map((blocker) => [blocker.step, blocker.path, blocker.reasonCode]), [
-    ["host-hooks", join(f.home, ".claude", "settings.json"), "HOST_HOOKS_FILE_UNSUPPORTED"],
-  ]);
-  const before = await snapshot([f.home, f.deviceHome, f.project]);
-  await assert.rejects(applySetup(planned), (error) => {
-    assert.equal(error.reasonCode, "SETUP_BLOCKED");
-    assert.equal(error.details.reasonCode, "HOST_HOOKS_FILE_UNSUPPORTED");
-    assert.equal(error.details.path, join(f.home, ".claude", "settings.json"));
-    return true;
-  });
-  assert.deepEqual(await snapshot([f.home, f.deviceHome, f.project]), before);
-
+  if (await fileSymlinksAvailable(f.base)) {
+    const dotfiles = join(f.base, "dotfiles");
+    await mkdir(dotfiles);
+    await writeFile(join(dotfiles, "settings.json"), "{}\n");
+    await mkdir(join(f.home, ".claude"));
+    await symlink(join(dotfiles, "settings.json"), join(f.home, ".claude", "settings.json"));
+    const planned = await plan(f);
+    assert.deepEqual(planned.blockers.map((blocker) => [blocker.step, blocker.path, blocker.reasonCode]), [
+      ["host-hooks", join(f.home, ".claude", "settings.json"), "HOST_HOOKS_FILE_UNSUPPORTED"],
+    ]);
+    const before = await snapshot([f.home, f.deviceHome, f.project]);
+    await assert.rejects(applySetup(planned), (error) => {
+      assert.equal(error.reasonCode, "SETUP_BLOCKED");
+      assert.equal(error.details.reasonCode, "HOST_HOOKS_FILE_UNSUPPORTED");
+      assert.equal(error.details.path, join(f.home, ".claude", "settings.json"));
+      return true;
+    });
+    assert.deepEqual(await snapshot([f.home, f.deviceHome, f.project]), before);
+  }
   const other = join(f.base, "other");
   await mkdir(other);
   const created = await cli(["init", "--workspace", join(other, ".ether"), "--at", at()]);

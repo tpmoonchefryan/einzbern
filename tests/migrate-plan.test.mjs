@@ -1,4 +1,6 @@
+import { pathToFileURL } from "node:url";
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-STORY-489 R1, AC1 (dry-run form) / STORY-480 R6 (TCRN-CROSS-SUB-364; MIN-235 D17,
 // MIN-238 D4): setup --mode migrate plans the migration of an installation from before the rename.
 // Old partitions restored from the frozen old-layout fixture into a temporary container, with a
@@ -131,8 +133,8 @@ async function oldKnowledgePartition(m, name, broken = false) {
   const storedMarker = JSON.parse(await readFile(join(donor, DIRECTORY.knowledge, "store.json"), "utf8"));
   await writeFile(join(knowledge, "store.json"), canonicalJson({ ...storedMarker, version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
   for (const record of listed.records) {
-    await writeFile(join(knowledge, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(knowledge, "bodies", `${record.id}.body`), bodies.get(record.id));
+    await writeFile(storeRecordPath(join(knowledge, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(knowledge, "bodies"), `${record.id}.body`), bodies.get(record.id));
   }
   await writeFile(join(knowledge, "views", "index.json"), await readFile(join(cachePath(expected.workspaceId), "crest-views", "index.json")));
   const damaged = ["store.json", `metadata/${listed.records[0].id}.json`];
@@ -221,7 +223,7 @@ test("489-R1, AC1 (fixture): a two-partition mapping plans two libraries with th
   // setup --mode migrate without --yes, in a process whose every write under the container, the
   // home and the device directory is refused.
   const before = await treeDigest(m.base);
-  const run = spawnSync(process.execPath, ["--import", tripwirePath, cliPath, "setup", "--mode", "migrate", "--project", m.container, "--mapping", mapping, "--at", at()], {
+  const run = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, cliPath, "setup", "--mode", "migrate", "--project", m.container, "--mapping", mapping, "--at", at()], {
     encoding: "utf8",
     env: {
       ...process.env,
@@ -650,7 +652,7 @@ for (const language of ["en", "zh-CN", "ja", "ko", "fr"]) {
     const partitions = [{ partition: "cross-project", legacyWorkspace: crossProject, projectRoot: m.container }];
     const mapping = await writeMapping(m, partitions, join(m.container, "mapping.json"));
     const before = await treeDigest(m.base);
-    const argv = ["--import", join(repositoryRoot, "scripts/no-network.mjs"), "--import", tripwirePath, cliPath,
+    const argv = ["--import", pathToFileURL(join(repositoryRoot, "scripts/no-network.mjs")).href, "--import", pathToFileURL(tripwirePath).href, cliPath,
       "setup", "--mode", "migrate", "--project", m.container, "--mapping", "mapping.json",
       "--cloud", "true", "--language", language, "--navigation", "false", "--at", at()];
     const run = spawnSync(process.execPath, argv, {

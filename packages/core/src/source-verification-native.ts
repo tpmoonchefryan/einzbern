@@ -6,7 +6,7 @@ import { constants } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import type { LibraryRead, StreamManifest, StreamSegment } from "./akasha.js";
 import type { EventRecord } from "../../protocol/src/index.js";
@@ -97,7 +97,7 @@ function digest(bytes: Uint8Array): string {
 }
 function inside(parent: string, child: string): boolean {
   const path = relative(parent, child);
-  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith("../"));
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

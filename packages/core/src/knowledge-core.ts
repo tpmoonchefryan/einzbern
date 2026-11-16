@@ -1422,7 +1422,7 @@ async function backupKnowledgeBodies(directory: string, files: readonly { readon
     }
     fail("KNOWLEDGE_PATH_INVALID", `${directory}:${String(error)}`);
   }
-  for (const file of files) await writeFileAtomic(join(directory, file.name), file.bytes);
+  for (const file of files) await writeFileAtomic(storeRecordPath(directory, file.name), file.bytes);
 }
 
 // The claim protocol is file-native (STORY-177, like STORY-174's workspace leases):

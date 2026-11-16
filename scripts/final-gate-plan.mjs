@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -778,7 +778,8 @@ function trustedArtifactIdentity(candidate, { expectedInputs = null, gateId = nu
   try {
     if (!statSync(absolute).isFile()) return null;
     const root = resolve(storeRoot);
-    if (!(absolute === root || absolute.startsWith(`${root}/`))) return null;
+    const path = relative(root, absolute);
+    if (isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`)) return null;
     const bytes = readFileSync(absolute);
     const actual = createHash("sha256").update(bytes).digest("hex");
     if (actual !== digest || !Number.isSafeInteger(candidate.bytes) || candidate.bytes !== bytes.length) return null;

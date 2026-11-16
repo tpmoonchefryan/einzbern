@@ -1,7 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from "node:crypto";
-import { symlink, unlink, writeFile } from "node:fs/promises";
+import { cp, realpath, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
+export async function copyDependencyTree(source, target) {
+  if (process.platform === "win32") await symlink(await realpath(source), target, "junction");
+  else await cp(source, target, { recursive: true });
+}
 
 export async function fileSymlinksAvailable(directory) {
   if (process.platform !== "win32") return true;

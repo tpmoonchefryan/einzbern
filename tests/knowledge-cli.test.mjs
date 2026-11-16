@@ -430,7 +430,7 @@ test("R46 I04 (CLI): a library that never created its knowledge store lists an e
   await writeFile(store, "not a store\n");
   assert.equal(await refused(), "KNOWLEDGE_SPECIAL_FILE", "a file at the store's place");
   await rename(store, join(base, "store-file"));
-  await symlink(join(base, "store-away"), store);
+  await symlink(join(base, "store-away"), store, process.platform === "win32" ? "junction" : "dir");
   assert.equal(await refused(), "KNOWLEDGE_LINK_UNSAFE", "a link at the store's place");
   await rename(store, join(base, "store-link"));
   await mkdir(join(store, "metadata"), { recursive: true });

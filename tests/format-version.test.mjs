@@ -12,6 +12,7 @@ import { mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:
 import { tmpdir } from "node:os";
 import { delimiter, join, relative, resolve } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { FRAMEWORK_VERSION, materializeLibrary, openLibrary } from "../dist/build/packages/core/src/index.js";
@@ -86,7 +87,7 @@ async function treeDigest(root) {
       const path = join(directory, entry.name);
       const metadata = await stat(path);
       const digest = entry.isFile() ? createHash("sha256").update(await readFile(path)).digest("hex") : "directory";
-      rows.push(`${relative(root, path)}|${metadata.size}|${metadata.mtimeMs}|${digest}`);
+      rows.push(`${relative(root, path).split("\\").join("/")}|${metadata.size}|${metadata.mtimeMs}|${digest}`);
       if (entry.isDirectory()) await walk(path);
     }
   };
@@ -96,7 +97,7 @@ async function treeDigest(root) {
 
 /** Run the CLI binary with every write under `roots` refused (tests/helpers/fs-write-tripwire.mjs). */
 function underTripwire(roots, args) {
-  return spawnSync(process.execPath, ["--import", tripwirePath, cliPath, ...args], {
+  return spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, cliPath, ...args], {
     encoding: "utf8",
     env: { ...process.env, EINZBERN_TRIPWIRE_ROOT: roots.join(delimiter) },
   });

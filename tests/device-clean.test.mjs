@@ -95,9 +95,11 @@ async function device(context, { previous = "2.0.3" } = {}) {
   for (const name of [BACKUPS.pre201, BACKUPS.pre202, BACKUPS.pre203, BACKUPS.pre210]) await put(`backups/${name}/engine/current`, "{}\n");
   for (const host of [".agents", ".claude"]) await put(`backups/${BACKUPS.update210}/skill-copies/${host}/skills/mana-orchestrate/SKILL.md`, "# skill\n");
   // A staging that links out of the device directory: the link goes with it, never what it names.
-  const outside = join(base, "outside.txt");
+  const outsideDirectory = join(base, "outside");
+  await mkdir(outsideDirectory);
+  const outside = join(outsideDirectory, "outside.txt");
   await writeFile(outside, "not the device's\n");
-  await symlink(outside, join(deviceHome, "trash", STAGINGS.install202, "linked-out"));
+  await symlink(outsideDirectory, join(deviceHome, "trash", STAGINGS.install202, "linked-out"), process.platform === "win32" ? "junction" : "dir");
   return { base, home, deviceHome, outside };
 }
 
@@ -236,7 +238,7 @@ test("541 GWT4 (SUB-519): a backup is cleared only when it holds the skill copie
   await mkdir(linkedTo);
   await writeFile(join(linkedTo, "SKILL.md"), "# not the device's\n");
   await mkdir(join(fx.deviceHome, "backups", more.linkedSkill));
-  await symlink(linkedTo, join(fx.deviceHome, "backups", more.linkedSkill, "skill-copies"));
+  await symlink(linkedTo, join(fx.deviceHome, "backups", more.linkedSkill, "skill-copies"), process.platform === "win32" ? "junction" : "dir");
 
   const plan = await cli(clean(fx));
   const added = new Set(Object.values(more));
@@ -275,11 +277,11 @@ test("541 GWT4: a symbolic link in trash/ and a backups/ that leads out of the d
   await mkdir(precious);
   await writeFile(join(precious, "data.txt"), "precious\n");
   const link = join(fx.deviceHome, "trash", "install-2026-01-01T000000Z-tmp-0000000000000000");
-  await symlink(precious, link);
+  await symlink(precious, link, process.platform === "win32" ? "junction" : "dir");
   // backups/ itself moved out and linked back: every entry under it would be outside the device directory.
   const elsewhere = join(fx.base, "elsewhere");
   await rename(join(fx.deviceHome, "backups"), elsewhere);
-  await symlink(elsewhere, join(fx.deviceHome, "backups"));
+  await symlink(elsewhere, join(fx.deviceHome, "backups"), process.platform === "win32" ? "junction" : "dir");
   const elsewhereBefore = await tree(elsewhere);
 
   const plan = await cli(clean(fx));
@@ -393,7 +395,7 @@ test("542 GWT2 (SUB-521): the old helper's copies and the install markers the mi
   await lay(fx, more.mixed, [withEntry(updateCopy(claude)), withEntry(migratedCopy(claude.root))]);
   // The old helper's copy was a link and was moved as one: kept, and what it names is never read.
   await lay(fx, more.linked, [`${SKILL_COPIES}/${claude.root}/`]);
-  await symlink(elsewhere, join(fx.deviceHome, "backups", more.linked, ...migratedCopy(claude.root).split("/")));
+  await symlink(elsewhere, join(fx.deviceHome, "backups", more.linked, ...migratedCopy(claude.root).split("/")), process.platform === "win32" ? "junction" : "dir");
   const added = [...copies.map(([, name]) => name), ...Object.values(more)];
   const before = await backupsOf(fx, added);
 
@@ -441,7 +443,7 @@ test("542 GWT2 (SUB-521): anything else under skill-copies keeps the backup as u
   // A file, and a link, where an update's copy, a directory, belongs.
   await lay(fx, more.fileCopy, [updateCopy(claude)]);
   await lay(fx, more.linkedCopy, [`${SKILL_COPIES}/${agents.root}/`]);
-  await symlink(elsewhere, join(fx.deviceHome, "backups", more.linkedCopy, ...updateCopy(agents).split("/")));
+  await symlink(elsewhere, join(fx.deviceHome, "backups", more.linkedCopy, ...updateCopy(agents).split("/")), process.platform === "win32" ? "junction" : "dir");
   // Empty directories: a host root, the markers' directory, skill-copies itself, an update's copy.
   await lay(fx, more.emptyRoot, [`${SKILL_COPIES}/${claude.root}/`]);
   await lay(fx, more.emptyMarkers, [`${SKILL_COPIES}/${LEGACY_DEVICE_DIRECTORY}/`]);

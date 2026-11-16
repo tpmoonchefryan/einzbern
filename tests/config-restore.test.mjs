@@ -47,7 +47,7 @@ test("CFG-B02: allowlisted collection never walks retained backups, staging or r
   for (const area of ["config-backups", "config-backup-staging", "config-backup-recovery"]) {
     const path = join(f.source.projectRoot, "retained", area); await mkdir(path, { recursive: true });
     await writeFile(join(path, "AGENTS.md"), "Unselected nested material must never enter the package.\n");
-    await symlink(f.source.projectRoot, join(path, "self"));
+    await symlink(f.source.projectRoot, join(path, "self"), process.platform === "win32" ? "junction" : "dir");
   }
   assert.deepEqual(await collectConfigBackupPayloads(f.source, selection), before);
   assert.equal(before.length, 1); assert.equal(before[0].text, "Preserve the selected user fragment.\n");
@@ -55,7 +55,7 @@ test("CFG-B02: allowlisted collection never walks retained backups, staging or r
 test("R4 restore fixture canonicalizes an aliased device home while the production directory guard still rejects it", async t => asPinnedDevice(async home => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "einzbern-restore-home-alias-"))); t.after(() => rm(root, { recursive: true, force: true }));
   const canonicalHome = await realpath(home); const alias = join(root, "device-home-alias");
-  await symlink(canonicalHome, alias, "dir");
+  await symlink(canonicalHome, alias, process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(assertConfigBackupDirectory(alias), { reasonCode: "CONFIG_BACKUP_PATH_INVALID" });
   const f = await fixture(t, alias, [{ kind: "device-preference", key: "portal.defaultTheme", value: "dark", source: "device-declaration" }]);
   assert.equal(f.source.machineSettingsPath, join(canonicalHome, "machine-settings.json"));

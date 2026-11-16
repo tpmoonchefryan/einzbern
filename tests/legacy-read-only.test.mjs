@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-466 AC1, R2 / TCRN-CROSS-STORY-467 R4, AC3 (old layout): the frozen
 // old-layout workspace is read without a single write, chain-validate replays it from
@@ -58,7 +59,7 @@ async function cli(args) {
 }
 
 function underTripwire(root, args) {
-  return spawnSync(process.execPath, ["--import", tripwirePath, ...args], {
+  return spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, ...args], {
     encoding: "utf8",
     env: { ...process.env, EINZBERN_TRIPWIRE_ROOT: root },
   });

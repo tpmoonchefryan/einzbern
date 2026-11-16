@@ -27,8 +27,8 @@ function escaped(value) {
 
 function markerRules(options) {
   const rules = [
-    { reasonCode: "CROSS_REPO_ABSOLUTE_PATH", expression: /(?:^|[\s"'`=(,:])\/(?:Users|home|private)\//u },
-    { reasonCode: "CROSS_REPO_WINDOWS_PATH", expression: /(?:^|[\s"'`=(,:])[A-Za-z]:[\\/]/u },
+    { reasonCode: "CROSS_REPO_ABSOLUTE_PATH", expression: /(?:^|[\s"'`=(,:])[\\/]+(?:Users|home|private)[\\/]/u },
+    { reasonCode: "CROSS_REPO_WINDOWS_PATH", expression: /(?:^|[\s"'`=(,:])(?:[A-Za-z]:[\\/]|\\{2,}[^\\\s]+\\)/u },
   ];
   const names = [options.userName, options.hostName, options.governedHost]
     .filter((value) => typeof value === "string" && value.trim().length >= 3)

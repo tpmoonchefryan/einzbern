@@ -335,7 +335,7 @@ test("INIT080 throwing input getter is neither pre-read nor blamed on a later me
 // tests never observe the patch; the child restores every descriptor before replay.
 async function isolatedCorrection(mode) {
   const repo = fileURLToPath(new URL("..", import.meta.url));
-  const guard = fileURLToPath(new URL("../scripts/no-network.mjs", import.meta.url));
+  const guard = new URL("../scripts/no-network.mjs", import.meta.url).href;
   const script = `(${correctiveProbe.toString()})(${JSON.stringify({ repo, mode })}).then((result) => process.stdout.write(JSON.stringify(result)));`;
   const { stdout } = await promisify(execFile)(process.execPath, ["--max-old-space-size=2048", "--import", guard, "--input-type=module", "-e", script], { maxBuffer: 16 * 1024 * 1024, timeout: 60_000, env: process.env });
   return JSON.parse(stdout);
@@ -406,7 +406,7 @@ for (const mode of ["length", "length-batch", "buffer", "byteOffset", "shadow", 
 for (const mode of ["owned", "owned-seeded", "batch", "batch-seeded", "public", "public-seeded", "empty", "batch-empty", "index-accessor", "proxy-array", "custom-entries", "custom-prototype", "input-accessor", "options-accessor", "invalid", "actor", "event", "event-indexed", "batch-invalid", "batch-actor"]) test(`INIT080 singleton ${mode} retains original single-validation behavior`, async () => {
   const repo = fileURLToPath(new URL("..", import.meta.url));
   const script = `(${singletonProbe.toString()})(${JSON.stringify({ repo, mode })}).then((result) => process.stdout.write(JSON.stringify(result)));`;
-  const guard = fileURLToPath(new URL("../scripts/no-network.mjs", import.meta.url));
+  const guard = new URL("../scripts/no-network.mjs", import.meta.url).href;
   const { stdout } = await promisify(execFile)(process.execPath, ["--max-old-space-size=2048", "--import", guard, "--input-type=module", "-e", script], { maxBuffer: 16 * 1024 * 1024, timeout: 60_000, env: process.env });
   const result = JSON.parse(stdout);
   const fails = ["empty", "batch-empty", "invalid", "actor", "event", "event-indexed", "batch-invalid", "batch-actor"].includes(mode);

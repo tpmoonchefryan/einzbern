@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, stat
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { pathToFileURL, fileURLToPath } from "node:url";
 import { initializeLibrary, createProject, declareChainIdentity, materializeWorkspaceFromGenesis, readDevice, registerLibrary,
   applyWritableRoots, configureStorageLocation, consolidateStorage, defaultSharedLibraryPath, planWritableRoots, readStorageLocation } from "../dist/build/packages/core/src/index.js";
 import { runtimeTransportReceiptPath } from "../dist/build/packages/core/src/runtime-transport.js";
@@ -38,7 +38,7 @@ async function projectHostFiles(projectRoot) {
 }
 
 function configureCli(t, fixture, runtime, timestamp, decidedIn) {
-  const argv = ["--import", fileURLToPath(new URL("../scripts/no-network.mjs", import.meta.url)),
+  const argv = ["--import", new URL("../scripts/no-network.mjs", import.meta.url).href,
     fileURLToPath(new URL("../scripts/einzbern.mjs", import.meta.url)),
     "storage-configure", "--library", fixture.from, "--runtime", runtime, "--at", timestamp, "--decided-in", decidedIn, "--yes", "true"];
   const { error, status, stdout, stderr } = spawnSync(process.execPath, argv, { cwd: fixture.root, encoding: "utf8" });
@@ -366,7 +366,7 @@ test("storage repair converts intact legacy absolute forwarding links without mo
   const f = await fixture(t), target = join(f.root, "Portable parent", "Ether", ".einzbern", f.device.deviceId);
   await configureStorageLocation(f.home, f.from, target, at, decision, true);
   const link = join(f.home, "cache");
-  await unlink(link); await symlink(join(target, "cache"), link, "dir");
+  await unlink(link); await symlink(join(target, "cache"), link, process.platform === "win32" ? "junction" : "dir");
   assert.equal(isAbsolute(await readlink(link)), true);
   await configureStorageLocation(f.home, f.from, target, at, decision, true);
   assert.equal(isAbsolute(await readlink(link)), false);

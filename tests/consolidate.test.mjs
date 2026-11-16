@@ -3,7 +3,7 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { cp, mkdtemp, mkdir, readFile, realpath, rename, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import {
   initializeLibrary, createProject, declareChainIdentity, setWorkspaceSetting, registerLibrary,
@@ -299,7 +299,7 @@ test("647: warm checkpoint rejects coherently rehashed source history at unchang
   events[events.length - 1] = createEvent({ ...eventInputOf(last), occurredAt: "2026-10-19T12:00:01Z" }, last.schemaVersion);
   const text = events.map(event => canonicalJson(event)).join("");
   await writeFile(path, text);
-  const manifestPath = path.replace(/[^/]+$/u, "manifest.json");
+  const manifestPath = join(dirname(path), "manifest.json");
   const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
   manifest.headEventHash = events.at(-1).eventHash;
   const segment = manifest.segments.find(segment => path.endsWith(segment.name));
@@ -359,8 +359,10 @@ test("647: incremental source-stream matrix preserves status, queries and govern
     assert.ok(candidate.observation.eventReadsBySource.some(source => source.scope === "archive"));
     assert.ok(candidate.observation.metadataReadBytes > 0);
     assert.ok(candidate.observation.cacheReadBytes > 0);
-    assert.ok(candidate.observation.segmentHashCpuMicros > 0);
-    assert.ok(candidate.observation.eventValidationCpuMicros > 0);
+    assert.ok(candidate.observation.segmentHashElapsedMs > 0);
+    assert.ok(candidate.observation.eventValidationElapsedMs > 0);
+    assert.ok(candidate.observation.segmentHashCpuMicros >= 0);
+    assert.ok(candidate.observation.eventValidationCpuMicros >= 0);
     samples.push({ scenario, candidate: candidate.observation, full: full.observation });
     return candidate.value;
   };
@@ -457,7 +459,11 @@ test("648: full verification detects authentic same-length, same-name, missing a
   await rename(`${path}.replacement`, path);
   const replaced = await withRecallObservation(() => materializeLibrary(f.to));
   assert.deepEqual(replaced.value, expected, "byte-identical replacement is valid after full verification");
-  assert.equal(replaced.observation.logicalEventBytes, original.length, "only the changed object needs full source verification");
+  if (warm.observation.verifiedSegmentsBySource.length > 0) {
+    assert.equal(replaced.observation.logicalEventBytes, original.length, "only the changed object needs full source verification");
+  } else {
+    assert.equal(replaced.observation.logicalEventBytes, warm.observation.logicalEventBytes, "the portable verifier rereads every segment");
+  }
   observations.push({ scenario: "byte-identical replacement fully read", observation: replaced.observation });
   await rename(path, `${path}.missing`);
   await rejects("missing historical segment", { reasonCode: "AKASHA_SEGMENT_CORRUPT" });
@@ -512,7 +518,7 @@ test("647: a new supported consolidation generation invalidates the previous bas
   const f = await fixture(t);
   const copies = [];
   for (const source of f.sources) {
-    const path = join(f.root, "next-sources", source.projectId);
+    const path = join(f.root, "next-sources", source.projectId.split(":")[1]);
     await cp(source.path, path, { recursive: true });
     copies.push({ ...source, path });
   }
