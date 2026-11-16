@@ -116,6 +116,13 @@ test("module-relative imports and URLs are checked against their owning file", (
   ]) assert.equal(judgeSource(source, [BRAND.helper.id]).length, 1, source);
 });
 
+test("a hyphenated script name in runtime metadata is distinct from a process invocation", () => {
+  const name = BRAND.helper.id;
+  assert.deepEqual(judgeSource(`entry({ consumer: ["skill/${name}/scripts/spawn-guard.mjs"] });`, [name]), []);
+  const spawned = judgeSource(`spawn("node", [join(root, "../${name}/scripts/spawn-guard.mjs")]);`, [name]);
+  assert.equal(spawned[0]?.operation, "process-spawn");
+});
+
 test("invalid, incomplete, and ambiguous manifest inputs are not-verifiable", () => {
   const invalid = judgeNoSiblingDependency({ repoRoot: REPO_ROOT, manifest: { schemaVersion: "wrong" } });
   assert.equal(invalid.reasonCode, "SIBLING_DEPENDENCY_NOT_VERIFIABLE");

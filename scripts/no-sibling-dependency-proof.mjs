@@ -144,7 +144,7 @@ export function canonicalSiblingRoster({ repoRoot = REPO_ROOT, manifest, manifes
  */
 const REACHING_OPERATIONS = Object.freeze([
   { id: "filesystem-read", pattern: /\b(?:readFileSync|readFile|createReadStream|existsSync|statSync|lstatSync|readdirSync|readdir|import\s*\()/u },
-  { id: "process-spawn", pattern: /\b(?:spawn|spawnSync|(?<!\.)exec|execSync|execFile|execFileSync|fork)\b/u },
+  { id: "process-spawn", pattern: /\b(?:spawn|spawnSync|(?<!\.)exec|execSync|execFile|execFileSync|fork)\b(?!-[\w])/u },
 ]);
 
 /**

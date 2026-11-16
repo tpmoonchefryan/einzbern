@@ -336,10 +336,16 @@ export async function acquireMemoryBudget({ deviceHome, directory, command, env 
   const previous = env[MEMORY_LEASE_VARIABLE];
   const reference = JSON.stringify({ directory, token }); env[MEMORY_LEASE_VARIABLE] = reference;
   let released = false;
-  const monitor = setInterval(() => {
-    try { stateTransaction(directory, state => observe(state, processes())); } catch { /* No release or admission is inferred from a failed observation. */ }
-  }, 1000);
-  monitor.unref();
+  // CIM can take longer than the sampling interval. Leave a full interval for
+  // managed work after each sample and take the observation outside the mutex.
+  let monitor = setTimeout(sampleAgain, 1000).unref();
+  function sampleAgain() {
+    try {
+      const table = processes();
+      stateTransaction(directory, state => observe(state, table));
+    } catch { /* No release or admission is inferred from a failed observation. */ }
+    monitor = setTimeout(sampleAgain, 1000).unref();
+  }
   // No process-exit release: root death is not evidence that its process tree has ended.
   return Object.freeze({ workers: admitted.workers, bytes: admitted.bytes, token, directory,
     refresh() { return memoryPhase(env, sample, processes); },
@@ -356,7 +362,7 @@ export async function acquireMemoryBudget({ deviceHome, directory, command, env 
         writeAtomic(join(directory, "memory-receipts", `${token}.json`), receipt);
         state.leases = state.leases.filter(row => row.token !== token);
       });
-      released = true; clearInterval(monitor);
+      released = true; clearTimeout(monitor);
       if (env[MEMORY_LEASE_VARIABLE] === reference) { if (previous === undefined) delete env[MEMORY_LEASE_VARIABLE]; else env[MEMORY_LEASE_VARIABLE] = previous; }
     },
   });

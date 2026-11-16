@@ -42,7 +42,7 @@ import os from 'node:os';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-const directory = realpathSync(mkdtempSync(join(tmpdir(), 'memory-windows-fixture-')));
+const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'memory-windows-fixture-')));
 const originalPlatform = process.platform;
 Object.defineProperty(process, 'platform', { value: 'win32' });
 process.env.SystemRoot = directory;
@@ -131,8 +131,9 @@ assert.throws(() => m.resolveMemoryDirectory(undefined, directory), { reasonCode
 
 test("an unobservable owned process retains its reservation through reparenting", () => {
   windowsFixture(`
-const { writeFileSync } = await import('node:fs');
+const { mkdirSync, writeFileSync } = await import('node:fs');
 answer = true;
+mkdirSync(join(directory, 'locks'));
 const policy = { enabled: true, reserveMiB: 0, budgetMiB: 1024, fixedMiB: 128, workerMiB: 256, maxWorkers: 1 };
 writeFileSync(join(directory, 'machine-settings.json'), JSON.stringify({ schemaVersion: 'tcrn.machine-settings.v1', values: { 'execution.memoryPolicy': JSON.stringify(policy) } }));
 const owner = { pid: process.pid, ppid: process.ppid, rss: 1024, started: '2026-11-16T00:00:00.1234567Z' };
