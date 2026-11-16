@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
+import "./helpers/windows-review-output-fixture.mjs";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -30,6 +31,36 @@ async function fixture(t) {
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
+
+test("Windows synchronous jobs write to redirected files before exit and capture the other stream as bytes", windows, async t => {
+  const root = await fixture(t);
+  const payload = Buffer.alloc(65536, 0xff);
+  const marker = Buffer.from([0, 0xff, 0x80]);
+  for (const redirected of [1, 2]) {
+    const path = join(root, String(redirected));
+    const destination = await open(path, "wx");
+    try {
+      const stdio = ["ignore", "pipe", "pipe"];
+      stdio[redirected] = destination.fd;
+      const script = [
+        "const fs = require('node:fs');",
+        "const fd = Number(process.argv[1]);",
+        "fs.writeSync(fd, Buffer.alloc(65536, 0xff));",
+        "fs.writeSync(3 - fd, Buffer.from([0, 0xff, 0x80]));",
+        "process.exitCode = fs.statSync(process.argv[2]).size === 65536 ? 23 : 9;",
+      ].join("\n");
+      const run = spawnCommandSync(process.execPath, ["-e", script, String(redirected), path], { stdio, maxBuffer: 64, timeout: 15_000 });
+      assert.ifError(run.error);
+      assert.equal(run.status, 23);
+      assert.equal(run.output[redirected], null);
+      assert.deepEqual(run.output[3 - redirected], marker);
+      assert.deepEqual(await readFile(path), payload);
+    } finally {
+      await destination.close();
+    }
+  }
+});
+
 function collect(child, input = "") {
   const stdout = [];
   const stderr = [];

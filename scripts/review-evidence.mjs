@@ -11,7 +11,7 @@
 import { spawnSync } from "node:child_process";
 import { spawnCommandSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -74,12 +74,25 @@ function outputTail(value, maximum = REVIEW_OUTPUT_BYTES) {
 }
 
 function fullOutput(path) {
-  const bytes = readFileSync(path);
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  if (bytes.length > REVIEW_OUTPUT_BYTES) {
-    return { text: "", bytes: bytes.length, sha256: digest, complete: false };
+  const fd = openSync(path, "r");
+  try {
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const retained = [];
+    let bytes = 0;
+    let count;
+    while ((count = readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+      const chunk = buffer.subarray(0, count);
+      bytes += count;
+      hash.update(chunk);
+      if (bytes <= REVIEW_OUTPUT_BYTES) retained.push(Buffer.from(chunk));
+      else retained.length = 0;
+    }
+    const complete = bytes <= REVIEW_OUTPUT_BYTES;
+    return { text: complete ? Buffer.concat(retained, bytes).toString("utf8") : "", bytes, sha256: hash.digest("hex"), complete };
+  } finally {
+    closeSync(fd);
   }
-  return { text: bytes.toString("utf8"), bytes: bytes.length, sha256: digest, complete: true };
 }
 
 function resultCode(result) {
@@ -91,7 +104,7 @@ function resultCode(result) {
 
 function runShell(command, cwd, timeoutMs = REVIEW_COMMAND_TIMEOUT_MS) {
   if (typeof command !== "string" || command.trim().length === 0 || command.includes("\u0000")) {
-    return { command: command ?? null, cwd, exitCode: "INPUT_INVALID", stdout: "", stderr: "" };
+    return { command: command ?? null, cwd, exitCode: "INPUT_INVALID", stdout: "", stderr: "", outputComplete: false };
   }
   let result;
   const outputDirectory = mkdtempSync(join(tmpdir(), "tcrn-review-evidence-run-"));
@@ -124,28 +137,29 @@ function runShell(command, cwd, timeoutMs = REVIEW_COMMAND_TIMEOUT_MS) {
     }
   } catch (error) {
     rmSync(outputDirectory, { recursive: true, force: true });
-    return { command, cwd, exitCode: String(error?.code ?? "START_FAILED"), stdout: "", stderr: String(error?.message ?? error) };
+    return { command, cwd, exitCode: String(error?.code ?? "START_FAILED"), stdout: "", stderr: String(error?.message ?? error), outputComplete: false };
   }
-  let stdout = { text: "", bytes: 0, sha256: createHash("sha256").digest("hex"), complete: true };
-  let stderr = { text: "", bytes: 0, sha256: createHash("sha256").digest("hex"), complete: true };
+  let stdout;
+  let stderr;
   try {
     stdout = fullOutput(stdoutPath);
     stderr = fullOutput(stderrPath);
   } finally {
     rmSync(outputDirectory, { recursive: true, force: true });
   }
-  const outputComplete = stdout.complete && stderr.complete;
+  const withinLimit = stdout.complete && stderr.complete;
+  const finished = Number.isInteger(result.status) && !result.error;
   return {
     command,
     cwd,
-    exitCode: outputComplete ? resultCode(result) : "OUTPUT_LIMIT",
+    exitCode: finished && !withinLimit ? "OUTPUT_LIMIT" : resultCode(result),
     stdout: stdout.text,
     stderr: stderr.text,
     stdoutBytes: stdout.bytes,
     stderrBytes: stderr.bytes,
     stdoutSha256: stdout.sha256,
     stderrSha256: stderr.sha256,
-    outputComplete,
+    outputComplete: finished && withinLimit,
   };
 }
 

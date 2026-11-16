@@ -252,6 +252,7 @@
       "tests/helpers/register-portal-libraries.mjs",
       "tests/helpers/release-fixture.mjs",
       "tests/helpers/task-runtime-fixture.mjs",
+      "tests/helpers/windows-review-output-fixture.mjs",
       "tests/helpers/work-lease-gates-fixture.mjs",
       "tests/helpers/workspace-fixture.mjs",
       "tests/hook-host.test.mjs",
@@ -392,6 +393,7 @@
       "tests/variables.test.mjs",
       "tests/vendored-runtime.test.mjs",
       "tests/wiki-cli-reference.test.mjs",
+      "tests/windows-process.test.mjs",
       "tests/work-acceptance.test.mjs",
       "tests/work-content-cli.test.mjs",
       "tests/work-delete-lock-scope.test.mjs",
@@ -495,6 +497,7 @@
       "tests/helpers/ci-component-fixture.mjs",
       "tests/helpers/release-fixture.mjs",
       "tests/helpers/task-runtime-fixture.mjs",
+      "tests/helpers/windows-review-output-fixture.mjs",
       "tests/inc263-closeout.test.mjs",
       "tests/inc275-mcp-absent.test.mjs",
       "tests/integration-release.test.mjs",
@@ -537,7 +540,8 @@
       "tests/story-346-pg-disabled.test.mjs",
       "tests/story-378-incident-replay.test.mjs",
       "tests/story-rule-conservation.test.mjs",
-      "tests/token-attribution.test.mjs"
+      "tests/token-attribution.test.mjs",
+      "tests/windows-process.test.mjs"
     ]
   },
   "docs": {
@@ -599,7 +603,8 @@
       "tests/skill-render.test.mjs",
       "tests/story-346-pg-disabled.test.mjs",
       "tests/story-378-incident-replay.test.mjs",
-      "tests/story-rule-conservation.test.mjs"
+      "tests/story-rule-conservation.test.mjs",
+      "tests/windows-process.test.mjs"
     ],
     "docs/wiki/Atelier.md": [
       "tests/privacy-boundary.test.mjs",
@@ -664,7 +669,8 @@
       "tests/story-378-incident-replay.test.mjs",
       "tests/story-rule-conservation.test.mjs",
       "tests/wiki-cli-reference.test.mjs",
-      "tests/wiki-pages.test.mjs"
+      "tests/wiki-pages.test.mjs",
+      "tests/windows-process.test.mjs"
     ],
     "docs/wiki/Ether-Layout.md": [
       "tests/privacy-boundary.test.mjs",
@@ -806,6 +812,7 @@
         "tests/helpers/ci-component-fixture.mjs",
         "tests/helpers/release-fixture.mjs",
         "tests/helpers/task-runtime-fixture.mjs",
+        "tests/helpers/windows-review-output-fixture.mjs",
         "tests/inc238-markdown-link-gate.test.mjs",
         "tests/inc263-closeout.test.mjs",
         "tests/inc275-mcp-absent.test.mjs",
@@ -841,7 +848,8 @@
         "tests/skill-render.test.mjs",
         "tests/story-346-pg-disabled.test.mjs",
         "tests/story-378-incident-replay.test.mjs",
-        "tests/story-rule-conservation.test.mjs"
+        "tests/story-rule-conservation.test.mjs",
+        "tests/windows-process.test.mjs"
       ],
       "tests": [
         "tests/bootstrap.test.mjs",
@@ -901,7 +909,8 @@
         "tests/skill-render.test.mjs",
         "tests/story-346-pg-disabled.test.mjs",
         "tests/story-378-incident-replay.test.mjs",
-        "tests/story-rule-conservation.test.mjs"
+        "tests/story-rule-conservation.test.mjs",
+        "tests/windows-process.test.mjs"
       ],
       "portalTests": []
     },
@@ -1001,6 +1010,7 @@
         "tests/helpers/ci-component-fixture.mjs",
         "tests/helpers/release-fixture.mjs",
         "tests/helpers/task-runtime-fixture.mjs",
+        "tests/helpers/windows-review-output-fixture.mjs",
         "tests/inc263-closeout.test.mjs",
         "tests/inc275-mcp-absent.test.mjs",
         "tests/integration-release.test.mjs",
@@ -1038,7 +1048,8 @@
         "tests/story-378-incident-replay.test.mjs",
         "tests/story-rule-conservation.test.mjs",
         "tests/wiki-cli-reference.test.mjs",
-        "tests/wiki-pages.test.mjs"
+        "tests/wiki-pages.test.mjs",
+        "tests/windows-process.test.mjs"
       ],
       "tests": [
         "tests/bootstrap.test.mjs",
@@ -1098,7 +1109,8 @@
         "tests/story-378-incident-replay.test.mjs",
         "tests/story-rule-conservation.test.mjs",
         "tests/wiki-cli-reference.test.mjs",
-        "tests/wiki-pages.test.mjs"
+        "tests/wiki-pages.test.mjs",
+        "tests/windows-process.test.mjs"
       ],
       "portalTests": []
     },
@@ -1557,6 +1569,7 @@
     "tests/variables.test.mjs",
     "tests/vendored-runtime.test.mjs",
     "tests/wiki-cli-reference.test.mjs",
+    "tests/windows-process.test.mjs",
     "tests/work-acceptance.test.mjs",
     "tests/work-content-cli.test.mjs",
     "tests/work-delete-lock-scope.test.mjs",
@@ -1659,7 +1672,8 @@
     "tests/story-346-pg-disabled.test.mjs",
     "tests/story-378-incident-replay.test.mjs",
     "tests/story-rule-conservation.test.mjs",
-    "tests/token-attribution.test.mjs"
+    "tests/token-attribution.test.mjs",
+    "tests/windows-process.test.mjs"
   ],
   "sourceAudit": {
     ".editorconfig": "a6b98ea7cb6d61ed8d430dd0dffa46c87012b5cf859d4ce7207898954951fdcd",
@@ -2113,7 +2127,7 @@
     "scripts/retrieval-delivery-eval.mjs": "753e37bcabe50e287cfb3cba2e75540b22e083d6b345befda01bd4612b941cf8",
     "scripts/retrieval-eval-record.mjs": "e95fce9f05325bac94ce45088ccafa3776b11bca7652b285220ed1dae14d87f8",
     "scripts/retrieval-eval.mjs": "c3ae282f16bc20ac8e25df6a78fb93b89c2a5e9aa8fce31a32e5ae3fbf2f4b0a",
-    "scripts/review-evidence.mjs": "a05f0e0f2a95e790ecc015e5fb8af6586efdcbb74523d23637ba31c210fd5356",
+    "scripts/review-evidence.mjs": "c96e9dafa9223a978675c747dec58e1f74775ad308d6ebc48c239dd110ec6370",
     "scripts/s253-class-alignment-proof.mjs": "e6cc243bc2927d52b4e5eebe49c42152e624f8b04f3c7070d9851af5c9ecc10a",
     "scripts/s278-component-coverage.mjs": "0213b4181a0519eae3d84c545f3dcc356cc70158cb232260a8acf1a3c28f89cf",
     "scripts/s279-catalog-mutation-proof.mjs": "9f4effa28d049af499d11ee009a40e2394dc8e0fae601cd36944d5b5563db516",
@@ -2145,7 +2159,7 @@
     "skill/mana-orchestrate/scripts/kiro-run.mjs": "4d220af577b3dfa280aca8960cb4661996cf39bfd7e5efe914e06d25b13daa74",
     "skill/mana-orchestrate/scripts/kiro-specs.mjs": "59ee6d70f7e9359115bc6af20fdac4876da68cb4bb2f492342295c9a0e39ee45",
     "skill/mana-orchestrate/scripts/process-launch.d.mts": "ccc1612c5c42141c4dec47cc3632ba05f8a72261e8d125885133b92dbdc1c79e",
-    "skill/mana-orchestrate/scripts/process-launch.mjs": "a00ac0c69ffcfd0af6dee70ec204345a65a12495ba271ac46b35a1fddd151dd4",
+    "skill/mana-orchestrate/scripts/process-launch.mjs": "c84f8252f1edba6cd77e05c0276f2622fb9fcd2378b8ad6ca63a320465e31659",
     "skill/mana-orchestrate/scripts/trash-empty.mjs": "8ed5912fa1fa13d2c52afe8829168f599887601e69bc66cdae7daefbbbc119c3",
     "skill/mana-orchestrate/scripts/windows-system.mjs": "14eab0b19e892ea1aa77d035dec808be9cb4c589a0c37c9007513a5026c7a86d",
     "tests/act11-adapter-acceptance.test.mjs": "aca755627df55964fdd2cc5b683aca9ff514d90d438fe9f13906ee6d4b0c7bef",
@@ -2336,6 +2350,7 @@
     "tests/helpers/release-fixture.mjs": "e61bac0c3c0af758e0787348f891231988cd1811972f56a30d49830b99017832",
     "tests/helpers/source-attestor-observer.mjs": "aa904c068ea9ae2d89177ec824bd7059dc8543c702ffd3b9e31f5eaf9e1ecf30",
     "tests/helpers/task-runtime-fixture.mjs": "a359d516b348de8ccdafff6e5fcee54152ccbae14b2291d79d305918a20eb0b1",
+    "tests/helpers/windows-review-output-fixture.mjs": "fe4ee5fb5657670811bd045bece70503823340ead78918270657c784996a7c04",
     "tests/helpers/work-lease-fixture.mjs": "1523d26edff3cdc5269e69c75543150bf74a423716e3bcf31be71f82e35e13c3",
     "tests/helpers/work-lease-gates-fixture.mjs": "603d6c335b63de49b91878d4b6649741219cc7fd9059c30946a6a152165b4250",
     "tests/helpers/workspace-fixture.mjs": "9faa72405bf584057943ee555b9439dbd07643fca28ac3d25386cbeafd442693",
@@ -2479,7 +2494,7 @@
     "tests/render-helper-docs.test.mjs": "78fcf99323e8010387a80b47605ac4a72ffb14e83d1bcb5326eba0366ad27ff9",
     "tests/retired-settings-replay.test.mjs": "254f9100bc325cae15b16a4fee28258d2749fd0288e3ad27e70621b1a6b56133",
     "tests/retrieval-delivery-eval.test.mjs": "9db1c5c477ed051829f3a9dd501083c6b1ed9aea43b0a659fbbd8b0bc4200757",
-    "tests/review-evidence.test.mjs": "168b6ec4ae8c2e736a634b6134c2ee5f7ec2bd87b57498bb70a942aeabed119f",
+    "tests/review-evidence.test.mjs": "4b9fdc6731c4070d8c311bff00fd70b5d19f37a7464eb61868f8ca3d248ce24f",
     "tests/root-boundaries.test.mjs": "c09ecd54f7d789d8b3501ac72f8809b0c15a14c88c2e41d9af8c627605e01c20",
     "tests/rules-catalog.test.mjs": "aa1da594899c4f65eb836498229b99109d0c0ea502cd63e2686c260a31fd351d",
     "tests/rules-cli.test.mjs": "2b5fb9863f29a0506eaccdd40b4abd1e96cf94bdaddcd283fe96bc2c7c2e2353",
@@ -2554,7 +2569,7 @@
     "tests/wiki-cli-reference.test.mjs": "569d6869d2940ba7d401b4620425b78eb6f80292b9aaafdc4d29e73d8ace52b6",
     "tests/wiki-pages.test.mjs": "680e180bdbe7920e21a1b9a64c76af7847c1df45de8e862feec70ae9cbd99bcc",
     "tests/windows-platform.test.mjs": "135b9e4a5fac4d9906a3cff1aa8ef01fb9fd916f983996c702d0e72a6febe127",
-    "tests/windows-process.test.mjs": "cc858f1b72c5f2c20f0cc6b9dd571e7a233f5079971e4dab6f751b14c2f873a1",
+    "tests/windows-process.test.mjs": "14825067a23a02cd883250a16e0c9e33e9d425c8d4c3984aaf99d757750755b5",
     "tests/work-acceptance.test.mjs": "5c2685cbffc9b0633d926b225243d694c5b4082e30989ce7a8ed550e9ad96b3b",
     "tests/work-content-cli.test.mjs": "8a041bf9c8f926e9abd964be65fb87f36b9a0f9c664dcf81b2d83ea8b733bf27",
     "tests/work-content-context.test.mjs": "a4240346f1e8b0433c9fd60db5b33fa550afcb3a57c1299d8fd893c6e17ff68d",

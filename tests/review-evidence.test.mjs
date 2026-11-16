@@ -328,6 +328,7 @@ test("STORY-375 GWT1: review-evidence reads the bound verify, runs it, and separ
       commandTimeoutMs: 1_500,
     });
     assert.equal(timeout.evidence.testRun.result.exitCode, "TIMEOUT");
+    assert.equal(timeout.evidence.testRun.result.outputComplete, false);
     assert.equal(timeout.ok, false);
     assert.throws(() => process.kill(Number(readFileSync(pidFile, "utf8")), 0));
   } finally {
