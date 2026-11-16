@@ -174,9 +174,13 @@ export async function correctiveProbe({ repo, mode, destination, source, keep = 
     const descriptor = Object.getOwnPropertyDescriptor(owner, key);
     delete values[1].content; delete values[1].templateAdmission;
     values[1].goal = key === "length" ? "E1TRIGGER" : "E1TRIGGER" + "x".repeat(512);
+    const marker = Array.from(values[1].goal, character => character.charCodeAt(0));
+    const byteLength = Object.getOwnPropertyDescriptor(owner, "byteLength").get;
     const replacement = { ...descriptor, get() {
       const result = Reflect.apply(descriptor.get, this, []);
-      if (this[0] === 69 && this[1] === 49 && this[2] === 84) {
+      // Node also reads these getters on an entire uninitialized allocation pool.
+      // Only the exact reducer input should trigger the fixture mutation.
+      if (Reflect.apply(byteLength, this, []) === marker.length && marker.every((byte, index) => this[index] === byte)) {
         callbacks += 1; values[0].content.constraints.push(undefined);
       }
       return result;

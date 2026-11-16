@@ -43,9 +43,8 @@ function lineWaiter(stream, exited) {
 
 /**
  * Another process that takes the library's write lock, as a write verb does, and gives it back
- * `milliseconds` after it took it. Given `during` -- statements run with the knowledge core as
- * `knowledge` -- it waits under the lock until write() is called, runs them there, as another writer
- * whose turn came first would, and only then lets the rest of the time run out.
+ * after at least `milliseconds`. With `during`, the parent signals when to write and when to
+ * release, so it can observe the competing requests while the holder still owns the lock.
  */
 async function holdLibraryLock(context, workspace, milliseconds, during = null) {
   const script = `import { withWorkspaceWriteLock } from ${JSON.stringify(workspaceModule)};
@@ -54,9 +53,11 @@ import { once } from "node:events";
 await withWorkspaceWriteLock(${JSON.stringify(workspace)}, async () => {
   const heldAt = Date.now();
   process.stdout.write("held\\n");
-  ${during === null ? "" : `await once(process.stdin, "data");
+  ${during === null ? "" : `const release = once(process.stdin, "end");
+  await once(process.stdin, "data");
   ${during}
-  process.stdout.write("written\\n");`}
+  process.stdout.write("written\\n");
+  await release;`}
   await new Promise((resolve) => setTimeout(resolve, Math.max(0, ${milliseconds} - (Date.now() - heldAt))));
 }, { command: "einzbern knowledge-capture" });`;
   const child = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: [during === null ? "ignore" : "pipe", "pipe", "pipe"], env: process.env });
@@ -74,9 +75,12 @@ await withWorkspaceWriteLock(${JSON.stringify(workspace)}, async () => {
   await printed("held");
   return {
     heldAt: Date.now(),
-    released: exited,
+    release() {
+      if (during !== null) child.stdin.end();
+      return exited;
+    },
     async write() {
-      child.stdin.end("write\n");
+      child.stdin.write("write\n");
       await printed("written");
     },
   };
@@ -188,7 +192,7 @@ test("538 GWT4: while another process holds the library write lock for 3 seconds
   const policy = settle(cliProcess(["knowledge-batch", "--workspace", workspace, "--at", instant(22), "--from-file", batch]));
   await pause(700);
   assert.deepEqual([reverify.state.done, refresh.state.done, policy.state.done], [false, false, false], "the writes wait while the lock is held");
-  await holder.released;
+  await holder.release();
   const receipts = [];
   for (const run of [await reverify.promise, await refresh.promise, await policy.promise]) {
     assert.equal(run.status, 0, run.stderr);
@@ -226,7 +230,7 @@ test("538 GWT4: a knowledge-reverify whose crest another writer appended to afte
   const [other] = (await eventFiles(workspace)).filter((name) => !known.includes(name));
   assert.ok(other !== undefined, "the other writer appended its event");
   assert.equal(read.includes(other), false, "the first scan could not have read it");
-  await holder.released;
+  await holder.release();
   const receipt = await writing.promise;
   assert.ok(read.slice(scanned).includes(other), "the reverify scanned again once it found the crest moved, reading the other writer's event");
   assert.deepEqual([receipt.reasonCode, receipt.id, receipt.revision, receipt.version], ["KNOWLEDGE_REVERIFIED", fx.wombat, 2, before + 2],
@@ -253,7 +257,7 @@ test("538 GWT4: a knowledge-reverify and an article refresh whose card another w
   await holder.write();
   await pause(300);
   assert.deepEqual([reverify.state.done, refresh.state.done], [false, false], "they passed their checks before the other writer's appends, so they still wait");
-  const releasedAt = await holder.released;
+  const releasedAt = await holder.release();
   const refusals = [await reverify.promise, await refresh.promise];
   assert.ok(Date.now() >= releasedAt, "the refusals came at the append, once the lock was free");
   for (const refused of refusals) {
