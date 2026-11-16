@@ -31,6 +31,7 @@ import { link, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, s
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import test from "node:test";
+import { assertRecallStore } from "./helpers/knowledge-evidence.mjs";
 
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { userCrestCachePath, userCrestLockPath } from "../dist/build/packages/core/src/device-home.js";
@@ -330,7 +331,7 @@ async function sameKeyOnTwoDevices(shared) {
   const { workspace, deviceA, deviceB } = shared;
   const heron = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-HERON", { subject: "Heron wading depth" })));
   const kestrel = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-SHARED-KEY", {
-    occurredAt: instant(3), subject: "Kestrel hover timing", summary: "Kestrel notes", snippet: "time the kestrel hover", body: "Body of A's kestrel version",
+    occurredAt: instant(3), subject: "Kestrel hover timing", summary: "Enable kestrel hover timing", snippet: "time the kestrel hover", body: "Body of A's kestrel version",
   })));
   await shared.hold(deviceA);
   const beaver = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-SHARED-KEY", {
@@ -796,15 +797,21 @@ test("INC-400: a matching staging name with another inode cannot admit an extern
   assert.deepEqual(await readFile(event), bytes);
 });
 
+// The old subject-only conflict fixtures now make incompatible exclusive choices explicitly.
+function exclusiveCard(key, overrides = {}) {
+  const input = card(key, overrides);
+  return { ...input, summary: `${input.subject} must use only ${key.toLowerCase()}` };
+}
+
 test("R14 (a) D7: a same-subject card B wrote before A's stream arrived is withheld with its pair; every other user card is read, recalled and written, and --supersedes resolves the pair", async (context) => {
   const shared = await twoDevices(context);
   const { workspace, deviceA, deviceB } = shared;
-  const marmot = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-MARMOT", {
+  const marmot = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-MARMOT", {
     subject: "Marmot burrow safety", summary: "Marmot burrow notes", snippet: "mark the marmot burrow",
   })));
-  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-GULL", { subject: "Gull nesting location" })));
+  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-GULL", { subject: "Gull nesting location" })));
   await shared.hold(deviceA);
-  const gullB = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-B-GULL", { subject: "Gull nesting location" })));
+  const gullB = await asDevice(deviceB, () => createKnowledgeUnit(workspace, exclusiveCard("UC-B-GULL", { subject: "Gull nesting location" })));
   assert.deepEqual([gullB.reasonCode, gullB.conflicts], ["KNOWLEDGE_UNIT_CREATED", undefined], "B saw no gull card, so nothing refused it");
   assert.equal(Object.hasOwn(await asDevice(deviceB, () => recallCli(workspace, "gull nesting location")), "userCrestDegraded"), false,
     "before the folder delivers A's stream there is nothing to hold back");
@@ -839,21 +846,21 @@ test("R14 (a) D7: a same-subject card B wrote before A's stream arrived is withh
   assert.equal(cardHit(shared.state, read.cards, "marmot burrow")?.id, marmot.id);
   const answer = await asDevice(deviceA, () => recallCli(workspace, "marmot burrow safety"));
   assert.deepEqual(answer.userCrestDegraded, expected);
-  assert.deepEqual(answer.knowledgeStores.user, { reasonCode: "KNOWLEDGE_LIST_READY", cards: 1 });
+  assertRecallStore(answer.knowledgeStores.user, 1, "user");
   assert.deepEqual(answer.records.filter((record) => record.kind === "card").map((record) => [record.id, record.scope]), [[marmot.id, "user"]]);
 
   // An unrelated card is written as ever, on either device, and recalled.
-  const otter = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-OTTER", { subject: "Otter holt survey" })));
+  const otter = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-OTTER", { subject: "Otter holt survey" })));
   assert.equal(otter.reasonCode, "KNOWLEDGE_UNIT_CREATED");
   assert.deepEqual((await asDevice(deviceB, () => readRecallCards(workspace, { at }))).cards.map((entry) => entry.id).sort(), [marmot.id, otter.id].sort());
 
   // A new card on the same subject is refused, naming both cards of the pair.
-  const refused = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-B-GULL-3", { subject: "Gull nesting location" }))).then(() => null, (error) => error);
+  const refused = await asDevice(deviceB, () => createKnowledgeUnit(workspace, exclusiveCard("UC-B-GULL-3", { subject: "Gull nesting location" }))).then(() => null, (error) => error);
   assert.deepEqual([refused?.reasonCode, refused?.details?.conflicts], ["KNOWLEDGE_POSSIBLE_CONFLICT", pair]);
 
   // --supersedes naming one card of the pair resolves it. The write saw the pair's other card and
   // is admitted beside it, which the new card records.
-  const replacement = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-B-GULL-2", {
+  const replacement = await asDevice(deviceB, () => createKnowledgeUnit(workspace, exclusiveCard("UC-B-GULL-2", {
     subject: "Gull nesting location", supersedes: gullB.id,
   })));
   assert.deepEqual([replacement.reasonCode, replacement.superseded, replacement.conflicts], ["KNOWLEDGE_UNIT_CREATED", gullB.id, [gullA.id]]);
@@ -871,15 +878,15 @@ test("R14 (a) D7: a same-subject card B wrote before A's stream arrived is withh
 test("R14 (a) D7 negative: with A's stream delivered, B's same-subject card is refused before anything is written, and one writer's own cards form no pair", async (context) => {
   const shared = await twoDevices(context);
   const { workspace, deviceA, deviceB } = shared;
-  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-GULL", { subject: "Gull nesting location" })));
-  const refused = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-B-GULL", { subject: "Gull nesting location" }))).then(() => null, (error) => error);
+  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-GULL", { subject: "Gull nesting location" })));
+  const refused = await asDevice(deviceB, () => createKnowledgeUnit(workspace, exclusiveCard("UC-B-GULL", { subject: "Gull nesting location" }))).then(() => null, (error) => error);
   assert.deepEqual([refused?.reasonCode, refused?.details?.conflicts], ["KNOWLEDGE_POSSIBLE_CONFLICT", [gullA.id]], "the refusal is explicit and names A's card");
   assert.deepEqual((await shared.events()).map((event) => event.externalKey), ["UC-A-GULL"], "nothing of B's card was committed");
 
   // One writer scans before it writes: its supersede beside its own same-subject card is admitted,
   // recorded, and forms no pair.
-  const heron = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-HERON", { subject: "Heron wading depth" })));
-  const moved = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-GULL-2", { subject: "Gull nesting location", supersedes: heron.id })));
+  const heron = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-HERON", { subject: "Heron wading depth" })));
+  const moved = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-GULL-2", { subject: "Gull nesting location", supersedes: heron.id })));
   assert.deepEqual([moved.reasonCode, moved.conflicts], ["KNOWLEDGE_UNIT_CREATED", [gullA.id]]);
   for (const home of [deviceA, deviceB]) {
     const listed = await asDevice(home, () => listKnowledgeMetadata(workspace, { at, scope: "user" }));
@@ -923,16 +930,16 @@ test("R14 (a) D7: cards one writer wrote -- here the metadata/body layout, whose
 test("R14 (a) D7: two devices that each supersede the same card before either delivers keep the crest readable; the two replacements form a pair that --supersedes resolves", async (context) => {
   const shared = await twoDevices(context);
   const { workspace, deviceA, deviceB } = shared;
-  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-GULL", { subject: "Gull nesting location" })));
+  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-GULL", { subject: "Gull nesting location" })));
   await shared.hold(deviceA);
-  const gullB = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-B-GULL", { subject: "Gull nesting location" })));
+  const gullB = await asDevice(deviceB, () => createKnowledgeUnit(workspace, exclusiveCard("UC-B-GULL", { subject: "Gull nesting location" })));
   await shared.deliver(deviceA);
   // Each device resolves the pair by replacing B's card; A's replacement has not reached B.
-  const byA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-GULL-FIX", {
+  const byA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-GULL-FIX", {
     occurredAt: instant(5), subject: "Gull nesting location", supersedes: gullB.id,
   })));
   const deliverA = await shared.holdLatest(deviceA);
-  const byB = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-B-GULL-FIX", {
+  const byB = await asDevice(deviceB, () => createKnowledgeUnit(workspace, exclusiveCard("UC-B-GULL-FIX", {
     occurredAt: instant(6), subject: "Gull nesting location", supersedes: gullB.id,
   })));
   assert.deepEqual([byA.conflicts, byB.conflicts], [[gullA.id], [gullA.id]]);
@@ -947,7 +954,7 @@ test("R14 (a) D7: two devices that each supersede the same card before either de
     "the replaced card is removed, naming its latest replacement (TCRN-CROSS-SUB-425)");
   assert.equal((await asDevice(deviceA, () => readRecallCards(workspace, { at }))).userCrestDegraded.withheldCards, 2);
 
-  const settled = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-GULL-SETTLED", {
+  const settled = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-GULL-SETTLED", {
     occurredAt: instant(7), subject: "Gull nesting location", supersedes: byB.id,
   })));
   assert.deepEqual(settled.conflicts, [gullA.id, byA.id].sort());
@@ -959,7 +966,7 @@ test("R14 (a) D7: two devices that each supersede the same card before either de
 test("R14 (d) D7: a write whose event is committed is answered as created, though A's same-subject event arrives between B's scan and B's answer", async (context) => {
   const shared = await twoDevices(context);
   const { workspace, deviceA, deviceB } = shared;
-  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-GULL", { subject: "Gull nesting location" })));
+  const gullA = await asDevice(deviceA, () => createKnowledgeUnit(workspace, exclusiveCard("UC-A-GULL", { subject: "Gull nesting location" })));
   // The folder will deliver A's event before its body, so a read of the crest after B's commit
   // could only refuse: B's answer must not depend on one.
   const deliverBody = await shared.holdLatestBody(deviceA);
@@ -968,7 +975,7 @@ test("R14 (d) D7: a write whose event is committed is answered as created, thoug
   // scan does after it has read every stream: that is when the folder delivers A's event.
   assert.equal((await asDevice(deviceB, () => listKnowledgeMetadata(workspace, { at, scope: "user" }))).total, 0);
   let delivered = false;
-  const written = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-B-GULL", { subject: "Gull nesting location" }), {
+  const written = await asDevice(deviceB, () => createKnowledgeUnit(workspace, exclusiveCard("UC-B-GULL", { subject: "Gull nesting location" }), {
     beforeDescriptorReadForTest: async (path) => {
       if (delivered || basename(path) !== "index.json") return;
       delivered = true;
@@ -978,6 +985,7 @@ test("R14 (d) D7: a write whose event is committed is answered as created, thoug
   assert.equal(delivered, true, "A's event arrived while B's write was under way");
   assert.deepEqual([written.reasonCode, written.id, written.version, written.conflicts],
     ["KNOWLEDGE_UNIT_CREATED", deriveStableId("knowledge", "UC-B-GULL"), 1, undefined], "the answer is the committed write's own");
+  assert.deepEqual([written.localCommitted, written.verifiedReadback, written.remoteVerification], [true, true, "unverified"]);
   // The answer matches the disk: B's event is committed beside A's, each in its own stream.
   const events = await shared.events();
   assert.deepEqual(events.map((event) => event.externalKey).sort(), ["UC-A-GULL", "UC-B-GULL"]);
@@ -988,6 +996,25 @@ test("R14 (d) D7: a write whose event is committed is answered as created, thoug
   const listed = await asDevice(deviceB, () => listKnowledgeMetadata(workspace, { at, scope: "user", selection: "all" }));
   assert.deepEqual(listed.unresolvedConflicts, [[gullA.id, written.id].sort()]);
   assert.deepEqual(sortedIds(listed.records), [gullA.id, written.id].sort());
+});
+
+test("a committed user card reports a failed body readback and remains readable on retry", async (context) => {
+  const { workspace, deviceA } = await twoDevices(context);
+  const input = card("UC-LOCAL-READBACK");
+  let refusedBodyRead = false;
+  const receipt = await asDevice(deviceA, () => createKnowledgeUnit(workspace, input, {
+    beforeDescriptorReadForTest: async (path) => {
+      if (refusedBodyRead || !path.endsWith(".body")) return;
+      refusedBodyRead = true;
+      throw new Error("body unavailable during readback");
+    },
+  }));
+  assert.equal(refusedBodyRead, true);
+  assert.deepEqual([receipt.reasonCode, receipt.ok, receipt.localCommitted, receipt.verifiedReadback, receipt.remoteVerification],
+    ["KNOWLEDGE_WRITE_READBACK_UNVERIFIED", false, true, false, "unverified"]);
+  assert.match(receipt.readback.error, /body unavailable during readback/u);
+  const recovered = await asDevice(deviceA, () => readKnowledgeBody(workspace, receipt.id, { at, scope: "user" }));
+  assert.equal(recovered.body, input.body);
 });
 
 test("R15 D7 (SUB-413): one external key two devices wrote before either delivered is an unresolved duplicate, not a refusal of the crest: its versions leave default list and recall, list, a read of its id and recall name both devices and versions, and every other card reads, recalls and is written", async (context) => {
@@ -1035,7 +1062,7 @@ test("R15 D7 (SUB-413): one external key two devices wrote before either deliver
     assert.deepEqual(read.userCrestDegraded, expected);
     const answer = await asDevice(home, () => recallCli(workspace, "kestrel hover timing"));
     assert.deepEqual(answer.userCrestDegraded, expected);
-    assert.deepEqual(answer.knowledgeStores.user, { reasonCode: "KNOWLEDGE_LIST_READY", cards: 1 });
+    assertRecallStore(answer.knowledgeStores.user, 1, "user");
     assert.equal(answer.records.some((record) => record.id === id), false, "no version is recalled");
     const control = await asDevice(home, () => recallCli(workspace, "heron wading depth"));
     assert.deepEqual(control.records.filter((record) => record.kind === "card").map((record) => record.id), [heron.id], "the control card is recalled");
@@ -1057,7 +1084,7 @@ test("R15 D7 (SUB-413): one external key two devices wrote before either deliver
 
   // A write that sees the key is refused as before, and one about a version's subject names the key.
   await expectReason("KNOWLEDGE_DUPLICATE", asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-SHARED-KEY", { subject: "Beaver lodge entrance" }))));
-  const refused = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-KESTREL-3", { subject: "Kestrel hover timing" }))).then(() => null, (error) => error);
+  const refused = await asDevice(deviceA, () => createKnowledgeUnit(workspace, card("UC-A-KESTREL-3", { subject: "Kestrel hover timing", summary: "Disable kestrel hover timing" }))).then(() => null, (error) => error);
   assert.deepEqual([refused?.reasonCode, refused?.details?.conflicts], ["KNOWLEDGE_POSSIBLE_CONFLICT", [id]]);
   assert.deepEqual((await shared.events()).map((event) => event.externalKey).filter((key) => key === "UC-SHARED-KEY" || key === "UC-A-KESTREL-3"),
     ["UC-SHARED-KEY", "UC-SHARED-KEY"], "a refused write commits nothing");

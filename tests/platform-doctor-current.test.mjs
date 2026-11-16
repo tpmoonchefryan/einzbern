@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { inspectPlatform } from "../scripts/platform-doctor.mjs";
-import { FRAMEWORK_VERSION, initializeLibrary, registerLibrary, applyHostHooks, readHostHooks, planHostHooks } from "../dist/build/packages/core/src/index.js";
+import { FRAMEWORK_VERSION, initializeLibrary, registerLibrary, applyHostHooks, readHostHooks, planHostHooks, renderAgentsSections } from "../dist/build/packages/core/src/index.js";
 import { installSkillCopies } from "../dist/build/packages/core/src/skill-copies.js";
 import { canonicalJson } from "../dist/build/packages/protocol/src/index.js";
 
@@ -43,6 +43,7 @@ async function fixture(t) {
 
 test("BL41: minimal .ether container plus current installed engine is healthy without legacy layout or manifest files", async (t) => {
   const f = await fixture(t);
+  await renderAgentsSections(f.library, { projectRoot: f.root, navigation: null, occurredAt: AT });
   const result = await f.inspect();
   assert.equal(result.ok, true, JSON.stringify(result));
   assert.deepEqual(result.checks.map((entry) => entry.name), ["platformRoot", "libraryContainer", "minimalContainer", "engine-version", "hooks-present", "skill-copies", "registry", "library-format", "device-stream", "managed-sections", "cloud-flag", "engineExecutability"]);

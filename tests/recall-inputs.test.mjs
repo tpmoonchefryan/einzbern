@@ -47,7 +47,7 @@ async function library(context) {
     await transitionWork(workspace, { occurredAt: at(6 + index), id: idOf("RI-STORY"), status });
   }
   await appendHistoricalWorkCreate(workspace, {
-    externalKey: "RI-INC", projectId, kind: "Incident", parentId: idOf("RI-STORY"), status: "done", title: "Leaking capybara valve", occurredAt: at(9),
+    externalKey: "RI-INC", projectId, kind: "Incident", parentId: idOf("RI-STORY"), status: "done", title: "Leaking capybara valve", summary: "Repair the capybara valve", occurredAt: at(9),
   });
   const state = await recordMinutes(workspace, {
     occurredAt: at(10), externalKey: "RI-MIN-1", projectId, title: "Otter decision", summary: "The otter moves.",
@@ -99,7 +99,7 @@ test("STORY-474 R1: minutes and cards share the index with the work records, and
   const state = await library(context);
   const minutes = answer(state, "otter").find((entry) => entry.kind === "minutes");
   assert.equal(minutes?.key, "RI-MIN-1", "a minutes record is keyed by its external key");
-  assert.equal(formatRecallLine(minutes), "[纪要 RI-MIN-1] Otter decision · D1 Move the otter to the east pond. …");
+  assert.match(formatRecallLine(minutes), /^\[纪要 RI-MIN-1\] Otter decision · D1 现行有效 · 范围 .* · Move the otter to the east pond\. · 出处（minutes-show --id minutes:.*#D1）$/u);
   const card = answer(state, "quokka").find((entry) => entry.kind === "card");
   assert.equal(formatRecallLine(card), "[卡片] Quokka handling notes · knowledge:000000000000000000000001");
 });
@@ -113,7 +113,7 @@ test("STORY-474 R2: an answer is cut to its byte budget at whole lines", async (
   assert.deepEqual(all, lines);
   const firstTwo = Buffer.byteLength(`${lines[0]}\n${lines[1]}`, "utf8");
   assert.deepEqual(recallContextLines(hits, firstTwo), lines.slice(0, 2), "two lines fit exactly");
-  assert.deepEqual(recallContextLines(hits, firstTwo - 1), lines.slice(0, 1), "one byte less and the second line is dropped whole");
+  assert.deepEqual(recallContextLines(hits, firstTwo - 1), [lines[0], lines[2]], "the second line is dropped whole and the shorter third line still fits");
   assert.deepEqual(recallContextLines(hits, 0), []);
   const long = formatRecallLine({ ...hits[0], title: "长".repeat(400) });
   assert.ok(long.includes("长".repeat(400)), "the complete title remains in the line");
@@ -136,7 +136,7 @@ test("SUB-426 (MIN-239 D6): a minutes record is indexed with its valid decisions
   assert.deepEqual(minutes.decisions, ["Keep the old pond."], "the obsolete decision is not indexed");
   assert.deepEqual(minutes.decisionNumbers, [2]);
   const hit = answer(next, "old pond").find((entry) => entry.kind === "minutes" && entry.key === "RI-MIN-1");
-  assert.equal(formatRecallLine(hit), "[纪要 RI-MIN-1] Otter decision · D2 Keep the old pond.");
+  assert.match(formatRecallLine(hit), /^\[纪要 RI-MIN-1\] Otter decision · D2 现行有效 · 范围 .* · Keep the old pond\. · 出处（minutes-show --id minutes:.*#D2）$/u);
   assert.equal(answer(next, "east").some((entry) => entry.key === "RI-MIN-1"), false, "the words only the obsolete decision held find nothing");
   const untouched = recallInputsFromState(next, CARDS).minutes.find((entry) => entry.externalKey === "RI-MIN-2");
   assert.equal(Object.hasOwn(untouched, "decisionNumbers"), false, "a record with every decision valid reads as it always did");

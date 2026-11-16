@@ -1,0 +1,30 @@
+{
+  "agreeing": [
+    {
+      "id": "knowledge:synthetic-importer-one",
+      "subject": "Synthetic importer revision policy",
+      "summary": "Sample importer --expected-version reads store revision, not chain revision.",
+      "snippet": "Retry the sample importer using its store counter; the chain counter appears only in diagnostics."
+    },
+    {
+      "id": "knowledge:synthetic-importer-two",
+      "subject": "Synthetic importer revision policy",
+      "summary": "Sample importer --expected-version selects store revision, not chain revision.",
+      "snippet": "Compare store revision vs. chain revision while troubleshooting the sample importer."
+    }
+  ],
+  "exclusive": [
+    {
+      "id": "knowledge:synthetic-exclusive-store",
+      "subject": "Synthetic exclusive revision policy",
+      "summary": "The --expected-version flag must use only the knowledge-store version",
+      "snippet": ""
+    },
+    {
+      "id": "knowledge:synthetic-exclusive-chain",
+      "subject": "Synthetic exclusive revision policy",
+      "summary": "The --expected-version flag must use only the chain version",
+      "snippet": ""
+    }
+  ]
+}

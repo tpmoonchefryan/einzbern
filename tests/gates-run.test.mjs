@@ -128,7 +128,7 @@ test("485-AC3: two gates red at once give two reds, and a red gate does not stop
   const directory = gateRunsDirectory(libraryId, desk);
   assert.deepEqual(await Promise.all(run.gates.map(async (gate) => readFile(join(directory, gate.outputFile), "utf8"))), ["a", "b", "ok"]);
   assert.equal(recordPath, join(directory, `${run.runId}.json`));
-  assert.equal(recordPath.startsWith(join(desk, "cache")), true, "the run is in this device's cache");
+  assert.equal(recordPath.startsWith(join(desk, "derived-cache")), true, "the run is in this device's local cache");
   const record = JSON.parse(await readFile(recordPath, "utf8"));
   assert.equal(record.schemaVersion, "einzbern.gate-run.v1");
   assert.match(record.treeDigest, /^[0-9a-f]{64}$/u);

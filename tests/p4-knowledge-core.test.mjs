@@ -957,7 +957,10 @@ test("64 real insertion orders produce exact index, list, and checkpoint parity"
       }
       // TCRN-CROSS-INC-282: no promote pass remains; the corpus under comparison is the written one.
       const indexBytes = await readFile(fixture.indexView, "utf8");
-      const listBytes = canonicalJson(await listKnowledgeMetadata(fixture.workspace, { at: instant(12) }));
+      const { sourceVersion, snapshot, ...list } = await listKnowledgeMetadata(fixture.workspace, { at: instant(12) });
+      assert.match(sourceVersion.crestDigest, /^[a-f0-9]{64}$/u);
+      assert.match(snapshot, /^[a-f0-9]{64}$/u);
+      const listBytes = canonicalJson(list);
       const checkpointBytes = await exportKnowledgeCheckpoint(fixture.workspace, instant(12));
       const observation = {
         indexBytes,

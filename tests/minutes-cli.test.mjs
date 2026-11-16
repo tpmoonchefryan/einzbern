@@ -64,6 +64,9 @@ test("STORY-475 AC1: one minutes-record writes once and echoes the minutes id wi
   assert.equal(receipt.externalKey, "MC-MIN-007");
   assert.deepEqual(receipt.decisions, THREE_DECISIONS.map((text, index) => ({ number: index + 1, text })), "D1 to D3 in the order given");
   assert.ok(receipt.ids.includes(receipt.id), "the receipt names what it wrote");
+  assert.equal(receipt.verifiedReadback, true);
+  assert.equal(receipt.localCommitted, true);
+  assert.equal(receipt.remoteVerification, "unverified");
 
   // minutes-show by id and by key (in any case) answers the same record.
   const shown = await cli(["minutes-show", "--workspace", fixture.workspace, "--id", receipt.id]);
@@ -166,4 +169,21 @@ test("STORY-475 AC3, R3: conference-open answers CLI_COMMAND_UNKNOWN, and the ca
   assert.deepEqual(names.filter((name) => name.startsWith("conference-")), []);
   const mutates = Object.fromEntries(COMMAND_CATALOG.filter((entry) => entry.name.startsWith("minutes-")).map((entry) => [entry.name, entry.mutates]));
   assert.deepEqual(mutates, { "minutes-list": false, "minutes-record": true, "minutes-show": false });
+});
+
+test("666: comma-separated parameter fragments require a decisions file and complete short decisions remain valid", async (context) => {
+  const fixture = await library(context);
+  const args = ["minutes-record", "--workspace", fixture.workspace, "--at", at(5), "--project-id", fixture.projectId,
+    "--title", "Model choice", "--summary", "Record the complete decision"];
+  const decision = "Use model=gpt-example, effort=max, service_tier=ultrafast";
+  const before = (await cli(["status", "--workspace", fixture.workspace])).version;
+  await assert.rejects(cli([...args, "--decisions", decision]), (error) =>
+    error.reasonCode === "CLI_ARGUMENT_MALFORMED" && error.message.includes("--decisions-file"));
+  assert.equal((await cli(["status", "--workspace", fixture.workspace])).version, before);
+  const file = join(fixture.base, "complete-decisions.json");
+  await writeFile(file, JSON.stringify([decision]));
+  const result = await cli([...args, "--external-key", "MC-MIN-001", "--decisions-file", file]);
+  assert.equal(result.decisions[0].text, decision);
+  const short = await cli([...args, "--decisions", "Keep the first choice,Record the second choice"]);
+  assert.deepEqual(short.decisions.map((entry) => entry.text), ["Keep the first choice", "Record the second choice"]);
 });

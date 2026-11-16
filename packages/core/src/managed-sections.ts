@@ -345,6 +345,7 @@ export async function planManagedWrite(input: {
   readonly records: readonly ManagedSectionRecord[];
   // Retire only recorded, intact generated sections; user text keeps its protection.
   readonly retired?: readonly string[];
+  readonly restoreMissingFile?: boolean;
 }): Promise<ManagedWritePlan> {
   const file = input.file ?? basename(input.filePath);
   if (!isRelativeFileName(file)) fail("MANAGED_SECTION_INPUT_INVALID", `${file} is not a file name relative to the project`, { file });
@@ -409,6 +410,14 @@ export async function planManagedWrite(input: {
       const rev = Math.max(section.rev, record?.rev ?? 0) + 1;
       rendered.set(id, renderSection({ id, rev, body }, eol));
       decide(id, "replace", { file, id, rev, digest: sectionDigest(body), state: "managed" }, section.startLine);
+      continue;
+    }
+    if (input.restoreMissingFile === true && before === null && record?.state === "managed" && body !== undefined) {
+      const digest = sectionDigest(body);
+      const rev = record.digest === digest ? record.rev : record.rev + 1;
+      rendered.set(id, renderSection({ id, rev, body }, eol));
+      created.push(id);
+      decide(id, "create", { file, id, rev, digest, state: "managed" }, null);
       continue;
     }
     if (record !== undefined) {

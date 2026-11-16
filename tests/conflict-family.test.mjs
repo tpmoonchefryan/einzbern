@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-// TCRN-CROSS-STORY-531 (MIN-256 D6 C5, MIN-257 D6): the conflict guards are split by INIT family.
+// Historical STORY-531/539 family provenance remains covered. INIT-093 requires explicit
+// coexistence for true same-domain knowledge contradictions, regardless of INIT family.
+// Minutes retain their separate, unchanged family warning semantics.
+// Original behavior (superseded for knowledge by STORY-654): guards split by INIT family.
 // A card (TCRN-CROSS-SUB-485) close in subject to a card of another INIT family is written beside it,
 // recorded in coexistsWith, and its receipt warns of it; a card of the same family, or of a family
 // either side cannot name, is refused with KNOWLEDGE_POSSIBLE_CONFLICT as before, and --supersedes and
@@ -64,9 +67,10 @@ async function familyLibrary(context, name) {
   return { base, workspace, projectId, next: () => second++ };
 }
 
+// Each family-guard fixture states an exclusive revision choice; related prose alone is admitted.
 function lesson(fixture, subject, overrides = {}) {
   return {
-    occurredAt: at(fixture.next()), subject, summary: `${subject} 的完整说明`, snippet: `${subject} 摘录`,
+    occurredAt: at(fixture.next()), subject, summary: `${subject} must use only revision-${fixture.next()}`, snippet: `${subject} 摘录`,
     tags: ["lesson"], accountableOwnerId: OWNER, body: `${subject} 正文 ${String(Math.random())}`, ...overrides,
   };
 }
@@ -100,15 +104,15 @@ test("STORY-531 (SUB-485): a work record's family is the Initiative at the top o
   assert.equal(familiesApart([work("CF-INIT-A")], null), false);
 });
 
-test("STORY-531 GWT1 (SUB-485): a card close to a card of another INIT family is written, warned of, and recorded beside it", async (context) => {
+test("654 / historical SUB-485: explicit coexistence across INIT families is recorded", async (context) => {
   const fixture = await familyLibrary(context, "gwt1");
   const subject = "并发跑门 前先确认 工作树 没有其他编辑";
   const old = await capture(fixture, subject, { sourceReferences: [work("CF-STORY-B1")] });
-  const written = await capture(fixture, subject, { sourceReferences: [work("CF-STORY-A1")] });
+  assert.equal((await refusalOf(capture(fixture, subject, { sourceReferences: [work("CF-STORY-A1")] })))?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "different INITs do not waive a same-domain contradiction");
+  const written = await capture(fixture, subject, { sourceReferences: [work("CF-STORY-A1")], coexist: true });
   assert.equal(written.reasonCode, "KNOWLEDGE_UNIT_CREATED");
   assert.deepEqual(written.conflicts, [old.id]);
-  assert.deepEqual(written.warnings.map((warning) => [warning.reasonCode, warning.id, warning.families]), [["KNOWLEDGE_POSSIBLE_CONFLICT", old.id, [work("CF-INIT-B")]]], "the receipt warns of the card it stands beside");
-  assert.match(written.warnings[0].message, /another INIT family/u);
+  assert.equal(Object.hasOwn(written, "warnings"), false, "explicit coexistence needs no family waiver");
   assert.deepEqual((await cardById(fixture, written.id)).extensions, { coexistsWith: [old.id] }, "the new card records what it stands beside");
   assert.equal(Object.hasOwn(await cardById(fixture, old.id), "removal"), false, "the old card stays valid");
 
@@ -119,11 +123,12 @@ test("STORY-531 GWT1 (SUB-485): a card close to a card of another INIT family is
   });
   const minutesSubject = "纪要 引用 折算 工单族 的卡";
   const viaMinutes = await capture(fixture, minutesSubject, { sourceReferences: [deriveStableId("minutes", "CF-MIN-B")] });
-  const besideMinutes = await capture(fixture, minutesSubject, { sourceReferences: [work("CF-STORY-A2")] });
-  assert.deepEqual(besideMinutes.warnings.map((warning) => [warning.id, warning.families]), [[viaMinutes.id, [work("CF-INIT-B")]]]);
+  assert.equal((await refusalOf(capture(fixture, minutesSubject, { sourceReferences: [work("CF-STORY-A2")] })))?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
+  const besideMinutes = await capture(fixture, minutesSubject, { sourceReferences: [work("CF-STORY-A2")], coexist: true });
+  assert.equal(Object.hasOwn(besideMinutes, "warnings"), false, "explicit coexistence needs no family waiver");
   const sameAsMinutes = await refusalOf(capture(fixture, minutesSubject, { sourceReferences: [work("CF-STORY-B1")] }));
   assert.equal(sameAsMinutes?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "the minutes' card is of B's family, so a card of B is refused");
-  assert.deepEqual(sameAsMinutes.details, { conflicts: [viaMinutes.id], otherFamilyConflicts: [besideMinutes.id] });
+  assert.deepEqual(sameAsMinutes.details, { conflicts: [viaMinutes.id, besideMinutes.id].sort() });
 });
 
 test("STORY-531 GWT2 (SUB-485): a card close to one of its own family, or of a family not known, is still refused", async (context) => {
@@ -146,10 +151,10 @@ test("STORY-531 GWT2 (SUB-485): a card close to one of its own family, or of a f
 
   // Two conflicts, one of each kind: the refusal names the one that refuses, and the other apart.
   const crossOld = await capture(fixture, "门输出 必须 先写进文件 再读", { sourceReferences: [work("CF-STORY-B2")] });
-  const sameOld = await capture(fixture, "门输出 必须 先写进文件 再读 摘录", { sourceReferences: [work("CF-STORY-A2")], coexist: true });
+  const sameOld = await capture(fixture, "门输出 必须 先写进文件 再读", { sourceReferences: [work("CF-STORY-A2")], coexist: true });
   const mixed = await refusalOf(capture(fixture, "门输出 必须 先写进文件 再读", { sourceReferences: [work("CF-STORY-A1")] }));
   assert.equal(mixed?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
-  assert.deepEqual(mixed.details, { conflicts: [sameOld.id], otherFamilyConflicts: [crossOld.id] });
+  assert.deepEqual(mixed.details, { conflicts: [sameOld.id, crossOld.id].sort() });
 });
 
 test("STORY-531 (SUB-485): --supersedes and --coexist behave as they did", async (context) => {
@@ -167,23 +172,23 @@ test("STORY-531 (SUB-485): --supersedes and --coexist behave as they did", async
   assert.equal(Object.hasOwn(replacement, "warnings"), false);
 });
 
-test("STORY-531 (SUB-485): knowledge-capture and knowledge-batch receipts carry the warnings", async (context) => {
+test("654 / historical SUB-485: CLI and batch preserve explicit coexistence receipts", async (context) => {
   const fixture = await familyLibrary(context, "receipts");
   const subject = "子代理 完成通知 不等于 做完";
   const old = await capture(fixture, subject, { sourceReferences: [work("CF-STORY-B1")] });
   let output = "";
   await runCli([
     "knowledge-capture", "--workspace", fixture.workspace, "--at", at(fixture.next()), "--subject", subject,
-    "--summary", "通知只说明代理停下", "--snippet", "通知不等于完成", "--tags", "lesson", "--accountable-owner-id", OWNER,
-    "--body", "CLI 回执", "--source-references", work("CF-STORY-A1"), "--allow-trailing", "true",
+    "--summary", `${subject} must use only cli-revision`, "--snippet", "通知不等于完成", "--tags", "lesson", "--accountable-owner-id", OWNER,
+    "--coexist", "true", "--body", "CLI 回执", "--source-references", work("CF-STORY-A1"), "--allow-trailing", "true",
   ], { write: (value) => { output += value; } });
   const receipt = JSON.parse(output);
   assert.equal(receipt.reasonCode, "KNOWLEDGE_UNIT_CREATED");
-  assert.deepEqual(receipt.warnings.map((warning) => warning.id), [old.id], "the CLI receipt names the card under warnings");
+  assert.equal(Object.hasOwn(receipt, "warnings"), false, "explicit coexistence needs no family waiver");
 
   const member = (key, overrides) => ({
     verb: "knowledge-create", externalKey: key, scope: "project", projectId: fixture.projectId, roleScopes: [],
-    category: "workflow", kind: "guide", tags: ["batch"], subject: "批量 写卡 按 成员 回执 警告", summary: "batch", snippet: "batch",
+    category: "workflow", kind: "guide", tags: ["batch"], subject: "批量 写卡 按 成员 回执 警告", summary: `批量 写卡 按 成员 回执 警告 must use only ${key.toLowerCase()}`, snippet: "batch",
     accountableOwnerId: OWNER, sourceDigest: canonicalSha256({ key }), linkedWorkIds: [], linkedDecisionIds: [], linkedGateIds: [],
     linkedEvidenceIds: [deriveStableId("evidence", key)], retrievalDisposition: "default", freshnessState: "fresh",
     lastVerified: at(2), stalenessPolicy: { maximumAgeDays: null, unknownDisposition: "fail-closed" }, exportDisposition: "metadata-only",
@@ -191,24 +196,25 @@ test("STORY-531 (SUB-485): knowledge-capture and knowledge-batch receipts carry 
   });
   const result = await applyKnowledgeBatch(fixture.workspace, {
     schemaVersion: "tcrn.knowledge-batch.v1",
-    members: [member("CF-BATCH-1", { sourceReferences: [work("CF-STORY-B2")] }), member("CF-BATCH-2", { sourceReferences: [work("CF-STORY-A2")] })],
+    members: [member("CF-BATCH-1", { sourceReferences: [work("CF-STORY-B2")] }), member("CF-BATCH-2", { sourceReferences: [work("CF-STORY-A2")], coexist: true })],
   }, { occurredAt: at(fixture.next()), mutation: { allowTrailing: true } });
   assert.equal(Object.hasOwn(result.applied[0], "warnings"), false, "the first member stood beside nothing");
-  assert.deepEqual(result.applied[1].warnings.map((warning) => warning.id), [deriveStableId("knowledge", "CF-BATCH-1")], "the second member's entry carries its warnings");
+  assert.equal(Object.hasOwn(result.applied[1], "warnings"), false, "explicit coexistence needs no family waiver");
 });
 
-test("STORY-531 (SUB-485): the user crest splits the same way, and a card pointing at another library's work has no family", async (context) => {
+test("654 / historical SUB-485: user cards need explicit coexistence regardless of cited family", async (context) => {
   const fixture = await familyLibrary(context, "user");
   const subject = "用户卡 跨库 回忆 主题相近 分族";
   const old = await capture(fixture, subject, { scope: "user", sourceReferences: [work("CF-STORY-B1")] });
-  const written = await capture(fixture, subject, { scope: "user", sourceReferences: [work("CF-STORY-A1")] });
+  assert.equal((await refusalOf(capture(fixture, subject, { scope: "user", sourceReferences: [work("CF-STORY-A1")] })))?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
+  const written = await capture(fixture, subject, { scope: "user", sourceReferences: [work("CF-STORY-A1")], coexist: true });
   assert.equal(written.scope, "user");
-  assert.deepEqual(written.warnings.map((warning) => warning.id), [old.id]);
+  assert.equal(Object.hasOwn(written, "warnings"), false, "explicit coexistence needs no family waiver");
   const foreign = await refusalOf(capture(fixture, subject, { scope: "user", sourceReferences: [work("CF-OTHER-LIBRARY-STORY")] }));
   assert.equal(foreign?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "another library's work names no family here (Q11)");
   const sameFamily = await refusalOf(capture(fixture, subject, { scope: "user", sourceReferences: [work("CF-STORY-B2")] }));
   assert.equal(sameFamily?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
-  assert.deepEqual(sameFamily.details, { conflicts: [old.id], otherFamilyConflicts: [written.id] });
+  assert.deepEqual(sameFamily.details, { conflicts: [old.id, written.id].sort() });
 });
 
 // TCRN-CROSS-SUB-486: minutes-record is split the same way. A record's family is that of the work it
@@ -280,7 +286,7 @@ function createCardArgs(fixture, key, subject, { references = "-", workIds } = {
   return [
     "knowledge-create", "--workspace", fixture.workspace, "--at", at(fixture.next()), "--external-key", key, "--scope", "project",
     "--project-id", fixture.projectId, "--role-scopes", "-", "--category", "workflow", "--kind", "fact", "--tags", "lesson", "--subject", subject,
-    "--summary", `${subject} 的说明`, "--snippet", `${subject} 摘录`, "--accountable-owner-id", OWNER, "--source-references", references,
+    "--summary", `${subject} must use only ${key.toLowerCase()}`, "--snippet", `${subject} 摘录`, "--accountable-owner-id", OWNER, "--source-references", references,
     "--retrieval", "default", "--freshness", "fresh", "--last-verified", "-", "--stale-days", "-", "--export", "metadata-only",
     "--body", `${key} 正文`, ...(workIds === undefined ? [] : ["--work-ids", workIds.join(",")]),
   ];
@@ -289,7 +295,7 @@ function createCardArgs(fixture, key, subject, { references = "-", workIds } = {
 function batchMember(fixture, key, subject, overrides = {}) {
   return {
     verb: "knowledge-create", externalKey: key, scope: "project", projectId: fixture.projectId, roleScopes: [],
-    category: "workflow", kind: "fact", tags: ["batch"], subject, summary: "batch", snippet: "batch",
+    category: "workflow", kind: "fact", tags: ["batch"], subject, summary: `${subject} must use only ${key.toLowerCase()}`, snippet: "batch",
     accountableOwnerId: OWNER, sourceDigest: canonicalSha256({ key }), sourceReferences: [], linkedWorkIds: [], linkedDecisionIds: [],
     linkedGateIds: [], linkedEvidenceIds: [deriveStableId("evidence", key)], retrievalDisposition: "default", freshnessState: "fresh",
     lastVerified: at(2), stalenessPolicy: { maximumAgeDays: null, unknownDisposition: "fail-closed" }, exportDisposition: "metadata-only",
@@ -316,19 +322,20 @@ test("STORY-539 (SUB-503): a work record's external key names its family, and a 
   assert.equal(cardFamilies(state, { sourceReferences: ["https://example.test/x"], linkedWorkIds: [] }), null);
 });
 
-test("STORY-539 GWT1 (SUB-503): a card citing work keys is judged by their family: beside another family with a warning, refused in its own or when a key names no work here", async (context) => {
+test("654 / historical SUB-503: work-key references cannot waive true contradictions", async (context) => {
   const fixture = await familyLibrary(context, "gwt1-keys");
   const subject = "外部键 引用 的卡 按工单族 判定 写入";
   const old = await capture(fixture, subject, { sourceReferences: ["CF-STORY-B1", "docs/notes.md"] });
-  const written = await capture(fixture, subject, { sourceReferences: ["CF-STORY-A1"] });
+  assert.equal((await refusalOf(capture(fixture, subject, { sourceReferences: ["CF-STORY-A1"] })))?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
+  const written = await capture(fixture, subject, { sourceReferences: ["CF-STORY-A1"], coexist: true });
   assert.equal(written.reasonCode, "KNOWLEDGE_UNIT_CREATED", "a card of A beside a card of B, both named by key, is written");
-  assert.deepEqual(written.warnings.map((warning) => [warning.reasonCode, warning.id, warning.families]), [["KNOWLEDGE_POSSIBLE_CONFLICT", old.id, [work("CF-INIT-B")]]]);
+  assert.equal(Object.hasOwn(written, "warnings"), false, "explicit coexistence needs no family waiver");
   assert.deepEqual((await cardById(fixture, written.id)).extensions, { coexistsWith: [old.id] }, "the card records what it stands beside");
   assert.equal(Object.hasOwn(await cardById(fixture, old.id), "removal"), false, "the old card stays valid");
 
   const sameFamily = await refusalOf(capture(fixture, subject, { sourceReferences: ["CF-STORY-B2"] }));
   assert.equal(sameFamily?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "a key of the same Initiative's work is the same family");
-  assert.deepEqual(sameFamily.details, { conflicts: [old.id], otherFamilyConflicts: [written.id] });
+  assert.deepEqual(sameFamily.details, { conflicts: [old.id, written.id].sort() });
 
   for (const references of [["CF-STORY-Z9"], ["cf-story-a2"], ["TCRN-CROSS-STORY-529", "docs/notes.md"]]) {
     const unknown = await refusalOf(capture(fixture, subject, { sourceReferences: references }));
@@ -343,16 +350,17 @@ test("STORY-539 GWT1 (SUB-503): a card that names its work only by --work-ids is
   const subject = "只带 关联工单 的卡 按其族 判定 写入";
   const old = await cliJson(createCardArgs(fixture, "CF-LINKED-B", subject, { workIds: [work("CF-STORY-B1")] }));
   assert.equal(old.reasonCode, "KNOWLEDGE_UNIT_CREATED");
-  const written = await cliJson(createCardArgs(fixture, "CF-LINKED-A", subject, { references: "docs/notes.md", workIds: [work("CF-SUB-A1")] }));
+  assert.equal((await refusalOf(cliJson(createCardArgs(fixture, "CF-LINKED-A", subject, { workIds: [work("CF-SUB-A1")] }))))?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
+  const written = await cliJson([...createCardArgs(fixture, "CF-LINKED-A", subject, { references: "docs/notes.md", workIds: [work("CF-SUB-A1")] }), "--coexist", "true"]);
   assert.equal(written.reasonCode, "KNOWLEDGE_UNIT_CREATED", "the linked work of each side names its family, though no reference does");
-  assert.deepEqual(written.warnings.map((warning) => [warning.reasonCode, warning.id, warning.families]), [["KNOWLEDGE_POSSIBLE_CONFLICT", old.id, [work("CF-INIT-B")]]]);
+  assert.equal(Object.hasOwn(written, "warnings"), false, "explicit coexistence needs no family waiver");
 
   const sameFamily = await refusalOf(cliJson(createCardArgs(fixture, "CF-LINKED-B2", subject, { workIds: [work("CF-STORY-B2")] })));
   assert.equal(sameFamily?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT");
-  assert.deepEqual(sameFamily.details, { conflicts: [old.id], otherFamilyConflicts: [written.id] });
+  assert.deepEqual(sameFamily.details, { conflicts: [old.id, written.id].sort() });
   const captured = await refusalOf(capture(fixture, subject, { sourceReferences: ["CF-STORY-A2"] }));
   assert.equal(captured?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "a capture naming A's work by key is of the linked card's family");
-  assert.deepEqual(captured.details, { conflicts: [written.id], otherFamilyConflicts: [old.id] });
+  assert.deepEqual(captured.details, { conflicts: [written.id, old.id].sort() });
   const unlinked = await refusalOf(cliJson(createCardArgs(fixture, "CF-UNLINKED", subject, { references: "docs/notes.md" })));
   assert.equal(unlinked?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "a card naming neither work nor linked work has no family");
 });
@@ -364,16 +372,14 @@ test("STORY-539 GWT1 (SUB-503): knowledge-batch reads a member's work keys and l
     schemaVersion: "tcrn.knowledge-batch.v1",
     members: [
       batchMember(fixture, "CF-BATCH-KEY-B", subject, { sourceReferences: ["CF-STORY-B2"] }),
-      batchMember(fixture, "CF-BATCH-LINK-A", subject, { linkedWorkIds: [work("CF-STORY-A2")] }),
+      batchMember(fixture, "CF-BATCH-LINK-A", subject, { linkedWorkIds: [work("CF-STORY-A2")], coexist: true }),
     ],
   }, { occurredAt: at(fixture.next()), mutation: { allowTrailing: true } });
   assert.equal(Object.hasOwn(result.applied[0], "warnings"), false, "the first member stood beside nothing");
-  assert.deepEqual(result.applied[1].warnings.map((warning) => [warning.reasonCode, warning.id, warning.families]), [
-    ["KNOWLEDGE_POSSIBLE_CONFLICT", deriveStableId("knowledge", "CF-BATCH-KEY-B"), [work("CF-INIT-B")]],
-  ], "the second member, of A by its linked work, stands beside the first, of B by its key");
+  assert.equal(Object.hasOwn(result.applied[1], "warnings"), false);
 });
 
-test("STORY-539 GWT4 (SUB-503): minutes-record's guard reads a family from the sources the card guard reads", async (context) => {
+test("654 / historical SUB-503: knowledge protection changes without changing minutes family warnings", async (context) => {
   const fixture = await familyLibrary(context, "gwt4");
   await minutesRecord(fixture, "CF-MIN-B", [work("CF-STORY-B1")], [OTTER]);
   // One family, named three ways: B's minutes, the key of B's Story and B's linked work.
@@ -382,8 +388,8 @@ test("STORY-539 GWT4 (SUB-503): minutes-record's guard reads a family from the s
   const byKey = await refusalOf(capture(fixture, subject, { sourceReferences: ["CF-STORY-B2"] }));
   assert.equal(byKey?.reasonCode, "KNOWLEDGE_POSSIBLE_CONFLICT", "B's minutes and the key of B's Story name one family");
   assert.deepEqual(byKey.details, { conflicts: [byMinutes.id] });
-  const byLink = await capture(fixture, subject, { sourceReferences: ["CF-STORY-A1"] });
-  assert.deepEqual(byLink.warnings.map((warning) => [warning.id, warning.families]), [[byMinutes.id, [work("CF-INIT-B")]]]);
+  const byLink = await capture(fixture, subject, { sourceReferences: ["CF-STORY-A1"], coexist: true });
+  assert.equal(Object.hasOwn(byLink, "warnings"), false, "explicit coexistence needs no family waiver");
 
   // The minutes guard: a record linking A's work stands beside B's decision, warned of B's family.
   const recorded = await minutesRecord(fixture, "CF-MIN-A", [work("CF-STORY-A1")], [OTTER]);

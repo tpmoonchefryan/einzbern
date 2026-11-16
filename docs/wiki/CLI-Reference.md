@@ -412,6 +412,29 @@
 | `--result` | 可选 | `string` | `Actual Antigravity child process return JSON; omit only for a refused preflight.` |
 | `--output` | 必填 | `string` | `Create-new private Antigravity process evidence outside device/library roots.` |
 
+## `execution-antigravity-swarm-evidence`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--from-file` | 必填 | `string` |
+
+## `execution-antigravity-swarm-record`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 必填 | `string` |
+| `--manifest` | 必填 | `string` |
+| `--preparations` | 必填 | `string` |
+| `--observations` | 必填 | `string` |
+| `--prior` | 可选 | `string` |
+| `--output` | 必填 | `string` |
+
 ## `execution-codex-peer-evidence`
 
 - 可用范围：`cli`。
@@ -638,6 +661,7 @@
 | `--action` | 可选 | `string` |
 | `--command` | 可选 | `string` |
 | `--root` | 可选 | `string` |
+| `--repository` | 可选 | `string` |
 | `--covers` | 可选 | `list` |
 | `--required` | 可选 | `boolean` |
 | `--enabled` | 可选 | `boolean` |
@@ -674,6 +698,7 @@
 | `--name` | 必填 | `string` |  |
 | `--command` | 可选 | `string` |  |
 | `--root` | 可选 | `string` |  |
+| `--repository` | 可选 | `string` |  |
 | `--covers` | 可选 | `list` |  |
 | `--required` | 可选 | `boolean` |  |
 | `--enabled` | 可选 | `boolean` |  |
@@ -935,23 +960,27 @@
 - 可用范围：`cli`。
 - 是否写入：否。
 
-| 旗标 | 必填 | 取值类型 |
-| --- | --- | --- |
-| `--workspace` | 可选 | `string` |
-| `--at` | 必填 | `instant` |
-| `--scope` | 可选 | `string` |
-| `--selection` | 可选 | `string` |
-| `--status` | 可选 | `string` |
-| `--project-id` | 可选 | `string` |
-| `--role-scope` | 可选 | `string` |
-| `--category` | 可选 | `string` |
-| `--kind` | 可选 | `string` |
-| `--tag` | 可选 | `string` |
-| `--freshness` | 可选 | `string` |
-| `--search` | 可选 | `string` |
-| `--limit` | 可选 | `integer` |
-| `--offset` | 可选 | `integer` |
-| `--allow-trailing` | 可选 | `boolean` |
+| 旗标 | 必填 | 取值类型 | 写法 |
+| --- | --- | --- | --- |
+| `--workspace` | 可选 | `string` |  |
+| `--at` | 必填 | `instant` |  |
+| `--scope` | 可选 | `string` |  |
+| `--selection` | 可选 | `string` |  |
+| `--status` | 可选 | `string` |  |
+| `--project-id` | 可选 | `string` |  |
+| `--role-scope` | 可选 | `string` |  |
+| `--category` | 可选 | `string` |  |
+| `--kind` | 可选 | `string` |  |
+| `--tag` | 可选 | `string` |  |
+| `--freshness` | 可选 | `string` |  |
+| `--search` | 可选 | `string` |  |
+| `--limit` | 可选 | `integer` |  |
+| `--offset` | 可选 | `integer` |  |
+| `--diagnostics` | 可选 | `string` | `summary (default), ids, conflicts, or audit` |
+| `--diagnostic-limit` | 可选 | `integer` |  |
+| `--diagnostic-offset` | 可选 | `integer` |  |
+| `--snapshot` | 可选 | `string` | `SHA-256 from the first page; required for diagnostic continuation` |
+| `--allow-trailing` | 可选 | `boolean` |  |
 
 ## `knowledge-rebase`
 
@@ -1852,6 +1881,7 @@
 | `--relation` | 可选 | `string` |
 | `--search` | 可选 | `string` |
 | `--scope-bytes` | 可选 | `integer` |
+| `--full` | 可选 | `boolean` |
 | `--limit` | 可选 | `integer` |
 | `--offset` | 可选 | `integer` |
 

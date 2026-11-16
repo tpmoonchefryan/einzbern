@@ -14,6 +14,7 @@ import { hookProtocolOutput } from "../dist/build/packages/core/src/hook-recall.
 import {
   ANTIGRAVITY_HOOKS_FILE,
   ANTIGRAVITY_OWNED_HOOK_GROUP,
+  ANTIGRAVITY_PRETOOL_MATCHER,
   ANTIGRAVITY_READ_MATCHER,
   ANTIGRAVITY_USER_HOOKS_FILE,
   antigravityConfigRoot,
@@ -139,7 +140,7 @@ test("INIT091-A2: Antigravity hooks merge only the einzbern group, preserve othe
   await applyAntigravityHookPlan(first, { at: "2026-11-11T00:00:00Z", deviceHome: f.deviceHome });
   const installed = JSON.parse(await readFile(hookFile, "utf8"));
   assert.deepEqual(Object.keys(installed), ["user-security", "team-telemetry", ANTIGRAVITY_OWNED_HOOK_GROUP]);
-  assert.equal(installed[ANTIGRAVITY_OWNED_HOOK_GROUP].PreToolUse[0].matcher, ANTIGRAVITY_READ_MATCHER);
+  assert.equal(installed[ANTIGRAVITY_OWNED_HOOK_GROUP].PreToolUse[0].matcher, ANTIGRAVITY_PRETOOL_MATCHER);
   assert.equal(installed[ANTIGRAVITY_OWNED_HOOK_GROUP].SessionStart.length, 1);
   assert.equal(installed[ANTIGRAVITY_OWNED_HOOK_GROUP].PreInvocation.length, 1);
 
@@ -157,9 +158,18 @@ test("INIT091-A2: Antigravity hooks merge only the einzbern group, preserve othe
     hostHookCommand(hookLauncherPath(relocatedDevice, process.platform), "UserPromptSubmit", f.home, process.platform, "antigravity"),
   );
 
-  // Editing the owned group triggers ANTIGRAVITY_HOOKS_OWNERSHIP_CONFLICT.
-  refreshed[ANTIGRAVITY_OWNED_HOOK_GROUP].PreToolUse[0].matcher = "edited_matcher";
+  // Legacy 4.6.0 read_file|view_file matcher upgrades smoothly to read_file|view_file|swarm without conflict.
+  refreshed[ANTIGRAVITY_OWNED_HOOK_GROUP].PreToolUse[0].matcher = ANTIGRAVITY_READ_MATCHER;
   await writeFile(hookFile, `${JSON.stringify(refreshed, null, 2)}\n`);
+  const upgraded = await planAntigravityHooks(request(configRoot, { home: f.home, deviceHome: relocatedDevice, navigation: "always" }));
+  assert.equal(upgraded.changed, true);
+  await applyAntigravityHookPlan(upgraded, { at: "2026-11-11T00:01:30Z", deviceHome: f.deviceHome });
+  const upgradedDoc = JSON.parse(await readFile(hookFile, "utf8"));
+  assert.equal(upgradedDoc[ANTIGRAVITY_OWNED_HOOK_GROUP].PreToolUse[0].matcher, ANTIGRAVITY_PRETOOL_MATCHER);
+
+  // Editing the owned group triggers ANTIGRAVITY_HOOKS_OWNERSHIP_CONFLICT.
+  upgradedDoc[ANTIGRAVITY_OWNED_HOOK_GROUP].PreToolUse[0].matcher = "edited_matcher";
+  await writeFile(hookFile, `${JSON.stringify(upgradedDoc, null, 2)}\n`);
   await assert.rejects(
     planAntigravityHooks(request(configRoot, { home: f.home, deviceHome: relocatedDevice, navigation: "always" })),
     { reasonCode: "ANTIGRAVITY_HOOKS_OWNERSHIP_CONFLICT" },

@@ -171,7 +171,7 @@ test("469: init creates a library, and projects, work, transitions, lists and sh
   // state live on the device (TCRN-CROSS-STORY-469 R4).
   assert.deepEqual((await readdir(library)).sort(), [".gitignore", "README.md", "akasha", "artifacts", "config", "crest", "manifest.json"]);
   assert.deepEqual(await readdir(join(library, "akasha")), [deviceId]);
-  assert.deepEqual((await readdir(device)).sort(), ["cache", "device.json", "locks", "registry.json"]);
+  assert.deepEqual((await readdir(device)).filter(name => name !== "source-verification").sort(), ["derived-cache", "device.json", "locks", "registry.json"]);
   const registry = JSON.parse(await readFile(join(device, "registry.json"), "utf8"));
   assert.equal(registry.schemaVersion, "einzbern.registry.v2");
   assert.deepEqual(registry.entries.map(({ projectPath, projectId: target, libraryPath, libraryId }) => ({ projectPath: resolve(device, projectPath), projectId: target, libraryPath: resolve(device, libraryPath), libraryId })),

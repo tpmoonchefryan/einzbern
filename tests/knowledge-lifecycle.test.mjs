@@ -407,10 +407,10 @@ test("SUB-425: a removal combined with an unresolved duplicate, a lost project a
   await as(fx.homeB, () => createKnowledgeUnit(fx.workspace, card("SUB-425-SHARED", "Oystercatcher feeding on the cockle beds", { occurredAt: instant(6) })));
   // Two cards about one thing, one on each device: an unresolved pair (SUB-310).
   const beforeB = await fx.entries(fx.homeB);
-  const pairB = await as(fx.homeB, () => createKnowledgeUnit(fx.workspace, card("SUB-425-PAIR-B", "Redshank alarm call near the sluice gate", { occurredAt: instant(7) })));
+  const pairB = await as(fx.homeB, () => createKnowledgeUnit(fx.workspace, card("SUB-425-PAIR-B", "Redshank alarm call near the sluice gate", { occurredAt: instant(7), summary: "Redshank alarm must use only whistle" })));
   const deliverB = await fx.holdNew(fx.homeB, beforeB);
   await deliverA();
-  const pairA = await as(fx.homeA, () => createKnowledgeUnit(fx.workspace, card("SUB-425-PAIR-A", "Redshank alarm call near the sluice", { occurredAt: instant(8) })));
+  const pairA = await as(fx.homeA, () => createKnowledgeUnit(fx.workspace, card("SUB-425-PAIR-A", "Redshank alarm call near the sluice", { occurredAt: instant(8), summary: "Redshank alarm must use only bell" })));
   await deliverB();
   // A card whose project is deleted after it was written (SUB-414 R16).
   const lost = await as(fx.homeA, async () => (await createProject(fx.workspace, { occurredAt: instant(9), externalKey: "SUB-425-LOST", name: "Lost" })).projects.find((project) => project.externalKey === "SUB-425-LOST").id);

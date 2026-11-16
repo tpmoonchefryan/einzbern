@@ -15,6 +15,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // proves, so it is not part of the declarations digest a run is judged by.
 
 import type { WriteAuthorization } from "./actor-attestation.js";
+import { normalizeGitRemote } from "./registry.js";
 import { configRecords, removeConfigRecord, removeConfigRecordDelta, setConfigRecord, setConfigRecordDelta } from "./config-records.js";
 import { GatesPlanError, compileGlob } from "./gates-plan.js";
 import type { MutationDelta, WorkspaceMutationOptions, WorkspaceState } from "./workspace.js";
@@ -43,6 +44,8 @@ function invalid(field: string, message: string, details: Readonly<Record<string
 export interface GateDeclaration {
   readonly command: readonly string[];
   readonly root: string;
+  /** Canonical Git remote identity. When present, root is relative to that repository. */
+  readonly repository?: string;
   readonly covers: readonly string[];
   readonly required: boolean;
   readonly enabled: boolean;
@@ -59,7 +62,6 @@ export const GATE_ARGUMENT_MAX_BYTES = RUNTIME_CAPACITY.bufferBytes;
 export const GATE_COVERS_MAX = RUNTIME_CAPACITY.arrayEntries;
 const GATE_WORK_COVER = /^work:[0-9a-f]{24}$/u;
 const GATE_FIELDS = ["command", "covers", "enabled", "releaseOnly", "required", "root"];
-const ORDERED_GATE_FIELDS = ["command", "covers", "enabled", "order", "releaseOnly", "required", "root"];
 const GATE_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
 
 export function isGateName(value: unknown): value is string {
@@ -78,9 +80,9 @@ export function isProjectRelativeRoot(value: unknown): value is string {
 export function checkGateDeclaration(value: unknown, name = "the gate"): GateDeclaration {
   if (value === null || typeof value !== "object" || Array.isArray(value)) invalid("gate", `${name} is not a JSON object`, { name });
   const record = value as Readonly<Record<string, unknown>>;
-  const fields = Object.keys(record).sort().join(",");
-  if (fields !== GATE_FIELDS.join(",") && fields !== ORDERED_GATE_FIELDS.join(",")) {
-    invalid("gate", `${name} declares exactly ${GATE_FIELDS.join(", ")}, and may declare an order`, { name });
+  const fields = Object.keys(record).filter((field) => field !== "order" && field !== "repository").sort().join(",");
+  if (fields !== GATE_FIELDS.join(",")) {
+    invalid("gate", `${name} declares exactly ${GATE_FIELDS.join(", ")}, and may declare order and repository`, { name });
   }
   const command = record.command;
   if (!Array.isArray(command) || command.length === 0 || command.length > GATE_COMMAND_MAX_ARGUMENTS ||
@@ -89,6 +91,13 @@ export function checkGateDeclaration(value: unknown, name = "the gate"): GateDec
   }
   if (!isProjectRelativeRoot(record.root)) {
     invalid("root", `the root of ${name} is a directory relative to the project that stays inside it ("." for the project itself)`, { name, root: String(record.root) });
+  }
+  const repository = record.repository;
+  if (repository !== undefined && (typeof repository !== "string" ||
+    !/^[^\s/\\:@?#\u0000-\u001f\u007f]+(?:\/[^\s/\\:@?#\u0000-\u001f\u007f]+)+$/u.test(repository) ||
+    repository.split("/").some((part) => part === "." || part === "..") ||
+    normalizeGitRemote(repository) !== repository)) {
+    invalid("repository", `the repository of ${name} is a canonical Git remote identity such as example.org/team/project`, { name });
   }
   const covers = record.covers;
   if (!Array.isArray(covers) || covers.length > GATE_COVERS_MAX || covers.some((glob) => typeof glob !== "string")) {
@@ -116,6 +125,7 @@ export function checkGateDeclaration(value: unknown, name = "the gate"): GateDec
   return {
     command: [...(command as readonly string[])],
     root: record.root,
+    ...(repository === undefined ? {} : { repository: repository as string }),
     covers: [...(covers as readonly string[])],
     required: record.required as boolean,
     enabled: record.enabled as boolean,

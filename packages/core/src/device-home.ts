@@ -11,6 +11,7 @@ import { runtimeHome } from "./storage-location.js";
 // reads a mode back, so no behaviour here depends on permission bits (R6).
 
 import { mkdir } from "node:fs/promises";
+import { lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -99,7 +100,25 @@ export function engineModelPolicyLockPath(home: string = deviceHome()): string {
 
 /** This library's derived state on this machine: views, snapshots and indexes. */
 export function cachePath(libraryId: string, home: string = deviceHome()): string {
-  return join(runtimeHome(home), DEVICE_HOME_ENTRIES.cache, libraryDirectoryName(libraryId));
+  const path = join(localDerivedCachePath(home), libraryDirectoryName(libraryId));
+  assertCacheDirectory(path);
+  return path;
+}
+
+function assertCacheDirectory(path: string): void {
+  try {
+    const info = lstatSync(path);
+    if (!info.isDirectory() || info.isSymbolicLink()) throw new DeviceHomeError("derived cache requires a local directory", "DEVICE_HOME_INVALID");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+/** Disposable projections never follow the synchronized runtime/cache forwarding link. */
+export function localDerivedCachePath(home: string = deviceHome()): string {
+  const root = join(home, "derived-cache");
+  for (const path of [home, root]) assertCacheDirectory(path);
+  return root;
 }
 
 /** The one write lock every process on this machine takes before writing this library. */
@@ -131,7 +150,7 @@ export function userCrestLockPath(home: string = deviceHome()): string {
 
 /** The user crest's derived state on this machine (its index view); never a file in the crest. */
 export function userCrestCachePath(home: string = deviceHome()): string {
-  return join(runtimeHome(home), DEVICE_HOME_ENTRIES.cache, USER_CREST_DEVICE_NAME);
+  return join(localDerivedCachePath(home), USER_CREST_DEVICE_NAME);
 }
 
 /**

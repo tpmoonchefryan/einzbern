@@ -147,7 +147,17 @@ export function scopedWorkspaceState(state: WorkspaceState, projectId?: string):
     if (seen.has(identity)) continue;
     seen.add(identity); configRecords.push(record); configSources[identity] = source(scope);
   }
-  return { ...state, settings, configRecords, configurationProjectId: projectId ?? null, settingSources, settingFallbackValues, settingFallbackSources, configSources };
+  // Preserve the verified state's lazy historical events when making a settings
+  // view. Spreading it would decode history even when no consumer asks for it.
+  const descriptors = Object.getOwnPropertyDescriptors(state);
+  for (const descriptor of Object.values(descriptors)) {
+    descriptor.configurable = true;
+    if ("value" in descriptor) descriptor.writable = true;
+  }
+  const changed = { settings, configRecords, configurationProjectId: projectId ?? null, settingSources, settingFallbackValues, settingFallbackSources, configSources };
+  for (const key of Object.keys(changed)) delete descriptors[key];
+  return Object.assign(Object.create(Object.getPrototypeOf(state), descriptors) as WorkspaceState,
+    changed);
 }
 
 /** A parent write must keep every descendant's category/tier/ceiling references coherent. */

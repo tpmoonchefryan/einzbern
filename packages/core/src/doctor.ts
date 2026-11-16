@@ -35,9 +35,11 @@ import type { CodexHookAdmission } from "./host-hooks.js";
 // and the probe file, both removed again, and the lock directory in the device directory. A library
 // this engine may not open is never locked or probed (format-version.ts).
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
+import { agentsFileSections } from "./agents-sections.js";
 import { isSharedLibrary } from "./chain-identity.js";
 import { scopedWorkspaceState } from "./project-scope.js";
+import { effectiveProjectState } from "./project-chain.js";
 import type { FileHandle } from "node:fs/promises";
 import { lstat, open, readFile, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -311,16 +313,24 @@ function changedFiles(plan: HostHooksPlan): readonly string[] {
   return plan.files.filter((file) => file.changed).map((file) => file.path);
 }
 
+async function fileHostSelected(context: DoctorContext, host: HostHookFileHost): Promise<boolean> {
+  if (host === "codex" && context.codexAdmission !== undefined) return true;
+  const directories = [context.home, context.projectRoot].map(root => dirname(join(root, ...HOST_HOOK_FILES[host].split("/"))));
+  return (await Promise.all(directories.map(entryKind))).some(kind => kind !== null);
+}
+
 async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
   const { inspectKiroHookScope, kiroSelectionStatus, planKiroHookScopes, probeKiroHost } = await import("./kiro-host.js");
   const { antigravityConfigRoot, antigravitySelectionStatus, inspectAntigravityHookScope, planAntigravityHookScopes, probeAntigravityHost } = await import("./antigravity-host.js");
   const causes: string[] = [];
+  const launcherCauses: string[] = [];
+  let needsLauncher = false;
   let launcher: string | null = null;
   try {
     launcher = hookLauncherPath(context.deviceHome, context.platform);
-    if (await entryKind(launcher) !== "file") causes.push("HOOK_LAUNCHER_MISSING");
+    if (await entryKind(launcher) !== "file") launcherCauses.push("HOOK_LAUNCHER_MISSING");
   } catch (error) {
-    causes.push(causeOf(error));
+    launcherCauses.push(causeOf(error));
   }
   // A project opened at the home directory has one scope, not the same file counted twice.
   const home = await realpath(context.home).catch(() => context.home);
@@ -329,6 +339,12 @@ async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
     : [{ scope: "user", root: context.home }, { scope: "project", root: context.projectRoot }];
   const hosts: JsonValue[] = [];
   for (const host of HOST_HOOK_FILE_HOSTS) {
+    const selected = await fileHostSelected(context, host);
+    if (!selected) {
+      hosts.push({ host, applicability: "not-selected", hooks: 0, files: [], causes: [] });
+      continue;
+    }
+    needsLauncher = true;
     const hostCauses: string[] = [];
     const entries: ScopeEntry[] = [];
     for (const { scope, root } of scopes) {
@@ -360,7 +376,7 @@ async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
       files.push({ scope: entry.scope, path: entry.path, hooks: entry.read.count, differs: [...differs] });
     }
     causes.push(...hostCauses);
-    hosts.push({ host, hooks: total, files, causes: [...unique(hostCauses)] });
+    hosts.push({ host, applicability: "selected", hooks: total, files, causes: [...unique(hostCauses)] });
   }
   const kiroIdentity = probeKiroHost({ home: context.home, env: { ...context.cloud.env } as NodeJS.ProcessEnv });
   const kiroSelection = kiroSelectionStatus({ home: context.home, projectRoot: context.projectRoot, ...(context.cloud.env.KIRO_HOME === undefined ? {} : { kiroHome: context.cloud.env.KIRO_HOME }) });
@@ -373,6 +389,7 @@ async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
   const kiroCauses: string[] = [];
   let kiroApplicability = kiroSelection === "not-selected" ? "not-selected" : "selection-unknown";
   if (kiroDetected) {
+    needsLauncher = true;
     kiroApplicability = "selected";
     for (const scope of kiroScopes) if (scope.error !== null) kiroCauses.push("KIRO_HOOKS_FILE_UNREADABLE");
     if (kiroCauses.length === 0 && kiroCount === 0) kiroCauses.push("HOOK_MISSING");
@@ -411,6 +428,7 @@ async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
   const antigravityCauses: string[] = [];
   let antigravityApplicability = antigravitySelection === "not-selected" ? "not-selected" : "selection-unknown";
   if (antigravityDetected) {
+    needsLauncher = true;
     antigravityApplicability = "selected";
     for (const scope of antigravityScopes) if (scope.error !== null) antigravityCauses.push("ANTIGRAVITY_HOOKS_FILE_UNREADABLE");
     if (antigravityCauses.length === 0 && antigravityCount === 0) antigravityCauses.push("HOOK_MISSING");
@@ -452,6 +470,7 @@ async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
   if (launcher !== null) {
     const dsh = await inspectDshPlugin({ home: context.home, deviceHome: context.deviceHome, platform: context.platform, env: context.cloud.env });
     if (dsh.detected) {
+      needsLauncher ||= dsh.profiles.some(profile => profile.installed);
       const dshCauses = dsh.causes.filter((cause) => cause === "DSH_PLUGIN_HOOK_PATH_MISMATCH");
       causes.push(...dshCauses);
       hosts.push({
@@ -470,6 +489,7 @@ async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
       });
     }
   }
+  if (needsLauncher) causes.push(...launcherCauses);
   const codexGuard = await codexNativeGuardHealth({ device: context.deviceHome, home: context.home, cwd: context.projectRoot,
     ...(context.codexAdmission?.state === "supported" && context.codexAdmission.trust === "permitted" && context.codexAdmission.preToolUse === true && context.codexAdmission.native ? { observation: context.codexAdmission.native } : {}) });
   if (!codexGuard.ready && (context.codexAdmission !== undefined || codexGuard.roleRecovery.roles.length > 0)) causes.push("CODEX_PEER_GUARD_NOT_READY");
@@ -489,7 +509,10 @@ async function skillCopiesCheck(context: DoctorContext): Promise<DoctorCheck> {
     ...(context.cloud.env.ANTIGRAVITY_CONFIG_DIR === undefined ? {} : { antigravityConfigHome: context.cloud.env.ANTIGRAVITY_CONFIG_DIR }),
   }) === "selected";
   const antigravityConfigHome = context.cloud.env.ANTIGRAVITY_CONFIG_DIR ?? join(context.home, ".gemini", "config");
-  const verification = await verifySkillCopies({ home: context.home, deviceHome: context.deviceHome, includeKiro, kiroHome, includeAntigravity, antigravityConfigHome });
+  const requiredHosts: ("claude" | "codex")[] = [];
+  if (await fileHostSelected(context, "claude-code")) requiredHosts.push("claude");
+  if (await fileHostSelected(context, "codex")) requiredHosts.push("codex");
+  const verification = await verifySkillCopies({ home: context.home, deviceHome: context.deviceHome, includeKiro, kiroHome, includeAntigravity, antigravityConfigHome, presentHostsOnly: true, requiredHosts });
   return result("skill-copies", verification.ok ? [] : [verification.reasonCode], {
     record: verification.record,
     copies: verification.copies.map((copy) => ({ host: copy.host, path: copy.path, reasonCode: copy.reasonCode })),
@@ -730,6 +753,7 @@ async function managedSectionsCheck(context: DoctorContext, located: ProjectLibr
   // Replayed from the streams, read-only: neither the device cache nor the projection is trusted.
   const native = await materializeWorkspaceFromGenesis(located.libraryPath);
   const state = isSharedLibrary(native) ? scopedWorkspaceState(native, located.entry?.projectId) : native;
+  const effective = await effectiveProjectState(native, located.entry?.projectId);
   const recorded = state.configRecords.filter((record) => record.collection === MANAGED_SECTION_COLLECTION);
   const files = [...new Set([...MANAGED_FILES, ...recorded.map((record) => String(record.value.file))])].sort();
   const causes: string[] = [];
@@ -739,10 +763,16 @@ async function managedSectionsCheck(context: DoctorContext, located: ProjectLibr
   const removed: string[] = [];
   const problems: JsonValue[] = [];
   const skipped: string[] = [];
+  const fileReadbacks: JsonValue[] = [];
   for (const file of files) {
     const records = managedSectionRecordsFor(state, file);
     try {
       const plan = await planManagedWrite({ filePath: join(context.projectRoot, ...file.split("/")), file, desired: [], records });
+      fileReadbacks.push({ file, exists: plan.before !== null,
+        sha256: plan.before === null ? null : createHash("sha256").update(plan.before).digest("hex"), hostLoad: "unverified" });
+      if (file === "AGENTS.md" && plan.before === null && agentsFileSections(effective, null).sections.length > 0) {
+        causes.push("MANAGED_FILE_MISSING");
+      }
       for (const id of plan.pending) pending.add(managedSectionRecordKey(file, id));
       for (const decision of plan.sections) {
         // Markers the user took out: the section is not put back, and its record will say removed.
@@ -770,6 +800,7 @@ async function managedSectionsCheck(context: DoctorContext, located: ProjectLibr
   return result("managed-sections", causes, {
     libraryPath: located.libraryPath,
     files,
+    fileReadbacks,
     // TCRN-CROSS-STORY-540 GWT4 (TCRN-CROSS-SUB-507): each section the library records, as
     // <file>#<section id>, with the state its record holds.
     sections: recorded.map((record) => ({ section: record.key, state: String(record.value.state) }))

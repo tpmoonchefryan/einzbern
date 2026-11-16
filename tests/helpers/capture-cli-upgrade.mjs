@@ -131,6 +131,9 @@ export async function runCaptureCliUpgradeMatrix({ root, execute }) {
       "--external-key", "PR24-CLI-CAPTURE", "--language-bundle", bundlePath,
       ...(item.host ? ["--host", item.host] : [])];
     const result = call(args);
+    // Observe the capture itself before readbacks may build their own protected
+    // Crest projection. Its only permitted device change is the index below.
+    const deviceAfter = await snapshot(fixture.device);
     let capturedRecords;
     if (item.success) {
       assert.equal(result.status, 0, `${item.name}: ${result.stderr}`);
@@ -149,11 +152,10 @@ export async function runCaptureCliUpgradeMatrix({ root, execute }) {
       assert.equal(json(["knowledge-list", "--workspace", fixture.workspace, "--at", at]).records.length, 0, item.name);
     }
     assert.deepEqual(settingsReadback(), settingsBefore, `${item.name}: historical settings unchanged`);
-    const deviceAfter = await snapshot(fixture.device);
     if (item.success) {
       // A successful append refreshes exactly its derived crest index. Never
       // exempt policy, identity, historical views, or an arbitrary cache subtree.
-      const indexes = Object.keys(deviceBefore).filter(key => /^cache\/library-[a-f0-9]+\/crest-views\/index\.json$/u.test(key));
+      const indexes = Object.keys(deviceBefore).filter(key => /^derived-cache\/library-[a-f0-9]+\/crest-views\/index\.json$/u.test(key));
       assert.equal(indexes.length, 1);
       const [index] = indexes;
       const cached = JSON.parse(Buffer.from(deviceAfter[index], "base64").toString("utf8"));

@@ -7,10 +7,18 @@ try {
   // TCRN-CROSS-STORY-481 R4: an older Node.js is refused with ENGINE_NODE_TOO_OLD {required,
   // actual} first; the rest of the engine loads only after it passes.
   assertNodeFloor(process.versions.node);
-  const { runCli } = await import("../dist/build/packages/cli/src/index.js");
-  await runCli(process.argv.slice(2), {
-    write: (value) => process.stdout.write(value),
-  });
+  const args = process.argv.slice(2);
+  if (args[0] === "recall" && !args.includes("--help") && !args.includes("-h")) {
+    const { runRecallCli } = await import("../dist/build/packages/cli/src/recall-fast.js");
+    await runRecallCli(args, {
+      write: (value) => process.stdout.write(value),
+    });
+  } else {
+    const { runCli } = await import("../dist/build/packages/cli/src/index.js");
+    await runCli(args, {
+      write: (value) => process.stdout.write(value),
+    });
+  }
 } catch (error) {
   const reasonCode = typeof error?.reasonCode === "string" ? error.reasonCode : "CLI_INTERNAL_ERROR";
   // TCRN-CROSS-STORY-467 R4: a chain break names its stream, sequence, event and kind; a library

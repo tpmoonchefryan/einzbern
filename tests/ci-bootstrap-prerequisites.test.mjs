@@ -33,14 +33,16 @@ function redigest(plan) {
 }
 
 test("Corepack acquisition follows full core and selected Release consumption, while checks and Portal need none", async (t) => {
-  const fixture = await createCiComponentFixture(t, { files: releaseFile, rules: { ciTests: ["tests/a.test.mjs", releaseTest] } });
-  const basis = checkoutBasis(fixture);
-  for (const coverage of ["full", "selective"]) {
-    const plan = validatedPlan(fixture, coverage);
-    assert.ok(plan.coreTests.includes(releaseTest));
-    assert.equal(corepackBootstrapRequired("p1-core", plan, basis), true, coverage);
-    assert.equal(corepackBootstrapRequired("p1-checks", plan, basis), false, coverage);
-    if (coverage === "full") assert.equal(corepackBootstrapRequired("p1-portal", plan, basis), false);
+  for (const path of [releaseTest, "tests/integration-release.test.mjs"]) {
+    const fixture = await createCiComponentFixture(t, { files: { [path]: releaseFile[releaseTest] }, rules: { ciTests: ["tests/a.test.mjs", path] } });
+    const basis = checkoutBasis(fixture);
+    for (const coverage of ["full", "selective"]) {
+      const plan = validatedPlan(fixture, coverage);
+      assert.ok(plan.coreTests.includes(path));
+      assert.equal(corepackBootstrapRequired("p1-core", plan, basis), true, coverage);
+      assert.equal(corepackBootstrapRequired("p1-checks", plan, basis), false, coverage);
+      if (coverage === "full") assert.equal(corepackBootstrapRequired("p1-portal", plan, basis), false);
+    }
   }
   assert.equal(corepackBootstrapRequired("p1"), true);
   assert.equal(corepackBootstrapRequired("pf2-h1"), true);

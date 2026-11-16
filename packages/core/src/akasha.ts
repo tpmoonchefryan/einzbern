@@ -431,7 +431,7 @@ export async function readStreamEvents(libraryRoot: string, manifest: StreamMani
   let mismatched: StreamSegment | null = null;
   // This manifest was already read for stream identity. Ordinary streams have
   // no verification scope, so they need neither its module nor its callbacks.
-  const verifier = readFile === defaultReadBytes && (manifest.identityScheme === "legacy" || options.archivedManifest !== undefined || libraryManifest?.consolidation !== undefined)
+  const verifier = readFile === defaultReadBytes && (process.platform === "linux" || manifest.identityScheme === "legacy" || options.archivedManifest !== undefined || libraryManifest?.consolidation !== undefined)
     ? await import("./source-verification.js") : undefined;
   const verification = verifier?.verifiedStreamSegments(libraryRoot, manifest, options.archivedManifest);
   const prepared = verification === null || verification === undefined ? null : await verification;

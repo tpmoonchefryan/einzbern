@@ -214,7 +214,7 @@ test("646: Kiro PromptSubmit uses real USER_PROMPT text and AgentSpawn remains n
   }));
   assert.match(answer.value, /HOOK-STORY/u);
   assert.equal(answer.observation.materializations, 1);
-  assert.equal(answer.observation.segmentReads, 1);
+  assert.ok(answer.observation.logicalEventBytes > 0, "the routed prompt uses content-verified authority");
   assert.equal(answer.observation.recallCalls, 1);
   const spawn = await withRecallObservation(() => runHookEvent({
     event: "AgentSpawn", payload: { prompt: PROMPT, agent_type: "zebrafish" }, libraryPath: library, cwd: directory,

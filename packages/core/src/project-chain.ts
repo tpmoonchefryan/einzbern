@@ -2,7 +2,6 @@ import { readWorkContentPolicy, workContentRolloutReadiness } from "./work-conte
 import { FRAMEWORK_VERSION } from "./framework-version.js";
 import { workContentContext } from "./work-content-context.js";
 import type { WorkContentContext } from "./work-content-context.js";
-import { workContentAdmissionProblems } from "./work-gates.js";
 import { executionDecisionEligibility } from "./host-capabilities.js";
 import { validateHostExecutionRequest, resolveHostExecution } from "./execution-fallback.js";
 import type { HostExecutionRequest, HostExecutionDecision } from "./execution-fallback.js";
@@ -26,7 +25,6 @@ import { realpath } from "node:fs/promises";
 import { canonicalJson } from "../../protocol/src/index.js";
 import type { ProjectReference } from "../../protocol/src/index.js";
 import { openLibrary, hasLibraryManifest } from "./ether-library.js";
-import { materializeWorkspace, materializeWorkspaceFromGenesis, initializeLibrary, createProject, readLibraryTombstone } from "./workspace.js";
 import type { WorkspaceState, WorkspaceMutationOptions } from "./workspace.js";
 import { readRegistry, registerLibrary, normalizeGitRemote, unregisterEntries } from "./registry.js";
 import type { Registry, RegistryEntry } from "./registry.js";
@@ -42,7 +40,7 @@ import type { ChainIdentity } from "./chain-identity.js";
 export { ProjectChainError, chainIdentity, checkChainRecord } from "./chain-identity.js";
 export type { ChainIdentity } from "./chain-identity.js";
 export async function declareChainIdentity(root: string, identity: ChainIdentity, options: WorkspaceMutationOptions): Promise<WorkspaceState> {
-  const state = await materializeWorkspace(root);
+  const state = await (await import("./workspace.js")).materializeWorkspace(root);
   if (identity.role === "coordination" && identity.coordinationLibraryId !== state.metadata.workspaceId) throw new ProjectChainError("coordination identity must name its own library");
   const previous = chainIdentity(state);
   if (canonicalJson(previous) === canonicalJson(identity)) return state;
@@ -109,6 +107,7 @@ async function resolveProjectTargetFromSnapshot(referenceInput: ProjectReference
   const root = [...paths][0]!;
   let state: WorkspaceState;
   try {
+    const { materializeWorkspace, readLibraryTombstone } = await import("./workspace.js");
     const tombstone = await readLibraryTombstone(root);
     if (tombstone !== null) return { ...base, status: "invalid-chain", reason: "LIBRARY_TOMBSTONED", tombstone };
     const library = await openLibrary(root);
@@ -200,6 +199,7 @@ export async function workProjectContexts(state: WorkspaceState, workId: string,
   const work = state.work.find(entry => entry.id === workId && !entry.tombstone);
   if (!work) throw new ProjectChainError("work does not exist");
   const workContent = workContentContext(state, workId);
+  const { workContentAdmissionProblems } = await import("./work-gates.js");
   const contentAdmissionProblems = workContentAdmissionProblems(state, work, "start");
   const contentRolloutReadiness = workContentRolloutReadiness(state, readWorkContentPolicy(state, work.projectId)?.rollout ?? null, { engineVersion: FRAMEWORK_VERSION, manifestMinEngineVersion: state.library?.minEngineVersion ?? null, requireCurrentBoundary: false });
   const involvedProjects = involvedProjectsOf(work);
@@ -277,6 +277,7 @@ async function hostWorkProjectContexts(state: WorkspaceState, workId: string, re
   const work = state.work.find(item => item.id === workId && !item.tombstone)!;
   if (request.workId !== workId || request.workRevision !== work.revision) throw new ProjectChainError("host request work/revision differs from current work");
   const workContent = workContentContext(state, workId);
+  const { workContentAdmissionProblems } = await import("./work-gates.js");
   const contentAdmissionProblems = workContentAdmissionProblems(state, work, "start");
   const contentRolloutReadiness = workContentRolloutReadiness(state, readWorkContentPolicy(state, work.projectId)?.rollout ?? null, { engineVersion: FRAMEWORK_VERSION, manifestMinEngineVersion: state.library?.minEngineVersion ?? null, requireCurrentBoundary: false });
   const involvedProjects = involvedProjectsOf(work);
@@ -378,7 +379,7 @@ async function discoverRegistered(home: string | undefined, expectedId: string |
       continue;
     }
     let state: WorkspaceState;
-    try { state = await materializeWorkspace(entry.libraryPath); }
+    try { state = await (await import("./workspace.js")).materializeWorkspace(entry.libraryPath); }
     catch (error) {
       if (expectedId === undefined && entry.chainRole === "project") { unavailable.push(location); continue; }
       throw new ProjectChainError(`coordination discovery cannot classify ${entry.libraryId}: ${String(error)}`);
@@ -426,11 +427,15 @@ function effectiveConfigurationUnavailable(context: Readonly<Record<string, unkn
   return new ProjectChainError(`effective configuration unavailable: ${String(context.reason ?? context.status)}`);
 }
 
-/** Async read boundary for explicitly opted-in cross-chain defaults. Canonical writers
- * continue to use the full native state; this view is never an append replacement. */
-export async function effectiveProjectState(state: WorkspaceState, projectId?: string, home?: string): Promise<ReturnType<typeof scopedWorkspaceState>> {
-  const scoped = scopedWorkspaceState(state, projectId);
-  if (projectId === undefined || !scoped.configRecords.some(record => record.collection === "chain" && record.key === "common-default")) return scoped;
+export { effectiveProjectState } from "./project-state-read.js";
+
+/** @internal Called by project-state-read when a target opts into common-default. */
+export async function resolveEffectiveProjectState(
+  state: WorkspaceState,
+  scoped: ReturnType<typeof scopedWorkspaceState>,
+  projectId: string,
+  home?: string,
+): Promise<ReturnType<typeof scopedWorkspaceState>> {
   const context = await resolveProjectTarget({ libraryId: state.metadata.workspaceId, projectId }, home);
   if (!Array.isArray(context.settings) || context.status === "conflicting") throw effectiveConfigurationUnavailable(context);
   return effectiveFromSettings(state, scoped, context.settings as EffectiveSettingEntry[]);
@@ -528,7 +533,7 @@ export interface CoordinationBinding {
 async function defaultCoordination(home: string): Promise<{ readonly libraryId: string; readonly role: ChainIdentity["role"] | null; readonly path: string } | null> {
   const path = defaultCoordinationPath(home);
   if (!await hasLibraryManifest(path)) return null;
-  const state = await materializeWorkspaceFromGenesis(path);
+  const state = await (await import("./workspace.js")).materializeWorkspaceFromGenesis(path);
   return { libraryId: state.metadata.workspaceId, role: chainIdentity(state)?.role ?? null, path: await realpath(path) };
 }
 
@@ -616,6 +621,7 @@ export async function projectCoordinationChoice(identity: ChainIdentity | null, 
  * without it the registration names none. Answers whether the library was written.
  */
 export async function registerSetupCoordination(path: string, occurredAt: string, home: string = deviceHome(), options: { readonly createProject: boolean } = { createProject: true }): Promise<boolean> {
+  const { createProject, materializeWorkspace } = await import("./workspace.js");
   let current = await materializeWorkspace(path);
   const named = (state: WorkspaceState): WorkspaceState["projects"][number] | undefined => state.projects.find(entry => entry.externalKey === "CROSS-PROJECT" && !entry.tombstone);
   let written = false;
@@ -631,6 +637,7 @@ export async function registerSetupCoordination(path: string, occurredAt: string
 /** Installation lifecycle; low-level initializeLibrary remains an unclassified factory. */
 // `written`: the coordination library was written to (created, or given its Cross Project project).
 export async function ensureProjectCoordination(root: string, occurredAt: string, home = deviceHome()): Promise<{ libraryId: string; path: string | null; created: boolean; written: boolean; status: ProjectCoordinationChoice["status"] }> {
+  const { initializeLibrary, materializeWorkspace } = await import("./workspace.js");
   const identity = chainIdentity(await materializeWorkspace(root));
   if (identity?.role === "shared") return { libraryId: identity.coordinationLibraryId, path: root, created: false, written: false, status: "registered" };
   const choice = await projectCoordinationChoice(identity, home);
@@ -653,7 +660,7 @@ export async function ensureProjectCoordination(root: string, occurredAt: string
  */
 export async function coordinationNamedBy(path: string): Promise<string | null | undefined> {
   try {
-    const state = await materializeWorkspaceFromGenesis(path);
+    const state = await (await import("./workspace.js")).materializeWorkspaceFromGenesis(path);
     const identity = chainIdentity(state);
     return identity === null ? null : identity.role === "coordination" ? state.metadata.workspaceId : identity.coordinationLibraryId;
   } catch {

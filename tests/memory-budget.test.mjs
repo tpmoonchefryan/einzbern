@@ -230,6 +230,7 @@ const target=join(directory,'target');await mkdir(target);await symlink(target,j
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 const alias=join(directory,'alias');await symlink(target,alias,process.platform === 'win32' ? 'junction' : 'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home,EINZBERN_HEAVY_LOCK_DIR:alias},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
+if(process.platform==='linux'&&process.getuid?.()>0&&process.getuid()===process.getgid?.()){await chmod(target,0o775);const lease=await m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}});lease.release();}
 if (process.platform === 'win32') execFileSync('icacls.exe',[target,'/grant','*S-1-1-0:(M)'],{windowsHide:true});
 else await chmod(target,0o777);
 await assert.rejects(m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
@@ -254,7 +255,7 @@ const env={...process.env};const lease=await m.acquireMemoryBudget({deviceHome:h
 try {
 const target=join(directory,'project');await cp(root,target,{recursive:true,filter:p=>!['.git','dist','node_modules'].some(n=>p===join(root,n))});const {copyDependencyTree}=await import(${JSON.stringify(new URL("./helpers/filesystem-fixture.mjs", import.meta.url).href)});await copyDependencyTree(join(root,'node_modules'),join(target,'node_modules'));execFileSync('git',['init','-q',target],{stdio:['ignore','pipe','pipe']});const plan=await planGates({projectRoot:target,release:true,gates:[{name:'engine:format',root:'.',command:['corepack','pnpm@11.3.0','run','--silent','format:check'],covers:['**'],required:true,enabled:true,releaseOnly:false}]});
 const run=await runGates(plan,{libraryId:'workspace:'+ '1'.repeat(24),at:'2026-10-29T18:00:00Z',deviceHome:home,env});
-const diagnostic=await readFile(join(home,'cache','workspace-'+ '1'.repeat(24),'gate-runs',run.run.gates[0].outputFile),'utf8');assert.deepEqual(run.run.reds,[],JSON.stringify(run)+diagnostic);assert.equal(run.run.gates.length,1);assert.equal(run.run.gates[0].ok,true,JSON.stringify(run));assert.equal(run.run.gates[0].exitCode,0);console.log(JSON.stringify(run));
+const diagnostic=await readFile(join(home,'derived-cache','workspace-'+ '1'.repeat(24),'gate-runs',run.run.gates[0].outputFile),'utf8');assert.deepEqual(run.run.reds,[],JSON.stringify(run)+diagnostic);assert.equal(run.run.gates.length,1);assert.equal(run.run.gates[0].ok,true,JSON.stringify(run));assert.equal(run.run.gates[0].exitCode,0);console.log(JSON.stringify(run));
 } finally {lease.release()}
 `);
   assert.ok(output.includes("engine:format"));

@@ -318,3 +318,26 @@ test("offline light guard declaration pins exact probes and rejects structural m
     assert.equal(finding(changed, classifier(changed, rebound)), true, mutation.name);
   }
 });
+
+test("offline attestor classification admits only the reviewed private Unix transport sites", async () => {
+  const task = await readFile(new URL("../scripts/task.mjs", import.meta.url), "utf8");
+  const start = task.indexOf("function privateUnixIpcSite("), end = task.indexOf("\nfunction loopbackHarnessSites(", start);
+  assert.ok(start >= 0 && end > start);
+  const classify = new Function("createHash", `return (${task.slice(start, end).trim()});`)(createHash);
+  const protocol = await readFile(new URL("../packages/core/src/source-attestor-protocol.ts", import.meta.url), "utf8");
+  for (const file of ["packages/core/src/source-attestor-client.ts", "packages/core/src/source-attestor-service.ts", "tests/source-attestor.test.mjs"]) {
+    const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8");
+    assert.equal(classify(file, source, protocol, "node:net"), true, file);
+    assert.equal(classify("packages/core/src/unreviewed.ts", source, protocol, "node:net"), false);
+    const binding = file.includes("service") ? "createServer" : "createConnection";
+    for (const changed of [
+      `${source}\n${binding}(9, '127.0.0.1');`,
+      `${source}\nconst transportAlias = ${binding};`,
+      `${source}\nimport extraNet from 'node:net';`,
+      `${source}\nexistingSocket.connect(9, '127.0.0.1');`,
+      source.replace("await validateAttestorEndpoint(", "await uncheckedEndpoint("),
+    ]) assert.equal(classify(file, changed, protocol, "node:net"), false, file);
+    assert.equal(classify(file, source, protocol.replace("(info.mode & 0o077) !== 0", "false"), "node:net"), false, "ownership guard mutation");
+    assert.equal(classify(file, source, protocol.replace("endpoint.includes(\"\\0\")", "false"), "node:net"), false, "abstract path guard mutation");
+  }
+});

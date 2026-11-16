@@ -204,9 +204,19 @@ export async function applyKnowledgeBatch(
         // member written beside a conflict of another INIT family carries the single verb's warnings.
         applied.push({
           index, verb: "knowledge-create", id: result.id as string, revision: result.revision as number, version,
+          localCommitted: result.localCommitted ?? true,
+          verifiedReadback: result.verifiedReadback ?? false,
+          ...(result.readback === undefined ? {} : { readback: result.readback }),
           ...(typeof result.superseded === "string" ? { superseded: result.superseded } : {}),
           ...(Array.isArray(result.warnings) ? { warnings: result.warnings } : {}),
         });
+        if (result.verifiedReadback === false) {
+          throw new WorkspaceError("WORK_BATCH_REFUSED", JSON.stringify({
+            stage: "readback", localCommitted: true, verifiedReadback: false, applied,
+            failed: { index, verb: member.verb, reasonCode: result.reasonCode, remedy: result.remedy },
+            notEvaluated: Array.from({ length: members.length - index - 1 }, (_, offset) => index + offset + 1),
+          }));
+        }
         continue;
       }
       const id = referencedId(member) as string;

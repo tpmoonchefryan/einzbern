@@ -206,3 +206,22 @@ The floors in `scripts/policy/retrieval-eval-thresholds.json` are these values, 
 Re-measured when the threshold moved to `recallScoreUnit` (MIN-235 D9): every floor above is
 unchanged. At 600 records the new default is a bm25 floor of 17.9719, and every group measures the
 same there as at the old 17.
+
+## Decision delivery freeze
+
+`decision-delivery-freeze.json` binds `decision-delivery-cases.json`, source identity
+and content hashes, source-disjoint development/tuning/holdout groups and new
+clause-delivery floors. The existing corpus hashes, thresholds and floors above
+are unchanged. The 62 questions are derived from permitted public regression
+sources and the explicitly admitted hook/collector evolution; they are not a
+claim of 62 observed user handoffs or independent blind questions.
+
+`node scripts/retrieval-delivery-eval.mjs --splits development,tuning --out <private-dir>`
+scores development and tuning without holdout. Freeze the implementation before
+scoring holdout. `pnpm verify:retrieval-eval` runs both the existing floors and the
+new delivery gate. The normal CLI agent context is the primary measured surface;
+a record ranked in the first three is only diagnostic. Small, mid and large
+libraries add 0, 64 and 512 source-backed distractor records. Raw CLI outputs,
+recordings, zero-write byte digests and per-class counts stay private.
+
+See [the delivery contract](../../../docs/implementation/recall-delivery.md).

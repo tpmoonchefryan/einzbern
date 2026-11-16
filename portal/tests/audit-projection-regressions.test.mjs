@@ -87,7 +87,7 @@ test("Portal gate projection shares strict shape and nanosecond ordering with en
  assert.equal(admit({...run,gates:[gate]},libraryId,null),true);
  for(const key of ['root','exitCode']) {const bad={...gate};delete bad[key];assert.equal(admit({...run,gates:[bad]},libraryId,null),false,key);}
  const newer={...run,runId:'a-new',at:'2026-10-18T00:00:00.000000002Z'};assert.ok(compareGateRuns(newer,run)<0);
- const project=extract(server,'latestGateRunProjection',{currentLibrary:()=>({libraryId,configurationProjectId:null}),deviceHomePath:()=>'/fixture',join:(...parts)=>parts.join('/'),readdir:async()=>['old.json','new.json','bad.json'].map(name=>({name,isFile:()=>true})),readFile:async path=>JSON.stringify(path.endsWith('new.json')?newer:path.endsWith('old.json')?run:{...newer,release:undefined}),isGateRun:admit,compareGateRuns});
+ const project=extract(server,'latestGateRunProjection',{currentLibrary:()=>({libraryId,configurationProjectId:null}),cachePath:id=>{assert.equal(id,libraryId);return '/fixture';},join:(...parts)=>parts.join('/'),readdir:async()=>['old.json','new.json','bad.json'].map(name=>({name,isFile:()=>true})),readFile:async path=>JSON.stringify(path.endsWith('new.json')?newer:path.endsWith('old.json')?run:{...newer,release:undefined}),isGateRun:admit,compareGateRuns});
  assert.equal((await project()).run.runId,'a-new');
 });
 

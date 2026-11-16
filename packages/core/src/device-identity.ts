@@ -11,7 +11,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // find no device file agree on one id rather than each using its own.
 
 import { randomBytes } from "node:crypto";
-import { constants } from "node:fs";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { lstat, link, mkdir, open, readdir, rm } from "node:fs/promises";
 import { hostname as systemHostname } from "node:os";
 import { setTimeout as delay } from "node:timers/promises";
@@ -150,6 +150,28 @@ async function waitForDevicePublication(path: string, observed: { readonly dev: 
 }
 
 /** This device's identity, or null when the device directory has none yet. A damaged file fails closed. */
+export function readDeviceSync(home: string = deviceHome()): DeviceIdentity | null {
+  const path = deviceFilePath(home);
+  let info;
+  try {
+    info = lstatSync(path);
+  } catch (error) {
+    if ((error as { code?: string }).code === "ENOENT") return null;
+    throw error;
+  }
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
+    fail("DEVICE_FILE_INVALID", `${path} must be a single-link regular file`);
+  }
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile() || opened.nlink !== 1) fail("DEVICE_FILE_INVALID", `${path} must be a single-link regular file`);
+    return parseDevice(readFileSync(fd, "utf8"), path);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export async function readDevice(home: string = deviceHome()): Promise<DeviceIdentity | null> {
   const path = deviceFilePath(home);
   let info;

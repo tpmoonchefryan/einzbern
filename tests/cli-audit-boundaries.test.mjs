@@ -88,15 +88,24 @@ test("in-process recall keeps project-specific corpus settings independent", asy
     const state = await createProject(root, { occurredAt: at, externalKey: key, name: key });
     ids.push(state.projects.find(project => project.externalKey === key).id);
   }
-  await createWork(root, { occurredAt: at, projectId: ids[0], externalKey: "RECALL-INIT", kind: "Initiative", parentId: null, title: "Koala habitat", scope: "A long habitat scope with more detail than the small excerpt allows." });
+  const workIds = [];
+  for (const [index, projectId] of ids.entries()) {
+    const state = await createWork(root, { occurredAt: at, projectId, externalKey: `RECALL-INIT-${index}`, kind: "Initiative", parentId: null, title: "Koala habitat", scope: "A long habitat scope with more detail than the small excerpt allows." });
+    workIds.push(state.work.find(work => work.projectId === projectId).id);
+  }
   for (const [id, limit] of [[ids[0], 8], [ids[1], 64]]) await setWorkspaceSetting(root, { occurredAt: at, configurationProjectId: id, key: "retrieval.scopeExcerptBytes", value: String(limit) });
   async function read(id) {
     let output = "";
-    await runCli(["recall", "--workspace", root, "--project-id", id, "--at", at, "--query", "RECALL-INIT"], { write: value => { output += value; } });
+    await runCli(["recall", "--workspace", root, "--project-id", id, "--at", at, "--query", "Koala habitat"], { write: value => { output += value; } });
     return JSON.parse(output);
   }
   const small = await read(ids[0]);
   const large = await read(ids[1]);
+  assert.deepEqual(small.records.map(record => record.id), [workIds[0]], "project A recalls only its own matching corpus");
+  assert.deepEqual(large.records.map(record => record.id), [workIds[1]], "project B recalls only its own matching corpus");
+  assert.equal(small.scopeExcerptBytes, 8);
+  assert.equal((await read(ids[0])).rebuilt, false, "switching projects preserves A's cache");
+  assert.equal((await read(ids[1])).rebuilt, false, "switching projects preserves B's cache");
   resetRecallCache();
   const freshLarge = await read(ids[1]);
   assert.equal(large.scopeExcerptBytes, 64);

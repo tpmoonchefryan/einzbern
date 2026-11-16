@@ -136,9 +136,18 @@ function writeAtomic(path, value) {
   renameSync(temp, path);
 }
 
+/** Linux pam_umask(8) user-private-group defaults leave g+w (0o020) when uid === gid > 0; shared groups and world-write remain unsafe. */
+function unsafeWritableMode(metadata) {
+  if ((metadata.mode & 0o002) !== 0) return true;
+  if ((metadata.mode & 0o020) === 0) return false;
+  if (process.platform !== "linux" || typeof process.getuid !== "function" || typeof process.getgid !== "function") return true;
+  const uid = process.getuid();
+  return uid === 0 || uid !== process.getgid() || metadata.uid !== uid || metadata.gid !== uid;
+}
+
 function privatePermissions(path, metadata) {
   if (process.platform !== "win32") {
-    return (metadata.mode & 0o022) === 0 && (typeof process.getuid !== "function" || metadata.uid === process.getuid());
+    return !unsafeWritableMode(metadata) && (typeof process.getuid !== "function" || metadata.uid === process.getuid());
   }
   return hasPrivateWindowsPermissions(path);
 }

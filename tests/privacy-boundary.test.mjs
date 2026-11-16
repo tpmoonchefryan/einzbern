@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { LocalCommandError, runLocalCommand } from "../scripts/lib/local-command.mjs";
+import { readSourceFile, walkFiles } from "../scripts/lib/files.mjs";
 import { aggregatePrivacySurface, decodeGitMetadataBytes, normalizePrivacyText, p8ReleasePrivacySourcePaths, parseGitObjectBatch, parseHistoricalTreePaths, scanPrivacyEntries, walkHistoricalCommitPaths } from "../scripts/lib/privacy.mjs";
 import { readUstar, writeUstar } from "../scripts/lib/tar.mjs";
 import { BRAND, ENGINE_REPOSITORY_NAMES, LEGACY_REPOSITORY_NAMES } from "../dist/build/packages/core/src/index.js";
@@ -49,6 +50,24 @@ async function emptyFixtureRepository(context, prefix) {
   fixtureGit(root, ["init", "-q", "-b", "main"]);
   return root;
 }
+
+test("source privacy skips a real linked-worktree Git pointer and still rejects a private path in source", async (context) => {
+  const root = await emptyFixtureRepository(context, "privacy-linked-worktree-");
+  await writeFile(join(root, "source.mjs"), "export const value = 1;\n");
+  fixtureGit(root, ["add", "source.mjs"]);
+  fixtureGit(root, ["commit", "-qm", "source fixture"]);
+  const linked = join(root, "linked");
+  fixtureGit(root, ["worktree", "add", "--detach", linked, "HEAD"], { tolerateStderr: true });
+  assert.match(await readFile(join(linked, ".git"), "utf8"), /^gitdir: /u);
+  const entries = async () => Promise.all((await walkFiles(linked)).map(async (path) => ({
+    label: path.slice(linked.length + 1), kind: "source", content: (await readSourceFile(path)).toString("utf8"),
+  })));
+  assert.deepEqual((await entries()).map(entry => entry.label), ["source.mjs"]);
+  assert.deepEqual(scanPrivacyEntries(await entries(), { owner: "public-contributor" }), []);
+  const privatePath = joinParts(["", "home", "fixture-user", ".einzbern", "device.json"], "/");
+  await writeFile(join(linked, "source.mjs"), `export const privatePath = ${JSON.stringify(privatePath)};\n`);
+  assert.ok(scanPrivacyEntries(await entries(), { owner: "public-contributor" }).includes("LINUX_HOME_PATH:source:source.mjs"));
+});
 
 // Independent reimplementation of the length the batch pass must emit: the batch-check
 // bytes are byte-for-byte the headers the batch pass repeats, plus each declared payload
@@ -269,6 +288,7 @@ test("classified privacy samples stay path-and-line exact across source, history
     "tests/privacy-boundary.test.mjs",
     "tests/push-wiki.test.mjs",
     "tests/registry-resolve.test.mjs",
+    "tests/helpers/release-fixture.mjs",
     "tests/release-lockstep.test.mjs",
     "tests/setup-fresh.test.mjs",
     "tests/variables-cli.test.mjs",

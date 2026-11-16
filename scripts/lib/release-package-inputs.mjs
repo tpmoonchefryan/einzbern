@@ -18,7 +18,7 @@ export const SPECIFICATIONS = Object.freeze([
 ]);
 
 // Public helper contracts that retain their documented source-relative paths.
-export const CONTRACT_DOCUMENTS = Object.freeze(["docs/codex-native-controller.md"]);
+export const CONTRACT_DOCUMENTS = Object.freeze(["docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md"]);
 
 async function treeFiles(root, relativePath = "") {
   const directory = relativePath === "" ? root : join(root, ...relativePath.split("/"));

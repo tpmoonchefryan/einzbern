@@ -4328,7 +4328,8 @@ button:disabled { cursor: not-allowed; }
                 <form id="gate-add-form" data-ui="gate-add-form">
                   <div class="tcrn-grid tcrn-grid--2">
                     <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="gates.name">Gate name</span><input class="tcrn-input" name="name" required autocomplete="off"></label>
-                    <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="gates.root">Project-relative root</span><input class="tcrn-input" name="root" value="." required autocomplete="off"></label>
+                    <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="gates.repository">Git repository identity (optional)</span><input class="tcrn-input" name="repository" autocomplete="off" placeholder="example.org/team/project"></label>
+                    <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="gates.root">Relative root</span><input class="tcrn-input" name="root" value="." required autocomplete="off"></label>
                     <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="gates.command">Command as JSON argv</span><textarea class="tcrn-input tcrn-textarea" name="command" required rows="2" placeholder='["pnpm","verify:links"]'></textarea></label>
                     <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="gates.coversInput">Covers, one per line: a path glob or a work id</span><textarea class="tcrn-input tcrn-textarea" name="covers" rows="2" placeholder="src/**"></textarea></label>
                   </div>
@@ -6432,6 +6433,7 @@ const BOOT = __PORTAL_BOOT__;
       <div class="tcrn-table-shell__cell" role="cell" data-column-label="${esc(t("collection.order"))}"><label class="tcrn-field"><span class="tcrn-sr-only">${esc(t("collection.order"))}</span>${orderInput(gate.order ?? "", `aria-label="${esc(t("collection.order"))}" data-gate-order`)}</label></div>
       <div class="tcrn-table-shell__cell" role="cell" data-column-label="${esc(t("gates.columnGate"))}"><div data-gate-cell><strong><code>${esc(gate.name)}</code></strong>
         <label class="tcrn-field"><span class="tcrn-field__label">${esc(t("gates.command"))}</span><textarea class="tcrn-input tcrn-textarea" data-gate-command rows="2">${esc(JSON.stringify(gate.command ?? []))}</textarea></label>
+        <label class="tcrn-field"><span class="tcrn-field__label">${esc(t("gates.repository"))}</span><input class="tcrn-input" data-gate-repository value="${esc(gate.repository ?? "")}" placeholder="example.org/team/project"></label>
         <label class="tcrn-field"><span class="tcrn-field__label">${esc(t("gates.root"))}</span><input class="tcrn-input" data-gate-root value="${esc(gate.root ?? ".")}"></label>
         <div data-gate-switches><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-gate-enabled ${gate.enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(t("gates.enabled"))}</span></label><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-gate-required ${gate.required ? "checked" : ""}><span class="tcrn-switch__label">${esc(t("gates.required"))}</span></label><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-gate-release-only ${gate.releaseOnly ? "checked" : ""}><span class="tcrn-switch__label">${esc(t("gates.releaseOnly"))}</span></label></div>
         <div data-gate-cell-actions><button type="button" class="tcrn-button tcrn-button--secondary" data-gate-save="${esc(gate.name)}" data-cli-action="gates-config-set">${esc(t("gates.save"))}</button><button type="button" class="tcrn-button tcrn-button--quiet" data-gate-remove="${esc(gate.name)}" data-cli-action="gates-config-remove">${esc(t("gates.remove"))}</button></div>
@@ -7193,8 +7195,10 @@ const BOOT = __PORTAL_BOOT__;
     const values = new FormData(form);
     const command = parseGateArgv(String(values.get("command") ?? ""));
     if (command === null) { showReceipt({ ok: false, reasonCode: "PORTAL_GATE_COMMAND_INVALID" }); return; }
+    const repository = String(values.get("repository") ?? "").trim();
     const gate = {
       name: String(values.get("name") ?? "").trim(), command, root: String(values.get("root") ?? "."),
+      ...(repository === "" ? {} : { repository }),
       covers: String(values.get("covers") ?? "").split(/\r?\n/u).map((cover) => cover.trim()).filter((cover) => cover.length > 0),
       enabled: values.has("enabled"), required: values.has("required"), releaseOnly: values.has("releaseOnly"),
     };
@@ -7220,8 +7224,10 @@ const BOOT = __PORTAL_BOOT__;
       const command = parseGateArgv(row.querySelector("[data-gate-command]").value);
       if (command === null) { showReceipt({ ok: false, reasonCode: "PORTAL_GATE_COMMAND_INVALID" }); return; }
       const order = row.querySelector("[data-gate-order]")?.value.trim() ?? "";
+      const repository = row.querySelector("[data-gate-repository]").value.trim();
       const gate = {
         name: button.dataset.gateSave, command, root: row.querySelector("[data-gate-root]").value,
+        repository,
         covers: gateCoversFrom(row), required: row.querySelector("[data-gate-required]").checked,
         enabled: row.querySelector("[data-gate-enabled]").checked, releaseOnly: row.querySelector("[data-gate-release-only]").checked,
         ...(order === "" ? {} : { order }),

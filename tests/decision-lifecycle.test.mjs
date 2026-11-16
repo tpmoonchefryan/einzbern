@@ -380,18 +380,22 @@ test("SUB-426 (R17 续作修订三; STORY-514 R4): recall --status obsolete read
   assert.equal(obsolete.status, "obsolete");
   const firstObsolete = hitOf(obsolete, first.id);
   assert.deepEqual(firstObsolete?.obsoleteDecisions, [superseded], "the obsolete decision comes with the decision that superseded it");
-  assert.ok(firstObsolete.line.includes(`D1 ${EAST}`), firstObsolete.line);
+  assert.ok(firstObsolete.line.includes("D1 历史已失效") && firstObsolete.line.includes(EAST), firstObsolete.line);
+  assert.ok(firstObsolete.line.includes(`minutes-show --id ${first.id}#D1`));
   assert.ok(firstObsolete.line.includes(`过时决策 ${superseded.decision}→${superseded.supersededBy}`), firstObsolete.line);
   assert.equal(hitOf(await recallAs(fx, 15, "west shelf otter archive", "obsolete"), second.id), undefined, "the valid decision's words do not find its record");
   const pelicanObsolete = hitOf(await recallAs(fx, 15, "pelican noon", "obsolete"), second.id);
   assert.deepEqual(pelicanObsolete?.obsoleteDecisions, [withdrawn], "the withdrawn decision's words find its record, with no successor");
-  assert.ok(pelicanObsolete.line.includes(`D2 ${PELICAN}`), pelicanObsolete.line);
+  assert.ok(pelicanObsolete.line.includes("D2 历史已失效") && pelicanObsolete.line.includes(PELICAN), pelicanObsolete.line);
+  assert.ok(pelicanObsolete.line.includes(`minutes-show --id ${second.id}#D2`));
   assert.ok(pelicanObsolete.line.includes(`过时决策 ${withdrawn.decision}→撤回`), pelicanObsolete.line);
-  assert.equal(hitOf(await recallAs(fx, 16, "heron ledger", "obsolete"), third.id), undefined, "a record with no obsolete decision is not indexed");
+  const onlyObsolete = await recallAs(fx, 16, "heron ledger", "obsolete");
+  assert.equal(hitOf(onlyObsolete, third.id), undefined, "a record with no obsolete decision is not indexed");
 
   // all: every decision of every record, each obsolete one with its successor or 撤回. Asked right after
   // an obsolete read, it is not answered from that read's index: the checkpoint names the status.
   const heron = await recallAs(fx, 16, "heron ledger", "all");
+  assert.equal(heron.headEventHash, onlyObsolete.headEventHash, "the status switch is tested at the same head");
   assert.equal(heron.rebuilt, true, "an all read after an obsolete read at the same head rebuilds its index");
   assert.ok(hitOf(heron, third.id) !== undefined, "a record whose decisions are all valid is recalled under all");
   const all = await recallAs(fx, 17, "east shelf otter archive", "all");

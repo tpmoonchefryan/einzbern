@@ -115,7 +115,7 @@ async function twoDevices(context, name) {
 // A role card of the library's crest naming its work by reference.
 function capture(fx, subject, sourceReferences, extra = {}) {
   return captureKnowledgeUnit(fx.workspace, {
-    occurredAt: fx.next(), subject, summary: `${subject}, in brief`, snippet: `${subject}, the line`, tags: ["family"],
+    occurredAt: fx.next(), subject, summary: `${subject.replace(/\b(?:survey|census|check|measure)$/u, "").trim()} must use only writer-${process.env.EINZBERN_HOME === fx.homeA ? "a" : "b"}`, snippet: `${subject}, the line`, tags: ["family"],
     accountableOwnerId: OWNER, body: `${subject} body`, sourceReferences, ...extra,
   }, { allowTrailing: true });
 }
@@ -124,7 +124,7 @@ function capture(fx, subject, sourceReferences, extra = {}) {
 function card(fx, key, subject, { scope = "project", sourceReferences = [], linkedWorkIds = [], coexist } = {}) {
   return createKnowledgeUnit(fx.workspace, {
     occurredAt: fx.next(), externalKey: key, scope, projectId: scope === "project" ? fx.projectId : null, roleScopes: [], category: "workflow",
-    kind: "fact", tags: ["family"], subject, summary: `${subject}, in brief`, snippet: `${subject}, the line`, accountableOwnerId: OWNER,
+    kind: "fact", tags: ["family"], subject, summary: `${subject.replace(/\b(?:survey|census|check|measure)$/u, "").trim()} must use only writer-${process.env.EINZBERN_HOME === fx.homeA ? "a" : "b"}`, snippet: `${subject}, the line`, accountableOwnerId: OWNER,
     sourceReferences, sourceDigest: canonicalSha256({ key }), supersedes: null, linkedWorkIds, linkedDecisionIds: [], linkedGateIds: [],
     linkedEvidenceIds: [], retrievalDisposition: "default", freshnessState: "fresh", lastVerified: null,
     stalenessPolicy: { maximumAgeDays: null, unknownDisposition: "fail-closed" }, exportDisposition: "metadata-only", body: `${key} body`,
@@ -132,7 +132,7 @@ function card(fx, key, subject, { scope = "project", sourceReferences = [], link
   });
 }
 
-test("STORY-539 GWT2 (SUB-504): of the pairs two devices wrote, one of INIT families apart is not unresolved; one of one family, or of a family not known, is", async (context) => {
+test("654 / historical SUB-504: same-domain contradictory pairs remain unresolved across INIT families", async (context) => {
   const fx = await twoDevices(context, "pairs");
   // A writes three cards, then the folder holds A's stream back while B writes three close to them.
   const gullA = await as(fx.homeA, () => capture(fx, "Gull nesting cliff survey", ["RF-STORY-A1"]));
@@ -145,28 +145,32 @@ test("STORY-539 GWT2 (SUB-504): of the pairs two devices wrote, one of INIT fami
   for (const written of [gullB, heronB, otterB]) assert.equal(Object.hasOwn(written, "conflicts"), false, "B saw none of A's cards");
   await fx.deliver(fx.homeA);
 
-  const unresolved = pairs([heronA.id, heronB.id], [otterA.id, otterB.id]);
+  const unresolved = pairs([gullA.id, gullB.id], [heronA.id, heronB.id], [otterA.id, otterB.id]);
   for (const home of [fx.homeA, fx.homeB]) {
     const listed = await as(home, () => listKnowledgeMetadata(fx.workspace, { at: AT }));
     assert.equal(listed.reasonCode, "KNOWLEDGE_LIST_READY");
-    assert.deepEqual(listed.unresolvedConflicts, unresolved, "A's gull card is of A and B's of B: that pair is not named");
-    assert.deepEqual(ids(listed.records), [gullA.id, gullB.id].sort(), "the gull pair's cards stay in default selection; the two pairs named leave it");
+    assert.deepEqual(listed.unresolvedConflicts, unresolved.slice(0, 2), "default diagnostics have bounded examples");
+    assert.equal(listed.diagnostics.conflictPairCount, 3);
+    assert.equal(listed.diagnostics.truncated, true);
+    const full = await as(home, () => listKnowledgeMetadata(fx.workspace, { at: AT, diagnostics: "conflicts" }));
+    assert.deepEqual(full.diagnosticPage.records, unresolved);
+    assert.deepEqual(ids(listed.records), [], "all three same-domain contradictions are withheld");
     const all = await as(home, () => listKnowledgeMetadata(fx.workspace, { at: AT, selection: "all" }));
-    assert.deepEqual(all.unresolvedConflicts, unresolved);
+    assert.deepEqual(all.unresolvedConflicts, unresolved.slice(0, 2));
     assert.equal(all.total, 6, "selection all lists every card");
     const byId = new Map(all.records.map((record) => [record.id, record]));
     assert.deepEqual(knowledgeConflictHits([byId.get(gullA.id)], byId.get(gullB.id).subject), [gullA.id], "the gull cards score as a conflict, so the scan finds them a pair");
   }
   await as(fx.homeB, async () => {
     const recalled = await readRecallCards(fx.workspace, { at: AT });
-    assert.deepEqual(recalled.cards.map((entry) => entry.id).sort(), [gullA.id, gullB.id].sort(), "recall reads the gull pair's cards");
-    assert.deepEqual(recalled.projectCrestDegraded, { reasonCode: "KNOWLEDGE_POSSIBLE_CONFLICT", unresolvedConflicts: unresolved, withheldCards: 4 });
+    assert.deepEqual(recalled.cards, [], "Recall applies the same projection across INIT families");
+    assert.deepEqual(recalled.projectCrestDegraded, { reasonCode: "KNOWLEDGE_POSSIBLE_CONFLICT", unresolvedConflicts: unresolved.slice(0, 2), withheldCards: 6 });
     const checkpoint = JSON.parse(await exportKnowledgeCheckpoint(fx.workspace, AT));
-    assert.deepEqual(ids(checkpoint.records), [gullA.id, gullB.id].sort(), "a checkpoint's corpus is the default selection's");
+    assert.deepEqual(ids(checkpoint.records), [], "a checkpoint uses the same default corpus");
   });
 });
 
-test("STORY-539 GWT2 (SUB-504): the user crest's pairs are split in the library a read goes through", async (context) => {
+test("654 / historical SUB-504: user contradictions do not depend on the library a read goes through", async (context) => {
   const fx = await twoDevices(context, "user");
   const crest = join(fx.base, "synced", "crest");
   await mkdir(join(fx.base, "synced"));
@@ -181,10 +185,10 @@ test("STORY-539 GWT2 (SUB-504): the user crest's pairs are split in the library 
   await rename(join(fx.held, "user-a"), streamA);
 
   const listed = await as(fx.homeB, () => listKnowledgeMetadata(fx.workspace, { at: AT, scope: "user" }));
-  assert.deepEqual(listed.unresolvedConflicts, [[heronA.id, heronB.id].sort()], "the herons are both of B; the gulls are of A and of B");
-  assert.deepEqual(ids(listed.records), [gullA.id, gullB.id].sort());
+  assert.deepEqual(listed.unresolvedConflicts, pairs([gullA.id, gullB.id], [heronA.id, heronB.id]), "INIT lineage cannot waive a user contradiction");
+  assert.deepEqual(ids(listed.records), []);
 
-  // Read through a library that holds none of that work, no card has a known family: both pairs stand.
+  // A library holding none of the cited work produces the same intrinsic conflict pairs.
   const other = join(fx.base, "other", ".ether");
   await as(fx.homeB, async () => {
     await initializeLibrary({ root: other, createdAt: AT });
@@ -259,22 +263,21 @@ test("545: completion hints cap ranked candidates at five independently of query
 });
 
 
-test("545: conflict projection follows stable creation direction, not reverse-only evidence", () => {
-  const older = { id: "knowledge:a", updatedAt: "2026-10-14T08:00:00Z", subject: "Amber rotation", summary: "", snippet: "", tags: [], lifecycle: "active", extensions: {} };
+test("653/654: projection is symmetric and requires same-domain mutually exclusive claims", () => {
+  const older = { scope: "workspace", projectId: null, id: "knowledge:a", updatedAt: "2026-10-14T08:00:00Z", subject: "Amber rotation", summary: "Enable amber rotation", snippet: "", tags: [], lifecycle: "active", extensions: {} };
   const newer = { ...older, id: "knowledge:b", updatedAt: "2026-10-14T09:00:00Z", subject: "Cobalt deployment", summary: "Amber rotation; Amber rotation" };
   const conflict = (left, right) => knowledgeProjectionConflict(left, right, left.updatedAt, right.updatedAt);
   assert.deepEqual(knowledgeConflictHits([older], newer.subject), []);
   assert.deepEqual(knowledgeConflictHits([newer], older.subject), [newer.id]);
-  assert.equal(conflict(older, newer), false);
-  assert.equal(conflict(newer, older), false, "enumeration never selects the comparison direction");
-  const genuine = { ...newer, subject: "Amber rotation guide" };
+  assert.equal(conflict(older, newer), false, "repeated topic evidence is compatible");
+  assert.equal(conflict(newer, older), false);
+  const related = { ...newer, subject: "Amber rotation guide" };
+  assert.equal(conflict(older, related), false, "related detail stays selectable");
+  const genuine = { ...related, summary: "Disable amber rotation" };
   assert.equal(conflict(older, genuine), true);
   assert.equal(conflict(genuine, older), true);
-  assert.equal(knowledgeProjectionConflict({ ...older, updatedAt: "2026-10-15T08:00:00Z" }, newer, older.updatedAt, newer.updatedAt), false, "refresh metadata does not replace the original event instant");
-  const tied = { ...newer, updatedAt: older.updatedAt };
-  assert.equal(conflict(older, tied), false);
-  assert.equal(conflict(tied, older), false);
-  const reverseTie = { ...tied, id: "knowledge:0" };
-  assert.equal(conflict(older, reverseTie), true, "equal-time cards use canonical id, not input order");
-  assert.equal(conflict(reverseTie, older), true);
+  const tied = { ...genuine, updatedAt: older.updatedAt };
+  assert.equal(conflict(older, tied), true);
+  assert.equal(conflict(tied, older), true);
+  assert.equal(knowledgeProjectionConflict({ ...older, updatedAt: "2026-10-15T08:00:00Z" }, genuine, older.updatedAt, genuine.updatedAt), true);
 });

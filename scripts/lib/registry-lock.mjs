@@ -8,4 +8,4 @@
 // builds beside the names build and points this bridge at them, so the release bundle carries one copy
 // of each.
 export { withFileLock } from "../../dist/build/packages/core/src/file-lock.js";
-export { registryPath } from "../../dist/build/packages/core/src/device-home.js";
+export { registryPath, cachePath } from "../../dist/build/packages/core/src/device-home.js";
