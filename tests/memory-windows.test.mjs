@@ -61,7 +61,7 @@ cp.execFileSync = (executable, args, options) => {
   }
   assert.deepEqual(args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
   if (args[3].includes('CreateDirectoryW') || args[3].includes('Add-Type -TypeDefinition $source -OutputAssembly')) {
-    assert.equal(options.timeout, 15000);
+    assert.equal(options.timeout, 60000);
     return 'true';
   }
   assert.equal(options.timeout, 5000);
