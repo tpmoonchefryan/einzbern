@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rename, rm, writeFile, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,6 +96,23 @@ test("existing gates consumers execute independent roots from a Cross Project wo
   const productRuns = bothRepositories.targets.filter(result => result.reference.libraryId === a.reference.libraryId);
   assert.equal(new Set(productRuns.map(result => result.recordPath)).size, 2);
   assert.equal(JSON.parse(await readFile(join(helperRepo, "handoff.json"), "utf8")).repository.buildProject, "helper");
+  for (const [repo, identity, name] of [[a.repo, "en", "en"], [helperRepo, "en-helper", "helper"]]) {
+    execFileSync("git", ["init", "--quiet", repo]);
+    execFileSync("git", ["-C", repo, "remote", "add", "origin", `https://example.test/${identity}`]);
+    await setConfigRecord(a.path, { collection: "gate", key: name, projectId: a.reference.projectId,
+      value: { root: ".", repository: `example.test/${identity}`, command: [process.execPath, "-e", "process.stdout.write(process.cwd())"],
+        covers: ["**"], enabled: true, required: true, releaseOnly: false }, occurredAt: at });
+  }
+  const portable = await cli(["gates-run", ...args, "--at", at]);
+  assert.equal(portable.ok, true, JSON.stringify(portable));
+  assert.equal(portable.targets.length, 2, "repository-bound declarations run once per project");
+  const portableRun = portable.targets.find(result => result.reference.libraryId === a.reference.libraryId);
+  assert.equal(portableRun.handoff.repository, null, "the handoff describes the complete project");
+  assert.equal(portableRun.run.gates.length, 2);
+  for (const gate of portableRun.run.gates) {
+    const log = join(portableRun.recordPath, "..", gate.outputFile);
+    assert.equal(await readFile(log, "utf8"), gate.name === "en" ? a.repo : helperRepo);
+  }
   const denied = join(b.repo, "not-executable"); await writeFile(denied, "#!/bin/sh\nexit 0\n", { mode: 0o600 });
   await setConfigRecord(b.path, { collection: "gate", key: "fr", projectId: b.reference.projectId, value: { root: ".", command: [denied], covers: ["**"], enabled: true, required: true, releaseOnly: false }, occurredAt: at });
   const refused = await cli(["gates-run", ...args, "--at", at]);

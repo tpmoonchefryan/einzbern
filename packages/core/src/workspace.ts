@@ -4108,6 +4108,50 @@ async function commitAppend(prepared: PreparedAppend, options: WorkspaceMutation
   };
 }
 
+/** Verify a completed write against a fresh authoritative projection, including business fields. */
+export async function readBackWorkspaceWrite(
+  workspaceRoot: string,
+  committed: WorkspaceState,
+  ids: readonly string[],
+): Promise<Readonly<Record<string, JsonValue>>> {
+  const boundary = { localCommitted: true, remoteVerification: "unverified" };
+  try {
+    const actual = await materializeWorkspace(workspaceRoot);
+    const expectedRecords = new Map([...committed.work, ...committed.minutes, ...committed.projects].map((record) => [record.id, record]));
+    const actualRecords = new Map([...actual.work, ...actual.minutes, ...actual.projects].map((record) => [record.id, record]));
+    const records = ids.map((id) => {
+      const expected = expectedRecords.get(id);
+      const observed = actualRecords.get(id);
+      const matches = expected !== undefined && observed !== undefined && canonicalJson(expected) === canonicalJson(observed);
+      return {
+        id, matches,
+        revision: observed?.revision ?? null,
+        status: observed !== undefined && "status" in observed ? observed.status : null,
+        title: observed !== undefined && "title" in observed ? observed.title : null,
+        summary: observed !== undefined && "summary" in observed ? observed.summary : null,
+        recordDigest: observed === undefined ? null : canonicalSha256(observed),
+      };
+    });
+    const verifiedReadback = actual.metadata.workspaceId === committed.metadata.workspaceId &&
+      actual.version >= committed.version && records.length > 0 && records.every((record) => record.matches);
+    return {
+      ...boundary, verifiedReadback, ok: verifiedReadback,
+      readback: { workspaceId: actual.metadata.workspaceId, version: actual.version, headEventHash: actual.headEventHash, records },
+      ...(verifiedReadback ? {} : {
+        reasonCode: "WORKSPACE_WRITE_READBACK_UNVERIFIED",
+        remedy: "read the target records and compare their revisions before retrying the write",
+      }),
+    };
+  } catch (error) {
+    return {
+      ...boundary, verifiedReadback: false, ok: false,
+      reasonCode: "WORKSPACE_WRITE_READBACK_UNVERIFIED",
+      readback: { error: String(error), ids: [...ids] },
+      remedy: "read the target records and compare their revisions before retrying the write",
+    };
+  }
+}
+
 // Where one stream stands: its device, its sequence and its head event.
 interface StreamPlace {
   readonly deviceId: string;

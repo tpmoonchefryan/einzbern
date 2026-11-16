@@ -741,3 +741,24 @@ test("public update and repair carry synthetic native admission without granting
   await applySetup(preserved);
   assert.deepEqual(JSON.parse(await readFile(path, "utf8")).hooks.SubagentStop, document.hooks.SubagentStop);
 });
+
+test("671: fresh, repair and update read back AGENTS files when shared managed records already exist", async (context) => {
+  const fixture = await installed(context);
+  const agents = join(fixture.project, "AGENTS.md");
+  const original = await readFile(agents, "utf8");
+  assert.ok(parseManagedFile(original).sections.some((section) => section.id === "navigation"));
+  const release = await releaseOf(fixture.base, NEWER);
+  for (const mode of ["repair", "update"]) {
+    await rm(agents);
+    const planned = await plan(fixture, mode, mode === "update" ? { archive: release.archive } : {});
+    assert.deepEqual(planned.blockers, []);
+    const result = await applySetup(planned);
+    assert.equal(await readFile(agents, "utf8"), original);
+    assert.ok(result.written.some((entry) => entry.path === agents && entry.action === "create"));
+    const check = result.selfCheck.find((entry) => entry.check === "managed-sections");
+    assert.equal(check.ok, true);
+    const readback = check.detail.fileReadbacks.find((entry) => entry.file === "AGENTS.md");
+    assert.deepEqual([readback.exists, readback.hostLoad], [true, "unverified"]);
+    assert.equal(readback.sha256, createHash("sha256").update(original).digest("hex"));
+  }
+});

@@ -509,6 +509,8 @@ export async function verifySkillCopies(input: {
   readonly kiroHome?: string;
   readonly includeAntigravity?: boolean;
   readonly antigravityConfigHome?: string;
+  readonly presentHostsOnly?: boolean;
+  readonly requiredHosts?: readonly SkillCopyHost[];
 } = {}): Promise<SkillCopiesVerification> {
   const home = resolve(input.home ?? homedir());
   const device = resolve(input.deviceHome ?? currentDeviceHome());
@@ -525,6 +527,8 @@ export async function verifySkillCopies(input: {
     const path = skillCopyPath(home, root, kiroHome, antigravityConfigHome);
     const entry = recorded.find((copy) => copy.host === root.host && copy.path === path);
     const stats = await lstatOrNull(path);
+    if (input.presentHostsOnly === true && entry === undefined && stats === null && !input.requiredHosts?.includes(root.host) &&
+      !(root.host === "kiro" && input.includeKiro) && !(root.host === "antigravity" && input.includeAntigravity)) continue;
     const actual = stats !== null && stats.isDirectory() ? await treeDigestOrNull(path) : null;
     let reasonCode: SkillCopyVerificationCode = "SKILL_COPY_VERIFIED";
     if (stats === null) reasonCode = "SKILL_COPY_MISSING";
@@ -542,7 +546,7 @@ export async function verifySkillCopies(input: {
   }
   const legacyCopies = (await legacySkillCopies(home)).map((copy) => copy.path);
   let reasonCode: SkillCopiesVerification["reasonCode"] = "SKILL_COPIES_VERIFIED";
-  if (loaded.state === "missing") reasonCode = "SKILL_COPIES_NOT_RECORDED";
+  if (loaded.state === "missing" && (input.presentHostsOnly !== true || copies.length > 0)) reasonCode = "SKILL_COPIES_NOT_RECORDED";
   else if (loaded.state === "invalid") reasonCode = "SKILL_COPIES_RECORD_INVALID";
   else if (copies.some((copy) => !copy.ok)) reasonCode = "SKILL_COPIES_DRIFTED";
   else if (legacyCopies.length > 0) reasonCode = "SKILL_COPIES_LEGACY_PRESENT";

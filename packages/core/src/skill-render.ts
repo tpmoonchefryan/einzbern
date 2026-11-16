@@ -65,7 +65,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Starting work",
     verbs: ["recall", "rule-list"],
-    action: "Recall as needed: `recall --view agent --query \"<task>\" --at <UTC>`. Enabled rules only (`specs/work-practices-v1.md`). New, resumed and delegated sessions read their own live work. Specs: `references/kiro-specs.md`. Dot blocker/privacy-publication: `specs/dot-rules-v1.md`.",
+    action: "Use `recall --view agent --query \"<task>\" --at <UTC>`. Sessions read their live work. Enabled rules: `specs/work-practices-v1.md`; Kiro: `references/kiro-specs.md`; Dot blocker/privacy-publication: `specs/dot-rules-v1.md`.",
   },
 
   {
@@ -76,22 +76,17 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Need the full text",
     verbs: ["work-show", "work-content-context", "minutes-show", "work-project-context", "execution-prepare", "execution-record", "execution-evidence"],
-    action: "Use each target's `handoff` for native dispatch/gates (`EINZBERN_PROJECT_CONTEXT`). Unresolved targets block only dependent work; coordination-only needs no development target. `specs/context-v1.md`. `--execution-request`: `dispatchAdmitted=true`; selected runner/model/effort, never substitute. Keep stdout/stderr/exit code; no reusable permit. `execution-evidence --from-file <json>` remains read-only validation, not authentication. `specs/dispatch-admission-evidence-v1.md`.",
+    action: "Read `work-show --id <id>` or `minutes-show --id <id>`. Use each target's `handoff` for dispatch/gates (`EINZBERN_PROJECT_CONTEXT`). Unresolved targets block dependent work. `--execution-request` requires `dispatchAdmitted=true` and the selected runner/model/effort. Keep that selection. Retain raw stdout/stderr/exit code. Evidence validation grants no execution permission. `specs/context-v1.md`, `specs/dispatch-admission-evidence-v1.md`.",
   },
   {
     moment: "Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity)",
     verbs: ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"],
-    action: "Host/category/rejection policy; not permission. Class fallback/hard limits; normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports, attempt association (`--binding`/`--prior`), unknown/cancel/finality/review: `specs/host-fallback-v1.md`. Dot model selection is host-managed. Codex only: independent main/economy peers, no collector; `collaboration.spawn_agent`; workers native final; coordinator reports to manifest.main; reports threadId/hostId/prompt only; authorized settings/query exits: `docs/codex-native-controller.md`. Kiro: `specs/kiro-host-v1.md`; Antigravity: `specs/antigravity-host-v1.md`, `docs/antigravity-swarm-controller.md`. Other hosts keep their workflow.",
+    action: "Resolve policy and Class fallback/hard limits. Use normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports, attempt association (`--binding`/`--prior`), unknown/cancel/finality/review: `specs/host-fallback-v1.md`. Dot model selection is host-managed. Host Integrations/controller details: `docs/codex-native-controller.md`, `specs/kiro-host-v1.md`, `docs/antigravity-swarm-controller.md`.",
   },
   {
     moment: "Shared submission",
     verbs: ["shared-submit-plan", "shared-submit-evidence", "shared-submit-advisory-read", "shared-submit-advisory-write"],
     action: "Complete baseline/engine changes; one complete pre-submit refresh + engine reapply; serial handoff; segments before manifest; verify remote bytes + complete destination replay; observe release. Advisory is not a lock; absence/age grants nothing. Query unknown publication before retry. `specs/shared-submit-v1.md`.",
-  },
-  {
-    moment: "Configuration backup or restore",
-    verbs: ["config-backup-plan", "config-backup-create", "config-backup-prepare", "config-backup-commit", "config-backup-verify", "config-backup-list", "config-backup-resume", "config-backup-retire", "config-restore-plan", "config-restore-apply"],
-    action: "Allowlist, retention. Remote prepare/readback/commit; same-ID recovery, not auth. Local unchanged. `specs/config-backup-v1.md`.",
   },
   {
     moment: "Work is done",
@@ -116,7 +111,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
 ].map((entry) => Object.freeze({ ...entry, verbs: Object.freeze([...entry.verbs]) })));
 
 // Verbs the text names outside the table.
-const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "library-resolve", "setup"]);
+const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "library-resolve", "setup", "work-list", "work-create", "work-batch"]);
 
 /** Every engine verb SKILL.md names, the table's first and in its order, without repeats. */
 export function skillNamedVerbs(): readonly string[] {
@@ -177,15 +172,19 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "Versions: fixes/internal: patch; new features: minor; breaks: major. Explicit `--version`.",
     "",
+    "## Core commands",
+    "",
+    "Add `--workspace <libraryPath>` and, for writes, `--at <UTC>`. `work-list --limit 20` gives summaries (`--full true` for content). `work-create --project-id <id> --kind Initiative --external-key <key> --title <title>`. `work-transition --id <id> --status active`. `work-annotate --id <id> --summary <text>`. `work-batch --from-file <json>`. `minutes-record --project-id <id> --external-key <key> --title <title> --summary <summary> --decisions-file <json>` takes a JSON string array. Check `verifiedReadback`/`localCommitted`. Verify remote delivery at destination.",
+    "",
     "## Three steps",
     "",
     "1. Install this skill: `npx skills add tpmoonchefryan/mana-orchestrate`.",
     `2. Say "install ${BRAND.engine.name}". Hooks or independent dot target: \`setup\`; approval: install.md.`,
-    "3. Installation, policy changes, restoration and publication retain their separate approvals. 20-minute patrol and 00:00 Asia/Shanghai backup: independent; unapproved policy forbids daily enablement; unknown stays unknown.",
+    "3. Installation, policy changes, restoration and publication need their own approvals. Owner Extensions (dot/schedules): `references/owner-extensions.md`.",
     "",
     "## Install-type tasks",
     "",
-    "Install/restore/update/repair/rollback/migrate/uninstall/doctor: read `references/` (`install.md`, `restore.md`, `update.md`, `migrate.md`, `uninstall.md`, `doctor.md`); dot: install; never load them for any other work.",
+    "Install/restore/update/repair/rollback/migrate/uninstall/doctor: read `references/` (`install.md`, `restore.md`, `update.md`, `migrate.md`, `uninstall.md`, `doctor.md`); dot uses `owner-extensions.md`; never load them for any other work.",
     "",
   ];
   const markdown = lines.join("\n");

@@ -4600,6 +4600,36 @@ export async function createKnowledgeUnit(workspaceRoot: string, input: CreateKn
   return optimisticCrestWrite(workspaceRoot, (commitUnderLock) => createLibraryCrestEvent(workspaceRoot, input, options, commitUnderLock));
 }
 
+async function readBackKnowledgeWrite(read: () => Promise<CrestScan>, written: KnowledgeUnitMetadata): Promise<Readonly<Record<string, JsonValue>>> {
+  const boundary = { localCommitted: true, remoteVerification: "unverified" };
+  try {
+    const scan = await read();
+    const observed = scan.units.find((unit) => unit.metadata.id === written.id);
+    const verifiedReadback = observed !== undefined && canonicalJson(observed.metadata) === canonicalJson(written);
+    return {
+      ...boundary, verifiedReadback, ok: verifiedReadback,
+      readback: {
+        storeId: scan.marker.workspaceId, version: scan.marker.version,
+        records: observed === undefined ? [] : [{
+          id: observed.metadata.id, revision: observed.metadata.revision, status: observed.metadata.lifecycle,
+          headEventHash: observed.event?.eventHash ?? null, recordDigest: canonicalSha256(observed.metadata),
+        }],
+      },
+      ...(verifiedReadback ? {} : {
+        reasonCode: "KNOWLEDGE_WRITE_READBACK_UNVERIFIED",
+        remedy: "read the target card and compare its revision before retrying the write",
+      }),
+    };
+  } catch (error) {
+    return {
+      ...boundary, verifiedReadback: false, ok: false,
+      reasonCode: "KNOWLEDGE_WRITE_READBACK_UNVERIFIED",
+      readback: { id: written.id, error: String(error) },
+      remedy: "read the target card and compare its revision before retrying the write",
+    };
+  }
+}
+
 async function createUserCrestEvent(
   workspaceRoot: string,
   input: CreateKnowledgeUnitInput,
@@ -4706,10 +4736,7 @@ async function createUserCrestEvent(
   // TCRN-CROSS-SUB-425 (MIN-239 D4): this device's stream gives up the bodies of the removed cards,
   // the one this write superseded among them.
   await clearRemovedBodies(scan, device.deviceId, [...scan.removals.keys(), ...(metadata.supersedes === null ? [] : [metadata.supersedes])]);
-  // TCRN-CROSS-SUB-310 (R14 (d)): the event is committed, so the answer is the write's own: nothing
-  // after this point re-reads the crest. An event another device delivered meanwhile cannot turn a
-  // committed write into a refusal; the next read reports any conflict it forms. The version is
-  // the one this write's scan projected, advanced by this event.
+  // The receipt keeps the committed version and separately reports the authoritative readback.
   return {
     schemaVersion: "tcrn.knowledge-create-result.v1",
     reasonCode: "KNOWLEDGE_UNIT_CREATED",
@@ -4720,6 +4747,7 @@ async function createUserCrestEvent(
     scope: "user",
     ...(conflicts.length > 0 ? { conflicts: [...conflicts] } : {}),
     ...(metadata.supersedes === null ? {} : { superseded: metadata.supersedes }),
+    ...await readBackKnowledgeWrite(() => scanUserCrest(location, options, false, "full", false), written),
   };
 }
 
@@ -4907,6 +4935,7 @@ async function createLibraryCrestEvent(
     version: scan.marker.version + 1,
     ...(conflicts.length > 0 ? { conflicts: [...conflicts] } : {}),
     ...(metadata.supersedes === null ? {} : { superseded: metadata.supersedes }),
+    ...await readBackKnowledgeWrite(() => scanKnowledgeStore(workspaceRoot, options), written),
   };
 }
 

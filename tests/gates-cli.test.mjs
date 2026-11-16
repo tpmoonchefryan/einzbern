@@ -17,7 +17,7 @@ import { heavyLockDirectoryUnder, usePrivateHeavySlots } from "./helpers/heavy-s
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -26,6 +26,7 @@ import { fileURLToPath } from "node:url";
 import { COMMAND_CATALOG, MODEL_WRITE_DECISION_REMEDY, SURFACE_ENVIRONMENT_VARIABLE, runCli } from "../dist/build/packages/cli/src/index.js";
 import { materializeWorkspace } from "../dist/build/packages/core/src/index.js";
 import { deriveStableId } from "../dist/build/packages/protocol/src/index.js";
+import { unregisterLibrary } from "../dist/build/packages/core/src/registry.js";
 
 // TCRN-CROSS-STORY-513 R1: these tests declare and remove gates through the CLI, as Atelier does; a
 // model's shell is withSurface(undefined, ...).
@@ -951,4 +952,151 @@ test("BL-45 CLI: explicit per-root bases reach planning and persist in gate runs
   assert.equal(result.run.gates[0].ok, true);
   assert.ok(Number.isSafeInteger(result.run.gates[0].durationMs));
   assert.equal((await refusal(["gates-plan", "--workspace", library, "--project", project, "--base", baseCommit, "--base-by-root", "{"]))?.reasonCode, "CLI_ARGUMENT_MALFORMED");
+});
+
+async function portableGates(context) {
+  const fixture = await setup(context);
+  const { base, project, library } = fixture;
+  const repository = "example.invalid/team/portable";
+  git(project, ["remote", "add", "origin", `https://${repository}.git`]);
+  const projectId = (await cli(["project-create", "--workspace", library, "--at", at(), "--external-key", "PORTABLE-PROJECT", "--name", "Portable gates"])).record.id;
+  await cli(["work-create", "--workspace", library, "--at", at(), "--project-id", projectId, "--external-key", "PORTABLE-INIT", "--kind", "Initiative", "--title", "Portable work"]);
+  await cli(["work-create", "--workspace", library, "--at", at(), "--project-id", projectId, "--external-key", "PORTABLE-EPIC", "--kind", "Epic", "--parent-id", workId("PORTABLE-INIT"), "--title", "Portable epic"]);
+  const story = async (key) => (await cli(["work-create", "--workspace", library, "--at", at(), "--project-id", projectId, "--external-key", key, "--kind", "Story", "--status", "active", "--parent-id", workId("PORTABLE-EPIC"), "--title", key, "--goal", "Run the declared repository gates", "--acceptance", "The bound gates pass on the current tree"])).record.id;
+  const register = (directory) => cli(["library-register", "--project", directory, "--library", library, "--at", at()]);
+  const clone = async (directory, remote = repository) => {
+    await mkdir(dirname(directory), { recursive: true });
+    git(base, ["clone", "--quiet", "--shared", project, directory]);
+    git(directory, ["remote", "set-url", "origin", `https://${remote}.git`]);
+    return directory;
+  };
+  await register(project);
+  const deviceA = process.env.EINZBERN_HOME;
+  const deviceB = join(base, "second-device");
+  const projectB = await clone(join(base, "different", "deep", "checkout-name"));
+  process.env.EINZBERN_HOME = deviceB;
+  await register(projectB);
+  process.env.EINZBERN_HOME = deviceA;
+  await declare(library, "portable", [node, "-e", "process.stdout.write(process.cwd())"], ["--root", "src"]);
+  const legacy = await cli(["gates-plan", "--workspace", library, "--project", project, "--release", "true"]);
+  assert.deepEqual(legacy.roots, ["src"]);
+  await declare(library, "portable", null, ["--repository", repository]);
+  await declare(library, "portable", null, ["--repository", ""]);
+  assert.equal((await cli(["gates-config-list", "--workspace", library])).records[0].repository, undefined);
+  for (const invalid of ["https://example.invalid/team/portable", "example.invalid/../portable", "bad\\host/team", "example.invalid/team\\portable"]) {
+    assert.equal((await refusal(["gates-config-set", "--workspace", library, "--project-id", projectId, "--at", at(), "--name", "portable", "--repository", invalid])).reasonCode, "GATES_CONFIG_INVALID");
+  }
+  await declare(library, "portable", null, ["--repository", repository]);
+  return { ...fixture, repository, projectId, story, register, clone, deviceA, deviceB, projectB };
+}
+
+test("670: one shared declaration runs two repositories across independent device layouts and closes single and batch Stories", async (context) => {
+  const fixture = await portableGates(context);
+  const { base, project, library, repository, deviceA, deviceB, projectB, story, register, clone } = fixture;
+  const helperIdentity = "example.invalid/team/helper";
+  const helperA = await clone(join(base, "nested", "custom-helper"), helperIdentity);
+  await register(helperA);
+  await declare(library, "helper", [node, "-e", "process.stdout.write(process.cwd())"], ["--repository", helperIdentity]);
+  const first = await story("PORTABLE-FIRST");
+  const declarations = (await cli(["gates-config-list", "--workspace", library])).records;
+  assert.deepEqual(declarations.map(gate => [gate.name, gate.repository, gate.root]), [["helper", helperIdentity, "."], ["portable", repository, "src"]]);
+  const firstPlan = await cli(["gates-plan", "--workspace", library, "--release", "true", "--work-id", first]);
+  process.env.EINZBERN_HOME = deviceB;
+  const helperB = await clone(join(base, "helper-on-second-device"), helperIdentity);
+  await register(helperB);
+  const secondPlan = await cli(["gates-plan", "--workspace", library, "--release", "true", "--work-id", first]);
+  assert.deepEqual(secondPlan.roots, firstPlan.roots);
+  assert.equal(secondPlan.declarationsDigest, firstPlan.declarationsDigest);
+  const runB = await cli(["gates-run", "--workspace", library, "--at", at(), "--release", "true", "--work-id", first]);
+  assert.equal(runB.ok, true, gateDiagnostic(runB.run, runB.recordPath));
+  for (const gate of runB.run.gates) {
+    assert.equal(await readFile(join(dirname(runB.recordPath), gate.outputFile), "utf8"), gate.name === "portable" ? join(projectB, "src") : helperB);
+  }
+  const single = await cli(["work-transition", "--workspace", library, "--at", at(), "--id", first, "--status", "done"]);
+  assert.equal(single.record.status, "done");
+  assert.equal(single.doneGates.reason, "green");
+  const second = await story("PORTABLE-SECOND");
+  process.env.EINZBERN_HOME = deviceA;
+  const runA = await cli(["gates-run", "--workspace", library, "--at", at(), "--release", "true", "--work-id", second]);
+  assert.equal(runA.ok, true, gateDiagnostic(runA.run, runA.recordPath));
+  assert.equal(runA.run.treeDigest, runB.run.treeDigest);
+  for (const gate of runA.run.gates) {
+    assert.equal(await readFile(join(dirname(runA.recordPath), gate.outputFile), "utf8"), gate.name === "portable" ? join(project, "src") : helperA);
+  }
+  const batch = join(base, "portable-done.json");
+  await writeFile(batch, JSON.stringify({ schemaVersion: "tcrn.work-batch.v1", members: [{ verb: "work-transition", id: second, status: "done" }] }));
+  const done = await cli(["work-batch", "--workspace", library, "--at", at(), "--from-file", batch]);
+  assert.equal(done.doneGates.reason, "green");
+  assert.equal((await materializeWorkspace(library)).work.find(record => record.id === second).status, "done");
+  assert.deepEqual((await cli(["gates-config-list", "--workspace", library])).records, declarations);
+  assert.ok(!JSON.stringify(declarations).includes(base));
+});
+
+test("670: missing, ambiguous, wrong and escaping repository bindings preserve pending work and existing gate checks", async (context) => {
+  const fixture = await portableGates(context);
+  const { base, project, library, repository, deviceA, deviceB, projectB, story, register } = fixture;
+  const id = await story("PORTABLE-PENDING");
+  const plan = ["gates-plan", "--workspace", library, "--project-id", fixture.projectId, "--release", "true", "--work-id", id];
+  const done = () => ["work-transition", "--workspace", library, "--at", at(), "--id", id, "--status", "done"];
+  process.env.EINZBERN_HOME = join(base, "unregistered-device");
+  assert.equal((await refusal(plan)).reasonCode, "GATES_REPOSITORY_MISSING");
+  process.env.EINZBERN_HOME = deviceA;
+  const worktree = join(base, "selected-worktree");
+  git(project, ["worktree", "add", "--quiet", "--detach", worktree]);
+  await register(worktree);
+  const ambiguous = await refusal(plan);
+  assert.equal(ambiguous.reasonCode, "GATES_REPOSITORY_AMBIGUOUS");
+  assert.match(ambiguous.details.remedy, /--project/u);
+  assert.equal((await cli([...plan, "--project", worktree])).gates[0].root, `git://${repository}?root=src`);
+  await put(worktree, "src/changed.ts", "changed\n");
+  const changed = await cli(["gates-plan", "--workspace", library, "--project", worktree, "--base", fixture.baseCommit]);
+  assert.deepEqual(changed.gates[0].matched, ["changed.ts"]);
+  await rm(join(worktree, "src/changed.ts"));
+  await unregisterLibrary(worktree);
+  process.env.EINZBERN_HOME = deviceB;
+  git(projectB, ["remote", "set-url", "origin", "https://example.invalid/team/wrong.git"]);
+  assert.equal((await refusal(plan)).reasonCode, "GATES_REPOSITORY_MISMATCH");
+  assert.equal((await refusal(done())).reasonCode, "GATES_REPOSITORY_MISMATCH");
+  git(projectB, ["remote", "set-url", "origin", `https://${repository}.git`]);
+  const outside = join(base, "outside");
+  await mkdir(outside);
+  await symlink(outside, join(projectB, "escape"), "dir");
+  await declare(library, "portable", null, ["--root", "escape"]);
+  assert.equal((await refusal(plan)).reasonCode, "GATES_ROOT_INVALID");
+  await declare(library, "portable", [node, "-e", "process.exit(7)"], ["--root", "src"]);
+  const red = await cli(["gates-run", "--workspace", library, "--at", at(), "--release", "true", "--work-id", id]);
+  assert.equal(red.ok, false);
+  assert.equal((await refusal(done())).reasonCode, "WORK_DONE_GATES_RED");
+  await declare(library, "portable", [node, "-e", "process.exit(0)"]);
+  const green = await cli(["gates-run", "--workspace", library, "--at", at(), "--release", "true", "--work-id", id]);
+  assert.equal(green.ok, true, gateDiagnostic(green.run, green.recordPath));
+  await put(projectB, "src/changed.ts", "changed\n");
+  assert.equal((await refusal(done())).reasonCode, "WORK_DONE_GATES_NOT_RUN");
+  for (const root of ["/tmp/private-root", "../outside"]) {
+    const error = await refusal(["gates-config-set", "--workspace", library, "--project-id", fixture.projectId, "--at", at(), "--name", "portable", "--root", root]);
+    assert.equal(error.reasonCode, "GATES_CONFIG_INVALID");
+  }
+  assert.equal((await materializeWorkspace(library)).work.find(record => record.id === id).status, "active");
+});
+
+
+test("670: nested repository names and relative roots keep distinct bindings and execution trees", async (context) => {
+  const {base, project, library, repository, register, clone} = await portableGates(context);
+  await put(project, "nested/subdir/value.txt", "first repository");
+  const nestedIdentity = `${repository}/nested`;
+  const nested = await clone(join(base, "nested-repository"), nestedIdentity);
+  await put(nested, "subdir/value.txt", "second repository");
+  await register(nested);
+  await declare(library, "portable", null, ["--root", "nested/subdir"]);
+  await declare(library, "nested", [node, "-e", "process.stdout.write(process.cwd())"], ["--repository", nestedIdentity, "--root", "subdir"]);
+  const plan = await cli(["gates-plan", "--workspace", library, "--release", "true"]);
+  assert.equal(new Set(plan.roots).size, 2);
+  assert.equal(Object.keys(plan.rootBindings).length, 2);
+  const result = await cli(["gates-run", "--workspace", library, "--release", "true", "--at", at()]);
+  assert.equal(result.ok, true, gateDiagnostic(result.run, result.recordPath));
+  assert.equal(result.run.trees.length, 2);
+  for (const gate of result.run.gates) {
+    assert.equal(await readFile(join(dirname(result.recordPath), gate.outputFile), "utf8"),
+      gate.name === "portable" ? join(project, "nested/subdir") : join(nested, "subdir"));
+  }
 });

@@ -102,6 +102,9 @@ test("476-AC1 (CLI): a card written without a lifecycle flag is recalled at once
   assert.equal(created.reasonCode, "KNOWLEDGE_UNIT_CREATED");
   assert.deepEqual(created.ids, [created.id], "the receipt names the card it wrote");
   assert.equal(created.version, 1, "beside the store version");
+  assert.deepEqual([created.localCommitted, created.verifiedReadback, created.remoteVerification], [true, true, "unverified"]);
+  assert.equal(created.readback.records[0].id, created.id);
+  assert.match(created.readback.records[0].headEventHash, /^[a-f0-9]{64}$/u);
   assert.equal(Object.hasOwn(created, "promotionState"), false, "the create receipt omits the retired promotion marker");
 
   const answer = await recallCli(workspace, 11, "pangolin scale inventory");

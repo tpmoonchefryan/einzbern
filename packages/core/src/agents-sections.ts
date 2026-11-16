@@ -40,6 +40,7 @@ import { effectiveProjectState } from "./project-chain.js";
 // coordinates -- and nowhere else (managedOutputBinding).
 
 import { lstat, readFile, realpath } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { isUtf8 } from "node:buffer";
 import { dirname, join, resolve } from "node:path";
 import { pathIsInside } from "./path-containment.js";
@@ -702,6 +703,9 @@ export interface RenderedFile {
   readonly file: string;
   readonly written: boolean;
   readonly backupPath: string | null;
+  readonly exists: boolean;
+  readonly sha256: string | null;
+  readonly hostLoad: "unverified";
 }
 
 export interface AgentsRenderResult {
@@ -847,6 +851,7 @@ export async function renderAgentsSections(workspaceRoot: string, input: {
           desired: agents.sections.map((section) => ({ id: section.id, body: section.body })),
           records: managedSectionRecordsFor(state, AGENTS_FILE),
           retired: RETIRED_VARIABLE_SECTION_IDS,
+          restoreMissingFile: true,
         }), ruleOrders(state)),
         await planClaudeImport(input.projectRoot, managedSectionRecordsFor(state, CLAUDE_FILE)),
       ];
@@ -863,7 +868,12 @@ export async function renderAgentsSections(workspaceRoot: string, input: {
         for (const plan of plans) {
           const applied = await applyManagedWrite(plan, { now: input.occurredAt, ...(input.backupRoot === undefined ? {} : { backupRoot: input.backupRoot }) });
           if (applied.written) wrote.push(plan);
-          files.push({ file: plan.file, written: applied.written, backupPath: applied.backupPath });
+          const actual = await readSectionFile(plan.filePath, plan.file);
+          if (actual !== (plan.after ?? plan.before)) {
+            throw new ManagedSectionError("MANAGED_SECTION_CHANGED_SINCE_PLAN", `${plan.file} differs at readback`, { file: plan.file });
+          }
+          files.push({ file: plan.file, written: applied.written, backupPath: applied.backupPath,
+            exists: actual !== null, sha256: actual === null ? null : createHash("sha256").update(actual).digest("hex"), hostLoad: "unverified" });
         }
         committed = await commitPlanned(root, append, recorded);
       } catch (error) {

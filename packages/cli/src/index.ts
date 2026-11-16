@@ -53,6 +53,7 @@ import {
   withWriteLockOptions,
   assertLibraryWritable,
   recordAppends,
+  readBackWorkspaceWrite,
   recordIdsOfEvents,
   createKnowledgeArticle,
   createKnowledgeUnit,
@@ -490,6 +491,14 @@ function decisionsFromFile(path: string): readonly string[] {
   return document as readonly string[];
 }
 
+function decisionsFromList(value: string | undefined): readonly string[] {
+  const decisions = listValue(value);
+  if (decisions.slice(1).some((decision) => /^(?:--)?[A-Za-z_][\w.-]*\s*=/u.test(decision.trim()))) {
+    fail("CLI_ARGUMENT_MALFORMED", "decisions contains comma-separated parameter fragments; use --decisions-file with a JSON array of complete decision texts");
+  }
+  return decisions;
+}
+
 // TCRN-CROSS-SUB-426 (MIN-239 D3, D5): --supersedes pairs each decision a record makes obsolete with
 // the decision that replaces it, <decision>=<successor>. Each side is minutes:<id>#D<n> or
 // <external key>#D<n>; the successor may be D<n>, a decision of the record being written.
@@ -649,10 +658,9 @@ function workSearchSummary(record: WorkRecord, scopeBytes: number): Readonly<Rec
   return { ...workSummary(record), scope: truncateUtf8(workScope(record), scopeBytes), fields: workFieldsExcerpt(record, scopeBytes) };
 }
 
-// TCRN-CROSS-STORY-473 R2: ordinary and searched listings have one four-field shape. The ordinary
-// page carries the goal, acceptance and body in full; --search keeps the bounded excerpts below.
+// Full content is explicit. Search retains its existing bounded excerpts.
 function workListSummary(record: WorkRecord): Readonly<Record<string, unknown>> {
-  return { ...workSummary(record), fields: storyFields(record) };
+  return { ...workSummary(record), fields: storyFields(record), content: workContent(record), scope: workScope(record) };
 }
 
 function workListPageJson(
@@ -660,7 +668,14 @@ function workListPageJson(
   records: readonly unknown[],
   values: Readonly<Record<string, string>>,
 ): string {
-  const page = paginate(state, "work", records, values);
+  const page = {
+    ...paginate(state, "work", records, values),
+    effectiveScope: {
+      projectId: values["project-id"] ?? null,
+      ...Object.fromEntries(["kind", "status", "parent-id", "sprint", "relation", "involved-project", "search"]
+        .filter((name) => values[name] !== undefined).map((name) => [name, values[name]])),
+    },
+  };
   try {
     return canonicalJson(page);
   } catch (error) {
@@ -1009,6 +1024,8 @@ async function libraryGateResult(state: Awaited<ReturnType<typeof materializeWor
     projectRoot = await gatesProjectRoot(state.metadata.workspaceId, values.project, group.projectId, state);
     const plan = await planGates({
       projectRoot,
+      libraryId: state.metadata.workspaceId,
+      ...(group.projectId === undefined ? {} : { projectId: group.projectId }),
       gates: listGates(scopedWorkspaceState(state, group.projectId)),
       release: booleanValue(values.release, "release"),
       ...(values.base === undefined ? {} : { base: values.base }),
@@ -1063,14 +1080,18 @@ async function workGateTargets(state: Awaited<ReturnType<typeof materializeWorks
         }
         const target = await effectiveProjectState(await validateWorkspace(context.libraryPath), reference.projectId);
         if (target.metadata.workspaceId !== reference.libraryId || target.version !== context.version) throw new Error("target identity or configuration changed; resolve again");
-        const repositories = (context.repositoryContexts as { projectPath: string; binding: unknown }[]).filter(repository => values.project === undefined || resolve(values.project) === repository.projectPath);
+        const declarations = listGates(target);
+        const repositoryBound = declarations.filter(gate => gate.enabled).every(gate => gate.repository !== undefined);
+        const repositories = repositoryBound
+          ? [{ projectPath: await gatesProjectRoot(reference.libraryId, values.project, reference.projectId, target), binding: null }]
+          : (context.repositoryContexts as { projectPath: string; binding: unknown }[]).filter(repository => values.project === undefined || resolve(values.project) === repository.projectPath);
         if (!repositories.length) throw new Error("no registered repository matches this operation");
         for (const repository of repositories) {
           try {
           const currentWork = (await materializeWorkspace(values.workspace!)).work.find(record => record.id === workId && !record.tombstone);
           if (currentWork?.revision !== resolved.workRevision) throw new Error("work revision changed; resolve again");
-          const projectRoot = await gatesProjectRoot(reference.libraryId, repository.projectPath, reference.projectId);
-          const plan = await planGates({ projectRoot, gates: listGates(target), release: booleanValue(values.release, "release"), ...(values.base === undefined ? {} : { base: values.base }),
+          const projectRoot = repositoryBound ? repository.projectPath : await gatesProjectRoot(reference.libraryId, repository.projectPath, reference.projectId);
+          const plan = await planGates({ projectRoot, libraryId: reference.libraryId, projectId: reference.projectId, gates: declarations, release: booleanValue(values.release, "release"), ...(values.base === undefined ? {} : { base: values.base }),
       ...(values["base-by-root"] === undefined ? {} : { baseByRoot: argumentJsonValue(values["base-by-root"], "base-by-root") as Record<string, string> }), workIds: [workId], subjects: gateSubjects(state.work, [workId]), subjectKeys: workSubjectKeys(state.work, [workId]) });
           // This handoff is bound to the very target whose gates execute: the target's own handoff
           // (project-chain.ts, the object the native host dispatch passes for it), with the
@@ -1130,6 +1151,8 @@ async function prepareGates(values: Readonly<Record<string, string>>, execute: b
   const workIds = values["work-id"] === undefined ? [] : listValue(values["work-id"]);
   const plan = await planGates({
     projectRoot: await gatesProjectRoot(state.metadata.workspaceId, values.project, values["project-id"], native),
+    libraryId: state.metadata.workspaceId,
+    ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }),
     gates: listGates(state),
     release: booleanValue(values.release, "release"),
     ...(values.base === undefined ? {} : { base: values.base }),
@@ -1141,7 +1164,7 @@ async function prepareGates(values: Readonly<Record<string, string>>, execute: b
   return { state, plan };
 }
 
-type GatesLibrary = Pick<Awaited<ReturnType<typeof materializeWorkspace>>, "configRecords" | "metadata" | "projects">;
+type GatesLibrary = Awaited<ReturnType<typeof materializeWorkspace>>;
 
 // TCRN-CROSS-STORY-519 (D-519-3): whether a library's entries registered with no project answer for
 // `projectId`: only on a coordination chain, and only for a project the library holds, not deleted.
@@ -1180,6 +1203,13 @@ async function gatesProjectRoot(libraryId: string, project: string | undefined, 
       }
     }
     return root;
+  }
+  // Repository-bound declarations resolve through the local registry independently
+  // of a shared container layout. The current directory only selects a checkout
+  // when it actually has the declared Git identity.
+  if (library !== undefined) {
+    const gates = listGates(scopedWorkspaceState(library, projectId)).filter((gate) => gate.enabled);
+    if (gates.length > 0 && gates.every((gate) => gate.repository !== undefined)) return process.cwd();
   }
   let here: Awaited<ReturnType<typeof resolveLibrary>> | null = null;
   try {
@@ -1702,9 +1732,9 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // TCRN-CROSS-STORY-527 (MIN-257 D6, Q6; TCRN-CROSS-SUB-478): a model proposes a gate declaration
   // (--action set, the default, with gates-config-set's flags) or a gate's removal (--action remove);
   // the proposal waits for Atelier and is not a declaration. A model's run is not refused.
-  { name: "gates-config-propose", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "action", required: false, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "gates-config-propose", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "action", required: false, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "gates-config-remove", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "gates-config-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "gates-config-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "gates-plan", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }] },
   { name: "gates-run", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }] },
   { name: "host-probe", availability: "cli", mutates: false, flags: [{ name: "host", required: true, valueKind: "string" }, { name: "model", required: true, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
@@ -1834,7 +1864,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // decision naming the gate.
   { name: "work-gate-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "work-id", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
   { name: "work-gate-release", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "reason", required: true, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "work-list", availability: "cli", mutates: false, flags: [{ name: "involved-project", required: false, valueKind: "json" }, { name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "parent-id", required: false, valueKind: "string" }, { name: "sprint", required: false, valueKind: "string" }, { name: "relation", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "scope-bytes", required: false, valueKind: "integer" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
+  { name: "work-list", availability: "cli", mutates: false, flags: [{ name: "involved-project", required: false, valueKind: "json" }, { name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "kind", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "parent-id", required: false, valueKind: "string" }, { name: "sprint", required: false, valueKind: "string" }, { name: "relation", required: false, valueKind: "string" }, { name: "search", required: false, valueKind: "string" }, { name: "scope-bytes", required: false, valueKind: "integer" }, { name: "full", required: false, valueKind: "boolean" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
   { name: "work-content-context", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "id", required: true, valueKind: "string" }, { name: "offset", required: false, valueKind: "integer", valueShape: "Nonnegative Unicode code-point offset within the document; default 0; nonzero requires digest" }, { name: "limit", required: false, valueKind: "integer", valueShape: "Positive Unicode code-point window length; omitted returns the full document subject to output capacity" }, { name: "digest", required: false, valueKind: "string", valueShape: "Exact SHA-256 from the first segment; pins direct and ancestor/source versions" }] },
   { name: "work-project-context", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "id", required: true, valueKind: "string" }, { name: "execution-request", required: false, valueKind: "string", valueShape: "Versioned HostExecutionRequest JSON for native hosts; legacy ExecutionAdmissionRequest / DotExecutionRequest retain historical semantics" }] },
   { name: "work-release", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "force", required: false, valueKind: "boolean" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
@@ -2658,7 +2688,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       navigation: { key: AGENTS_NAVIGATION_SETTING, value: navigation },
       sections: rendered.sections.map((section) => ({ id: section.id, file: section.file, result: section.result, state: section.state })),
       pending: rendered.pending.map((section) => ({ id: section.id, file: section.file })),
-      files: rendered.files.map((file) => ({ file: file.file, written: file.written, backupPath: file.backupPath })),
+      files: rendered.files.map((file) => ({ ...file })),
       backupDir: rendered.backupDir,
       withheld: rendered.withheld.map((entry) => ({ name: entry.name, reason: entry.reason })),
       recorded: rendered.recorded,
@@ -4029,7 +4059,10 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
         gates: verdict,
       };
     });
-    writeState(io, state, workSummary(state.work.find((entry) => entry.id === id)!), undefined, gates === null ? {} : { doneGates: gates });
+    writeState(io, state, workSummary(state.work.find((entry) => entry.id === id)!), undefined, {
+      ...(gates === null ? {} : { doneGates: gates }),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
+    });
     return;
   }
   if (command === "work-batch") {
@@ -4083,6 +4116,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     writeState(io, state, workBatchReceipt(state, members), undefined, {
       ...(hints.length === 0 ? {} : { knowledgeHints: doneIds.map((workId, index) => ({ workId, ...hints[index] })) }),
       ...(gates === null ? {} : { doneGates: gates }),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
     });
     return;
   }
@@ -4126,6 +4160,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     writeState(io, state, workSummary(transitioned), undefined, {
       ...(hint === undefined ? {} : { knowledgeHint: hint }),
       ...(gates === null ? {} : { doneGates: gates }),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
     });
     return;
   }
@@ -4160,7 +4195,10 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       ...(values.actor ? { actorId: values.actor } : {}),
     }));
     const updated = state.work.find((entry) => entry.id === (values.id ?? ""))!;
-    writeState(io, state, workSummary(updated), undefined, { contentImpact: readWorkContentImpact(updated) });
+    writeState(io, state, workSummary(updated), undefined, {
+      contentImpact: readWorkContentImpact(updated),
+      ...await readBackWorkspaceWrite(workspace, state, lastWrittenIds ?? []),
+    });
     return;
   }
   if (command === "work-delete") {
@@ -4228,7 +4266,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     return;
   }
   if (command === "work-list") {
-    const values = parseArguments(rest, ["workspace", "project-id", "kind", "status", "parent-id", "sprint", "relation", "involved-project", "search", "scope-bytes", "limit", "offset"]);
+    const values = parseArguments(rest, ["workspace", "project-id", "kind", "status", "parent-id", "sprint", "relation", "involved-project", "search", "scope-bytes", "full", "limit", "offset"]);
     required(values, ["workspace"]);
     if (values.search !== undefined && (values.search.length === 0 || values.search.length > RUNTIME_CAPACITY.stringCodeUnits || !values.search.isWellFormed())) {
       fail("CLI_ARGUMENT_MALFORMED", "search");
@@ -4247,6 +4285,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const scopeBytes = values["scope-bytes"] === undefined ? Number(configuredScopeBytes ?? "512") : integerValue(values, "scope-bytes");
     if (scopeBytes < 1 || scopeBytes > Number.MAX_SAFE_INTEGER) fail("CLI_ARGUMENT_MALFORMED", "scope-bytes");
     const search = values.search?.toLowerCase();
+    const full = booleanValue(values.full, "full");
     // TCRN-CROSS-STORY-472 R3: the records that stand in the named relation to the given id.
     const involved = values["involved-project"] === undefined ? undefined : projectReference(jsonValue(values["involved-project"], "involved-project"));
     const related = relation === undefined ? undefined : relationFilter(state, relation.name, relation.id);
@@ -4271,7 +4310,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // silent wrong answer (total=0), not a cosmetic inconsistency. Sharing nullableValue
       // makes the round trip closed for every spelling the writer accepts, by construction.
       (values["parent-id"] === undefined || (nullableValue(values["parent-id"]) === null ? entry.parentId === null : entry.parentId === values["parent-id"])))
-      .map((entry) => search === undefined ? workListSummary(entry) : workSearchSummary(entry, scopeBytes))
+      .map((entry) => full ? workListSummary(entry) : search === undefined ? workSummary(entry) : workSearchSummary(entry, scopeBytes))
       // TCRN-CROSS-STORY-528 (SUB-458): each record's own lease, null when it holds none; active is
       // judged by this machine's clock as it reads, for reading only (MIN-256 R1 Q6).
       .map((summary) => ({ ...summary, lease: workLeaseView(state, String(summary.id), now) }));
@@ -4412,7 +4451,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const values = parseArguments(rest, [...shared, "project-id", "external-key", "title", "summary", ...EXACTLY_ONE_FLAGS[command].map(({ name }) => name), "decided-by", "work-ids", "supersedes", "withdraws", "coexists", "actor"]);
     required(values, [...requiredShared, "project-id", "title", "summary"]);
     requireExactlyOne(command, values);
-    const decisions = values["decisions-file"] === undefined ? listValue(values.decisions) : decisionsFromFile(values["decisions-file"]);
+    const decisions = values["decisions-file"] === undefined ? decisionsFromList(values.decisions) : decisionsFromFile(values["decisions-file"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
     const state = await withWriteLock(workspace, at, async () => recordMinutes(workspace, {
@@ -4449,6 +4488,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       ...(recorded.declarations === undefined ? {} : { declarations: recorded.declarations }),
       ...(hint === undefined ? {} : { knowledgeHint: hint }),
       ...(warnings.length === 0 ? {} : { warnings: warnings as unknown as JsonValue }),
+      ...await readBackWorkspaceWrite(workspace, state, written.ids ?? []),
     }));
     return;
   }
@@ -4520,7 +4560,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // Atelier only; a model's run is refused with MODEL_WRITE_REFUSED once its arguments parse, before
   // the library is read, so a model cannot declare the gate its own Story is then held to.
   if (command === "gates-config-set") {
-    const values = parseArguments(rest, ["project-id", ...shared, "name", "command", "root", "covers", "required", "enabled", "release-only", "order", "actor", "decided-in"]);
+    const values = parseArguments(rest, ["project-id", ...shared, "name", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "actor", "decided-in"]);
     required(values, [...requiredShared, "name"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
@@ -4535,6 +4575,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       const existing = listGates(scopedWorkspaceState(await materializeWorkspace(workspace), values["project-id"])).find((gate) => gate.name === name);
       if (commandValue === undefined && existing === undefined) fail("CLI_ARGUMENT_MISSING", "command");
       const order = orderValue ?? existing?.order;
+      const repository = values.repository === "" ? undefined : values.repository ?? existing?.repository;
       const authorized = await writeAuthorization(permit, workspace);
       return setGate(workspace, {
         occurredAt: at, ...configurationOptions(values),
@@ -4542,6 +4583,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
         gate: {
           command: commandValue ?? existing?.command,
           root: values.root ?? existing?.root ?? ".",
+          ...(repository === undefined ? {} : { repository }),
           covers: values.covers === undefined ? existing?.covers ?? ["**"] : listValue(values.covers),
           required: requiredValue ?? existing?.required ?? true,
           enabled: enabledValue ?? existing?.enabled ?? true,
@@ -4575,14 +4617,14 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // takes none of them. The proposal waits for Atelier: gates-config-list, gates-plan and gates-run do
   // not see it, and gates-config-list --status pending lists it. A model's run is not refused.
   if (command === "gates-config-propose") {
-    const values = parseArguments(rest, ["project-id", ...shared, "name", "action", "command", "root", "covers", "required", "enabled", "release-only", "order", "actor"]);
+    const values = parseArguments(rest, ["project-id", ...shared, "name", "action", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "actor"]);
     required(values, [...requiredShared, "name", "actor"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
     const name = values.name ?? "";
     const action = values.action ?? "set";
     if (action !== "set" && action !== "remove") fail("CLI_ARGUMENT_MALFORMED", "action");
-    if (action === "remove" && ["command", "root", "covers", "required", "enabled", "release-only", "order"].some((flag) => values[flag] !== undefined)) {
+    if (action === "remove" && ["command", "root", "repository", "covers", "required", "enabled", "release-only", "order"].some((flag) => values[flag] !== undefined)) {
       fail("CLI_ARGUMENT_MALFORMED", "a gate's removal takes no declaration flags");
     }
     const commandValue = values.command === undefined ? undefined : gateCommandValue(values.command);
@@ -4596,10 +4638,12 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
         const existing = listGates(scopedWorkspaceState(await materializeWorkspace(workspace), values["project-id"])).find((gate) => gate.name === name);
         if (commandValue === undefined && existing === undefined) fail("CLI_ARGUMENT_MISSING", "command");
         const order = orderValue ?? existing?.order;
+        const repository = values.repository === "" ? undefined : values.repository ?? existing?.repository;
         payload = {
           // A command that is not an argv is refused by the declaration's check (GATES_CONFIG_INVALID).
           command: (commandValue ?? existing?.command) as JsonValue,
           root: values.root ?? existing?.root ?? ".",
+          ...(repository === undefined ? {} : { repository }),
           covers: values.covers === undefined ? [...(existing?.covers ?? ["**"])] : [...listValue(values.covers)],
           required: requiredValue ?? existing?.required ?? true,
           enabled: enabledValue ?? existing?.enabled ?? true,

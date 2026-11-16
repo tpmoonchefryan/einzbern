@@ -183,6 +183,7 @@ export {
   withWriteLockOptions,
   assertLibraryWritable,
   recordAppends,
+  readBackWorkspaceWrite,
   recordIdsOfEvents,
   workspaceBudgets,
   workspaceViewDocuments,

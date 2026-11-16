@@ -97,7 +97,6 @@ test("479-AC1: every verb the navigation table names is a verb of the current co
     ["work-show", "work-content-context", "minutes-show", "work-project-context", "execution-prepare", "execution-record", "execution-evidence"],
     ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"],
     ["shared-submit-plan", "shared-submit-evidence", "shared-submit-advisory-read", "shared-submit-advisory-write"],
-    ["config-backup-plan", "config-backup-create", "config-backup-prepare", "config-backup-commit", "config-backup-verify", "config-backup-list", "config-backup-resume", "config-backup-retire", "config-restore-plan", "config-restore-apply"],
     ["work-transition", "work-annotate"],
     ["minutes-record"],
     ["knowledge-create", "knowledge-capture"],
@@ -130,14 +129,16 @@ test("C.1: generated navigation points Kiro Spec work to its reference and manag
   assert.ok(startingWork[2].includes("`references/kiro-specs.md`"));
   const reference = await readFile(join(referenceDirectory, "kiro-specs.md"), "utf8");
   assert.ok(reference.includes("scripts/kiro-specs.mjs"));
-  assert.match(reference, /KIRO-OPEN-OPERATIONAL-VALIDATION:BEGIN/);
+  assert.doesNotMatch(reference, /KIRO-OPEN-OPERATIONAL-VALIDATION:BEGIN/);
+  assert.ok(reference.includes("SPEC_CURRENT"));
+  assert.ok(reference.includes("SPEC_EDIT_CONFLICT"));
 });
 
 // INIT-053 U10 (approved contract item 9): the native host dispatch passes each target's own handoff,
 // the object gate processes receive, and an unresolved target stops only the work that needs it.
 test("U10: the full-text row passes each target's handoff to the native host dispatch, as gate processes receive it", () => {
   const fullText = tableRows(render()).find(([, verbs]) => verbs.includes("`work-project-context`"));
-  for (const phrase of ["each target's `handoff`", "native dispatch/gates (`EINZBERN_PROJECT_CONTEXT`)", "Unresolved targets block only dependent work", "coordination-only needs no development target"]) {
+  for (const phrase of ["each target's `handoff`", "dispatch/gates (`EINZBERN_PROJECT_CONTEXT`)", "Unresolved targets block dependent work"]) {
     assert.ok(fullText[2].includes(phrase), phrase);
   }
 });
@@ -239,8 +240,8 @@ test("488-AC2 (MIN-238 D4): the install line and the fetch script name both repo
 
 test("552: generated dispatch workflow consumes admission rather than treating a catalog as permission", () => {
   const row = tableRows(render()).find(([, verbs]) => verbs.includes("`work-project-context`"));
-  for (const phrase of ["--execution-request", "`dispatchAdmitted=true`", "selected runner/model/effort", "never substitute", "no reusable permit", "stdout/stderr/exit code"]) assert.ok(row[2].includes(phrase), phrase);
-  assert.ok(row[2].includes("`execution-evidence --from-file <json>` remains read-only validation, not authentication"),
+  for (const phrase of ["--execution-request", "`dispatchAdmitted=true`", "selected runner/model/effort", "Keep that selection", "Evidence validation grants no execution permission", "stdout/stderr/exit code"]) assert.ok(row[2].includes(phrase), phrase);
+  assert.ok(row[2].includes("Evidence validation grants no execution permission"),
     "J17: retain the exact public process-evidence navigation and its non-authentication boundary");
   assert.ok(row[2].includes("specs/dispatch-admission-evidence-v1.md"));
 });
@@ -252,7 +253,7 @@ test("DOT-R01/R02: generated navigation separates native evidence, rules, schedu
   // Legacy protocol behavior remains covered by native-tool-evidence and dispatch tests.
   const native = tableRows(markdown).find(([, verbs]) => verbs.includes("`execution-host-prepare`"))[2];
   for (const phrase of ["normal prompt reports", "Class fallback", "hard limits", "Parent reads before dispatch, child reads before work", "targets=[]", "scope/permission", "machine-assembled raw returns/reports", "attempt association", "unknown/cancel/finality/review", "Dot model selection is host-managed"]) assert.ok(native.includes(phrase), phrase);
-  for (const phrase of ["New, resumed and delegated sessions read their own live work", "at most five new sourced lessons", "repository-relative evidence paths", "No progress in AGENTS", "independent dot target", "Installation, policy changes, restoration and publication retain their separate approvals", "20-minute patrol", "00:00 Asia/Shanghai", "unapproved policy forbids daily enablement", "unknown stays unknown"]) assert.ok(markdown.includes(phrase), phrase);
+  for (const phrase of ["Sessions read their live work", "at most five new sourced lessons", "repository-relative evidence paths", "No progress in AGENTS", "independent dot target", "Installation, policy changes, restoration and publication need their own approvals", "references/owner-extensions.md", "--decisions-file <json>", "--full true", "verifiedReadback"]) assert.ok(markdown.includes(phrase), phrase);
   for (const phrase of ["`--binding`", "`--prior`", "specs/host-fallback-v1.md"]) assert.ok(native.includes(phrase), phrase);
   const contract = await readFile(join(repositoryRoot, "specs", "host-fallback-v1.md"), "utf8");
   for (const phrase of ["normal prompt/report instructions", "never ask the user to hand-fill repeated metadata", "Unknown outcomes require reconciliation before duplicate invocation", "Cancel-accepted records host acknowledgement, not termination", "Pending/unknown tasks keep follow-up responsibility"]) assert.ok(contract.includes(phrase), phrase);
@@ -263,18 +264,20 @@ test("DOT-R01/R02: generated navigation separates native evidence, rules, schedu
 });
 
 test("DOT-R02: dot install reference is complete, source-bound and separate from traditional hooks", async () => {
-  const text = await readFile(join(referenceDirectory, "install.md"), "utf8");
+  const text = await readFile(join(referenceDirectory, "owner-extensions.md"), "utf8");
   for (const phrase of ["--execution-target chatgpt-dot", "--dot-input", "DotAgentsOptions", "engineCommit", "unavailable", "Catalog membership is not enablement", "preInjection", "skip performs no target write", "SETUP_DOT_PARTIAL", "sessionRead: \"not-verified\"", "Parent/patrol observations cannot substitute", "00:00 Asia/Shanghai", "Two distinct successful checks at least 20 minutes apart", "pending-resume", "activeLimit", "recoveryDuration", "exact policy digest", "two stable content-tree observations", "not release certification", "SharedSubmitInput", "no acquire, force-expiry or remote CAS flag"]) assert.ok(text.includes(phrase), phrase);
-  const dotSection = text.slice(text.indexOf("## Choose the installation target first"), text.indexOf("## Traditional target workflow"));
+  const dotSection = text.slice(text.indexOf("## Choose the installation target first"));
   assert.ok(dotSection.includes("do not ask the\nuser to hand-fill JSON"));
   assert.ok(dotSection.includes("does not prove that an\nexecution session read them"));
   assert.ok(dotSection.includes("No retention amounts or cleanup permission"));
   assert.ok(dotSection.includes("sourceVersion") || dotSection.includes("Source identity is obtained asynchronously"));
-  assert.ok(text.indexOf("## Traditional target workflow") < text.indexOf("## Questions (one screen)"));
+  const install = await readFile(join(referenceDirectory, "install.md"), "utf8");
+  assert.ok(install.includes("owner-extensions.md"));
+  assert.ok(install.indexOf("## Traditional target workflow") < install.indexOf("## Questions (one screen)"));
 });
 
 test("J01/J02/J03/J04/J09–J13: install guidance consumes reviewed source interfaces without promoting unknown or cached claims", async () => {
-  const text = (await readFile(join(referenceDirectory, "install.md"), "utf8")).replace(/\s+/gu, " ");
+  const text = (await readFile(join(referenceDirectory, "owner-extensions.md"), "utf8")).replace(/\s+/gu, " ");
   for (const phrase of [
     "actual engine bundle root contains `scripts/einzbern.mjs` and its sibling `specs/`",
     "contracts are not in this Skill's directory",
@@ -314,7 +317,7 @@ test("INIT065 generated normal Skill directs each native host to matching versio
   const markdown = render();
   assert.ok(markdown.includes(HOST_SKILL_PROTOCOL_MARKER));
   assert.ok(markdown.includes("Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity)"));
-  assert.ok(markdown.includes("Antigravity: `specs/antigravity-host-v1.md`"));
+  assert.ok(markdown.includes("docs/antigravity-swarm-controller.md"));
   assert.ok(markdown.includes("docs/antigravity-swarm-controller.md"));
   assert.ok(markdown.includes("Parent reads before dispatch, child reads before work"));
   assert.ok(markdown.includes("targets=[]"));
@@ -328,7 +331,7 @@ test("INIT065 generated normal Skill directs each native host to matching versio
 
 test("MIN358 installed Skill navigates actual enabled rules without hard-coding optional principle text", () => {
   const markdown = render();
-  assert.ok(markdown.includes("Enabled rules only (`specs/work-practices-v1.md`)"));
+  assert.ok(markdown.includes("specs/work-practices-v1.md"));
   assert.ok(SKILL_NAVIGATION[0].verbs.includes("rule-list"));
   assert.equal(markdown.includes("Do not establish a prohibition"), false, "optional text comes from scoped rule consumption, not an unconditional Skill duplicate");
 });
@@ -357,10 +360,8 @@ test("dot blocker recovery is an on-demand E-owned workflow, not a patrol contex
 test("Codex peer navigation replaces collector helper within ordinary budget", () => {
   const body = render();
   assert.ok(body.includes("docs/codex-native-controller.md"));
-  assert.ok(body.includes("Codex only: independent main/economy peers, no collector"));
-  assert.ok(body.includes("Other hosts keep their workflow"));
-  assert.ok(body.includes("reports threadId/hostId/prompt only"));
-  assert.ok(body.includes("authorized settings/query exits"));
+  assert.ok(body.includes("Host Integrations"));
+  assert.ok(body.includes("controller details"));
   assert.equal(body.includes("isolated opt-in/same-live helper"), false);
   assert.ok(Buffer.byteLength(body) < 6000);
 });

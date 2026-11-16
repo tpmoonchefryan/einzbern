@@ -157,7 +157,10 @@ test("STORY-473 R2: work-list says where each record's fields come from, and --s
   const tree = await storyTree(context, "SF-LIST");
   const withFields = (await tree.story("SF-LIST-FIELDS", 4, "--goal", GOAL, "--acceptance", ACCEPTANCE, "--body", "The quokka paragraph.")).record.id;
   const withScope = (await tree.story("SF-LIST-SCOPE", 5, "--scope", TEN_BLOCK_SCOPE)).record.id;
-  const ordinary = await cli(["work-list", "--workspace", tree.workspace]);
+  const compact = await cli(["work-list", "--workspace", tree.workspace]);
+  assert.ok(compact.records.every((record) => !Object.hasOwn(record, "fields") && !Object.hasOwn(record, "content")));
+  assert.deepEqual(compact.effectiveScope, { projectId: null });
+  const ordinary = await cli(["work-list", "--workspace", tree.workspace, "--full", "true"]);
   const byId = new Map(ordinary.records.map((record) => [record.id, record]));
   assert.deepEqual(byId.get(withFields).fields, {
     goal: GOAL,
@@ -181,7 +184,8 @@ test("STORY-473 R2: work-list says where each record's fields come from, and --s
     source: "scope",
   });
   assert.deepEqual(byId.get(tree.epicId).fields, { goal: null, acceptance: null, body: null, source: "none" });
-  assert.equal(Object.hasOwn(byId.get(withFields), "scope"), false, "the scope field itself stays out of the listing");
+  assert.equal(byId.get(withFields).scope, "");
+  assert.equal(byId.get(withScope).scope, TEN_BLOCK_SCOPE);
   // The body's word is in no title, summary, key or scope: only the fields can match it.
   const searched = await cli(["work-list", "--workspace", tree.workspace, "--search", "QUOKKA", "--scope-bytes", "8"]);
   assert.equal(searched.total, 1);
@@ -219,11 +223,13 @@ test("STORY-473 R2: work-list keeps a complete page beyond the retired byte ceil
   await writeFile(batchFile, `${JSON.stringify({ schemaVersion: "tcrn.work-batch.v1", members })}\n`);
   await cli(["work-batch", "--workspace", tree.workspace, "--at", instant(4), "--from-file", batchFile]);
 
-  const complete = await cli(["work-list", "--workspace", tree.workspace, "--kind", "Story"]);
+  const compact = await cli(["work-list", "--workspace", tree.workspace, "--kind", "Story"]);
+  const complete = await cli(["work-list", "--workspace", tree.workspace, "--kind", "Story", "--full", "true"]);
+  assert.ok(Buffer.byteLength(JSON.stringify(compact)) * 8 < Buffer.byteLength(JSON.stringify(complete)));
   assert.equal(complete.records.length, members.length);
   assert.equal(complete.truncated, false);
   assert.ok(complete.records.every(record => record.fields.body === body));
-  const page = await cli(["work-list", "--workspace", tree.workspace, "--kind", "Story", "--limit", "1"]);
+  const page = await cli(["work-list", "--workspace", tree.workspace, "--kind", "Story", "--limit", "1", "--full", "true"]);
   assert.equal(page.total, members.length);
   assert.equal(page.truncated, true);
   assert.equal(page.records.length, 1);

@@ -661,6 +661,7 @@
 | `--action` | 可选 | `string` |
 | `--command` | 可选 | `string` |
 | `--root` | 可选 | `string` |
+| `--repository` | 可选 | `string` |
 | `--covers` | 可选 | `list` |
 | `--required` | 可选 | `boolean` |
 | `--enabled` | 可选 | `boolean` |
@@ -697,6 +698,7 @@
 | `--name` | 必填 | `string` |  |
 | `--command` | 可选 | `string` |  |
 | `--root` | 可选 | `string` |  |
+| `--repository` | 可选 | `string` |  |
 | `--covers` | 可选 | `list` |  |
 | `--required` | 可选 | `boolean` |  |
 | `--enabled` | 可选 | `boolean` |  |
@@ -1879,6 +1881,7 @@
 | `--relation` | 可选 | `string` |
 | `--search` | 可选 | `string` |
 | `--scope-bytes` | 可选 | `integer` |
+| `--full` | 可选 | `boolean` |
 | `--limit` | 可选 | `integer` |
 | `--offset` | 可选 | `integer` |
 

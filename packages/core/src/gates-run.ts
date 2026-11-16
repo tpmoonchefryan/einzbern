@@ -43,8 +43,8 @@ import { join } from "node:path";
 import { assertStrictInstant, canonicalJson, canonicalSha256, compareCanonicalText, parseStrictInstant } from "../../protocol/src/index.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { cachePath } from "./device-home.js";
-import { GatesPlanError, changedFiles, gitHead, resolveGateRoot, storyCommitPaths } from "./gates-plan.js";
-import type { GatesPlan } from "./gates-plan.js";
+import { GatesPlanError, changedFiles, gateRootBinding, gitHead, resolveGateRoot, storyCommitPaths } from "./gates-plan.js";
+import type { GateRepositoryScope, GateRootBinding, GatesPlan } from "./gates-plan.js";
 
 import { GATE_RUN_SCHEMA_VERSION, compareGateRuns, isGateRunRecord } from "./gate-run-record.js";
 export { GATE_RUN_SCHEMA_VERSION } from "./gate-run-record.js";
@@ -120,9 +120,10 @@ export type GateRootTree = GateRootChanges | GateRootPaths;
  * files per root as a run recorded them, for their content to be read again; a root it does not name
  * counts every change.
  */
-export interface GateTreeScope {
+export interface GateTreeScope extends GateRepositoryScope {
   readonly keys?: readonly string[];
   readonly paths?: Readonly<Record<string, readonly string[]>>;
+  readonly rootBindings?: Readonly<Record<string, GateRootBinding>>;
 }
 
 export interface GateTreeState {
@@ -246,7 +247,9 @@ export async function gateTreeState(projectRoot: string, roots: readonly string[
   const project = await realpath(projectRoot);
   const keys = [...new Set(scope.keys ?? [])];
   const directories: (readonly [string, string])[] = [];
-  for (const root of [...new Set(roots)].sort(compareCanonicalText)) directories.push([root, await resolveGateRoot(project, root)]);
+  for (const root of [...new Set(roots)].sort(compareCanonicalText)) {
+    directories.push([root, await resolveGateRoot(project, root, gateRootBinding(scope.rootBindings, root), scope)]);
+  }
   const limited = new Map<string, readonly string[]>();
   if (scope.paths !== undefined) {
     for (const [root] of directories) {
@@ -367,7 +370,16 @@ export async function runGates(plan: GatesPlan, options: {
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 100 || timeoutMs > RUNTIME_CAPACITY.timerMilliseconds) fail("a gate timeout must fit the native timer and be at least 100 milliseconds", { timeoutMs: String(timeoutMs) });
   if (!Number.isSafeInteger(outputBytes) || outputBytes < 1_024 || outputBytes > RUNTIME_CAPACITY.bufferBytes) fail("a gate's output budget must fit the runtime buffer and be at least 1024 bytes", { outputBytes: String(outputBytes) });
   const directory = gateRunsDirectory(options.libraryId, options.deviceHome);
-  const tree = await gateTreeState(plan.projectRoot, plan.roots, plan.release || plan.subjectKeys === undefined ? {} : { keys: plan.subjectKeys });
+  const resolution = {
+    libraryId: options.libraryId,
+    ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
+    ...(options.deviceHome === undefined ? {} : { deviceHome: options.deviceHome }),
+    ...(plan.rootBindings === undefined ? {} : { rootBindings: plan.rootBindings }),
+  };
+  const tree = await gateTreeState(plan.projectRoot, plan.roots, {
+    ...resolution,
+    ...(plan.release || plan.subjectKeys === undefined ? {} : { keys: plan.subjectKeys }),
+  });
   const runId = `${utcStamp(options.at)}-${canonicalSha256({
     projectRoot: plan.projectRoot,
     at: options.at,
@@ -386,7 +398,7 @@ export async function runGates(plan: GatesPlan, options: {
   const ended: GatePriorResult[] = [];
   const environment = options.env ?? process.env;
   for (const [index, gate] of plan.gates.entries()) {
-    const cwd = await resolveGateRoot(plan.projectRoot, gate.root);
+    const cwd = await resolveGateRoot(plan.projectRoot, gate.root, gateRootBinding(plan.rootBindings, gate.root), resolution);
     const prior: GateRunPrior = { runId, gates: ended };
     const startedAt = new Date().toISOString();
     const started = performance.now();

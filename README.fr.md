@@ -17,7 +17,7 @@ Le Graal exauce les vœux. Einzbern se souvient des vœux que vous avez formulé
 <td align="center" width="33%">
 
 ### 1
-hook<br><sub>une recherche avant chaque prompt, silence sans lien fort</sub>
+point de recherche<br><sub>une recherche avant chaque prompt, silence sans lien fort</sub>
 
 </td>
 <td align="center" width="33%">
@@ -306,9 +306,9 @@ Le parallélisme, le nombre d'agents et les limites du contexte peuvent tous mod
 
 ## Pourquoi cette conception
 
-**Fournir la mémoire, ne pas policer la méthode.** La version précédente a tenté d'enfermer le modèle avec des portes, des preuves et des hooks Stop : plus d'une centaine de verbes, seize portes. Nous l'avons utilisée nous-mêmes pendant deux mois. Le coût dépassait de loin le bénéfice, et le modèle oubliait quand même ce qu'il allait oublier. Cette version retire tout cela et garde les enregistrements et la recherche.
+**Core enregistre et retrouve la mémoire du projet.** Les tâches, décisions et connaissances alimentent le flux d’événements. Les projets peuvent déclarer des contrôles de clôture, et les intégrations chargent les instructions et appliquent les contraintes d’exécution configurées.
 
-**Un seul hook.** Un modèle ne sait pas ce qu'il ne sait pas ; la recherche doit donc être déclenchée par l'hôte avant chaque prompt, sans attendre que le modèle y pense. Mais le hook ne contient aucune règle. Quoi chercher et combien en donner, c'est le moteur qui décide.
+**Les hooks dépendent de chaque intégration.** UserPromptSubmit déclenche la recherche. Les gardes de rôle Codex utilisent PreToolUse, PostToolUse et Stop. Le diagnostic de l’hôte indique leur activation et les preuves de chargement natif.
 
 **AGENTS.md est votre fichier.** Des règles qui doivent valoir sur les deux hôtes ne peuvent vivre que là où les deux lisent. Einzbern y écrit donc, mais seulement des sections balisées, seulement ce que vous avez activé, et jamais par-dessus vos modifications.
 
