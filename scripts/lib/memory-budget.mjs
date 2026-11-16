@@ -49,6 +49,17 @@ export function readMemoryPolicy(deviceHome) {
   return Object.hasOwn(value.values, MEMORY_POLICY_SETTING) ? parseMemoryPolicy(value.values[MEMORY_POLICY_SETTING]) : null;
 }
 
+function queryWindows(script) {
+  const systemRoot = process.env.SystemRoot;
+  if (!systemRoot || !isAbsolute(systemRoot)) throw new Error("Windows system directory is unavailable");
+  const executable = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+  // A PowerShell 7 parent may export module paths incompatible with Windows PowerShell.
+  const command = `$ErrorActionPreference = 'Stop'; $env:PSModulePath = Join-Path $PSHOME 'Modules'; ${script}`;
+  return JSON.parse(execFileSync(executable, ["-NoProfile", "-NonInteractive", "-Command", command], {
+    encoding: "utf8", timeout: 2000, maxBuffer: 8 * MiB, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+  }));
+}
+
 /** libuv supplies the process/container-aware headroom, never just free physical pages. */
 export function sampleMemory() {
   try {
@@ -70,14 +81,34 @@ export function sampleMemory() {
       if (!match) fail("MEMORY_SAMPLE_UNAVAILABLE");
       // This platform exposes a free percentage, not a PSI stall percentage.
       return { sampledAt: Date.now(), cpuParallelism: availableParallelism(), limitBytes, availableBytes: Math.min(availableBytes, physical * Number(match[1]) / 100), stallPercent: null, pressureSource: "macos-memory-pressure-query" };
+    } else if (process.platform === "win32") {
+      const memory = queryWindows(`
+Get-CimInstance Win32_OperatingSystem -Property TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory |
+  Select-Object TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory |
+  ConvertTo-Json -Compress`);
+      if (![memory?.TotalVisibleMemorySize, memory?.FreePhysicalMemory, memory?.TotalVirtualMemorySize, memory?.FreeVirtualMemory].every(value => integer(value))) fail("MEMORY_SAMPLE_UNAVAILABLE");
+      const physicalBytes = memory.TotalVisibleMemorySize * 1024;
+      const physicalAvailable = memory.FreePhysicalMemory * 1024;
+      const virtualBytes = memory.TotalVirtualMemorySize * 1024;
+      const virtualAvailable = memory.FreeVirtualMemory * 1024;
+      if (!integer(physicalBytes, 1) || !integer(virtualBytes, 1) || !integer(physicalAvailable) || !integer(virtualAvailable)
+        || physicalAvailable > physicalBytes || virtualAvailable > virtualBytes) fail("MEMORY_SAMPLE_UNAVAILABLE");
+      // Windows exposes physical/virtual headroom; PSI full-stall accounting is unavailable.
+      return {
+        sampledAt: Date.now(), cpuParallelism: availableParallelism(),
+        limitBytes: Math.min(limitBytes, physicalBytes, virtualBytes),
+        availableBytes: Math.min(availableBytes, physicalAvailable, virtualAvailable),
+        stallPercent: null, pressureSource: "windows-memory-status",
+      };
     } else fail("MEMORY_SAMPLE_UNAVAILABLE");
     return { sampledAt: Date.now(), cpuParallelism: availableParallelism(), limitBytes, availableBytes, stallPercent, pressureSource };
   } catch (error) { if (error instanceof MemoryBudgetError) throw error; fail("MEMORY_SAMPLE_UNAVAILABLE"); }
 }
 
 export function checkMemorySample(sample, policy, now = Date.now()) {
-  if (!sample || !Number.isFinite(sample.sampledAt) || now < sample.sampledAt || now - sample.sampledAt > policy.sampleMaxAgeMs || !Number.isFinite(sample.limitBytes) || sample.limitBytes <= 0 || !Number.isFinite(sample.availableBytes) || sample.availableBytes < 0 || sample.availableBytes > sample.limitBytes || !["linux-psi-full-avg10", "macos-memory-pressure-query"].includes(sample.pressureSource)) fail("MEMORY_SAMPLE_INVALID_OR_STALE");
+  if (!sample || !Number.isFinite(sample.sampledAt) || now < sample.sampledAt || now - sample.sampledAt > policy.sampleMaxAgeMs || !Number.isFinite(sample.limitBytes) || sample.limitBytes <= 0 || !Number.isFinite(sample.availableBytes) || sample.availableBytes < 0 || sample.availableBytes > sample.limitBytes || !["linux-psi-full-avg10", "macos-memory-pressure-query", "windows-memory-status"].includes(sample.pressureSource)) fail("MEMORY_SAMPLE_INVALID_OR_STALE");
   if (sample.pressureSource === "linux-psi-full-avg10" && (!Number.isFinite(sample.stallPercent) || sample.stallPercent < 0 || sample.stallPercent > 100)) fail("MEMORY_SAMPLE_INVALID_OR_STALE");
+  if (sample.pressureSource !== "linux-psi-full-avg10" && sample.stallPercent !== null) fail("MEMORY_SAMPLE_INVALID_OR_STALE");
   if (sample.cpuParallelism !== undefined && !integer(sample.cpuParallelism, 1)) fail("MEMORY_SAMPLE_INVALID_OR_STALE");
   if (100 * (1 - sample.availableBytes / sample.limitBytes) > policy.maxUsedPercent || (sample.stallPercent !== null && sample.stallPercent > policy.maxStallPercent)) fail("MEMORY_PRESSURE_HIGH");
 }
@@ -112,6 +143,27 @@ function writeAtomic(path, value) {
   try { writeFileSync(fd, `${JSON.stringify(value)}\n`); fsyncSync(fd); } finally { closeSync(fd); }
   renameSync(temp, path);
 }
+
+function privatePermissions(path, metadata) {
+  if (process.platform !== "win32") {
+    return (metadata.mode & 0o022) === 0 && (typeof process.getuid !== "function" || metadata.uid === process.getuid());
+  }
+  // NTFS permissions are independent of the POSIX mode bits exposed by Node on Windows.
+  const encodedPath = Buffer.from(path, "utf8").toString("base64");
+  try {
+    return queryWindows(`
+$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'));
+$acl = Get-Acl -LiteralPath $path;
+$trusted = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544');
+$safe = $trusted -contains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value;
+$write = [Security.AccessControl.FileSystemRights]'Write,DeleteSubdirectoriesAndFiles,Delete,ChangePermissions,TakeOwnership';
+foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
+  if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -ne 0 -and $trusted -notcontains $rule.IdentityReference.Value) { $safe = $false; }
+}
+ConvertTo-Json -Compress -InputObject $safe`) === true;
+  } catch { return false; }
+}
+
 /** Only the registered default locks forwarding may resolve through a link. */
 export function resolveMemoryDirectory(deviceHome, directory) {
   if (!isAbsolute(directory)) fail("MEMORY_DOMAIN_INVALID");
@@ -121,7 +173,7 @@ export function resolveMemoryDirectory(deviceHome, directory) {
     try {
       let pointer;
       try { pointer = lstatSync(join(deviceHome, "storage-location.json")); } catch (error) { if (error.code !== "ENOENT") throw error; }
-      if (pointer && (!pointer.isFile() || pointer.isSymbolicLink() || pointer.nlink !== 1 || (pointer.mode & 0o022) !== 0 || (typeof process.getuid === "function" && pointer.uid !== process.getuid()))) fail("MEMORY_DOMAIN_INVALID");
+      if (pointer && (!pointer.isFile() || pointer.isSymbolicLink() || pointer.nlink !== 1 || !privatePermissions(join(deviceHome, "storage-location.json"), pointer))) fail("MEMORY_DOMAIN_INVALID");
       location = readStorageLocation(deviceHome);
     } catch { fail("MEMORY_DOMAIN_INVALID"); }
     if (location) {
@@ -133,7 +185,7 @@ export function resolveMemoryDirectory(deviceHome, directory) {
   }
   mkdirSync(target, { recursive: true, mode: 0o700 });
   const metadata = lstatSync(target);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink() || (metadata.mode & 0o022) !== 0 || (typeof process.getuid === "function" && metadata.uid !== process.getuid())) fail("MEMORY_DOMAIN_INVALID");
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || !privatePermissions(target, metadata)) fail("MEMORY_DOMAIN_INVALID");
   return realpathSync(target);
 }
 
@@ -159,6 +211,21 @@ function stateTransaction(directory, fn) {
 /** Observational only. Failure gives no credit and must never prove a process is gone. */
 export function processTable() {
   try {
+    if (process.platform === "win32") {
+      const observation = queryWindows(`
+$rows = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,WorkingSetSize,CreationDate | ForEach-Object {
+  $started = $null;
+  if ($null -ne $_.CreationDate) { $started = $_.CreationDate.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture); }
+  @{ pid = $_.ProcessId; ppid = $_.ParentProcessId; rss = $_.WorkingSetSize; started = $started }
+});
+@{ observerPid = $PID; rows = $rows } | ConvertTo-Json -Compress -Depth 3`);
+      if (!integer(observation?.observerPid, 1) || !Array.isArray(observation.rows)) return null;
+      const rows = observation.rows.filter(row => row.pid !== observation.observerPid);
+      if (rows.some(row => !integer(row.pid) || !integer(row.ppid)
+        || !(row.rss === null || integer(row.rss))
+        || !(row.started === null || typeof row.started === "string" && Number.isFinite(Date.parse(row.started))))) return null;
+      return rows;
+    }
     const result = spawnSync("ps", ["-axo", "pid=,ppid=,rss=,lstart="], { encoding: "utf8", timeout: 2000, maxBuffer: 8 * MiB });
     if (result.error || result.status !== 0) return null;
     return result.stdout.trim().split("\n").map(line => {
@@ -175,7 +242,9 @@ function treeRows(table, owner) {
   const ids = new Set([owner.pid]);
   let added;
   do { added = false; for (const row of table) if (ids.has(row.ppid) && !ids.has(row.pid)) { ids.add(row.pid); added = true; } } while (added);
-  return table.filter(row => ids.has(row.pid));
+  const rows = table.filter(row => ids.has(row.pid));
+  if (rows.some(row => typeof row.started !== "string" || !integer(row.rss))) return null;
+  return rows;
 }
 function checkOutstanding(state, snapshot, policy) {
   let unspent = 0;
@@ -244,7 +313,7 @@ export async function acquireMemoryBudget({ deviceHome, directory, command, env 
       admitted = stateTransaction(directory, state => {
         const table = processes();
         const owner = table?.find(row => row.pid === process.pid);
-        if (!owner) fail("MEMORY_PROCESS_OBSERVATION_UNKNOWN");
+        if (!owner || typeof owner.started !== "string" || !integer(owner.rss)) fail("MEMORY_PROCESS_OBSERVATION_UNKNOWN");
         observe(state, table);
         const parent = inherited ? state.leases.find(row => row.token === inherited.token) : null;
         if (inherited && !parent) fail("MEMORY_LEASE_INVALID");
@@ -295,7 +364,7 @@ export async function acquireMemoryBudget({ deviceHome, directory, command, env 
         const lease = state.leases.find(row => row.token === token);
         if (!lease || !table || state.leases.some(row => row.parentToken === token)) fail("MEMORY_RELEASE_UNCONFIRMED");
         const rows = treeRows(table, lease.owner);
-        if (!rows || rows.some(row => row.pid !== process.pid) || lease.observedProcesses.some(p => p.pid !== process.pid && table.some(row => row.pid === p.pid && row.started === p.started))) fail("MEMORY_RELEASE_UNCONFIRMED");
+        if (!rows || rows.some(row => row.pid !== process.pid) || lease.observedProcesses.some(p => p.pid !== process.pid && table.some(row => row.pid === p.pid && (row.started === p.started || row.started === null)))) fail("MEMORY_RELEASE_UNCONFIRMED");
         const receipt = { schemaVersion: "einzbern.memory-run.v1", command, workers: lease.workers, reservedBytes: lease.bytes, peakObservedBytes: lease.peakObservedBytes, peakKind: "sampled-process-tree-rss-not-exact-peak", durationMs: Date.now() - lease.startedAt, status: "released" };
         mkdirSync(join(directory, "memory-receipts"), { recursive: true, mode: 0o700 });
         writeAtomic(join(directory, "memory-receipts", `${token}.json`), receipt);

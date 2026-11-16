@@ -1,0 +1,50 @@
+name: Resource guards
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resource-guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  memory-adapters:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.16.0
+      - name: Verify platform adapters and native Windows lifecycle
+        run: node --test --test-concurrency=1 tests/memory-windows.test.mjs
+      - name: Acquire pinned Linux verification dependencies
+        if: runner.os == 'Linux'
+        env:
+          npm_config_offline: "false"
+          npm_config_prefer_offline: "false"
+          npm_config_ignore_scripts: "true"
+          npm_config_audit: "false"
+          npm_config_fund: "false"
+        run: |
+          npm install --global pnpm@11.3.0 --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile --ignore-scripts --config.offline=false
+      - name: Build and verify resource admission regressions
+        if: runner.os == 'Linux'
+        run: |
+          pnpm build
+          node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/memory-budget.test.mjs tests/memory-policy-backup.test.mjs tests/heavy-runs.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs

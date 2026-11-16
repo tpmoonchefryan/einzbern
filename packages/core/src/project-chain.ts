@@ -304,8 +304,8 @@ async function hostWorkProjectContexts(state: WorkspaceState, workId: string, re
     // a new telemetry gate. Explicit user guarantees belong in request.hardLimits.
   };
   const constraintReasons: string[] = request.action === "implementation" ? contentAdmissionProblems.map(problem => `work-content:${problem}`) : [];
-  if (typeof deviceCap === "number") enforceCap(deviceCap, "total");
-  if (typeof projectCap === "number") enforceCap(projectCap, "children");
+  if (deviceCap !== undefined) enforceCap(Number(deviceCap), "total");
+  if (projectCap !== undefined) enforceCap(Number(projectCap), "children");
   if (["blocked", "pending-owner-acceptance", "done", "cancelled"].includes(work.status)) constraintReasons.push("current-work-state-does-not-allow-new-dispatch");
   // Optional project association is checked if requested. No selected target is fabricated.
   const target = request.projectRef === undefined ? undefined : contexts.find(context => dotDigest(context.reference) === dotDigest(request.projectRef));
