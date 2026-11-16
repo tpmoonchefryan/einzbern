@@ -2,14 +2,12 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile, lstat, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { codexPeerReportPrefix, normalizeCodexPeerBatch } from "./codex-peer-batch.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { withFileLock } from "./file-lock.js";
-import { isCodexIndependentCreate, isCodexNativeSpawn } from "./native-tool-evidence.js";
+import { isCodexIndependentCreate, isCodexNativeSpawn } from "./codex-tool-identity.js";
 import type { CodexPeerBatch } from "./codex-peer-batch.js";
 import { canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
 import { codexToolResult, runCodexQueryGuard } from "./codex-query-guard.js";
-import { consumeCodexSettingsIntent, hasCodexSettingsOverride, observeCodexSettingsResult } from "./codex-peer-settings.js";
 
 type ObjectValue = Record<string, unknown>;
 interface PeerTurn {
@@ -116,19 +114,23 @@ export async function runCodexPeerHook(event: string, payload: unknown, device: 
   const unchanged = { reasonCode: "HOOK_PEER_NOT_APPLICABLE", output: null };
   if (body === null || !text(body.session_id)) return unchanged;
   const tool = body.tool_name;
-  if (event === "PostToolUse" && tool === SEND && hasCodexSettingsOverride(body.tool_input)) await observeCodexSettingsResult(device, body);
+  if (event === "PostToolUse" && tool === SEND && (await import("./codex-peer-settings.js")).hasCodexSettingsOverride(body.tool_input)) {
+    const { observeCodexSettingsResult } = await import("./codex-peer-settings.js");
+    await observeCodexSettingsResult(device, body);
+  }
   const query = await runCodexQueryGuard(event, body, device);
   if (query.reasonCode !== "HOOK_PEER_NOT_APPLICABLE") return query;
   if (event === "PreToolUse" && tool === SEND) {
     const problem = await codexPeerReportRecipientProblem(device, body.session_id, body.tool_input);
     if (problem) return denyPeer(problem.reasonCode, problem.reason);
   }
-  if (event === "PreToolUse" && tool === SEND && hasCodexSettingsOverride(body.tool_input)) {
+  if (event === "PreToolUse" && tool === SEND && (await import("./codex-peer-settings.js")).hasCodexSettingsOverride(body.tool_input)) {
     const role = await readCodexPeerRole(device, body.session_id);
     if (role.status === "error") return denyPeer("HOOK_PEER_ROLE_RECOVERY_FAILED", role.reason);
     const input = object(body.tool_input) ?? {};
     if (role.status === "active" && input.threadId === role.role.mainId && (input.hostId === undefined || input.hostId === "local")) {
       try {
+        const { consumeCodexSettingsIntent } = await import("./codex-peer-settings.js");
         if (!await consumeCodexSettingsIntent(device, body)) return denyPeer("HOOK_PEER_SETTINGS_DENIED", "Ordinary reports omit model/thinking. Load Mana Orchestrate; prepare an explicitly authorized settings adjustment with its exact native arguments and existing Owner decision.");
       } catch (error) { return denyPeer("HOOK_PEER_SETTINGS_DENIED", String(error)); }
     }
@@ -179,7 +181,7 @@ export async function runCodexPeerHook(event: string, payload: unknown, device: 
 
   if (state === null) return unchanged;
   if (event === "PreToolUse") {
-    if (tool === SEND && !hasCodexSettingsOverride(input) && body.session_id === state.coordinatorId && input.threadId === state.mainId) {
+    if (tool === SEND && !(await import("./codex-peer-settings.js")).hasCodexSettingsOverride(input) && body.session_id === state.coordinatorId && input.threadId === state.mainId) {
       // An attempted send with no result is unknown, never an invitation to resend.
       state.deliveryAttempted = true;
       await saveTurn(file, state);
@@ -291,6 +293,7 @@ export async function codexPeerReportRecipientProblem(
   const manifest = role.role.receipt.manifest;
   const source = `role.receipt.manifest.main (${manifest.main.sourceRef})`;
   const binding = `batch ${manifest.batchId}/${manifest.attemptId}`;
+  const { codexPeerReportPrefix } = await import("./codex-peer-batch.js");
   if (!prompt.startsWith(codexPeerReportPrefix(manifest))) {
     return {
       reasonCode: "HOOK_PEER_REPORT_BINDING_DENIED",
@@ -341,6 +344,7 @@ export async function readCodexPeerRole(device: string, sessionId: string): Prom
     if (digest !== canonicalSha256(payload) || value.schemaVersion !== "einzbern.codex-peer-role.v1" ||
         value.host !== "codex" || value.coordinatorId !== sessionId || !["active", "retired"].includes(String(value.status)) ||
         value.libraryId !== anchor.libraryId || value.mainId !== anchor.mainId || value.status !== anchor.status || !text(value.actor) || !text(value.recordedAt)) throw new Error("invalid role identity, version or digest");
+    const { normalizeCodexPeerBatch } = await import("./codex-peer-batch.js");
     const receipt = normalizeCodexPeerBatch(value.receipt);
     if (receipt.schemaVersion !== "tcrn.codex-peer-batch.v2" || receipt.manifest.coordinator.conversationId !== sessionId ||
         receipt.manifest.main.conversationId !== value.mainId) throw new Error("role differs from validated peer receipt");
@@ -361,6 +365,7 @@ export async function persistCodexPeerRole(input: {
   readonly actor: string;
   readonly change?: { readonly operation: "retire" | "activate" | "recover"; readonly decidedIn: string | null };
 }): Promise<CodexPeerRole> {
+  const { normalizeCodexPeerBatch } = await import("./codex-peer-batch.js");
   const receipt = normalizeCodexPeerBatch(input.receipt);
   const manifest = receipt.manifest;
   if (receipt.schemaVersion !== "tcrn.codex-peer-batch.v2") throw new Error("legacy peer receipt is historical, not role enrollment");

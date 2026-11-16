@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { randomUUID } from "node:crypto";
+import { isCodexNativeSpawn } from "./codex-tool-identity.js";
+export { isCodexNativeSpawn, isCodexIndependentCreate } from "./codex-tool-identity.js";
 import { dotDigest, dotInstant, dotObject, dotRefs, dotSha, dotText, validateRevisionBinding, validateDotExecutionRequest, resolveDotExecutionAdmission } from "./dot-execution.js";
 import type { DotAdmission, RevisionBinding } from "./dot-execution.js";
 import type { ProjectReference } from "../../protocol/src/index.js";
@@ -825,12 +827,4 @@ export function normalizeHostNativeRecord(value: unknown): HostNativeRecord {
   const calculated = recordHostNativeEvents(record.preparation, record.events);
   if (dotDigest(calculated) !== dotDigest(record)) throw new HostExecutionError("native record differs from retained events");
   return calculated;
-}
-
-/** Tool identities only; never inspect JavaScript, prompts or shell text. */
-export function isCodexNativeSpawn(tool: unknown): boolean {
-  return ["collaboration.spawn_agent", "collaboration__spawn_agent", "multi_agent_v1.spawn_agent", "spawn_agent"].includes(String(tool));
-}
-export function isCodexIndependentCreate(tool: unknown): boolean {
-  return typeof tool === "string" && /(?:^|__|\.)(?:create_thread|fork_thread)$/u.test(tool);
 }

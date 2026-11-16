@@ -1727,9 +1727,9 @@
     "packages/core/src/cloud-roots.ts": "9dbce282738aca8d86fd27a0b8211d1e3932764fe2ca4869ea9de70648a3d3c1",
     "packages/core/src/codex-native-health.ts": "5dd03ca47e027f43ebe4966d131d89deedc73ba102e8984769b3707b7eb19fdf",
     "packages/core/src/codex-peer-batch.ts": "ca727a63c0c00792273062d119fb9c995110919e6edbf231508660c5b3eb2f24",
-    "packages/core/src/codex-peer-hooks.ts": "162d6b5e0032297c2d51fb0aa7297aeab3f86219c478e120d66a39ffdb97c3dd",
+    "packages/core/src/codex-peer-hooks.ts": "9d777ced299516928ee55c99d52eedcbb1a597fbe8a26594c7010d0bc1577ae5",
     "packages/core/src/codex-peer-settings.ts": "f7a6251d5de5bea85823e60a4514582bb0f1b9e1af4bd66ab01d29a45d647ec0",
-    "packages/core/src/codex-query-guard.ts": "80485156db995b1d6b177c06f5ae5bba95d91c36cc8d5deb115b0b9b66feceaa",
+    "packages/core/src/codex-query-guard.ts": "cd64ab67fe75a14aedf83a406fb2b8241d59158153a00f3ba6dd6f7cebe70c71",
     "packages/core/src/conference-execution.ts": "617975b49ce80cc2d6f639437094a4e0807956be82baa49fabd311d5611a2e81",
     "packages/core/src/conference.ts": "88da25785bca1dd7ee2a53edb1be032a60fefbe952ebb785a6d7d7c3b252c34a",
     "packages/core/src/config-backup-remote.ts": "db9b4f6b73fdb79cd3eed80a4c1a28a2670ab7f5e59ffaa86fe6f2fc06c53ef6",
@@ -1809,7 +1809,7 @@
     "packages/core/src/models-escalation.ts": "0afd573cd663718f87ffb5d5316c63e253ffb48099e667acd01ac627f0b5e24d",
     "packages/core/src/models-tiers.ts": "0c7eea501dbbcb68ac1bec334805c99f605708256aa582040d6474ba8375360a",
     "packages/core/src/names.ts": "09ed10a1ea5ce67943702e7da03db437b77678d759945470f829830ddf4c354e",
-    "packages/core/src/native-tool-evidence.ts": "4106c65a73276f262fbaca88dcf5154fbf0d055b92b0594559d79320b3afe692",
+    "packages/core/src/native-tool-evidence.ts": "138a6a4a5eae9d62a94ccbf5d3f96018dd173171fef362c76d4f890e3304115e",
     "packages/core/src/navigation-lines.ts": "a8f9654053a6d8759a06bdb4c57cdf90ea861cdb120d4d02b1e1e93605f6dceb",
     "packages/core/src/node-floor.ts": "338f93932309d6b459d1c82f92d9e46c1802a52e4519296c3cda20ca122b1e87",
     "packages/core/src/path-containment.ts": "55ba054c5392119bee42dcad86d8f3b1b2d9df76a43ef099fbc2073bc75c9556",
@@ -2544,7 +2544,8 @@
     "tests/crest-source-set.test.mjs": "3a622ba67ee77e177937262519db6be835447fb069728a65c5e3504659e075f0",
     "tests/fixtures/crest-projection-client.mjs": "cca44c7bf080a16c5fe4224cbd24108bde962f400acfe7b5a135c982a0aac5c1",
     "tests/fixtures/crest-set-client.mjs": "81b06f56aa0f764c5c21a4e8db6f3a666bd86c2e35d1767c10949653e324e8d9",
-    "tests/init095-fts-storage.test.mjs": "14d4ee9cce30fc29e14cc560dfdca9e524c00fd5424f70a7d22fa2c3f71e3af2"
+    "tests/init095-fts-storage.test.mjs": "14d4ee9cce30fc29e14cc560dfdca9e524c00fd5424f70a7d22fa2c3f71e3af2",
+    "packages/core/src/codex-tool-identity.ts": "c255c70f4efd8d28f0971942beedf12cedc2bade5eff1a2ddbcd140ba9d002d8"
   },
   "version": 68
 }
