@@ -656,6 +656,8 @@ async function build() {
   await safeWriteOutput(repositoryRoot, "dist/build/packages/core/src/darwin-source-identity.mjs", sourceIdentity);
   const memoryBudget = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-budget.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-budget.mjs", memoryBudget);
+  const windowsSystem = await readSourceFile(resolve(repositoryRoot, "scripts/lib/windows-system.mjs"));
+  await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/windows-system.mjs", windowsSystem);
   const memoryWorkerCheck = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-worker-check.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-worker-check.mjs", memoryWorkerCheck);
   const heavyRuns = await readSourceFile(resolve(repositoryRoot, "scripts/lib/heavy-runs.mjs"));
@@ -682,6 +684,9 @@ async function build() {
 // caller that is not a `verify:*` name: `p8Only` is the release train's dogfood leg. The
 // external-trust leg (`trustOnly`) retired with the trust root (TCRN-CROSS-STORY-467 R2).
 async function runTests({ p8Only = false, extraEnvironment = {}, ciPlan } = {}) {
+  if (process.platform === "win32") {
+    fail("TEST_CONTROLLER_PLATFORM_UNSUPPORTED", "The suite controller requires POSIX process groups. Run the focused Node tests documented in docs/windows.md on Windows.");
+  }
   await build();
   let tests = selectTestFiles((await walkFiles())
     .map((path) => toPosixPath(relative(repositoryRoot, path))), "core")

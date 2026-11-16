@@ -6,6 +6,12 @@ historical display name, **P1 verification**, for check-name compatibility; its
 current success is **`CI_LIGHT_VERIFIED`, `coverage=light`**, not full P1.
 See the distinct [light machine contract](../specs/ci-light-v1.md).
 
+The Windows and resource guards workflow additionally builds on Windows Server
+2022 and Ubuntu 24.04. Its focused suites cover native resource observations,
+filesystem boundaries, runtime relocation and isolated installation. Native
+Windows development commands and remaining controller requirements are described
+in [Windows support](windows.md).
+
 The fixed roster is format, links, test wiring, lint, build (including its nested
 typecheck), the explicit bounded light contract tests, Portal current proof,
 design reconciliation and design proof, no-sibling dependency, offline boundary,

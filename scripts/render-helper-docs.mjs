@@ -143,6 +143,7 @@ export async function renderHelperDocs({ out, version = null, root = REPOSITORY_
   const skill = await renderSkill(resolved);
   for (const [path, bytes] of skill.files) generated.set(`${HELPER_SKILL_DIRECTORY}/${path}`, bytes);
   generated.set("package.json", Buffer.from(helperPackageJson(resolved), "utf8"));
+  generated.set(".gitattributes", Buffer.from("* text=auto eol=lf\n", "utf8"));
   // CI and its archiver are release-owned outputs, so release:generate cannot
   // silently list them as extras and remove the helper's only workflow again.
   generated.set(".github/workflows/ci.yml", await readFile(join(REPOSITORY_ROOT, "scripts/templates/helper/ci.yml")));

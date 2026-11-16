@@ -8,6 +8,7 @@ import { availableParallelism, hostname, totalmem } from "node:os";
 import { basename, isAbsolute, join, resolve, dirname } from "node:path";
 
 import { readStorageLocation } from "./storage-location.mjs";
+import { hasPrivateWindowsPermissions, queryWindows } from "./windows-system.mjs";
 
 export const MEMORY_POLICY_SETTING = "execution.memoryPolicy";
 export const MEMORY_LEASE_VARIABLE = "EINZBERN_MEMORY_LEASE";
@@ -47,17 +48,6 @@ export function readMemoryPolicy(deviceHome) {
   catch (error) { if (error.code === "ENOENT") return null; fail("MEMORY_POLICY_UNREADABLE"); }
   if (!["tcrn.machine-settings.v1", "tcrn.machine-settings.v2"].includes(value.schemaVersion) || !value.values || typeof value.values !== "object" || Array.isArray(value.values)) fail("MEMORY_POLICY_UNREADABLE");
   return Object.hasOwn(value.values, MEMORY_POLICY_SETTING) ? parseMemoryPolicy(value.values[MEMORY_POLICY_SETTING]) : null;
-}
-
-function queryWindows(script) {
-  const systemRoot = process.env.SystemRoot;
-  if (!systemRoot || !isAbsolute(systemRoot)) throw new Error("Windows system directory is unavailable");
-  const executable = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-  // A PowerShell 7 parent may export module paths incompatible with Windows PowerShell.
-  const command = `$ErrorActionPreference = 'Stop'; $env:PSModulePath = Join-Path $PSHOME 'Modules'; ${script}`;
-  return JSON.parse(execFileSync(executable, ["-NoProfile", "-NonInteractive", "-Command", command], {
-    encoding: "utf8", timeout: 5000, maxBuffer: 8 * MiB, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
-  }));
 }
 
 /** libuv supplies the process/container-aware headroom, never just free physical pages. */
@@ -148,20 +138,7 @@ function privatePermissions(path, metadata) {
   if (process.platform !== "win32") {
     return (metadata.mode & 0o022) === 0 && (typeof process.getuid !== "function" || metadata.uid === process.getuid());
   }
-  // NTFS permissions are independent of the POSIX mode bits exposed by Node on Windows.
-  const encodedPath = Buffer.from(path, "utf8").toString("base64");
-  try {
-    return queryWindows(`
-$path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'));
-$acl = Get-Acl -LiteralPath $path;
-$trusted = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544');
-$safe = $trusted -contains $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value;
-$write = [Security.AccessControl.FileSystemRights]'Write,DeleteSubdirectoriesAndFiles,Delete,ChangePermissions,TakeOwnership';
-foreach ($rule in $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])) {
-  if ($rule.AccessControlType -eq 'Allow' -and ($rule.FileSystemRights -band $write) -ne 0 -and $trusted -notcontains $rule.IdentityReference.Value) { $safe = $false; }
-}
-ConvertTo-Json -Compress -InputObject $safe`) === true;
-  } catch { return false; }
+  return hasPrivateWindowsPermissions(path);
 }
 
 /** Only the registered default locks forwarding may resolve through a link. */
@@ -423,7 +400,7 @@ const EXECUTOR_SCHEMA = "einzbern.memory-executors.v1";
 const executorDigest = bytes => createHash("sha256").update(bytes).digest("hex");
 function moduleRoot() {
   let root = resolve(dirname(fileURLToPath(import.meta.url)), import.meta.url.endsWith("/memory-budget.mjs") ? "../.." : "..");
-  if (root.endsWith("/dist/build")) root = resolve(root, "../..");
+  if (basename(root) === "build" && basename(dirname(root)) === "dist") root = resolve(root, "../..");
   return root;
 }
 function verifiedExecutorProject(cwd) {
@@ -439,7 +416,7 @@ function verifiedExecutorProject(cwd) {
     if (member?.size !== bytes.length || member.sha256 !== executorDigest(bytes)) fail("MEMORY_EXECUTOR_UNSUPPORTED");
     contract = JSON.parse(bytes.toString("utf8"));
   } else contract = JSON.parse(readFileSync(metadataPath, "utf8"));
-  if (contract?.schemaVersion !== EXECUTOR_SCHEMA || !/^pnpm@\d+\.\d+\.\d+$/u.test(contract.packageManager ?? "") || !contract.files || Array.isArray(contract.files) || Object.keys(contract.files).length !== 11) fail("MEMORY_EXECUTOR_UNSUPPORTED");
+  if (contract?.schemaVersion !== EXECUTOR_SCHEMA || !/^pnpm@\d+\.\d+\.\d+$/u.test(contract.packageManager ?? "") || !contract.files || Array.isArray(contract.files) || Object.keys(contract.files).length !== 12 || !Object.hasOwn(contract.files, "scripts/lib/windows-system.mjs")) fail("MEMORY_EXECUTOR_UNSUPPORTED");
   const projectRoot = realpathSync(cwd);
   for (const path of Object.keys(contract.files)) {
     if (isAbsolute(path) || path.includes("\\") || path.split("/").some(part => part === ".." || part === "." || part === "") || !/^[a-f0-9]{64}$/u.test(contract.files[path] ?? "")) fail("MEMORY_EXECUTOR_UNSUPPORTED");

@@ -1,4 +1,4 @@
-name: Resource guards
+name: Windows and resource guards
 
 on:
   pull_request:
@@ -21,7 +21,10 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -32,8 +35,7 @@ jobs:
           node-version: 24.16.0
       - name: Verify platform adapters and native Windows lifecycle
         run: node --test --test-concurrency=1 tests/memory-windows.test.mjs
-      - name: Acquire pinned Linux verification dependencies
-        if: runner.os == 'Linux'
+      - name: Acquire pinned verification dependencies
         env:
           npm_config_offline: "false"
           npm_config_prefer_offline: "false"
@@ -44,8 +46,13 @@ jobs:
           npm install --global pnpm@11.3.0 --ignore-scripts --no-audit --no-fund
           corepack install --global --cache-only pnpm@11.3.0
           pnpm install --frozen-lockfile --ignore-scripts --config.offline=false
-      - name: Build and verify resource admission regressions
+      - name: Build on the native platform
+        run: pnpm build
+      - name: Verify native Windows entry points
+        if: runner.os == 'Windows'
+        run: |
+          node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/windows-platform.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/installer-cleanup-audit-regressions.test.mjs tests/skill-install-bootstrap.test.mjs
+      - name: Verify Linux resource and filesystem regressions
         if: runner.os == 'Linux'
         run: |
-          pnpm build
-          node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/memory-budget.test.mjs tests/memory-policy-backup.test.mjs tests/heavy-runs.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs
+          node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/memory-budget.test.mjs tests/memory-policy-backup.test.mjs tests/heavy-runs.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/io-boundaries.test.mjs tests/output-session-lifecycle.test.mjs tests/storage-defensive-maintenance.test.mjs tests/backup-snapshot.test.mjs tests/render-helper-docs.test.mjs tests/skill-install-bootstrap.test.mjs tests/windows-platform.test.mjs
