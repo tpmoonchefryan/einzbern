@@ -28,7 +28,7 @@ foreach ($sid in @($owner, [Security.Principal.SecurityIdentifier]::new('S-1-5-1
   $acl.AddAccessRule($rule);
 }
 Set-Acl -LiteralPath $path -AclObject $acl;
-`], { timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+`], { timeout: 15_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   return directory;
 }
 
@@ -41,7 +41,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, toNamespacedPath } from 'node:path';
 const directory = realpathSync.native(mkdtempSync(join(tmpdir(), 'memory-windows-fixture-')));
 const originalPlatform = process.platform;
 Object.defineProperty(process, 'platform', { value: 'win32' });
@@ -52,8 +52,19 @@ const calls = [];
 cp.execFileSync = (executable, args, options) => {
   calls.push({ executable, args, options });
   assert.equal(options.windowsHide, true);
-  assert.equal(options.timeout, 5000);
+  if (executable.endsWith('filesystem.exe')) {
+    assert.equal(options.timeout, 15000);
+    assert.equal(args.length, 2);
+    assert.ok(['acl-write', 'acl-private'].includes(args[0]));
+    if (failure || answer !== true) throw new Error('Synthetic ACL observation denied');
+    return Buffer.alloc(0);
+  }
   assert.deepEqual(args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
+  if (args[3].includes('CreateDirectoryW') || args[3].includes('Add-Type -TypeDefinition $source -OutputAssembly')) {
+    assert.equal(options.timeout, 15000);
+    return 'true';
+  }
+  assert.equal(options.timeout, 5000);
   if (failure) throw new Error('Synthetic Windows query failure');
   return JSON.stringify(answer);
 };
@@ -119,7 +130,7 @@ test("Windows resource domains require a successful private ACL observation", ()
   windowsFixture(`
 answer = true;
 assert.equal(m.resolveMemoryDirectory(undefined, directory), directory);
-assert.match(calls.at(-1).args[3], /Get-Acl -LiteralPath/);
+assert.deepEqual(calls.at(-1).args, ['acl-write', toNamespacedPath(directory)]);
 for (const invalid of [false, null, 'true', {}]) {
   answer = invalid;
   assert.throws(() => m.resolveMemoryDirectory(undefined, directory), { reasonCode: 'MEMORY_DOMAIN_INVALID' });
@@ -218,6 +229,6 @@ $everyone = [Security.Principal.SecurityIdentifier]::new('S-1-1-0');
 $rule = [Security.AccessControl.FileSystemAccessRule]::new($everyone, 'Write', 'Allow');
 $acl.AddAccessRule($rule);
 [IO.Directory]::SetAccessControl($path, $acl);
-`], { timeout: 5000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+`], { timeout: 15_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
   assert.throws(() => resolveMemoryDirectory(undefined, directory), { reasonCode: "MEMORY_DOMAIN_INVALID" });
 });

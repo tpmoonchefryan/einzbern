@@ -11,7 +11,7 @@ import { isInside, walkFiles } from "../scripts/lib/files.mjs";
 import { configureStorageLocation } from "../dist/build/packages/core/src/storage-configure.js";
 import { readSnapshotManifestFile } from "../dist/build/packages/core/src/workspace-snapshot.js";
 import { memoryPackageTask } from "../dist/build/scripts/lib/memory-budget.mjs";
-import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
+import { createPrivateWindowsDirectory, hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
 import { resolveMemoryDirectory } from "../scripts/lib/memory-budget.mjs";
 import { storePath, loadPath } from "../dist/build/packages/core/src/stored-path.js";
 import { validateSettingValue } from "../dist/build/packages/core/src/settings.js";
@@ -190,4 +190,19 @@ test("Windows runtime relocation uses junctions and rejects a nested destination
   for (const area of ["cache", "locks", "backups"]) assert.equal(await realpath(join(home, area)), join(runtime, area));
   assert.equal(await readFile(join(home, "cache", "payload.txt"), "utf8"), "payload\n");
   assert.equal((await configureStorageLocation(home, library, runtime, at, decision, true)).reasonCode, "STORAGE_LOCATION_CONFIGURED");
+});
+
+test("Windows ACL observation distinguishes read access from permission to change protected files", { skip: process.platform !== "win32" }, async t => {
+  const path = join(await fixture(t), "private-acl");
+  assert.equal(createPrivateWindowsDirectory(path), true);
+  assert.equal(hasPrivateWindowsPermissions(path, true), true);
+  const grant = rights => {
+    const result = spawnSync(join(process.env.SystemRoot, "System32", "icacls.exe"), [path, "/grant:r", `*S-1-1-0:(${rights})`], { windowsHide: true });
+    assert.equal(result.status, 0, String(result.stderr));
+  };
+  grant("RD");
+  assert.equal(hasPrivateWindowsPermissions(path), true);
+  assert.equal(hasPrivateWindowsPermissions(path, true), false);
+  grant("WD");
+  assert.equal(hasPrivateWindowsPermissions(path), false);
 });
