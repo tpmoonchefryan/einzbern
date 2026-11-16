@@ -1958,7 +1958,7 @@
     "scripts/ci/baseline-evidence.mjs": "4b25231f0ca3409ad091d1880d97cb135f0cfabf2680b00b5b72230d6102e0cb",
     "scripts/ci/bootstrap-prerequisites.mjs": "cd4815180935283ec4c2e097978172289fce0e493300a8cf4306cd3068618c36",
     "scripts/ci/git-source-blobs.mjs": "89eb62107e49dde3b16609b68967b6fec074e43304d3075077cb291e6d7dedda",
-    "scripts/ci/impact-plan.mjs": "f5e2e20e820842df910ea0ddade685dee376c3d9f9b43e041f8326d0b40a6de6",
+    "scripts/ci/impact-plan.mjs": "0fd2d58e5f092360b7b2542dfd5cff1472546225a9d0ab704d229d0813c546df",
     "scripts/ci/light-roster.mjs": "4d798b0c25ec8a789fb7889b2479be84230fc852dd8636e17251e7e29cd5b512",
     "scripts/ci/light-runner.mjs": "550ab83f2239d685ff03081b5129d0f14ca4bfe02baeb20dfca3f7bf4c4ae585",
     "scripts/ci/p1-evidence.py": "1cfb33036533baaf4412eb10f591401a4d4c9d809efe2e8292e41da281b3686b",

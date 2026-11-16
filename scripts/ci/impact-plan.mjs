@@ -364,8 +364,15 @@ export function sourceDependencyGraph(texts, inputAudit) {
     // Referenced aliases retain their defining tokens; changing a dynamic
     // binding must not inherit the old audit merely because it still evaluates
     // to no known path. Other value-only edits and comments are not input forms.
+    // Bindings are complete for this source. Repeated token expressions have the
+    // same fingerprint within each mode, including expressions with unknown paths.
+    const ordinaryForms = new Map(), taggedForms = new Map();
     const inputForm = (start, end, tagged = false) => {
-      const expression = tokens.slice(start, end), aliases = new Map();
+      const expression = tokens.slice(start, end);
+      const key = canonical(expression), cache = tagged ? taggedForms : ordinaryForms;
+      const previous = cache.get(key);
+      if (previous !== undefined) return previous;
+      const aliases = new Map();
       const pending = new Set(expression.filter((token) => token.kind === "identifier").map((token) => token.value));
       for (const name of pending) {
         const definitions = [bindingForms.get(name), ...(tagged ? [tagDefinitions.get(name)] : [])].filter(Boolean);
@@ -373,7 +380,9 @@ export function sourceDependencyGraph(texts, inputAudit) {
         const forms = definitions.flatMap((definition) => [...definition.values()]); aliases.set(name, definitions.flatMap((definition) => [...definition.keys()]));
         for (const identifier of forms.flat()) pending.add(identifier);
       }
-      return digest({ expression: digest(expression), aliases: Object.fromEntries(sorted(aliases.keys()).map((name) => [name, sorted(aliases.get(name))])) });
+      const result = digest({ expression: digest(key), aliases: Object.fromEntries(sorted(aliases.keys()).map((name) => [name, sorted(aliases.get(name))])) });
+      cache.set(key, result);
+      return result;
     };
     const nonCallees = /^(?:return|throw|case|yield|await|new|typeof|void|delete|in|of|instanceof|else|do|if|for|while|switch|catch|with|function|class|const|let|var|export|default)$/u;
     const calleeStart = (end, depth = 0) => {
