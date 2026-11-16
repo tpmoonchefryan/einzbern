@@ -7,7 +7,7 @@ import { createPrivateWindowsDirectory } from "./windows-system.mjs";
 import { randomUUID } from "node:crypto";
 import { closeSync, openSync, writeFileSync, writeSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { availableParallelism, tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -46,7 +46,13 @@ export async function runWindowsTestController(args, { cwd, env, timeoutMs, onFa
     const stderrFd = openSync(join(directory, "stderr"), "wx", 0o600);
     descriptors.push(stderrFd);
     const started = Date.now();
-    child = spawnCommand(process.execPath, memoryTestArguments(diagnostics?.arguments ?? ["--test-reporter=tap", ...args], env), {
+    const planned = memoryTestArguments(diagnostics?.arguments ?? ["--test-reporter=tap", ...args], env);
+    // Each suite can start its own compiler, Git and CLI children. Bound the
+    // default fan-out while preserving an explicit or memory-admitted worker count.
+    const concurrency = Math.min(4, Math.max(1, availableParallelism() - 1));
+    const runnerArgs = planned.some(arg => arg === "--test-concurrency" || arg.startsWith("--test-concurrency="))
+      ? planned : [`--test-concurrency=${concurrency}`, ...planned];
+    child = spawnCommand(process.execPath, runnerArgs, {
       cwd, env, stdio: ["ignore", "pipe", "pipe"], windowsHide: true,
     });
     const capture = (descriptor, chunks, bytes) => {

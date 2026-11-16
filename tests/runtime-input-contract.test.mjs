@@ -352,10 +352,11 @@ test("full-core controller uses bounded platform budgets and keeps P8 bounded", 
     process: { platform, env: value === undefined ? {} : { TCRN_TEST_CONTROLLER_TIMEOUT_MS: value } }, p8Only,
     assertion: (condition, reasonCode, detail) => { if (!condition) throw Object.assign(new Error(detail), { reasonCode }); },
   });
-  assert.equal(budget(undefined, false, "win32"), 1_800_000);
+  assert.equal(budget(undefined, false, "win32"), 3_600_000);
   assert.equal(budget(undefined, true, "win32"), 600_000);
   assert.equal(budget("1800000", false, "win32"), 1_800_000);
-  assert.throws(() => budget("1800001", false, "win32"), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
+  assert.equal(budget("3600000", false, "win32"), 3_600_000);
+  assert.throws(() => budget("3600001", false, "win32"), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
   assert.equal(budget(undefined), 900_000);
   assert.equal(budget(undefined, true), 600_000);
   for (const value of ["1", "100", "3000", "599999", "600000", "600001", "899999", "900000", " 100 ", "1e3", "0x64"]) assert.equal(budget(value), Number(value));
