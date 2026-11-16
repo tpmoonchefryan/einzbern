@@ -52,7 +52,7 @@ import { compareCanonicalText } from "../../protocol/src/index.js";
 import type { JsonValue } from "../../protocol/src/index.js";
 import { ATOMIC_TEMPORARY_PREFIX } from "./atomic-file.js";
 import { streamDirectory } from "./akasha.js";
-import { matchCloudRoot } from "./cloud-roots.js";
+import { cloudRootRules, matchCloudRoot } from "./cloud-roots.js";
 import type { CloudRootContext } from "./cloud-roots.js";
 import { deviceHome as currentDeviceHome, ensureDeviceDirectory, lockPath, registryPath } from "./device-home.js";
 import { readDevice } from "./device-identity.js";
@@ -819,8 +819,9 @@ async function cloudFlagCheck(context: DoctorContext, located: ProjectLibrary): 
   const entry = located.entry;
   // Without an entry there is no flag to compare; the registry check says why.
   if (entry === null) return result("cloud-flag", [], { registered: false, advisory: true });
+  const detectionAvailable = cloudRootRules(context.cloud).length > 0;
   const match = matchCloudRoot(entry.libraryPath, context.cloud);
-  const suggested = match !== null;
+  const suggested = detectionAvailable ? match !== null : null;
   const detail: Detail = {
     registered: true,
     libraryPath: entry.libraryPath,
@@ -831,7 +832,7 @@ async function cloudFlagCheck(context: DoctorContext, located: ProjectLibrary): 
     // Red here is a hint: the flag is the user's, and the table only suggests it.
     advisory: true,
   };
-  return result("cloud-flag", entry.cloudHosted === suggested ? [] : ["CLOUD_FLAG_DIFFERS_FROM_SUGGESTION"], detail);
+  return result("cloud-flag", suggested === null || entry.cloudHosted === suggested ? [] : ["CLOUD_FLAG_DIFFERS_FROM_SUGGESTION"], detail);
 }
 
 // ---- doctor ----
