@@ -9448,6 +9448,11 @@
             "valueKind": "string"
           },
           {
+            "name": "repository",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
             "name": "covers",
             "required": false,
             "valueKind": "list"
@@ -9559,6 +9564,11 @@
           },
           {
             "name": "root",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "repository",
             "required": false,
             "valueKind": "string"
           },
@@ -12827,6 +12837,11 @@
             "name": "scope-bytes",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "full",
+            "required": false,
+            "valueKind": "boolean"
           },
           {
             "name": "limit",

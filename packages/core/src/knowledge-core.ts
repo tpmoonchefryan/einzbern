@@ -4600,19 +4600,33 @@ export async function createKnowledgeUnit(workspaceRoot: string, input: CreateKn
   return optimisticCrestWrite(workspaceRoot, (commitUnderLock) => createLibraryCrestEvent(workspaceRoot, input, options, commitUnderLock));
 }
 
-async function readBackKnowledgeWrite(read: () => Promise<CrestScan>, written: KnowledgeUnitMetadata): Promise<Readonly<Record<string, JsonValue>>> {
+async function readBackKnowledgeWrite(
+  scan: CrestScan, head: CrestEventHead, written: KnowledgeUnitMetadata,
+  workspace: WorkspaceState | null, options: KnowledgeReadOptions,
+): Promise<Readonly<Record<string, JsonValue>>> {
   const boundary = { localCommitted: true, remoteVerification: "unverified" };
   try {
-    const scan = await read();
-    const observed = scan.units.find((unit) => unit.metadata.id === written.id);
-    const verifiedReadback = observed !== undefined && canonicalJson(observed.metadata) === canonicalJson(written);
+    // The event commits this write. A peer's partially delivered card can prevent a whole-store
+    // projection while this device's own committed event and body are both readable.
+    const eventsRoot = await boundDirectory(resolve(scan.storeRoot, CREST_EVENTS_DIRECTORY), scan.storeRoot);
+    const streamRoot = await boundDirectory(resolve(eventsRoot, head.deviceId), eventsRoot);
+    const name = `${String(head.sequence).padStart(8, "0")}-${head.eventHash}.json`;
+    const read = workspace === null ? readUserCrestFile : readLibraryCrestFile;
+    const value = parseCanonicalObject(await read(resolve(streamRoot, name), CREST_EVENT_MAXIMUM_BYTES, options), "crest event", "KNOWLEDGE_RECORD_INVALID");
+    const observed = workspace === null
+      ? validateUserCrestEvent(value, head.deviceId, name)
+      : validateLibraryCrestEvent(value, head.deviceId, name, workspace);
+    if (observed.body === null) fail("KNOWLEDGE_RECORD_INVALID", `${written.id}:missing created body`);
+    validateMetadataBody(observed.metadata, await read(resolve(streamRoot, observed.body.file), KNOWLEDGE_LIMITS.maximumBodyBytes, options), workspace);
+    const verifiedReadback = canonicalJson(observed.metadata) === canonicalJson(written);
     return {
       ...boundary, verifiedReadback, ok: verifiedReadback,
       readback: {
-        storeId: scan.marker.workspaceId, version: scan.marker.version,
-        records: observed === undefined ? [] : [{
+        storeId: scan.marker.workspaceId, version: scan.marker.version + 1, basis: "committed-event",
+        deviceId: observed.deviceId, sequence: observed.sequence,
+        records: [{
           id: observed.metadata.id, revision: observed.metadata.revision, status: observed.metadata.lifecycle,
-          headEventHash: observed.event?.eventHash ?? null, recordDigest: canonicalSha256(observed.metadata),
+          headEventHash: observed.eventHash, recordDigest: canonicalSha256(observed.metadata),
         }],
       },
       ...(verifiedReadback ? {} : {
@@ -4747,7 +4761,7 @@ async function createUserCrestEvent(
     scope: "user",
     ...(conflicts.length > 0 ? { conflicts: [...conflicts] } : {}),
     ...(metadata.supersedes === null ? {} : { superseded: metadata.supersedes }),
-    ...await readBackKnowledgeWrite(() => scanUserCrest(location, options, false, "full", false), written),
+    ...await readBackKnowledgeWrite(scan, event, written, null, options),
   };
 }
 
@@ -4921,10 +4935,11 @@ async function createLibraryCrestEvent(
   if (records.some((unit) => unit.metadata.id === metadata.id || unit.metadata.externalKey === metadata.externalKey)) {
     fail("KNOWLEDGE_DUPLICATE", metadata.id);
   }
-  await commitUnderLock(scan, async () => {
+  const committed = await commitUnderLock(scan, async () => {
     const head = await appendLibraryCrestEvent(scan, written, body, null, options.faultAt);
     await clearRemovedBodies(scan, head.deviceId, removalsAfter.keys());
     await projectViewAfterWrite(scan, projectedMetadata, options);
+    return head;
   });
   return {
     schemaVersion: "tcrn.knowledge-create-result.v1",
@@ -4935,7 +4950,7 @@ async function createLibraryCrestEvent(
     version: scan.marker.version + 1,
     ...(conflicts.length > 0 ? { conflicts: [...conflicts] } : {}),
     ...(metadata.supersedes === null ? {} : { superseded: metadata.supersedes }),
-    ...await readBackKnowledgeWrite(() => scanKnowledgeStore(workspaceRoot, options), written),
+    ...await readBackKnowledgeWrite(scan, committed, written, scan.workspace, options),
   };
 }
 

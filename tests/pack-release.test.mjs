@@ -5,7 +5,7 @@ import { BRANCH_LIFECYCLE_BODY, ruleBody } from "../dist/build/packages/core/src
 // but the archive's files, the engine lists its commands and creates and reads a library with
 // Node.js alone, Atelier reaches the engine beside it, and the hook entry answers nothing on an
 // older Node.js. The manifest states the install-tree digest of the unpacked directory (without
-// manifest.json itself), the skill directory holds SKILL.md and the seven references, and the
+// manifest.json itself), the skill directory holds SKILL.md and its shipped references, and the
 // launchers are the templates as they are. scripts/lib/tar.mjs writes the bytes P8's independent
 // rebuild writes, reads them back, and refuses the entries an unpacker must not follow.
 
@@ -47,7 +47,7 @@ const SOURCE_COREPACK_HOME = resolve(process.env.COREPACK_HOME ?? join(
   process.env.XDG_CACHE_HOME ?? process.env.LOCALAPPDATA ?? join(homedir(), process.platform === "win32" ? "AppData/Local" : ".cache"),
   "node/corepack",
 ));
-const REFERENCES = Object.freeze(["doctor.md", "install.md", "kiro-specs.md", "migrate.md", "restore.md", "uninstall.md", "update.md"]);
+const REFERENCES = Object.freeze(["doctor.md", "install.md", "kiro-specs.md", "migrate.md", "owner-extensions.md", "restore.md", "uninstall.md", "update.md"]);
 const SPECIFICATIONS = Object.freeze([
   "coding-style-v1.md",
   "installed-paths-v2.md", "work-practices-v1.md", "dot-task-recovery-v1.md", "batch-execution-v1.md", "resource-cleanup-v1.md", "unattended-execution-v1.md", "design-consumption-v1.md", "configuration-contract-v1.md", "settings-catalog-v1.md",
@@ -515,7 +515,7 @@ test("481-R2: the manifest states the install-tree digest of the unpacked direct
   }
 });
 
-test("481-R2: the skill directory holds SKILL.md for this version and the seven references", async () => {
+test("481-R2: the skill directory holds SKILL.md for this version and its shipped references", async () => {
   const { tree } = await packedRelease();
   const skill = join(tree, "skill/mana-orchestrate");
   const markdown = await readFile(join(skill, "SKILL.md"), "utf8");
@@ -635,7 +635,7 @@ test("R45 U11: the packed Atelier carries the lock and device-home modules once 
 test("R45 U11: a registry-lock bridge whose lock or device-home re-export is not found exactly once is refused", async () => {
   const bridge = await readFile(join(repositoryRoot, "scripts/lib/registry-lock.mjs"), "utf8");
   const lockSpecifier = "\"../../dist/build/packages/core/src/file-lock.js\"";
-  const homeExport = "export { registryPath } from \"../../dist/build/packages/core/src/device-home.js\";";
+  const homeExport = "export { registryPath, cachePath } from \"../../dist/build/packages/core/src/device-home.js\";";
   assert.equal(bridge.split(lockSpecifier).length, 2, "the bridge re-exports the lock build once");
   assert.equal(bridge.split(homeExport).length, 2, "the bridge re-exports the device directory build once");
   const mutations = [

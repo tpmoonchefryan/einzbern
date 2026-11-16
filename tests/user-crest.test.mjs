@@ -981,6 +981,7 @@ test("R14 (d) D7: a write whose event is committed is answered as created, thoug
   assert.equal(delivered, true, "A's event arrived while B's write was under way");
   assert.deepEqual([written.reasonCode, written.id, written.version, written.conflicts],
     ["KNOWLEDGE_UNIT_CREATED", deriveStableId("knowledge", "UC-B-GULL"), 1, undefined], "the answer is the committed write's own");
+  assert.deepEqual([written.localCommitted, written.verifiedReadback, written.remoteVerification], [true, true, "unverified"]);
   // The answer matches the disk: B's event is committed beside A's, each in its own stream.
   const events = await shared.events();
   assert.deepEqual(events.map((event) => event.externalKey).sort(), ["UC-A-GULL", "UC-B-GULL"]);
@@ -991,6 +992,25 @@ test("R14 (d) D7: a write whose event is committed is answered as created, thoug
   const listed = await asDevice(deviceB, () => listKnowledgeMetadata(workspace, { at, scope: "user", selection: "all" }));
   assert.deepEqual(listed.unresolvedConflicts, [[gullA.id, written.id].sort()]);
   assert.deepEqual(sortedIds(listed.records), [gullA.id, written.id].sort());
+});
+
+test("a committed user card reports a failed body readback and remains readable on retry", async (context) => {
+  const { workspace, deviceA } = await twoDevices(context);
+  const input = card("UC-LOCAL-READBACK");
+  let refusedBodyRead = false;
+  const receipt = await asDevice(deviceA, () => createKnowledgeUnit(workspace, input, {
+    beforeDescriptorReadForTest: async (path) => {
+      if (refusedBodyRead || !path.endsWith(".body")) return;
+      refusedBodyRead = true;
+      throw new Error("body unavailable during readback");
+    },
+  }));
+  assert.equal(refusedBodyRead, true);
+  assert.deepEqual([receipt.reasonCode, receipt.ok, receipt.localCommitted, receipt.verifiedReadback, receipt.remoteVerification],
+    ["KNOWLEDGE_WRITE_READBACK_UNVERIFIED", false, true, false, "unverified"]);
+  assert.match(receipt.readback.error, /body unavailable during readback/u);
+  const recovered = await asDevice(deviceA, () => readKnowledgeBody(workspace, receipt.id, { at, scope: "user" }));
+  assert.equal(recovered.body, input.body);
 });
 
 test("R15 D7 (SUB-413): one external key two devices wrote before either delivered is an unresolved duplicate, not a refusal of the crest: its versions leave default list and recall, list, a read of its id and recall name both devices and versions, and every other card reads, recalls and is written", async (context) => {

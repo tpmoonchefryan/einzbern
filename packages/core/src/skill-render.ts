@@ -76,7 +76,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Need the full text",
     verbs: ["work-show", "work-content-context", "minutes-show", "work-project-context", "execution-prepare", "execution-record", "execution-evidence"],
-    action: "Read `work-show --id <id>` or `minutes-show --id <id>`. Use each target's `handoff` for dispatch/gates (`EINZBERN_PROJECT_CONTEXT`). Unresolved targets block dependent work. `--execution-request` requires `dispatchAdmitted=true` and the selected runner/model/effort. Keep that selection. Retain raw stdout/stderr/exit code. Evidence validation grants no execution permission. `specs/context-v1.md`, `specs/dispatch-admission-evidence-v1.md`.",
+    action: "Read `work-show --id <id>` or `minutes-show --id <id>`. Use each target's `handoff` for dispatch/gates (`EINZBERN_PROJECT_CONTEXT`). Unresolved targets block dependent work. `--execution-request` requires `dispatchAdmitted=true` and the selected runner/model/effort. Keep that selection. Validate the association with `execution-evidence --from-file <json>`. Retain raw stdout/stderr/exit code. Evidence validation grants no execution permission. `specs/context-v1.md`, `specs/dispatch-admission-evidence-v1.md`.",
   },
   {
     moment: "Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity)",
