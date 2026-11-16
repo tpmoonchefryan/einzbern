@@ -348,8 +348,8 @@ test("J01/J10 approval binding and retry/history files remain explicit transient
 test("full-core controller uses bounded platform budgets and keeps P8 bounded", async () => {
   const text = await source("scripts/task.mjs");
   const body = namedFunction(text, "controllerTimeoutMs");
-  const budget = (value, p8Only = false, platform = "linux") => vm.runInNewContext(`${body}\ncontrollerTimeoutMs(p8Only)`, {
-    process: { platform, env: value === undefined ? {} : { TCRN_TEST_CONTROLLER_TIMEOUT_MS: value } }, p8Only,
+  const budget = (value, p8Only = false, platform = "linux", githubActions = false, fullSuite = true) => vm.runInNewContext(`${body}\ncontrollerTimeoutMs(p8Only, fullSuite)`, {
+    process: { platform, env: { GITHUB_ACTIONS: String(githubActions), TCRN_TEST_CONTROLLER_TIMEOUT_MS: value } }, p8Only, fullSuite,
     assertion: (condition, reasonCode, detail) => { if (!condition) throw Object.assign(new Error(detail), { reasonCode }); },
   });
   assert.equal(budget(undefined, false, "win32"), 3_600_000);
@@ -359,12 +359,18 @@ test("full-core controller uses bounded platform budgets and keeps P8 bounded", 
   assert.throws(() => budget("3600001", false, "win32"), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
   assert.equal(budget(undefined), 900_000);
   assert.equal(budget(undefined, true), 600_000);
+  assert.equal(budget(undefined, false, "linux", true), 1_800_000);
+  assert.equal(budget("800000", false, "linux", true), 800_000);
+  assert.throws(() => budget("1800001", false, "linux", true), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
+  assert.equal(budget(undefined, false, "linux", true, false), 900_000);
+  assert.equal(budget(undefined, true, "linux", true), 600_000);
+  assert.equal(budget(undefined, false, "darwin", true), 900_000);
   for (const value of ["1", "100", "3000", "599999", "600000", "600001", "899999", "900000", " 100 ", "1e3", "0x64"]) assert.equal(budget(value), Number(value));
   for (const value of ["1", "100", "3000", "600000"]) assert.equal(budget(value, true), Number(value));
   for (const p8Only of [false, true]) for (const value of ["", " ", "0", "-1", "1.5", "900001", "9007199254740992", "Infinity", "-Infinity", "NaN", "abc"]) assert.throws(() => budget(value, p8Only), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
   for (const value of ["600001", "899999", "900000"]) assert.throws(() => budget(value, true), { reasonCode: "TEST_CONTROLLER_TIMEOUT_INVALID" });
-  assert.ok(text.includes("const timeoutMs = controllerTimeoutMs(p8Only);"));
-  assert.ok(text.includes("coreTestArgv(tests), environment, tests, p8Only);"));
+  assert.ok(text.includes("const timeoutMs = controllerTimeoutMs(p8Only, ciPlan === undefined);"));
+  assert.ok(text.includes("coreTestArgv(tests), environment, tests, timeoutMs);"));
   assert.ok(text.includes('const dogfood = await runTests({ p8Only: true });'));
   assert.ok(text.includes('return runTests();'));
 });

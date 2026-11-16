@@ -1009,9 +1009,9 @@ test("INIT-062 diagnostics: frozen controller counters and later cleanup observa
   const source = readFileSync(resolve(REPOSITORY_ROOT, "scripts/task.mjs"), "utf8");
   assert.ok(source.includes('primaryError: "controller timeout"'));
   assert.ok(source.includes('primaryError: "controller did not close after " + outcome.value.status'));
-  assert.ok(source.includes('const maximum = p8Only ? 600_000 : process.platform === "win32" ? 3_600_000 : 900_000;'));
+  assert.ok(source.includes('const maximum = p8Only ? 600_000 : platformMaximum;'));
   assert.ok(source.includes('configured <= maximum'));
-  assert.ok(source.includes('const timeoutMs = controllerTimeoutMs(p8Only);'));
+  assert.ok(source.includes('const timeoutMs = controllerTimeoutMs(p8Only, ciPlan === undefined);'));
 });
 
 test("INIT-062 diagnostics: in-memory reporter drains without text and private observer keeps bounded slots", async (t) => {

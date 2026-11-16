@@ -35,8 +35,10 @@ and file-level diagnostics. The Windows core and Portal test runners default to
 at most four concurrent files and leave a logical CPU available on multi-core systems. An
 explicit test worker count or the memory admission policy takes precedence.
 The full Windows suite has a 60-minute controller
-limit, configurable downward with `TCRN_TEST_CONTROLLER_TIMEOUT_MS`. Its POSIX
-process-group recovery fixtures run on Linux. Native Job Object and NTFS recovery
+limit, configurable downward with `TCRN_TEST_CONTROLLER_TIMEOUT_MS`. The full
+Linux core roster has a 30-minute limit on GitHub Actions. Local POSIX runs and
+selective Linux runs use 15 minutes, and P8 uses 10 minutes. POSIX process-group
+recovery fixtures run on Linux. Native Job Object and NTFS recovery
 fixtures run on Windows. The Python CI observer holds output descriptors until
 it has retained and verified the bytes, then removes the captured Windows files.
 
