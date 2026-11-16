@@ -31,6 +31,15 @@ export async function verifyHelperGenerated(helper) {
   const scratch = await mkdtemp(join(tmpdir(), "einzbern-helper-ci-"));
   try {
     const report = await renderHelperDocs({ out: scratch, version: source.renderVersion });
+    // A stale dist/build can reproduce its own stale bytes. Bind each copied
+    // template to the source commit independently of the installed renderer.
+    const git = args => execFileSync("git", ["-C", REPOSITORY_ROOT, ...args], { maxBuffer: 16 * 1024 * 1024 });
+    const templatePaths = git(["ls-tree", "-r", "-z", "--name-only", source.commit, "--", "skill/mana-orchestrate/agents", "skill/mana-orchestrate/references", "skill/mana-orchestrate/scripts"])
+      .toString("utf8").split("\0").filter(Boolean);
+    for (const path of templatePaths) {
+      const rendered = await readFile(join(scratch, path));
+      assert.ok(rendered.equals(git(["show", `${source.commit}:${path}`])), `Rebuild the generator from its pinned source: ${path}`);
+    }
     const actual = (await files(helper)).filter((path) => !HELPER_KEPT_FILES.includes(path));
     assert.deepEqual(actual, report.files, "Missing or unowned distribution files");
     for (const path of report.files) {

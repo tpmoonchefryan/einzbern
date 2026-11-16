@@ -99,6 +99,7 @@ async function writeText(root, path, content) {
 async function initRepo(root) {
   await mkdir(root, { recursive: true });
   git(root, ["init", "--initial-branch=main"]);
+  git(root, ["config", "core.autocrlf", "false"]);
   git(root, ["config", "user.name", "Release Test"]);
   git(root, ["config", "user.email", "release-test@example.invalid"]);
 }

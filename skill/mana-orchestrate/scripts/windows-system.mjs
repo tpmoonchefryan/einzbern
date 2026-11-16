@@ -103,7 +103,7 @@ public static class EinzbernPrivateFile {
   try {
     identity = execFileSync(privateFileCreator, [toNamespacedPath(path)], { encoding: "utf8", windowsHide: true, timeout: 15_000 }).trim();
   } catch (error) {
-    if (error.status === 80 || error.status === 183) throw Object.assign(new Error("Private file already exists"), { code: "EEXIST" });
+    if (error.status === 80 || error.status === 183) throw Object.assign(new Error("EEXIST: private file already exists"), { code: "EEXIST", syscall: "open", path });
     throw error;
   }
   const matches = stats => stats.isFile() && stats.nlink === 1n && `${stats.dev} ${stats.ino}` === identity;

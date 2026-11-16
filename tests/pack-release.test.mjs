@@ -860,13 +860,14 @@ test("PR24-1: packed knowledge-capture preserves legacy language writes with exp
   }
   const cli = join(tree, "scripts/einzbern.mjs");
   const helperTemp = join(root, "native-temporary");
-  if (process.platform === "win32") {
-    // Knowledge publication uses the signed-in Windows account's NTFS and the native directory flush helper.
-    await mkdir(helperTemp, { recursive: true });
-    permission.push("--allow-child-process");
-  }
-  const execute = (args, options) => node([...permission, cli, ...args], process.platform === "win32"
-    ? { ...options, env: { ...options.env, TEMP: helperTemp, TMP: helperTemp } } : options);
+  if (process.platform === "win32") await mkdir(helperTemp, { recursive: true });
+  const execute = (args, options) => {
+    // Only knowledge publication needs the NTFS process helper. Read-only commands retain the source-denial boundary.
+    const writesCrest = process.platform === "win32" && args[0] === "knowledge-capture" && !args.includes("--help");
+    return writesCrest
+      ? node([...permission, "--allow-child-process", cli, ...args], { ...options, env: { ...options.env, TEMP: helperTemp, TMP: helperTemp } })
+      : node([...permission, cli, ...args], options);
+  };
   await runCaptureCliUpgradeMatrix({ root, execute });
   const isolated = await environment("capture-catalog");
   for (const args of [["commands"], ["knowledge-capture", "--help"]]) {

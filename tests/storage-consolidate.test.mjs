@@ -76,6 +76,7 @@ test("one Ether retains native history and evidence, isolates runtime, retires b
     delete journal.completed;
     await writeFile(journalPath, JSON.stringify(journal));
     await rename(forwarding, forwarding + ".storage-previous");
+    assert.equal((await consolidateStorage(f.home, f.from, f.to, f.runtimeRoot, at, decision, true)).completed, true);
   }
   assert.equal((await consolidateStorage(f.home, f.from, f.to, f.runtimeRoot, at, decision, true)).resumed, true);
   assert.equal(await realpath(forwarding), join(pointer.runtime, "cache"));
