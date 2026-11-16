@@ -1013,7 +1013,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify heavy-runs inc263-closeout inc275-mcp-absent memory-budget
     native-tool-evidence no-sibling-dependency node-floor offline-boundary operational-audit-boundaries output-session-lifecycle
     p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor privacy-boundary project-chain-model
-    push-gate-p1-coverage readme-render release-lockstep release-readiness release-tag-gate release-tooling-audit-boundaries release-trust
+    push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate release-tooling-audit-boundaries release-trust
     render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
     story-346-pg-disabled story-378-incident-replay story-rule-conservation`);
   const ordinaryWiki = ["Atelier", "CLI-Reference", "Ether-Layout", "FAQ", "Gates", "Glossary", "Home", "Install-Wizard", "Managed-Sections-and-Command-Spell", "Migrating-from-TCRN-Workflow", "Multi-Device-and-Cloud", "Variables", "_Sidebar"].map((name) => `docs/wiki/${name}.md`);
@@ -1027,7 +1027,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     config-backup-format configuration-contract cross-repo-privacy dependency-materialization dependency-policy dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify
     heavy-runs inc263-closeout inc275-mcp-absent local-command-byte-fidelity memory-budget native-tool-evidence no-sibling-dependency node-floor offline-boundary
     operational-audit-boundaries otel-privacy-guard output-session-lifecycle p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor
-    privacy-boundary privacy-git-metadata privacy-normalization project-chain-model push-gate-p1-coverage readme-render release-lockstep release-readiness release-tag-gate
+    privacy-boundary privacy-git-metadata privacy-normalization project-chain-model push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate
     release-tooling-audit-boundaries release-trust render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
     staged-privacy-origin-diagnostics staged-privacy-reviewed-paths storage-defensive-maintenance story-346-pg-disabled story-378-incident-replay story-rule-conservation token-attribution`);
   const pr33 = JSON.parse(readFileSync(new URL("./fixtures/ci-impact/pr-33.json", import.meta.url)));

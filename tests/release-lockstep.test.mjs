@@ -8,14 +8,11 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, mkdirSync } from "node:fs";
-import { chmod, cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { fileURLToPath, pathToFileURL } from "node:url";
-import { homedir, tmpdir } from "node:os";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { chmod, cp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { pathToFileURL } from "node:url";
+import { dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
-import test, { after } from "node:test";
-
+import test from "node:test";
 import {
   ReleaseLockstepError,
   parseReleaseBuildResult,
@@ -26,7 +23,6 @@ import {
   executeReleaseAction,
   checkReleaseGatePlan,
   assertReleaseGateRun,
-  finishRelease,
   generateRelease,
   planReleaseGeneration,
   validateReleaseGeneration,
@@ -36,118 +32,36 @@ import {
 } from "../scripts/lib/release-lockstep.mjs";
 import { classifyReleaseArtifacts } from "../scripts/lib/release-readiness.mjs";
 import { README_NAMES, renderReadmes } from "../scripts/render-readme.mjs";
-import { FRAMEWORK_VERSION, initializeLibrary, materializeWorkspace } from "../dist/build/packages/core/src/index.js";
-import { compareSemver, parseEngineVersion } from "../dist/build/packages/core/src/format-version.js";
-import { ATELIER_SURFACE, SURFACE_ENVIRONMENT_VARIABLE } from "../dist/build/packages/cli/src/index.js";
-import { registerLibrary } from "../dist/build/packages/core/src/registry.js";
 import { setGate } from "../dist/build/packages/core/src/gates-config.js";
 import { gateTreeState } from "../dist/build/packages/core/src/gates-run.js";
 import { stripTypesWithScopedExperimentalWarning } from "../scripts/lib/scoped-strip-types.mjs";
 import { readUstar } from "../scripts/lib/tar.mjs";
 import { BRAND, LEGACY_REPOSITORY_NAMES } from "../scripts/lib/names.mjs";
-import { privateHeavyEnvironment } from "./helpers/heavy-slots.mjs";
 import { sourceAuditDigest } from "../scripts/ci/impact-plan.mjs";
-import { validateFrozenDependencyGraph } from "../scripts/lib/dependency-graph.mjs";
-import { createDependencyMaterialization, populateDependencyStore } from "../scripts/lib/dependency-materialization.mjs";
-
-// Capture Corepack's standard cache resolution before any fixture substitutes HOME.
-const SOURCE_COREPACK_HOME = resolve(process.env.COREPACK_HOME ?? join(
-  process.env.XDG_CACHE_HOME ?? process.env.LOCALAPPDATA ?? join(homedir(), process.platform === "win32" ? "AppData/Local" : ".cache"),
-  "node/corepack",
-));
-// pnpm resolves this independently of Corepack. Retain the source location before
-// the complete release fixture gives the real installer a private HOME and cache.
-const SOURCE_PNPM_CACHE = resolve(process.env.pnpm_config_cache_dir || process.env.PNPM_CONFIG_CACHE_DIR || (
-  process.env.XDG_CACHE_HOME ? join(process.env.XDG_CACHE_HOME, "pnpm")
-    : process.platform === "darwin" ? join(homedir(), "Library/Caches/pnpm")
-      : process.platform !== "win32" ? join(homedir(), ".cache/pnpm")
-        : process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, "pnpm-cache") : join(homedir(), ".pnpm-cache")
-));
-const base = await realpath(await mkdtemp(join(tmpdir(), "einzbern-release-lockstep-")));
-const OLD_VERSION = FRAMEWORK_VERSION;
-const HELPER_OLD_VERSION = "1.0.7";
-// The version these fixtures prepare is the patch after the built one, derived rather than written:
-// a literal stops being newer the day the tree reaches it, and a fixture library the current build
-// initialises refuses an older engine (ENGINE_TOO_OLD).
-const OLD_PARTS = parseEngineVersion(OLD_VERSION);
-const NEXT_VERSION = `${OLD_PARTS.major}.${OLD_PARTS.minor}.${BigInt(OLD_PARTS.patch) + 1n}`;
-assert.ok(OLD_PARTS.prerelease.length === 0 && compareSemver(OLD_VERSION, NEXT_VERSION) < 0, "the prepared version is a stable version after the built one");
-const FIXTURE_SCHEMA_VERSION = "tcrn.fixture-contract.v1";
-const HELPER_READMES = ["README.md", "README.en.md", "README.ja.md", "README.ko.md", "README.fr.md"];
-const RELEASE_NOTES = "Improve configuration consistency and installation diagnostics.";
-const RELEASE_CLI = fileURLToPath(new URL("../scripts/release.mjs", import.meta.url));
-const REPOSITORY_ROOT = dirname(dirname(RELEASE_CLI));
-const SPECIFICATIONS = Object.freeze([
-  "coding-style-v1.md",
-  "installed-paths-v2.md", "work-practices-v1.md", "dot-task-recovery-v1.md", "batch-execution-v1.md", "resource-cleanup-v1.md", "unattended-execution-v1.md", "design-consumption-v1.md", "configuration-contract-v1.md", "settings-catalog-v1.md",
-  "dispatch-admission-evidence-v1.md", "dot-execution-v1.md", "native-tool-evidence-v1.md", "host-fallback-v1.md", "engine-model-policy-v1.md", "kiro-host-v1.md", "antigravity-host-v1.md",
-  "shared-submit-v1.md", "config-backup-v1.md", "dot-rules-v1.md", "context-v1.md", "work-content-v1.md", "engine-hook-events-v2.md",
-]);
-after(() => rm(base, { recursive: true, force: true }));
-
-function git(root, args) {
-  return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
-}
-
-async function writeText(root, path, content) {
-  const target = join(root, ...path.split("/"));
-  await mkdir(join(target, ".."), { recursive: true });
-  await writeFile(target, content);
-}
-
-async function initRepo(root) {
-  await mkdir(root, { recursive: true });
-  git(root, ["init", "--initial-branch=main"]);
-  git(root, ["config", "user.name", "Release Test"]);
-  git(root, ["config", "user.email", "release-test@example.invalid"]);
-}
-
-async function commitAll(root, message) {
-  git(root, ["add", "-A"]);
-  git(root, ["commit", "-m", message]);
-}
-
-async function createRepos(name) {
-  const root = join(base, name);
-  const engineRoot = join(root, "einzbern");
-  const helperRoot = join(root, "mana-orchestrate");
-  await initRepo(engineRoot);
-  await initRepo(helperRoot);
-
-  await writeText(engineRoot, "package.json", `${JSON.stringify({ name: "einzbern", version: OLD_VERSION, private: true, type: "module", packageManager: JSON.parse(await readFile(join(REPOSITORY_ROOT, "package.json"), "utf8")).packageManager }, null, 2)}\n`);
-  for (const packageName of ["cli", "core", "protocol"]) {
-    await writeText(engineRoot, `packages/${packageName}/package.json`, `${JSON.stringify({ name: `@einzbern/${packageName}`, version: OLD_VERSION, private: true }, null, 2)}\n`);
-  }
-  await writeText(engineRoot, "packages/protocol/schema-fixture.json", `${JSON.stringify({ schemaVersion: FIXTURE_SCHEMA_VERSION, record: { id: "stable" } }, null, 2)}\n`);
-  // Each fixture needs its own copy. Native synchronous directory copies avoid a
-  // promise round trip per entry while this test process is preparing it serially.
-  cpSync(join(REPOSITORY_ROOT, "dist/build"), join(engineRoot, "dist/build"), { recursive: true });
-  cpSync(join(REPOSITORY_ROOT, "packages/core"), join(engineRoot, "packages/core"), { recursive: true });
-  for (const directory of ["scripts", "portal", "skill"]) {
-    cpSync(join(REPOSITORY_ROOT, directory), join(engineRoot, directory), { recursive: true });
-  }
-  for (const path of ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "native/linux-source-lease.c", "packages/core/src/names.ts", "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md", "docs/design/continuous-source-attestor.md", ...SPECIFICATIONS.map(name => `specs/${name}`)]) {
-    await writeText(engineRoot, path, await readFile(join(REPOSITORY_ROOT, path), "utf8"));
-  }
-  await writeText(engineRoot, "packages/core/src/framework-version.ts", await readFile(join(REPOSITORY_ROOT, "packages/core/src/framework-version.ts"), "utf8"));
-  await writeText(engineRoot, "scripts/einzbern.mjs", await readFile(join(REPOSITORY_ROOT, "scripts/einzbern.mjs"), "utf8"));
-  await writeText(engineRoot, ".gitignore", "/dist/\n/node_modules/\n");
-  await writeText(engineRoot, "CHANGELOG.md", `# Changelog\n\n## Unreleased\n\n${RELEASE_NOTES}\n\n## ${OLD_VERSION}\n\nEarlier release.\n`);
-  for (const name of README_NAMES) {
-    await writeText(engineRoot, `docs/readme/einzbern/${name}`, `# Einzbern\n\n![release](https://img.shields.io/badge/release-{{version}}-blue)\n`);
-  }
-  await renderReadmes({ root: engineRoot, version: OLD_VERSION });
-  await commitAll(engineRoot, "initial engine");
-
-  await writeText(helperRoot, "package.json", `${JSON.stringify({ name: "mana-orchestrate", version: HELPER_OLD_VERSION, private: true }, null, 2)}\n`);
-  await writeText(helperRoot, ".gitignore", "/node_modules/\n");
-  await writeText(helperRoot, `skill/mana-orchestrate/SKILL.md`, `# Mana Orchestrate\n\nNavigation for Einzbern ${OLD_VERSION}: generated for this version.\n`);
-  for (const name of HELPER_READMES) {
-    await writeText(helperRoot, name, `# Mana Orchestrate\n\n![release](https://img.shields.io/badge/release-${HELPER_OLD_VERSION}-blue)\n`);
-  }
-  await commitAll(helperRoot, "initial helper");
-  return { engineRoot: await realpath(engineRoot), helperRoot: await realpath(helperRoot), projectRoot: await realpath(root) };
-}
+import {
+  CREATE_SKILL_ARCHIVE,
+  FIXTURE_SCHEMA_VERSION,
+  HELPER_READMES,
+  IGNORED_EXTRA,
+  NEXT_VERSION,
+  OLD_VERSION,
+  RELEASE_CLI,
+  RELEASE_NOTES,
+  REPOSITORY_ROOT,
+  RETIRED_REFERENCE,
+  SPECIFICATIONS,
+  base,
+  commitAll,
+  commitRelease,
+  createReleaseFixture,
+  createRepos,
+  git,
+  makeEnvironment,
+  makeWorkspace,
+  pinnedBuildArguments,
+  scopedReleaseProject,
+  writeText,
+} from "./helpers/release-fixture.mjs";
 
 async function createOrigin(root, name) {
   const bare = join(base, `${name}.git`);
@@ -155,30 +69,6 @@ async function createOrigin(root, name) {
   execFileSync("git", ["init", "--bare", "--initial-branch=main", bare], { stdio: "ignore" });
   git(root, ["remote", "add", "origin", bare]);
   git(root, ["push", "--set-upstream", "origin", "main"]);
-}
-
-// TCRN-CROSS-SUB-502 (STORY-538 GWT5): the gates-run a release step starts takes its heavy-run slot in a
-// directory of this case's own, outside the case's project root, never the slot of a run around the test.
-async function makeEnvironment(name) {
-  const home = join(base, name, "home");
-  const einZbernHome = join(home, ".einzbern");
-  await mkdir(einZbernHome, { recursive: true });
-  return privateHeavyEnvironment(join(base, "heavy-locks", name), { ...process.env, HOME: home, EINZBERN_HOME: einZbernHome });
-}
-
-async function makeWorkspace(name, repos, environment, { declarations = "required", red = false, helperRequired = true } = {}) {
-  const workspace = join(base, name, "release-workspace");
-  await initializeLibrary({ root: workspace, createdAt: "2026-09-27T00:00:00Z" });
-  await registerLibrary({ projectPath: repos.projectRoot, libraryPath: workspace, registeredAt: "2026-09-27T00:00:01Z" }, environment.EINZBERN_HOME);
-  if (declarations !== "empty") {
-    for (const [index, [name, root]] of [["engine:fixture", repos.engineRoot], ["helper:fixture", repos.helperRoot]].entries()) {
-      await setGate(workspace, {
-        occurredAt: `2026-09-27T00:00:0${index + 2}Z`, name,
-        gate: { command: [process.execPath, "-e", `process.exit(process.cwd() === ${JSON.stringify(root)} ? ${red && index === 0 ? 3 : 0} : 19)`], root: root.split("/").at(-1), covers: ["**"], required: declarations === "required" && (index === 0 || helperRequired), enabled: declarations !== "disabled", releaseOnly: true },
-      });
-    }
-  }
-  return workspace;
 }
 
 function helperReadme(version) {
@@ -210,10 +100,6 @@ test("488-R4: prepare names a gates workspace, while remote stops do not require
     "RELEASE_REPOSITORY_INVALID",
   );
 });
-
-function pinnedBuildArguments(engineRoot) {
-  return ["pnpm@11.3.0", "--dir", engineRoot, "--recursive", "--filter", "einzbern{.}", "--fail-if-no-match", "--reporter=ndjson", "run", "--stream", "build"];
-}
 
 function pnpmBuildResult(engineRoot, build = { ok: true, reasonCode: "BUILD_VERIFIED" }) {
   const context = { name: "pnpm:lifecycle", stage: "build", depPath: engineRoot, wd: engineRoot };
@@ -655,13 +541,6 @@ test("SUB-357: build ok without the requested actual core version stops before r
   const workspace = await makeWorkspace("stale-build", repos, environment);
   await assert.rejects(controlledPrepareRunner({ ...repos, environment, workspace, staleBuild: true }), (error) => error.reasonCode === "RELEASE_VERSION_MISMATCH" && error.details.mismatches.some((entry) => entry.path === "dist/build/packages/core/src/framework-version.js"));
 });
-
-// TCRN-CROSS-SUB-357 rev4 (INIT-053 R41 B1): generate and finish. The fixture helper carries a kept
-// LICENSE, two tracked extra files (the C5 script and a retired reference) and, when asked, an
-// ignored extra file; render and build are stand-ins, gate reads and runs are the real CLI.
-const CREATE_SKILL_ARCHIVE = "skill/mana-orchestrate/scripts/create-skill-archive.mjs";
-const RETIRED_REFERENCE = "skill/mana-orchestrate/references/retired-guide.md";
-const IGNORED_EXTRA = "ignored-extra.txt";
 const OTHER_VERSION = "9.9.9";
 
 async function helperFiles(root, prefix = "") {
@@ -709,19 +588,6 @@ function releaseRunner(engineRoot, calls) {
   };
 }
 
-async function createReleaseFixture(name, { red = false, ignoredExtra = false } = {}) {
-  const repos = await createRepos(name);
-  await writeText(repos.helperRoot, "LICENSE", "Apache-2.0 fixture\n");
-  await writeText(repos.helperRoot, CREATE_SKILL_ARCHIVE, "// fixture copy of the helper archive script\n");
-  await writeText(repos.helperRoot, RETIRED_REFERENCE, "# Retired guide\n");
-  if (ignoredExtra) await writeText(repos.helperRoot, ".gitignore", `/node_modules/\n/${IGNORED_EXTRA}\n`);
-  await commitAll(repos.helperRoot, "helper extras");
-  if (ignoredExtra) await writeText(repos.helperRoot, IGNORED_EXTRA, "ignored, untracked\n");
-  const environment = await makeEnvironment(name);
-  const workspace = await makeWorkspace(name, repos, environment, { red });
-  return { ...repos, environment, workspace, receiptPath: join(repos.projectRoot, "release-receipt.json") };
-}
-
 function generateFixture(fixture, { keepExtra = [], calls = [], receiptPath = fixture.receiptPath, engineRoot = fixture.engineRoot, projectId = fixture.projectId ?? null } = {}) {
   return generateRelease({ engineRoot, helperRoot: fixture.helperRoot, version: NEXT_VERSION, workspace: fixture.workspace, projectRoot: fixture.projectRoot, projectId, receiptPath, keepExtra, env: fixture.environment, runner: releaseRunner(engineRoot, calls), at: "2026-10-08T01:00:00Z" });
 }
@@ -763,14 +629,6 @@ async function validateCommittedFixture(fixture, { calls = [], version = NEXT_VE
     throw new ReleaseLockstepError(first.code, "release commit validation refused", { violations: validated.violations });
   }
   return { ...validated, reasonCode: "RELEASE_COMMITS_VALIDATED" };
-}
-
-function commitRelease(fixture, receipt) {
-  git(fixture.engineRoot, ["add", "-A"]);
-  git(fixture.engineRoot, ["commit", "-q", "-m", "release engine"]);
-  if (receipt.helper.removeFiles.length > 0) git(fixture.helperRoot, ["rm", "-q", "--", ...receipt.helper.removeFiles]);
-  git(fixture.helperRoot, ["add", "-A"]);
-  git(fixture.helperRoot, ["commit", "-q", "-m", "release helper"]);
 }
 
 test("SUB-549: generate rebases CHANGELOG file destinations while preserving source text and non-file links", async () => {
@@ -1040,31 +898,6 @@ test("SUB-357 R41 B1: generate and finish need a receipt, and every release opti
   assertCliReason(["generate", "--version", "not-a-version", "--helper", join(base, "missing-helper"), ...gated, ...receipt, "--keep-extra", CREATE_SKILL_ARCHIVE, "--keep-extra", RETIRED_REFERENCE], "RELEASE_VERSION_INVALID");
 });
 
-// SUB-544: configuration scope is independent of the registered filesystem root. These
-// fixtures use native project creation, scoped declarations and the actual built CLI.
-async function scopedReleaseProject(fixture, key, { required = true, helperRequired = true, enabled = true, rootOverride, covers = ["**"], red = false } = {}) {
-  if (!fixture.coordinationReady) {
-    const cli = join(fixture.engineRoot, "scripts/einzbern.mjs");
-    const libraryId = (await materializeWorkspace(fixture.workspace)).metadata.workspaceId;
-    // Only these scoped fixtures need a coordination chain. Legacy default-library fixtures
-    // keep their undeclared identity and registration, exercising the compatibility path.
-    execFileSync(process.execPath, [cli, "chain-declare", "--workspace", fixture.workspace, "--role", "coordination", "--coordination-library-id", libraryId, "--at", "2026-10-08T00:00:00Z"], { env: { ...fixture.environment, [SURFACE_ENVIRONMENT_VARIABLE]: ATELIER_SURFACE }, stdio: ["ignore", "pipe", "pipe"] });
-    // A coordination directory has one unscoped registration; A and B are configuration
-    // identities inside that chain, never competing registrations for the same directory.
-    execFileSync(process.execPath, [cli, "library-register", "--project", fixture.projectRoot, "--library", fixture.workspace, "--at", "2026-10-08T00:00:00Z"], { env: fixture.environment, stdio: ["ignore", "pipe", "pipe"] });
-    fixture.coordinationReady = true;
-  }
-  const created = JSON.parse(execFileSync(process.execPath, [join(fixture.engineRoot, "scripts/einzbern.mjs"), "project-create", "--workspace", fixture.workspace, "--external-key", key, "--name", key, "--at", "2026-10-08T00:00:01Z"], { env: fixture.environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  const projectId = created.record.id;
-  for (const [index, [name, root]] of [["engine:fixture", fixture.engineRoot], ["helper:fixture", fixture.helperRoot]].entries()) {
-    await setGate(fixture.workspace, {
-      occurredAt: `2026-10-08T00:00:0${index + 2}Z`, configurationProjectId: projectId, name,
-      gate: { command: [process.execPath, "-e", `process.exit(process.cwd() === ${JSON.stringify(root)} ? ${red ? 7 : 0} : 19)`], root: rootOverride ?? root.split("/").at(-1), covers, required: required && (index === 0 || helperRequired), enabled, releaseOnly: true },
-    });
-  }
-  return projectId;
-}
-
 async function scopedFixture(name, options = {}) {
   const fixture = await createReleaseFixture(name);
   fixture.projectId = await scopedReleaseProject(fixture, `${name}-A`, options);
@@ -1231,305 +1064,6 @@ test("607-R1: an unbound or substituted native run cannot cover release work", a
   for (const actual of [undefined, [], ["work:000000000000000000000002"]]) {
     await assert.rejects(assertReleaseGateRun({ gates: { run: { workIds: actual } }, plan: {}, tree: {}, at: "2026-10-25T00:00:00Z", workIds }), { reasonCode: "RELEASE_GATE_BINDING_INVALID" });
   }
-});
-
-
-async function assertCorepackCacheCopy(sourceRoot, targetRoot) {
-  const [sourceEntries, targetEntries] = await Promise.all([
-    readdir(sourceRoot, { withFileTypes: true }),
-    readdir(targetRoot, { withFileTypes: true }),
-  ]);
-  sourceEntries.sort((left, right) => left.name.localeCompare(right.name));
-  targetEntries.sort((left, right) => left.name.localeCompare(right.name));
-  assert.deepEqual(targetEntries.map((entry) => entry.name), sourceEntries.map((entry) => entry.name));
-  for (const [index, sourceEntry] of sourceEntries.entries()) {
-    const source = join(sourceRoot, sourceEntry.name);
-    const target = join(targetRoot, sourceEntry.name);
-    const targetEntry = targetEntries[index];
-    if (sourceEntry.isDirectory()) {
-      assert.ok(targetEntry.isDirectory(), target);
-      await assertCorepackCacheCopy(source, target);
-    } else {
-      assert.ok(sourceEntry.isFile() && targetEntry.isFile(), `the cached pnpm runtime must contain regular files: ${source}`);
-      const [sourceBytes, targetBytes] = await Promise.all([readFile(source), readFile(target)]);
-      assert.deepEqual(targetBytes, sourceBytes, `the private Corepack cache preserves every byte of ${source}`);
-    }
-  }
-}
-
-async function materializePinnedCorepack(fixture) {
-  const sourceRoot = join(SOURCE_COREPACK_HOME, "v1", "pnpm", "11.3.0");
-  const [recordBytes, packageBytes] = await Promise.all([
-    readFile(join(sourceRoot, ".corepack")),
-    readFile(join(sourceRoot, "package.json")),
-  ]).catch((error) => {
-    throw new Error(`the complete release fixture requires genuine cached pnpm@11.3.0 at ${sourceRoot}; Corepack network access is disabled`, { cause: error });
-  });
-  const record = JSON.parse(recordBytes.toString("utf8"));
-  const packageJson = JSON.parse(packageBytes.toString("utf8"));
-  assert.deepEqual(record.locator, { name: "pnpm", reference: "11.3.0" });
-  assert.equal(record.bin.pnpm, "./bin/pnpm.mjs");
-  assert.equal(packageJson.name, "pnpm");
-  assert.equal(packageJson.version, "11.3.0");
-  assert.equal(packageJson.bin.pnpm, "bin/pnpm.mjs");
-  const corepackHome = join(fixture.environment.HOME, "release-corepack");
-  const targetRoot = join(corepackHome, "v1", "pnpm", "11.3.0");
-  await mkdir(dirname(targetRoot), { recursive: true });
-  // Copy this version's metadata and entire runtime closure, never the shared cache.
-  await cp(sourceRoot, targetRoot, { recursive: true, errorOnExist: true, force: false });
-  await assertCorepackCacheCopy(sourceRoot, targetRoot);
-  assert.deepEqual(await readFile(join(targetRoot, ".corepack")), recordBytes);
-  assert.deepEqual(await readFile(join(targetRoot, "package.json")), packageBytes);
-  return corepackHome;
-}
-
-async function materializeLockfileVerificationCache(fixture, lockContent) {
-  const sourceLockfile = await realpath(join(REPOSITORY_ROOT, "pnpm-lock.yaml"));
-  const sourceCache = join(SOURCE_PNPM_CACHE, "lockfile-verified.jsonl");
-  const [sourceContent, sourceStat, cacheContent] = await Promise.all([
-    readFile(sourceLockfile, "utf8"),
-    stat(sourceLockfile, { bigint: true }),
-    readFile(sourceCache, "utf8"),
-  ]);
-  assert.equal(sourceContent, lockContent, "the fixture retains the genuinely verified source lockfile bytes");
-  let sourceRecord;
-  for (const line of cacheContent.split("\n")) {
-    let record;
-    try { record = JSON.parse(line); } catch { continue; }
-    const lockfile = record?.lockfile;
-    // Match only this source installation's current native path/stat entry.
-    // The raw-byte comparison above establishes the same semantic lockfile;
-    // pinned pnpm still decides whether its recorded policy permits reuse.
-    if (lockfile?.path === sourceLockfile && typeof lockfile.hash === "string"
-      && lockfile.size === Number(sourceStat.size) && lockfile.mtimeNs === sourceStat.mtimeNs.toString()
-      && lockfile.inode === sourceStat.ino.toString()) sourceRecord = { line, record };
-  }
-  assert.ok(sourceRecord, `the complete release fixture requires a genuine current lockfile verification record in ${sourceCache}`);
-  const cacheDir = join(fixture.environment.HOME, "release-pnpm-cache");
-  const cachePath = join(cacheDir, "lockfile-verified.jsonl");
-  await mkdir(cacheDir, { recursive: true });
-  // Preserve one authentic record verbatim, including its timestamp and original
-  // path/stat. Native pnpm hashes the fixture and appends its own path/stat entry.
-  const recordBytes = Buffer.from(`${sourceRecord.line}\n`);
-  await writeFile(cachePath, recordBytes, { flag: "wx" });
-  assert.deepEqual(await readFile(cachePath), recordBytes);
-  return { cacheDir, cachePath, recordBytes, record: sourceRecord.record };
-}
-
-async function materializeReleaseDependencies(fixture) {
-  const [packageJson, dependencyPolicy, lockContent, modules] = await Promise.all([
-    readFile(join(fixture.engineRoot, "package.json"), "utf8").then(JSON.parse),
-    readFile(join(fixture.engineRoot, "scripts/policy/dependency-policy.json"), "utf8").then(JSON.parse),
-    readFile(join(fixture.engineRoot, "pnpm-lock.yaml"), "utf8"),
-    readFile(join(REPOSITORY_ROOT, "node_modules/.modules.yaml"), "utf8").then(JSON.parse),
-  ]);
-  assert.equal(modules.packageManager, packageJson.packageManager);
-  assert.equal(modules.packageManager, "pnpm@11.3.0");
-  const corepackHome = await materializePinnedCorepack(fixture);
-  const verificationCache = await materializeLockfileVerificationCache(fixture, lockContent);
-  assert.ok(typeof modules.storeDir === "string" && isAbsolute(modules.storeDir));
-  const sourceStore = await realpath(modules.storeDir);
-  assert.equal(basename(sourceStore), "v11");
-  const graph = validateFrozenDependencyGraph({ packageJson, dependencyPolicy, lockContent });
-  assert.ok(typeof modules.virtualStoreDir === "string" && modules.virtualStoreDir.length > 0);
-  const virtualStore = resolve(REPOSITORY_ROOT, "node_modules", modules.virtualStoreDir);
-  const packages = await Promise.all(graph.records.map(async ({ identity, integrity, name }) => ({
-    key: `${integrity}\t${identity}`,
-    root: await realpath(join(virtualStore, identity.replaceAll("/", "+"), "node_modules", name)),
-  })));
-  const materializationRoot = join(fixture.projectRoot, "release-dependency-input");
-  const inputStore = join(materializationRoot, "store", "v11");
-  const privateStore = join(fixture.environment.HOME, "release-pnpm-store");
-  await mkdir(inputStore, { recursive: true });
-  try {
-    // pnpm 11 stores opaque package-index records in SQLite. Retain only the
-    // frozen graph's exact integrity/identity keys and their verified CAS files;
-    // the source installation and its unrelated store entries remain read-only.
-    // Read a static committed index snapshot without opening a shared WAL or
-    // taking a writable SQLite connection. Missing cache inputs still fail the
-    // real offline install below; no shared installation is used by the build.
-    const copied = JSON.parse(execFileSync("python3", ["-I", "-c", String.raw`
-import hashlib, json, pathlib, sqlite3, stat, sys
-source_store, target_store = map(pathlib.Path, sys.argv[1:3])
-packages = json.loads(sys.argv[3])
-source = sqlite3.connect((source_store / "index.db").as_uri() + "?mode=ro&immutable=1", uri=True)
-target = sqlite3.connect(target_store / "index.db")
-copied = set()
-try:
-    target.execute("CREATE TABLE package_index (key TEXT PRIMARY KEY, data BLOB NOT NULL) WITHOUT ROWID")
-    for package in packages:
-        key = package["key"]
-        row = source.execute("SELECT data FROM package_index WHERE key = ?", (key,)).fetchone()
-        assert row is not None, "installed dependency store is missing " + key
-        data = row[0]
-        # Hash this exact installed package's regular files to locate its CAS
-        # inputs. Preserve the opaque index row; pnpm remains its actual decoder.
-        package_files = 0
-        for installed in sorted(pathlib.Path(package["root"]).rglob("*")):
-            assert not installed.is_symlink(), "unexpected installed package symlink: " + str(installed)
-            if installed.is_dir():
-                continue
-            assert installed.is_file(), "unexpected installed package entry: " + str(installed)
-            package_files += 1
-            content = installed.read_bytes()
-            digest = hashlib.sha512(content).hexdigest()
-            suffix = "-exec" if stat.S_IMODE(installed.stat().st_mode) & 0o111 else ""
-            path = pathlib.Path("files") / digest[:2] / (digest[2:] + suffix)
-            if str(path) in copied:
-                continue
-            input_path = source_store / path
-            assert input_path.is_file(), "installed dependency store is missing CAS file " + str(path)
-            assert input_path.read_bytes() == content, str(path)
-            output = target_store / path
-            output.parent.mkdir(parents=True, exist_ok=True)
-            with output.open("xb") as stream:
-                stream.write(content)
-            output.chmod(stat.S_IMODE(input_path.stat().st_mode))
-            copied.add(str(path))
-        assert package_files > 0, "installed dependency package is empty: " + key
-        target.execute("INSERT INTO package_index (key, data) VALUES (?, ?)", (key, data))
-    target.commit()
-finally:
-    target.close()
-    source.close()
-print(json.dumps({"packages": len(packages), "files": len(copied)}))
-    `, sourceStore, inputStore, JSON.stringify(packages)], {
-      env: fixture.environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-    }));
-    assert.equal(copied.packages, graph.records.length);
-    assert.ok(copied.files > 0);
-    await createDependencyMaterialization(fixture.engineRoot, materializationRoot);
-    await populateDependencyStore(fixture.engineRoot, materializationRoot, privateStore);
-  } finally {
-    // The verified private store now owns the input; discard its temporary duplicate.
-    await rm(materializationRoot, { recursive: true, force: true });
-  }
-  fixture.environment = {
-    ...fixture.environment,
-    COREPACK_HOME: corepackHome,
-    COREPACK_ENABLE_NETWORK: "0", COREPACK_ENABLE_DOWNLOAD_PROMPT: "0",
-    // Reuse the genuine record under its recorded verifier policy. A private
-    // HOME has no user-level pnpm settings to activate that verifier for us.
-    pnpm_config_minimum_release_age: String(verificationCache.record.policy.minimumReleaseAge),
-    pnpm_config_store_dir: privateStore,
-    pnpm_config_cache_dir: verificationCache.cacheDir,
-    pnpm_config_offline: "true", pnpm_config_frozen_lockfile: "true", pnpm_config_ignore_scripts: "true",
-    pnpm_config_package_import_method: "copy",
-  };
-  execFileSync("corepack", ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts", "--store-dir", privateStore, "--package-import-method=copy"], {
-    env: fixture.environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
-  });
-  const installed = JSON.parse(await readFile(join(fixture.engineRoot, "node_modules/.modules.yaml"), "utf8"));
-  assert.equal(installed.packageManager, packageJson.packageManager);
-  assert.equal(await realpath(installed.storeDir), await realpath(join(privateStore, "v11")));
-  assert.notEqual(installed.storeDir, sourceStore);
-  assert.equal(await readFile(join(fixture.engineRoot, "pnpm-lock.yaml"), "utf8"), lockContent);
-  const cacheBytes = await readFile(verificationCache.cachePath);
-  assert.deepEqual(cacheBytes.subarray(0, verificationCache.recordBytes.length), verificationCache.recordBytes);
-  const fixtureLockfile = join(fixture.engineRoot, "pnpm-lock.yaml");
-  const nativeRecord = cacheBytes.toString("utf8").split("\n").filter(Boolean).map(JSON.parse)
-    .findLast((record) => record.lockfile?.path === fixtureLockfile);
-  assert.ok(nativeRecord, "native pnpm must recognize the semantic hash and append the fixture's own path/stat");
-  const fixtureStat = await stat(fixtureLockfile, { bigint: true });
-  assert.deepEqual(nativeRecord.lockfile, {
-    hash: verificationCache.record.lockfile.hash, path: fixtureLockfile,
-    size: Number(fixtureStat.size), mtimeNs: fixtureStat.mtimeNs.toString(), inode: fixtureStat.ino.toString(),
-  });
-  assert.deepEqual(nativeRecord.policy, verificationCache.record.policy);
-  assert.equal(nativeRecord.verifiedAt, verificationCache.record.verifiedAt, "reuse retains the authentic verification timestamp");
-}
-
-test("607-R2: complete generated release readiness, native multi-Story gates, pack and same-run done consumption", async () => {
-  const fixture = await createReleaseFixture("complete-native-release");
-  // One complete integration input. The receipt/commit refusal cases above remain
-  // small fixtures; only this case consumes the real source and renderers end to end.
-  const tracked = git(REPOSITORY_ROOT, ["ls-files", "-z"]).split("\0").filter(Boolean);
-  for (const path of tracked) {
-    const target = join(fixture.engineRoot, path);
-    mkdirSync(dirname(target), { recursive: true });
-    cpSync(join(REPOSITORY_ROOT, path), target);
-  }
-  cpSync(join(REPOSITORY_ROOT, "dist/build"), join(fixture.engineRoot, "dist/build"), { recursive: true });
-  git(fixture.engineRoot, ["rm", "-q", "--", "packages/protocol/schema-fixture.json"]);
-  await writeText(fixture.engineRoot, "CHANGELOG.md", `# Changelog\n\n## Unreleased\n\n${RELEASE_NOTES}\n\n## ${OLD_VERSION}\n\nEarlier release.\n`);
-  await commitAll(fixture.engineRoot, "complete release source input");
-  fixture.projectId = await scopedReleaseProject(fixture, "complete-native-release-project");
-  const cli = (args) => JSON.parse(execFileSync(process.execPath, [join(fixture.engineRoot, "scripts/einzbern.mjs"), ...args], { env: fixture.environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }));
-  const common = ["--workspace", fixture.workspace, "--project-id", fixture.projectId, "--at", "2026-10-08T00:00:05Z"];
-  const initiative = cli(["work-create", ...common, "--external-key", "RELEASE-INIT", "--kind", "Initiative", "--title", "Release integration"]).record.id;
-  const epic = cli(["work-create", ...common, "--external-key", "RELEASE-EPIC", "--kind", "Epic", "--status", "active", "--parent-id", initiative, "--title", "Release integration"]).record.id;
-  const workIds = ["RELEASE-STORY-1", "RELEASE-STORY-2"].map((key) => cli(["work-create", ...common, "--external-key", key, "--kind", "Story", "--status", "active", "--parent-id", epic, "--title", key, "--goal", "Release package exists", "--acceptance", "GIVEN complete inputs WHEN gates pass THEN package exists"]).record.id).sort();
-  await writeText(fixture.engineRoot, "docs/releases/integration-input.md", "# Story source input\n");
-  await commitAll(fixture.engineRoot, "RELEASE-STORY-1 RELEASE-STORY-2: integration source");
-  await materializeReleaseDependencies(fixture);
-  const calls = [];
-  const runner = async (command, args, options) => {
-    if (command === "corepack" && args[0] === "pnpm@11.3.0" && args.at(-1) === "build") {
-      // Generation has just changed the workspace package versions. Refresh
-      // pnpm's native workspace state explicitly through private pipes before
-      // its real run command; its implicit install would inherit controller IO.
-      const install = ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts"];
-      calls.push({ command, args: install, phase: "native-offline-readiness" });
-      execFileSync(command, install, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-    }
-    calls.push({ command, args });
-    return { status: 0, stdout: execFileSync(command, args, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), stderr: "" };
-  };
-  const options = { ...fixture, workIds, version: NEXT_VERSION, env: fixture.environment, runner };
-  const generated = await generateRelease({ ...options, at: "2026-10-08T01:00:00Z" });
-  assert.equal(generated.reasonCode, "RELEASE_GENERATED");
-  const receipt = JSON.parse(await readFile(fixture.receiptPath, "utf8"));
-  assert.deepEqual(receipt.gates.workIds, workIds);
-  assert.deepEqual(receipt.generated.build, { reasonCode: "BUILD_VERIFIED", builtVersion: NEXT_VERSION });
-  assert.ok(receipt.generated.helperDocs.skillInstallTreeDigest);
-  commitRelease(fixture, receipt);
-  const wrongSet = await validateReleaseCommits({ ...options, workIds: [workIds[0]] });
-  assert.ok(wrongSet.violations.some((entry) => entry.code === "RELEASE_RECEIPT_MISMATCH" && entry.field === "gates.workIds"));
-  const originalReceipt = await readFile(fixture.receiptPath);
-  const legacyReceipt = structuredClone(receipt);
-  delete legacyReceipt.gates.workIds;
-  await writeFile(fixture.receiptPath, JSON.stringify(legacyReceipt));
-  const lateBinding = await validateReleaseCommits(options);
-  assert.ok(lateBinding.violations.some((entry) => entry.field === "gates.workIds"), "old receipts cannot acquire a new Story binding");
-  await writeFile(fixture.receiptPath, originalReceipt);
-  await writeText(fixture.engineRoot, `dist/release/einzbern-${OLD_VERSION}.tar.gz`, "previous formal package\n");
-  await writeText(fixture.engineRoot, `dist/release/einzbern-${OLD_VERSION}.tar.gz.sha256`, "previous digest\n");
-  const finished = await finishRelease({ ...options, at: "2026-10-08T02:00:00Z" });
-  assert.deepEqual(finished.staleReleaseArtifacts.map((move) => move.to), [`dist/stale-release/${OLD_VERSION}/einzbern-${OLD_VERSION}.tar.gz`, `dist/stale-release/${OLD_VERSION}/einzbern-${OLD_VERSION}.tar.gz.sha256`]);
-  assert.deepEqual((await readdir(join(fixture.engineRoot, "dist/release"))).sort(), [`einzbern-${NEXT_VERSION}.tar.gz`, `einzbern-${NEXT_VERSION}.tar.gz.sha256`]);
-  assert.equal(finished.gates.ok, true);
-  assert.deepEqual(finished.gates.selected, ["engine:fixture", "helper:fixture"]);
-  assert.equal(finished.check, "RELEASE_VERSION_CHECKED");
-  assert.equal(await readFile(finished.assets.checksum, "utf8"), `${finished.assets.sha256}  einzbern-${NEXT_VERSION}.tar.gz\n`);
-  assert.ok(calls.some((call) => call.args[0]?.endsWith("pack-release.mjs")));
-
-  assert.equal(finished.readiness.reasonCode, "RELEASE_READINESS_READY");
-  assert.ok(finished.readiness.checks.every((check) => check.status === "verified"));
-  assert.equal(finished.reasonCode, "RELEASE_FINISHED");
-  assert.ok((await readFile(finished.assets.archive)).length > 0);
-  const saved = JSON.parse(await readFile(finished.gates.recordPath, "utf8"));
-  assert.deepEqual(saved.workIds, workIds);
-  assert.equal(saved.gates.length, 2);
-  assert.ok(saved.gates.every((gate) => gate.ok && gate.matchedWorkIds.length === 2));
-  const bound = await checkReleaseGatePlan({ ...options });
-  assert.equal(saved.treeDigest, (await gateTreeState(fixture.projectRoot, bound.plan.roots)).treeDigest);
-  const countBefore = (await readdir(dirname(finished.gates.recordPath))).filter((name) => name.endsWith(".json")).length;
-  for (const id of workIds) {
-    const done = cli(["work-transition", "--workspace", fixture.workspace, "--at", "2026-10-08T03:00:00Z", "--id", id, "--status", "done", "--project", fixture.projectRoot]);
-    assert.equal(done.doneGates.runId, saved.runId);
-  }
-  assert.equal((await readdir(dirname(finished.gates.recordPath))).filter((name) => name.endsWith(".json")).length, countBefore, "done consumes the same saved run without another gate execution");
-  const builds = calls.filter((call) => call.command === "corepack" && call.phase !== "native-offline-readiness");
-  assert.equal(builds.length, 1, "one real pinned build");
-  assert.deepEqual(builds[0].args, pinnedBuildArguments(fixture.engineRoot));
-  const installs = calls.filter((call) => call.phase === "native-offline-readiness");
-  assert.equal(installs.length, 1, "one explicit native offline preparation after version generation");
-  assert.deepEqual(installs[0].args, ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts"]);
-  assert.equal(calls.filter((call) => call.args[0]?.endsWith("pack-release.mjs")).length, 1);
-  const buildIndex = calls.indexOf(builds[0]);
-  const renderIndex = calls.findIndex((call) => call.args[0]?.endsWith("render-helper-docs.mjs"));
-  const packIndex = calls.findIndex((call) => call.args[0]?.endsWith("pack-release.mjs"));
-  assert.ok(calls.indexOf(installs[0]) < buildIndex && buildIndex >= 0 && renderIndex > buildIndex && packIndex > renderIndex);
 });
 
 

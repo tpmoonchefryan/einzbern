@@ -287,6 +287,7 @@ test("classified privacy samples stay path-and-line exact across source, history
     "tests/privacy-boundary.test.mjs",
     "tests/push-wiki.test.mjs",
     "tests/registry-resolve.test.mjs",
+    "tests/helpers/release-fixture.mjs",
     "tests/release-lockstep.test.mjs",
     "tests/setup-fresh.test.mjs",
     "tests/variables-cli.test.mjs",
