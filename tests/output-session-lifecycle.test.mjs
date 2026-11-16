@@ -202,6 +202,7 @@ async function taskEntrypointFixture(context, testSource, { includeEngineSources
   const root = await mkdtemp(join(tmpdir(), "tcrn-task-entrypoint-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   await cp(resolve(productRoot, "scripts"), resolve(root, "scripts"), { recursive: true });
+  await cp(resolve(productRoot, "skill"), resolve(root, "skill"), { recursive: true });
   await cp(resolve(productRoot, "node_modules"), resolve(root, "node_modules"), { recursive: true });
   await mkdir(resolve(root, "tests"));
   if (includeEngineSources) {
@@ -220,7 +221,7 @@ async function taskEntrypointFixture(context, testSource, { includeEngineSources
   runGit(root, ["init", "--quiet"]);
   runGit(root, ["config", "user.email", "tcrn-fixture"]);
   runGit(root, ["config", "user.name", "TCRN Fixture"]);
-  runGit(root, ["add", "package.json", ".gitignore", "scripts", "tests", "packages", ...(includeEngineSources ? ["tsconfig.json"] : [])]);
+  runGit(root, ["add", "package.json", ".gitignore", "scripts", "skill", "tests", "packages", ...(includeEngineSources ? ["tsconfig.json"] : [])]);
   runGit(root, ["commit", "--quiet", "-m", "fixture"]);
   assert.equal(spawnSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }).stdout, "");
   return root;

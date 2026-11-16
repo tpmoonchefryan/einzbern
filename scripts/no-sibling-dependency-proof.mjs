@@ -41,8 +41,8 @@
 // tests/inc260-snapshot-read-optimization.test.mjs.
 
 import { readFileSync, readdirSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { BRAND, LOCAL_DIRECTORY_NAMES, assertInstallManifestComplete, readInstallManifest } from "../dist/build/packages/core/src/index.js";
 import { canonicalSha256 } from "../dist/build/packages/protocol/src/index.js";
 
@@ -253,6 +253,21 @@ function readsRepositoryHelperSkill(code, sibling) {
   return new RegExp(rootedPath, "u").test(code);
 }
 
+/** Remove only module-relative operands whose resolved target stays in this repository. */
+function withoutRepositoryModulePaths(code, path, repoRoot) {
+  const removeLocalOperand = (match, prefix, quote, specifier) => {
+    let target;
+    try { target = fileURLToPath(new URL(specifier, pathToFileURL(path))); }
+    catch { return match; }
+    const fromRoot = relative(repoRoot, target);
+    if (isAbsolute(fromRoot) || fromRoot === ".." || fromRoot.startsWith(`..${sep}`)) return match;
+    return match.replace(`${quote}${specifier}${quote}`, `${quote}${quote}`);
+  };
+  return code
+    .replace(/(\bfrom\s+|\bimport\s*\(\s*)(["'])(\.\.?\/[^"'\r\n]*)\2/gu, removeLocalOperand)
+    .replace(/(\bnew\s+URL\(\s*)(["'])(\.\.?\/[^"'\r\n]*)\2(?=\s*,\s*import\.meta\.url\s*\))/gu, removeLocalOperand);
+}
+
 /**
  * Every line that both names a sibling and performs a reaching operation,
  * or references paths outside the repository with a reaching operation.
@@ -283,7 +298,7 @@ export function findReachingLines({
       text.split("\n").forEach((line, index) => {
         // A comment explaining the rule is not the rule being broken. This gate has to be
         // sayable in its own source, and in the convention that describes it.
-        const code = line.replace(/\/\/.*$/u, "");
+        const code = withoutRepositoryModulePaths(line.replace(/\/\/.*$/u, ""), path, repoRoot);
         if (/^\s*\*|^\s*\/\*/u.test(line)) return;
 
         // First check: explicit sibling name mentioned
