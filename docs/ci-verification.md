@@ -8,8 +8,10 @@ See the distinct [light machine contract](../specs/ci-light-v1.md).
 
 The Windows and resource guards workflow additionally builds on Windows Server
 2022 and Ubuntu 24.04. Its focused suites cover native resource observations,
-filesystem boundaries, runtime relocation and isolated installation. Native
-Windows development commands and remaining controller requirements are described
+filesystem boundaries, runtime relocation and isolated installation.
+Apply the `full-p1` label before pushing a PR revision to run `pnpm verify:p1`
+on the Ubuntu runner and retain its P1, core test and Portal receipts for that
+commit. Windows development commands and remaining controller requirements are described
 in [Windows support](windows.md).
 
 The fixed roster is format, links, test wiring, lint, build (including its nested

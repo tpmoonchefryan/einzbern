@@ -290,6 +290,12 @@ const CLASSIFIED_P8_RELEASE_ENTRY_SOURCES = new Map([
   ["dist/release/einzbern-4.6.0.tar.gz/einzbern-4.6.0/scripts/einzbern-hook.mjs", "dist/build/packages/core/src/names.js"],
   ["dist/release/einzbern-4.6.0.tar.gz/einzbern-4.6.0/scripts/einzbern.mjs", "dist/build/packages/core/src/names.js"],
   ["dist/release/einzbern-4.6.0.tar.gz/einzbern-4.6.0/scripts/library-catalog-worker.mjs", "dist/build/packages/core/src/names.js"],
+  // The 5.0.0 diagnostic archive (d5257d033901718f573c8e955adeb9579119d15565a3bb55d492ce67874ecee8)
+  // contains the reviewed public names.js owner field once in each of these four bundles.
+  ["dist/release/einzbern-5.0.0.tar.gz/einzbern-5.0.0/atelier/portal.mjs", "dist/build/packages/core/src/names.js"],
+  ["dist/release/einzbern-5.0.0.tar.gz/einzbern-5.0.0/scripts/einzbern-hook.mjs", "dist/build/packages/core/src/names.js"],
+  ["dist/release/einzbern-5.0.0.tar.gz/einzbern-5.0.0/scripts/einzbern.mjs", "dist/build/packages/core/src/names.js"],
+  ["dist/release/einzbern-5.0.0.tar.gz/einzbern-5.0.0/scripts/library-catalog-worker.mjs", "dist/build/packages/core/src/names.js"],
 ]);
 const CLASSIFIED_P8_RELEASE_MATCHES = new Set(
   [...CLASSIFIED_P8_RELEASE_ENTRY_SOURCES.entries()].map(([label, sourcePath]) => [

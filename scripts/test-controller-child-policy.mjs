@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // A governed test command owns its output session as one process group. A
-// detached child normally escapes that group and is refused. The single
-// exception is the product gate runner: its private stdout/stderr pipes are
-// routed through a registered bootstrap, and the controller reaper owns that
-// process group until it is gone.
+// detached child normally escapes that group and is refused. Gates, host probes
+// and review commands use private pipes and a registered bootstrap. The
+// controller reaper owns each of their process groups until it is gone.
 
 import childProcess from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
@@ -147,19 +146,24 @@ function detachedForbidden() {
   throw policyError("TEST_CONTROLLER_DETACHED_DESCENDANT_FORBIDDEN");
 }
 
-// The only product spawn permitted to detach is gates-run's bounded process
-// group. Its exact stdio contract gives the test controller private pipes; the
-// wrapper receives those pipes and never inherits the controller's output.
-function isGateRunnerSpawn(name, arguments_, options) {
+const managedRunnerSources = [
+  new URL("../dist/build/packages/core/src/host-probe.js", import.meta.url).href,
+  new URL("../packages/core/src/host-probe.ts", import.meta.url).href,
+  new URL("./lib/review-command.mjs", import.meta.url).href,
+];
+
+// Every admitted runner uses the same registered group and private pipe contract.
+function isManagedRunnerSpawn(name, arguments_, options) {
   if (name !== "spawn" || options?.detached !== true || options?.shell !== false) return false;
   if (!Array.isArray(arguments_[1]) || arguments_[1].some((argument) => typeof argument !== "string")) return false;
   if (!Array.isArray(options.stdio) || options.stdio.length !== 3 ||
       options.stdio[0] !== "ignore" || options.stdio[1] !== "pipe" || options.stdio[2] !== "pipe") return false;
   const stack = new Error().stack ?? "";
+  if (managedRunnerSources.some(source => stack.includes(`${source}:`))) return true;
   if (/(?:^|[\\/])packages[\\/]core[\\/]src[\\/]gates-run\.(?:js|ts):\d+:\d+/u.test(stack)) return true;
   // Distribution bundles keep the gate runner but not its original filesystem path.
   // Admit only the actual manifest-covered CLI entry, never an arbitrary same-named probe.
-  const frame = /at runGateProcess \(([^\n()]+[\\/]scripts[\\/]einzbern\.mjs):\d+:\d+\)/u.exec(stack);
+  const frame = /at (?:runGateProcess|probeHost) \(([^\n()]+[\\/]scripts[\\/]einzbern\.mjs):\d+:\d+\)/u.exec(stack);
   if (!frame) return false;
   try {
     const entry = frame[1].startsWith("file:") ? fileURLToPath(frame[1]) : resolve(frame[1]);
@@ -289,7 +293,7 @@ function isBootstrapRelay(name, arguments_, options) {
   return reservation?.state.processGroup === process.pid;
 }
 
-function spawnManagedGate(name, arguments_, options, original, receiver) {
+function spawnManagedChild(arguments_, options, original, receiver) {
   const token = randomBytes(16).toString("hex");
   const slotPath = reserveChildSlot(token);
   const executable = arguments_[0];
@@ -367,12 +371,6 @@ function rejectInheritedStdio(name, options) {
   if (inheritsStdioForCall(name, options)) throw policyError("TEST_CONTROLLER_INHERITED_STDIO_FORBIDDEN");
 }
 
-function rejectDetached(name, arguments_, options) {
-  if (!options?.detached) return;
-  if (isGateRunnerSpawn(name, arguments_, options)) return;
-  detachedForbidden();
-}
-
 // An allowlist, not a denylist. Besides "inherit", [0,1,2] and parent stream
 // objects can carry a test controller's output descriptor.
 const nonInheritingStdio = new Set(["pipe", "ignore", "overlapped", "ipc", null, undefined]);
@@ -413,11 +411,10 @@ for (const name of ["spawn", "spawnSync", "exec", "execFile", "execSync", "execF
   const original = childProcess[name];
   const guarded = function guardedChildProcess(...arguments_) {
     const options = optionsFor(name, arguments_);
-    const gateRunnerSpawn = isGateRunnerSpawn(name, arguments_, options);
     const bootstrapRelay = isBootstrapRelay(name, arguments_, options);
     if (options?.detached) {
-      rejectDetached(name, arguments_, options);
-      if (gateRunnerSpawn) return spawnManagedGate(name, arguments_, options, original, this);
+      if (!isManagedRunnerSpawn(name, arguments_, options)) detachedForbidden();
+      return spawnManagedChild(arguments_, options, original, this);
     }
     if (!bootstrapRelay) rejectInheritedStdio(name, options);
     return original.apply(this, propagatePolicyToNodeChild(name, arguments_));

@@ -82,13 +82,6 @@ function fullOutput(path) {
   return { text: bytes.toString("utf8"), bytes: bytes.length, sha256: digest, complete: true };
 }
 
-function terminateProcessGroup(pid) {
-  if (process.platform === "win32") return;
-  if (!Number.isSafeInteger(pid) || pid <= 0) return;
-  try { process.kill(-pid, "SIGTERM"); } catch { /* group already ended */ }
-  try { process.kill(-pid, "SIGKILL"); } catch { /* group already ended */ }
-}
-
 function resultCode(result) {
   if (result.error?.code === "ETIMEDOUT") return "TIMEOUT";
   if (result.error?.code) return String(result.error.code);
@@ -104,38 +97,37 @@ function runShell(command, cwd, timeoutMs = REVIEW_COMMAND_TIMEOUT_MS) {
   const outputDirectory = mkdtempSync(join(tmpdir(), "tcrn-review-evidence-run-"));
   const stdoutPath = join(outputDirectory, "stdout");
   const stderrPath = join(outputDirectory, "stderr");
-  let stdoutFd;
-  let stderrFd;
   try {
-    stdoutFd = openSync(stdoutPath, "w", 0o600);
-    stderrFd = openSync(stderrPath, "w", 0o600);
-    // A detached shell owns a private process group. Node's synchronous timeout
-    // sends the kill signal to that process group on this host; regular output
-    // files keep a timed-out grandchild from holding a pipe open.
-    const run = process.platform === "win32" ? spawnCommandSync : spawnSync;
-    const shell = process.platform === "win32" ? join(process.env.SystemRoot, "System32", "cmd.exe") : "/bin/sh";
-    const arguments_ = process.platform === "win32" ? ["/d", "/s", "/c", `"${command}"`] : ["-c", command];
-    result = run(shell, arguments_, {
-      cwd,
-      detached: process.platform !== "win32",
-      windowsVerbatimArguments: process.platform === "win32",
-      shell: false,
-      timeout: timeoutMs,
-      maxBuffer: REVIEW_OUTPUT_BYTES * 2,
-      encoding: "utf8",
-      stdio: ["ignore", stdoutFd, stderrFd],
-      env: childEnvironment(),
-    });
+    if (process.platform === "win32") {
+      let stdoutFd;
+      let stderrFd;
+      try {
+        stdoutFd = openSync(stdoutPath, "wx", 0o600);
+        stderrFd = openSync(stderrPath, "wx", 0o600);
+        result = spawnCommandSync(join(process.env.SystemRoot, "System32", "cmd.exe"), ["/d", "/s", "/c", `"${command}"`], {
+          cwd, env: childEnvironment(), windowsVerbatimArguments: true, shell: false, timeout: timeoutMs,
+          encoding: "utf8", stdio: ["ignore", stdoutFd, stderrFd],
+        });
+      } finally {
+        if (stdoutFd !== undefined) closeSync(stdoutFd);
+        if (stderrFd !== undefined) closeSync(stderrFd);
+      }
+    } else {
+      const collector = fileURLToPath(new URL("./lib/review-command.mjs", import.meta.url));
+      const receipt = spawnSync(process.execPath, [collector], {
+        cwd, env: childEnvironment(), encoding: "utf8", stdio: "pipe",
+        input: JSON.stringify({ command, timeoutMs, stdoutPath, stderrPath }),
+      });
+      if (receipt.error) throw receipt.error;
+      if (receipt.status !== 0) throw new Error(receipt.stderr || "Review command collector failed");
+      result = JSON.parse(receipt.stdout);
+    }
   } catch (error) {
     rmSync(outputDirectory, { recursive: true, force: true });
     return { command, cwd, exitCode: String(error?.code ?? "START_FAILED"), stdout: "", stderr: String(error?.message ?? error) };
-  } finally {
-    if (stdoutFd !== undefined) closeSync(stdoutFd);
-    if (stderrFd !== undefined) closeSync(stderrFd);
   }
   let stdout = { text: "", bytes: 0, sha256: createHash("sha256").digest("hex"), complete: true };
   let stderr = { text: "", bytes: 0, sha256: createHash("sha256").digest("hex"), complete: true };
-  if (result.error || result.status !== 0) terminateProcessGroup(result.pid);
   try {
     stdout = fullOutput(stdoutPath);
     stderr = fullOutput(stderrPath);

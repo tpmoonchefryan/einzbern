@@ -21,7 +21,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ matrix.os == 'ubuntu-24.04' && contains(github.event.pull_request.labels.*.name, 'full-p1') && 90 || 30 }}
     defaults:
       run:
         shell: bash
@@ -59,3 +59,17 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           pnpm exec node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/memory-budget.test.mjs tests/memory-policy-backup.test.mjs tests/heavy-runs.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/io-boundaries.test.mjs tests/output-session-lifecycle.test.mjs tests/storage-defensive-maintenance.test.mjs tests/backup-snapshot.test.mjs tests/render-helper-docs.test.mjs tests/skill-install-bootstrap.test.mjs tests/windows-platform.test.mjs tests/windows-process.test.mjs tests/ci-selective-runner.test.mjs tests/p1-all-legs.test.mjs tests/host-probe.test.mjs tests/kiro-native-execution.test.mjs tests/antigravity-native-execution.test.mjs tests/background-resource.test.mjs
+      - name: Run full Linux P1 on the reviewed commit
+        if: runner.os == 'Linux' && contains(github.event.pull_request.labels.*.name, 'full-p1')
+        run: pnpm verify:p1
+      - name: Retain full P1 and test receipts
+        if: always() && runner.os == 'Linux' && contains(github.event.pull_request.labels.*.name, 'full-p1')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-full-p1-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: |
+            dist/evidence/p1/verify-p1.json
+            dist/evidence/p1/test.json
+            dist/evidence/p1/portal.json
+          if-no-files-found: error
+          retention-days: 14

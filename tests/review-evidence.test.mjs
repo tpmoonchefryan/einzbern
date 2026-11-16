@@ -15,6 +15,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   REVIEW_EVIDENCE_VERSION,
+  collectReviewEvidence,
   diffEvidence,
   parseTestRunOutput,
 } from "../scripts/review-evidence.mjs";
@@ -255,15 +256,6 @@ console.log(JSON.stringify(files.filter(file => file.endsWith(".test.mjs"))));
   assert.match(changed.stderr, /EVIDENCE_HISTORY_TEST_ROSTER_MISMATCH/u);
 });
 
-function runUnpreloadedCollect(options) {
-  const moduleUrl = new URL("../scripts/review-evidence.mjs", import.meta.url).href;
-  const source = `import { collectReviewEvidence } from ${JSON.stringify(moduleUrl)}; process.stdout.write(JSON.stringify(collectReviewEvidence(${JSON.stringify(options)})));`;
-  const { NODE_OPTIONS, ...env } = process.env;
-  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", source], { encoding: "utf8", env });
-  assert.equal(result.status, 0, result.stderr);
-  return JSON.parse(result.stdout);
-}
-
 async function runCliJson(args) {
   let output = "";
   await runCli([...args, "--actor", "agent:test"], { write: (value) => { output += value; } });
@@ -286,7 +278,7 @@ test("STORY-375 GWT1: review-evidence reads the bound verify, runs it, and separ
   const { root: repositoryRoot, base } = gitFixture(t);
   const verifyCommand = `${JSON.stringify(process.execPath)} --test tests/fixture.test.mjs`;
   const { workspace, workId } = await reviewWorkspace(t, verifyCommand);
-  const result = runUnpreloadedCollect({
+  const result = collectReviewEvidence({
     workspace,
     workId,
     repositoryRoot,
@@ -299,7 +291,7 @@ test("STORY-375 GWT1: review-evidence reads the bound verify, runs it, and separ
   assert.equal(result.ok, false);
   assert.ok(result.problems.some((problem) => problem.includes("allowedFiles")));
 
-  const rerun = runUnpreloadedCollect({
+  const rerun = collectReviewEvidence({
     workspace,
     workId,
     repositoryRoot,
@@ -325,7 +317,7 @@ test("STORY-375 GWT1: review-evidence reads the bound verify, runs it, and separ
   const timeoutRoot = mkdtempSync(join(tmpdir(), "tcrn-review-evidence-timeout-"));
   try {
     const pidFile = join(timeoutRoot, "child.pid");
-    const timeout = runUnpreloadedCollect({
+    const timeout = collectReviewEvidence({
       workspace,
       workId,
       repositoryRoot,
@@ -333,7 +325,7 @@ test("STORY-375 GWT1: review-evidence reads the bound verify, runs it, and separ
       allowedFiles: ["tests/fixture.test.mjs"],
       testFiles: ["tests/fixture.test.mjs"],
       testCommand: `${JSON.stringify(process.execPath)} -e ${JSON.stringify(`require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(process.pid)); setTimeout(() => {}, 60_000)`)}`,
-      commandTimeoutMs: 100,
+      commandTimeoutMs: 1_500,
     });
     assert.equal(timeout.evidence.testRun.result.exitCode, "TIMEOUT");
     assert.equal(timeout.ok, false);

@@ -11,6 +11,7 @@ import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
 import { spawnCommandSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 
 import { hookProtocolOutput } from "../dist/build/packages/core/src/hook-recall.js";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import {
   ANTIGRAVITY_HOOKS_FILE,
   ANTIGRAVITY_OWNED_HOOK_GROUP,
@@ -44,6 +45,7 @@ const oldHookExitCode = process.exitCode;
 async function fixture(t) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "einzbern-agy-hooks-")));
   t.after(async () => {
+    resetRecallCache();
     if (originalHost === undefined) delete process.env.EINZBERN_HOST;
     else process.env.EINZBERN_HOST = originalHost;
     if (originalDeviceHome === undefined) delete process.env.EINZBERN_HOME;

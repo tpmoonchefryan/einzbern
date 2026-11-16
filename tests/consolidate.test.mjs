@@ -18,6 +18,8 @@ import { canonicalJson, deriveStableId } from "../dist/build/packages/protocol/s
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { promptRecallContext } from "../dist/build/packages/core/src/hook-recall.js";
 import { recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 const at = "2026-10-19T12:00:00Z";
 const owner = "owner:000000000000000000000001";
 async function fixture(t) {
@@ -59,12 +61,12 @@ test("653: archived null-project metadata keeps its binding, omitted legacy fiel
   const legacy = { ...original, subject: "Cache policy", summary: "Enable cache", snippet: "Enable cache" };
   delete legacy.supersedes;
   delete legacy.expansions;
-  const metadataPath = join(alpha.path, "crest", "metadata", `${legacy.id}.json`);
+  const metadataPath = storeRecordPath(join(alpha.path, "crest", "metadata"), `${legacy.id}.json`);
   await mkdir(join(alpha.path, "crest", "metadata"));
   await mkdir(join(alpha.path, "crest", "bodies"));
   const bytes = canonicalJson(legacy);
   await writeFile(metadataPath, bytes);
-  await writeFile(join(alpha.path, "crest", "bodies", `${legacy.id}.body`), body);
+  await writeFile(storeRecordPath(join(alpha.path, "crest", "bodies"), `${legacy.id}.body`), body);
   await rm(join(alpha.path, "crest", "events"), { recursive: true });
   const primaryInput = Object.fromEntries(["roleScopes", "category", "kind", "tags", "accountableOwnerId", "sourceReferences", "sourceDigest",
     "linkedWorkIds", "linkedDecisionIds", "linkedGateIds", "linkedEvidenceIds", "retrievalDisposition", "freshnessState", "lastVerified", "stalenessPolicy", "exportDisposition"]
@@ -82,7 +84,7 @@ test("653: archived null-project metadata keeps its binding, omitted legacy fiel
   assert.deepEqual((await list({ projectId: alpha.projectId })).records.map(record => record.id), [legacy.id]);
   assert.equal((await list({ projectId: f.sources[2].projectId })).total, 0);
   const alphaArchive = (await readConsolidationIndex(f.to, (await openLibrary(f.to)).manifest)).sources.find(source => source.manifest.libraryId === alpha.id);
-  const archivedMetadata = join(f.to, alphaArchive.archive, "crest", "metadata", `${legacy.id}.json`);
+  const archivedMetadata = storeRecordPath(join(f.to, alphaArchive.archive, "crest", "metadata"), `${legacy.id}.json`);
   assert.equal(await readFile(archivedMetadata, "utf8"), bytes);
   assert.equal(first.records.find(record => record.id === legacy.id).supersedes, null);
   assert.deepEqual(first.records.find(record => record.id === legacy.id).expansions, {});
@@ -92,8 +94,8 @@ test("653: archived null-project metadata keeps its binding, omitted legacy fiel
   const unbound = { ...legacy, id: deriveStableId("knowledge", "UNBOUND-LEGACY"), externalKey: "UNBOUND-LEGACY" };
   await mkdir(join(f.to, "crest", "metadata"), { recursive: true });
   await mkdir(join(f.to, "crest", "bodies"), { recursive: true });
-  await writeFile(join(f.to, "crest", "metadata", `${unbound.id}.json`), canonicalJson(unbound));
-  await writeFile(join(f.to, "crest", "bodies", `${unbound.id}.body`), body);
+  await writeFile(storeRecordPath(join(f.to, "crest", "metadata"), `${unbound.id}.json`), canonicalJson(unbound));
+  await writeFile(storeRecordPath(join(f.to, "crest", "bodies"), `${unbound.id}.body`), body);
   const unknown = await list();
   const unboundRow = unknown.diagnosticPage.records.find(entry => entry.id === unbound.id);
   assert.equal(unboundRow.intrinsicScope.kind, "unresolved-legacy");
@@ -165,6 +167,7 @@ test("a fresh shared library recalls global cards and only the selected project'
   const previous = process.env.EINZBERN_HOME;
   process.env.EINZBERN_HOME = join(root, "device");
   t.after(async () => {
+    resetRecallCache();
     if (previous === undefined) delete process.env.EINZBERN_HOME;
     else process.env.EINZBERN_HOME = previous;
     await rm(root, { recursive: true, force: true });
@@ -377,7 +380,7 @@ test("647: incremental source-stream matrix preserves status, queries and govern
   // 648 while keeping consolidation checkpoints and all original assertions.
   const materializeLibrary = root => cachedMaterializeLibrary(root, { readFile });
   const { workContentContext } = await import("../dist/build/packages/core/src/work-content-context.js");
-  const { recall, recallDocuments, resetRecallCache } = await import("../dist/build/packages/core/src/recall.js");
+  const { recall, recallDocuments } = await import("../dist/build/packages/core/src/recall.js");
   const { withRecallObservation } = await import("../dist/build/packages/core/src/recall-observation.js");
   const { readCacheSnapshot, writeCacheSnapshot } = await import("../dist/build/packages/core/src/library-cache.js");
   const libraryId = (await openLibrary(f.to)).manifest.libraryId;
@@ -514,7 +517,11 @@ test("648: full verification detects authentic same-length, same-name, missing a
   const replaced = await withRecallObservation(() => materializeLibrary(f.to));
   assert.deepEqual(replaced.value, expected, "byte-identical replacement is valid after full verification");
   if (warm.observation.verifiedSegmentsBySource.length > 0) {
-    assert.equal(replaced.observation.logicalEventBytes, original.length, "only the changed object needs full source verification");
+    const proofBytes = warm.observation.verificationContentBytes;
+    assert.ok(proofBytes > 0, "native reuse hashes the current source bytes before returning");
+    const warmEventReads = warm.observation.logicalEventBytes - proofBytes;
+    assert.equal(replaced.observation.verificationContentBytes, proofBytes, "the same declared bytes must still be checked");
+    assert.equal(replaced.observation.logicalEventBytes - proofBytes, warmEventReads + original.length, "only the replaced object needs an additional full event read");
   } else {
     assert.equal(replaced.observation.logicalEventBytes, warm.observation.logicalEventBytes, "the portable verifier rereads every segment");
   }

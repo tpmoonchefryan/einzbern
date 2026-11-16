@@ -2,9 +2,7 @@
 // STORY-373 — host-probe runs a bounded no-shell host command and exposes its result.
 
 import assert from "node:assert/strict";
-import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { once } from "node:events";
-import { spawn } from "node:child_process";
+import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -13,8 +11,6 @@ import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
 import { probeHost, HOST_PROBE_OUTPUT_BYTES } from "../dist/build/packages/core/src/host-probe.js";
 import { COMMAND_CATALOG } from "../dist/build/packages/cli/src/index.js";
 
-const HOST_PROBE_MODULE_URL = new URL("../dist/build/packages/core/src/host-probe.js", import.meta.url).href;
-
 async function fakeExecutable(t, source) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tcrn-host-probe-")));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -22,27 +18,10 @@ async function fakeExecutable(t, source) {
   return writeNodeExecutable(path, source);
 }
 
-async function runUnpreloadedRelay(t, source) {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "tcrn-host-probe-relay-")));
-  t.after(() => rm(directory, { recursive: true, force: true }));
-  const scriptPath = join(directory, "relay.mjs");
-  await writeFile(scriptPath, `import { probeHost } from ${JSON.stringify(HOST_PROBE_MODULE_URL)};\n${source}\n`, { mode: 0o700 });
-  const env = { ...process.env };
-  delete env.NODE_OPTIONS;
-  const child = spawn(process.execPath, [scriptPath], { env, stdio: ["ignore", "pipe", "pipe"] });
-  const stdout = [];
-  const stderr = [];
-  child.stdout.on("data", (chunk) => stdout.push(chunk));
-  child.stderr.on("data", (chunk) => stderr.push(chunk));
-  const [code] = await once(child, "close");
-  assert.equal(code, 0, Buffer.concat(stderr).toString("utf8"));
-  return JSON.parse(Buffer.concat(stdout).toString("utf8"));
-}
-
 test("STORY-373: host-probe passes model text as one argv value without a shell", async (t) => {
   const executable = await fakeExecutable(t, "process.stdout.write(JSON.stringify(process.argv.slice(2)))");
   const model = "model; touch /tmp/host-probe-must-not-run";
-  const result = await runUnpreloadedRelay(t, `const result = await probeHost({ host: "claude-code", model: ${JSON.stringify(model)}, executable: ${JSON.stringify(executable)}, env: process.env }); process.stdout.write(JSON.stringify(result));`);
+  const result = await probeHost({ host: "claude-code", model, executable });
   assert.equal(result.reasonCode, "HOST_PROBE_SUCCEEDED");
   assert.equal(result.ok, true);
   assert.deepEqual(JSON.parse(result.stdout), ["-p", "--bare", "--model", model]);
@@ -55,18 +34,18 @@ test("STORY-373: missing CLI, authentication failure, timeout, and output trunca
   assert.equal(missing.availability, "unavailable");
 
   const authExecutable = await fakeExecutable(t, "process.stderr.write('authentication required'); process.exitCode = 7");
-  const auth = (await runUnpreloadedRelay(t, `const result = await probeHost({ host: "codex", model: "auth-model", executable: ${JSON.stringify(authExecutable)}, env: process.env }); process.stdout.write(JSON.stringify(result));`));
+  const auth = await probeHost({ host: "codex", model: "auth-model", executable: authExecutable });
   assert.equal(auth.reasonCode, "HOST_PROBE_AUTH_FAILED");
   assert.equal(auth.exitCode, 7);
   assert.match(auth.stderr, /authentication required/u);
 
   const timeoutExecutable = await fakeExecutable(t, "setTimeout(() => {}, 10_000)");
-  const timedOut = await runUnpreloadedRelay(t, `const result = await probeHost({ host: "claude-code", model: "slow", executable: ${JSON.stringify(timeoutExecutable)}, timeoutMs: 100, env: process.env }); process.stdout.write(JSON.stringify(result));`);
+  const timedOut = await probeHost({ host: "claude-code", model: "slow", executable: timeoutExecutable, timeoutMs: 100 });
   assert.equal(timedOut.reasonCode, "HOST_PROBE_TIMEOUT");
   assert.equal(timedOut.timedOut, true);
 
   const outputExecutable = await fakeExecutable(t, "process.stdout.write('x'.repeat(70_000))");
-  const truncated = await runUnpreloadedRelay(t, `const result = await probeHost({ host: "claude-code", model: "loud", executable: ${JSON.stringify(outputExecutable)}, env: process.env }); process.stdout.write(JSON.stringify(result));`);
+  const truncated = await probeHost({ host: "claude-code", model: "loud", executable: outputExecutable });
   assert.equal(truncated.reasonCode, "HOST_PROBE_SUCCEEDED");
   assert.equal(truncated.ok, true);
   assert.equal(truncated.stdout, "x".repeat(70_000), "complete output beyond the former capture ceiling");
@@ -75,7 +54,7 @@ test("STORY-373: missing CLI, authentication failure, timeout, and output trunca
 });
 
 test("STORY-373: Codex and Claude argv forms are fixed and input validation is fail-closed", async (t) => {
-  const result = await runUnpreloadedRelay(t, `const result = await probeHost({ host: "codex", model: "model", executable: process.execPath, env: process.env }); process.stdout.write(JSON.stringify(result));`);
+  const result = await probeHost({ host: "codex", model: "model", executable: process.execPath });
   assert.deepEqual(result.command.slice(1), ["exec", "-m", "model", "-s", "read-only", "--ephemeral"]);
   await assert.rejects(probeHost({ host: "unknown", model: "model" }), (error) => error?.reasonCode === "HOST_PROBE_HOST_UNKNOWN");
   await assert.rejects(probeHost({ host: "codex", model: "" }), (error) => error?.reasonCode === "HOST_PROBE_MODEL_INVALID");
@@ -105,13 +84,13 @@ async function pathDirectory(t) {
   return directory;
 }
 
-function probeWithEnv(t, env) {
-  return runUnpreloadedRelay(t, `const result = await probeHost({ host: "claude-code", model: "m", env: ${JSON.stringify(env)} }); process.stdout.write(JSON.stringify(result));`);
+function probeWithEnv(env) {
+  return probeHost({ host: "claude-code", model: "m", env });
 }
 
 test("TCRN-CROSS-INC-387: without a test executable host-probe runs the host Claude CLI named by CLAUDE_CODE_EXECPATH", async (t) => {
   const host = await fakeExecutable(t, "process.stdout.write(`host ${JSON.stringify(process.argv.slice(2))}`)");
-  const result = await probeWithEnv(t, { PATH: await pathDirectory(t), CLAUDE_CODE_EXECPATH: host });
+  const result = await probeWithEnv({ PATH: await pathDirectory(t), CLAUDE_CODE_EXECPATH: host });
   assert.deepEqual(result.command, [host, "-p", "--bare", "--model", "m"], "command[0] is the host CLI");
   assert.equal(result.reasonCode, "HOST_PROBE_SUCCEEDED");
   assert.equal(result.stdout, `host ${JSON.stringify(["-p", "--bare", "--model", "m"])}`);
@@ -122,10 +101,10 @@ test("TCRN-CROSS-INC-387: a usable host CLI wins over a claude on PATH and an un
   const path = await pathDirectory(t);
   await writeNodeExecutable(join(path, "claude"), "process.stdout.write('path')");
   await writeFile(join(path, "not-executable"), "", { mode: 0o600 });
-  const preferred = await probeWithEnv(t, { PATH: path, CLAUDE_CODE_EXECPATH: host });
+  const preferred = await probeWithEnv({ PATH: path, CLAUDE_CODE_EXECPATH: host });
   assert.deepEqual([preferred.command[0], preferred.stdout], [host, "host"], "the host CLI runs even with a claude on PATH");
   for (const unusable of ["", join(path, "missing"), join(path, "not-executable"), path]) {
-    const fallback = await probeWithEnv(t, { PATH: path, CLAUDE_CODE_EXECPATH: unusable });
+    const fallback = await probeWithEnv({ PATH: path, CLAUDE_CODE_EXECPATH: unusable });
     assert.deepEqual([fallback.command[0], fallback.stdout, fallback.reasonCode], ["claude", "path", "HOST_PROBE_SUCCEEDED"], `unusable host CLI ${JSON.stringify(unusable)}`);
   }
 });

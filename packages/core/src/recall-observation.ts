@@ -9,6 +9,8 @@ export interface RecallObservation {
   readonly cpuScope: "process-wide-delta";
   readonly cpuMicros: number;
   readonly logicalEventBytes: number;
+  /** Bytes included in logicalEventBytes for the native verifier's final content check. */
+  readonly verificationContentBytes: number;
   readonly segmentReads: number;
   readonly eventReadsBySource: readonly { readonly scope: "live" | "archive"; readonly streamId: string | null; readonly bytes: number; readonly segments: number }[];
   readonly metadataReadBytes: number;
@@ -39,6 +41,7 @@ export interface RecallObservation {
 }
 interface Counters {
   logicalEventBytes: number;
+  verificationContentBytes: number;
   segmentReads: number;
   eventReadsBySource: { scope: "live" | "archive"; streamId: string | null; bytes: number; segments: number }[];
   metadataReadBytes: number;
@@ -68,10 +71,11 @@ interface Counters {
   checkpoint: string | null;
 }
 let active: AsyncLocalStorage<Counters> | undefined;
-export function observeEventRead(bytes: number, streamId: string | null = null, scope: "live" | "archive" = "live"): void {
+export function observeEventRead(bytes: number, streamId: string | null = null, scope: "live" | "archive" = "live", purpose: "events" | "content-proof" = "events"): void {
   const counters = active?.getStore();
   if (counters === undefined) return;
   counters.logicalEventBytes += bytes;
+  if (purpose === "content-proof") counters.verificationContentBytes += bytes;
   counters.segmentReads += 1;
   let source = counters.eventReadsBySource.find(entry => entry.streamId === streamId && entry.scope === scope);
   if (source === undefined) {
@@ -112,7 +116,7 @@ export function observeRecall(reason: string): void {
 /** Opt-in request-local counters. Logical bytes are not OS I/O, network bytes or token cost. */
 export async function withRecallObservation<T>(operation: () => Promise<T>, completed?: (observation: RecallObservation) => void): Promise<{ value: T; observation: RecallObservation }> {
   const counters: Counters = {
-    logicalEventBytes: 0, segmentReads: 0, eventReadsBySource: [], metadataReadBytes: 0,
+    logicalEventBytes: 0, verificationContentBytes: 0, segmentReads: 0, eventReadsBySource: [], metadataReadBytes: 0,
     cacheReadBytes: 0, cacheWriteBytes: 0, metadataCpuMicros: 0, metadataElapsedMs: 0,
     verificationRecordBytes: 0, verificationHelperScriptBytes: 0, verificationHelperInputBytes: 0,
     verificationHelperOutputBytes: 0, verificationHelperElapsedMs: 0, verifiedSegmentsBySource: [],

@@ -43,13 +43,14 @@
     "portal/tests/ui-presence.test.mjs": "86a1849db17a8c4830571d21dd25e546bdde663f589b3bcbc5502c0802f2a1e8",
     "portal/tests/ui-work.test.mjs": "35592a359e78a432dfaf19f6ce86371b709dd70d87110159a91ad109a89e45a3",
     "portal/tokens.css": "75415e829eaac6210e29d3ef11f2552b6d617ddf2fadf4b34d33d8fdefdae556",
-    "scripts/lib/privacy.mjs": "2e9b1cb70694c83ba2b8c5301f41ba924e29410a1b3d80b94d5242cca65ca750",
+    "scripts/lib/privacy.mjs": "a88fa8f8cfe5c7a4eb1603b4336c9b816b91ba1fc5c7d484ec1c23cf17c4e8f0",
     "tests/cross-repo-privacy.test.mjs": "744137410e2caf75cce0ebcf886957fd5e34815382a3466273a86d75088e230c",
+    "tests/helpers/release-fixture.mjs": "49ad09f684f3c43fe7dff675f7aa9fd1981ebd2589c96d1cbc649a96ab3d4edf",
     "tests/local-command-byte-fidelity.test.mjs": "5830b7f001d060ba49c749c8285eed5f775544005bb300dfa5de7e044ceb66e8",
     "tests/otel-privacy-guard.test.mjs": "66972f7f0ed4b381feb473096637b2b709166b731d77ec7a145efb1ffe772eed",
     "tests/p8-workflow-rc.test.mjs": "c619987f51386e50d27eee1b547e143d499538288051e6060e49cf79a969e4d1",
     "tests/pack-release.test.mjs": "430e86ba02cf5bd3577312a5050244c0cea0272b13016b36a57590affde18212",
-    "tests/privacy-boundary.test.mjs": "b4764c422c7a9169eedfbda7aba670b4bcd0de60ee7e3b8e9c579a85bc896196",
+    "tests/privacy-boundary.test.mjs": "f304707aa254a8e05db1e20c273a8a01de7e3e5d92e5c772026bb52c0c0c4aa5",
     "tests/privacy-git-metadata.test.mjs": "675a891f6f0066c29ea052a269219994ddf016536b20a74e9b682436c2427197",
     "tests/privacy-normalization.test.mjs": "8e3fcb3628b539022076d9389667ca45a67ae2e8bd0be05fa956634c16ad6914",
     "tests/readme-render.test.mjs": "2a150e521e2975a0d1008fa815f6f523219a309d6a7daf6bd518c2b7be51fb63",
@@ -58,8 +59,7 @@
     "tests/render-helper-docs.test.mjs": "0aaffeb07027612b3299138cb8c2fc4b2fb4c7ba4394e1efbb00d56415b7f0af",
     "tests/staged-privacy-origin-diagnostics.test.mjs": "513539430be5d7404d58fc4da3179b786679f728fbeb639fdf9dd8233a5f87cc",
     "tests/staged-privacy-reviewed-paths.test.mjs": "32e031c52009b7b16a69735090855553e9c4bf6be7065911001012468c8b1f57",
-    "tests/token-attribution.test.mjs": "71f63ff5e9bacadb3d8582cc0866697cfd8ef7acd384a366f5e1b2ac81c91d35",
-    "tests/helpers/release-fixture.mjs": "49ad09f684f3c43fe7dff675f7aa9fd1981ebd2589c96d1cbc649a96ab3d4edf"
+    "tests/token-attribution.test.mjs": "71f63ff5e9bacadb3d8582cc0866697cfd8ef7acd384a366f5e1b2ac81c91d35"
   },
   "ciTests": [
     "tests/ci-artifact-transport.test.mjs",
@@ -727,7 +727,6 @@
   },
   "documentAudit": {
     "README.md": {
-      "portalTests": [],
       "readers": [
         ".github/workflows/ci.yml",
         ".github/workflows/resource-guards.yml",
@@ -903,10 +902,10 @@
         "tests/story-346-pg-disabled.test.mjs",
         "tests/story-378-incident-replay.test.mjs",
         "tests/story-rule-conservation.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Atelier.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -920,10 +919,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/CLI-Reference.md": {
-      "portalTests": [],
       "readers": [
         ".github/workflows/ci.yml",
         ".github/workflows/resource-guards.yml",
@@ -1100,10 +1099,10 @@
         "tests/story-rule-conservation.test.mjs",
         "tests/wiki-cli-reference.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Ether-Layout.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1117,10 +1116,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/FAQ.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1134,10 +1133,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Gates.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1153,10 +1152,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Glossary.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1173,10 +1172,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Home.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1192,10 +1191,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Install-Wizard.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1209,10 +1208,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Managed-Sections-and-Command-Spell.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1227,10 +1226,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Migrating-from-TCRN-Workflow.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1244,10 +1243,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Multi-Device-and-Cloud.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1261,10 +1260,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/Variables.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1278,10 +1277,10 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     },
     "docs/wiki/_Sidebar.md": {
-      "portalTests": [],
       "readers": [
         "docs/verification/init053-owner-return-component-inventory.json",
         "docs/verification/init053-owner-return-copy-inventory.json",
@@ -1295,7 +1294,8 @@
         "tests/privacy-boundary.test.mjs",
         "tests/push-wiki.test.mjs",
         "tests/wiki-pages.test.mjs"
-      ]
+      ],
+      "portalTests": []
     }
   },
   "documentConsumers": {
@@ -1664,13 +1664,17 @@
   "sourceAudit": {
     ".editorconfig": "a6b98ea7cb6d61ed8d430dd0dffa46c87012b5cf859d4ce7207898954951fdcd",
     ".gitattributes": "167a38ccfe4c1ce36faeacbee047b2fc9c55d286710271d9fdc78d966d205069",
-    ".github/dependabot.yml": "9b74887725ee7ece5774faa1de3fc16d6997c82ef01f163700f6218e64f38dd7",
     ".github/ISSUE_TEMPLATE/bug.yml": "97a14a86b0d1b88eed0473c1edf940c1a65c44027403b89a171e3075cdd20877",
     ".github/ISSUE_TEMPLATE/config.yml": "8b09e7df09fc7534371988062769ee427af2954a02c04c763e8a8005be0f2be4",
+    ".github/dependabot.yml": "9b74887725ee7ece5774faa1de3fc16d6997c82ef01f163700f6218e64f38dd7",
     ".github/workflows/ci.yml": "31c798a010e1995dd5d623d069b78c64ad18738db4bcc2289f2049943a07225d",
+    ".github/workflows/resource-guards.yml": "6afbd90657dbcf5c0965be1c84831fdfd8403a21fc39a727c8c59d92b7a0ba16",
     ".gitignore": "8aa3efa989924a589b76af2fa0cc23f965335b3b52eb3f2041885b754ce7a264",
     ".node-version": "2722b61f414f07f08be7f1f1316012813818f26f1c40d6a24a748686cec7d2ff",
     ".npmrc": "05be9eca5ed913f6c49da4b40233c7b2cd26ef7da80437104f2232701cdf5bcb",
+    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+    "NOTICE": "045fa532821b114e93e7c1c1ba41a80f642d7a4d57967e6d51e8d3c53a7a98dd",
+    "THIRD_PARTY_NOTICES.txt": "4ed9fbf62ca58c4588755446b7563e411645d156b6a2542181641e4716d64af1",
     "docs/dispatch/2026-10-26-codex-subagentstop-to-dot/state.json": "7a59fe5433019798112ba0d6d3c10891b74ee1a54e7e921f7c4eac652ef6765b",
     "docs/implementation/configuration-inventory.json": "49990dabbee706ad6a605424924c1abbc7f7fdb46523dc98fd4502a26d7d8fbc",
     "docs/implementation/integrated-engine-acceptance.txt": "0eddea5d85b327172bfa21d03087acfa13428885664db9cdea4255e2a4445611",
@@ -1709,8 +1713,7 @@
     "fixtures/protocol/v1/property/determinism.json": "280332581a6fafcc91583c9724ff9c2df380d84dd3546263fcab20e68e9fa3d6",
     "fixtures/protocol/v1/property/portable-order.json": "c8abcd6569ef6dec212710af895fc6af8a6f85c5548ef1821d62c4779794c520",
     "fixtures/protocol/v1/schema-cases.json": "90e705247b663cb4e5dbaba50f8cbccda9127052b049133901c9de753c9e1e2e",
-    "LICENSE": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
-    "NOTICE": "045fa532821b114e93e7c1c1ba41a80f642d7a4d57967e6d51e8d3c53a7a98dd",
+    "native/linux-source-lease.c": "db3e6179849397a8e73bf16a424cdd9dd9871a8d66555edc47ce38389cb0ac8c",
     "package.json": "5b3dec64c7c192ea81bfed51a73b18ba27d53310d63c7be2a359043eb926bd67",
     "packages/cli/package.json": "15e31752c5acc196175662c579877f7d9c7a20c6d17ace3efcbc99abb830ff2b",
     "packages/cli/src/cli-args.ts": "aa25ba1ccf244027c296ef9a6bde14f5694b57bb99ed4c41d60f0fb9f9105769",
@@ -1752,6 +1755,7 @@
     "packages/core/src/codex-peer-hooks.ts": "9d777ced299516928ee55c99d52eedcbb1a597fbe8a26594c7010d0bc1577ae5",
     "packages/core/src/codex-peer-settings.ts": "f7a6251d5de5bea85823e60a4514582bb0f1b9e1af4bd66ab01d29a45d647ec0",
     "packages/core/src/codex-query-guard.ts": "cd64ab67fe75a14aedf83a406fb2b8241d59158153a00f3ba6dd6f7cebe70c71",
+    "packages/core/src/codex-tool-identity.ts": "c255c70f4efd8d28f0971942beedf12cedc2bade5eff1a2ddbcd140ba9d002d8",
     "packages/core/src/conference-execution.ts": "617975b49ce80cc2d6f639437094a4e0807956be82baa49fabd311d5611a2e81",
     "packages/core/src/conference.ts": "88da25785bca1dd7ee2a53edb1be032a60fefbe952ebb785a6d7d7c3b252c34a",
     "packages/core/src/config-backup-remote.ts": "db9b4f6b73fdb79cd3eed80a4c1a28a2670ab7f5e59ffaa86fe6f2fc06c53ef6",
@@ -1765,6 +1769,7 @@
     "packages/core/src/consolidate.ts": "492175abdc26acef0525dc68220b183fd31213044378840893c568afdaa80fc7",
     "packages/core/src/consolidation-format.ts": "9f331579d861de8a52e133d3baa84ed360f96569c46c80cdeaf534ce31f0e42e",
     "packages/core/src/consolidation-state.ts": "f7d98a7235dcecb0d407e285abf651c8856ceb7821b88ace0d8977d217ec60ac",
+    "packages/core/src/crest-source-proof.ts": "55c68a4fb38040da1d64148a2e22111cf79c15b78914d5441ad5d3f2d40bb1cd",
     "packages/core/src/darwin-source-identity.mjs": "f4535db01a4e14af61723f68d1e0a6c3bc5d5ada2a428b36ce3dd08121e13139",
     "packages/core/src/dependency.ts": "ef9882f03a2434213e59f4efab448f1043da036eacbc1f135b6c1ce47410755a",
     "packages/core/src/device-clean.ts": "e9cc1a102cdff7d1a8b40f6388c65ee2decc01435f6cd0deca37f35af1da92ee",
@@ -1844,7 +1849,7 @@
     "packages/core/src/recall-authority.ts": "e7740e80c96d31e80ccbb1841bd1a16e2675bcea2a499fe895467b5ffb4bf614",
     "packages/core/src/recall-inputs.ts": "761a07ac6de0166473ff3ab3f14cc0491106713096316dd2df60a3c31f424cf7",
     "packages/core/src/recall-observation-log.ts": "9805eea553fb008abeef88685c82724d9fc7b4969661d84472bebf106a4a139c",
-    "packages/core/src/recall-observation.ts": "f8f6daf07a57d0f46a383910d212e07d5a7a96a6a5ffda4f9ac1e5c5d61f7fdd",
+    "packages/core/src/recall-observation.ts": "6c290e27ad428e680ea1053406ae0d44b45121647262360ef92a654bf07cc8d7",
     "packages/core/src/recall.ts": "349ae97b54c50fec92586a2dff067ba9c0f44be9c31d7488d04cd10d13b538d5",
     "packages/core/src/reference-profiles.ts": "4f1dbb380af080e5920e17b1048bcc6159f13ddb887f7ebebd4962fd767391e1",
     "packages/core/src/registry.ts": "a9411f1a433f7b02bb685129955d10fa3cbae79c3687926c2b9c567f5522f634",
@@ -1864,7 +1869,11 @@
     "packages/core/src/shared-submit.ts": "192488df67226251011e80480966af110d21ec4e96746d3121c920f912678aee",
     "packages/core/src/skill-copies.ts": "c4be6ee0951c544f39800ad4c74e7798da2e4bc030c4e5d791ea9fa78d81b775",
     "packages/core/src/skill-render.ts": "4c8d7fcd46c2ae0304e80697957061dde2abcc0811abf9824448091950b81df1",
-    "packages/core/src/source-verification-native.ts": "040a7778e42a01846729d8be2ca9891e89142cae149e72afc4d9bfb1261734a6",
+    "packages/core/src/source-attestor-client.ts": "64a607a6e1bf6ccb39650aa51f4bab99e2229eea38514af4c94e4ea6e238bcbf",
+    "packages/core/src/source-attestor-crest.ts": "01a3d4decfcb2800f9c54d1c6cab705e488c6177a869d5dcc2d0860a71fd8437",
+    "packages/core/src/source-attestor-protocol.ts": "e923c3f0f84d3bb74c6e31c6c4556f66d1b353f89e97187788eac97c1b63bd92",
+    "packages/core/src/source-attestor-service.ts": "5dcbd62f14ce09d3527a92ccead3a73b50c895c8aea84201ca73d2ac240d6de9",
+    "packages/core/src/source-verification-native.ts": "0cc395aed205abe7dbc06af091c1236bd92eac97aba6a12b28b9ebe3f8f39cd8",
     "packages/core/src/source-verification-records.ts": "9aa5866e923d77339e427880c5de418fe3228ea68684d285c3805513999b6a4e",
     "packages/core/src/source-verification.ts": "0c1a7c4dd7ae7bf468003f5803ce33b6dd32a162be274cfde1a09c9f557aaa0e",
     "packages/core/src/storage-configure.ts": "eac433c3d11c526aeb2dc7b7b8ed1d85da1ea6298e1bc3a5972b4b236c705f27",
@@ -1972,6 +1981,7 @@
     "scripts/bench/bench-replay.mjs": "0be2c70ebc38e84307a0f11863237bea90fbc8889f6c36ba20d1bfc004a10eed",
     "scripts/bench/measure-context-bytes.mjs": "159348a66ac72c20245a3b372034e888fbb7e656366a7696e11fd46eb210054f",
     "scripts/bench/synthesize-chain.mjs": "3e4629767018882e4a7d4d2359873f97cfb208f45b9cfe1974ac5dc1f0865796",
+    "scripts/build-source-lease.mjs": "00b2e84127bae9f7c87f605bd9958384f8f1f3f82e0e31482a85bdbc5c54c9b8",
     "scripts/bundle.mjs": "e1825bb37a55e6938b7f5e18676f5c06eab56f7089fc0e47dcb081c94a78c770",
     "scripts/ceremony-cost.mjs": "1f7d92a300a3b2e50d7809c765a11bc7d507ccf2a36c0649b576b3d2b1a1f5d9",
     "scripts/ci/aggregate-evidence.py": "ce7914199e30d66fe7cc31abb3fc088336e55a2a0f6818c12bd3b6c25cf947ea",
@@ -2029,7 +2039,7 @@
     "scripts/lib/memory-worker-check.mjs": "3e94968ba11b5582da309c433c9e824ca77e55d32bfb041656db81e531e23506",
     "scripts/lib/names.mjs": "12b7838f5edaf792fb2bfee3688328d50b3ba8b896f7bf1d960addc9e50c7b3f",
     "scripts/lib/p8-workflow-rc.mjs": "f34e3006756daf413e32f6a98b6008a06d6cbbf4271565363c6cd925bf4ce4bc",
-    "scripts/lib/privacy.mjs": "94dc3f3949d920bd53a2339a0e48f80ce4fb6a35f52167e200fd1cc08046a5a0",
+    "scripts/lib/privacy.mjs": "569d3161d3afd401ee06e615b07195ee07f808c237e6303ceced1a2c169dc119",
     "scripts/lib/private-token-roster.mjs": "b1215d2e2b701213980d35fac6100aa38ceed4f3e5285db36bdf2551faa97571",
     "scripts/lib/protocol-proof.mjs": "3a24c629926d592ba4fc0a9801b24ffb24abf22188a60ada9d90b10fe39bab99",
     "scripts/lib/push-gate-children.mjs": "24cd269f3c99eddca52ef81f78db8e8c830f54e567fcb9679e041fa6a0ca5ecc",
@@ -2041,6 +2051,7 @@
     "scripts/lib/release-readiness.mjs": "9ce2350adbd2440fc384629b3e28bb6c23ef3521009d5c34e1e6cf4f1ce7ca15",
     "scripts/lib/release-tag-gate.mjs": "b03f7befb2b0e92e2f443afa1e7963d257a2c786032141278c462dd165227b97",
     "scripts/lib/release-trust.mjs": "af7b327d258b1e1c6e9b97913654358e24084f866ac07f8d711f7779bbd75d7b",
+    "scripts/lib/review-command.mjs": "1d1bc86999490b98f1ce10e76c7cb96f6f4fa91de38af6ac0ac6c288f552104e",
     "scripts/lib/runtime-capacity.d.mts": "dc36c13dffba768f4373a97ef294cf36ce0b912f2135ab1ff0a4322d85ecf987",
     "scripts/lib/runtime-capacity.mjs": "771cb7260175b862560f7169faff307acdb87d4a9bf3f510ef760e07cc382b5e",
     "scripts/lib/safe-io.mjs": "f504106b5d552f1e6fc66a37e10f4c4eb20d4e020970642b0830b24ca26b4d8a",
@@ -2054,6 +2065,10 @@
     "scripts/lib/test-wiring.mjs": "ffef254adb51c5c4822735d4345e3008d740a55c43cbd403d066762185be213d",
     "scripts/lib/vendored-runtime.mjs": "541c7ba7dd9a9b5430e97f424d86c3e533d4706ca2f71fc8eb32f5caa7c5e0d6",
     "scripts/lib/verification-evidence.mjs": "91a3b99f18e1546a76697613b6a622977ee5e81b853af1a7f330030b675e76b2",
+    "scripts/lib/windows-historical-coverage.mjs": "c08fe4531ca65324ff8d945038f2fb4e215006cc7d63fb49d755e53c1da10b6c",
+    "scripts/lib/windows-system.d.mts": "3a191d05062ccb514abba9019af551a8b4c2d076f62f8c55c9b7dacb023a73b5",
+    "scripts/lib/windows-system.mjs": "5d4aca422a780e7fab5e580f4be832c5acab92cf14e0df99146ff86652240cc0",
+    "scripts/lib/windows-test-controller.mjs": "6421e505dec54888343b474ebe0227cb2e8b76b868bac30b13ec4c3435262b11",
     "scripts/library-catalog-worker.mjs": "35d1664cbad6174ecea79213ac9597362a7630d2ed24c5ac83ae42cf804bcdd0",
     "scripts/markdown-link-resolution.mjs": "8fe1620c7dff4be5feec8732e8dbc766663d768fc1701ce5eec71950b0843eb2",
     "scripts/no-network.mjs": "a280b962c1089c1fd2d2bbf8a965b54e9b31dc471ca0131552ddaf2614b5a22b",
@@ -2098,10 +2113,11 @@
     "scripts/retrieval-delivery-eval.mjs": "3b0d5fabdea8131ebad7d8036962c30c8f26617873aff01d838e0e38247f71ea",
     "scripts/retrieval-eval-record.mjs": "e95fce9f05325bac94ce45088ccafa3776b11bca7652b285220ed1dae14d87f8",
     "scripts/retrieval-eval.mjs": "c3ae282f16bc20ac8e25df6a78fb93b89c2a5e9aa8fce31a32e5ae3fbf2f4b0a",
-    "scripts/review-evidence.mjs": "34ccb6d91aadace8a525b16a6b9c7c8b3d5b91894ecef4f664501ed9e895b794",
+    "scripts/review-evidence.mjs": "a05f0e0f2a95e790ecc015e5fb8af6586efdcbb74523d23637ba31c210fd5356",
     "scripts/s253-class-alignment-proof.mjs": "e6cc243bc2927d52b4e5eebe49c42152e624f8b04f3c7070d9851af5c9ecc10a",
     "scripts/s278-component-coverage.mjs": "0213b4181a0519eae3d84c545f3dcc356cc70158cb232260a8acf1a3c28f89cf",
     "scripts/s279-catalog-mutation-proof.mjs": "9f4effa28d049af499d11ee009a40e2394dc8e0fae601cd36944d5b5563db516",
+    "scripts/source-attestor-host.mjs": "9f63d234df1bddfe13d644d2bb8817849b3f6c754e4d7c951a0b8ef55a882091",
     "scripts/spawn-guard.mjs": "9c5702634975a7093d1d3a2cab8d01677fddf75e276b264d8ceac0a35a87757a",
     "scripts/story-rule-conservation.mjs": "0bab61a160cf66b16e626f29467c887e900bc8ce30fad5efc28bb67a3939b156",
     "scripts/task.mjs": "bbcdd450de59d18985c949c3ca13c81c5592fe55bd2b862d5092a1cd92605ff5",
@@ -2109,7 +2125,7 @@
     "scripts/templates/helper/create-skill-archive.mjs": "d915bf97e2eac373816fe030f93dbbfa20e67076388616bc70b90e0ea6b86aa7",
     "scripts/test-controller-bootstrap.mjs": "4c1fbcc397396bacc6c5a6d7acf70fabd49270b59737a36c38a7c52d9ffa3907",
     "scripts/test-controller-child-bootstrap.mjs": "abb25c05f2da234389a616843369be48af81aadb68b5f95ad03a8004f2a4c8c8",
-    "scripts/test-controller-child-policy.mjs": "d1773d0cd30cfbf91e85df526d923719f4b40ec912f93e8210e287d8c93dc3fa",
+    "scripts/test-controller-child-policy.mjs": "853d6cbc995074fe3169d8db77d6f12f79e8ab99282275cec5026e9c4576a75e",
     "scripts/test-controller-reaper.mjs": "65991dbe6cbda636f28cd3c02b35c014ea8439ab862c094d3465aa90fbd8ed49",
     "scripts/test-file-progress-reporter.mjs": "d267121b200dbaf3c92132ce1d1bf462eb7fe3366ed3249b5f36bc40b33f727b",
     "scripts/test-wiring-proof.mjs": "90ec2e31b723a068c86c0e0c838a50ad45ba6e0161da6cef854d9e2dc81e2cd2",
@@ -2128,7 +2144,10 @@
     "skill/mana-orchestrate/scripts/install.mjs": "982d7fe40d74633af782b637061e14db005e486727e6e3fb305616e3b6dc14f7",
     "skill/mana-orchestrate/scripts/kiro-run.mjs": "4d220af577b3dfa280aca8960cb4661996cf39bfd7e5efe914e06d25b13daa74",
     "skill/mana-orchestrate/scripts/kiro-specs.mjs": "59ee6d70f7e9359115bc6af20fdac4876da68cb4bb2f492342295c9a0e39ee45",
+    "skill/mana-orchestrate/scripts/process-launch.d.mts": "ccc1612c5c42141c4dec47cc3632ba05f8a72261e8d125885133b92dbdc1c79e",
+    "skill/mana-orchestrate/scripts/process-launch.mjs": "a00ac0c69ffcfd0af6dee70ec204345a65a12495ba271ac46b35a1fddd151dd4",
     "skill/mana-orchestrate/scripts/trash-empty.mjs": "8ed5912fa1fa13d2c52afe8829168f599887601e69bc66cdae7daefbbbc119c3",
+    "skill/mana-orchestrate/scripts/windows-system.mjs": "7f11f88b1785b97fd16b3c0acaf118e08f898d1ae2e00b2eb11ca5051f41e9f3",
     "tests/act11-adapter-acceptance.test.mjs": "aca755627df55964fdd2cc5b683aca9ff514d90d438fe9f13906ee6d4b0c7bef",
     "tests/act13-authority-output.test.mjs": "290e9003208774fcb4d45fc9d8b6925d14a789a3f7bd1be37d94fdd200abfcf4",
     "tests/act3-persona-render.test.mjs": "36f58541f5dfe8150bdc4375d9ee356212ef4bb7dd6d1ee95b5e37cd207af562",
@@ -2139,7 +2158,7 @@
     "tests/akasha-merge.test.mjs": "58502820f6e1537a965848aae2f4f676c9e6f46b3cfd6db6291026bf8aa2d6ed",
     "tests/akasha-segment-ordinal.test.mjs": "d6f36516c2f7dba8d5f0b370d30c6d69b9a92ed7faeb8a1792dc7fe2272ac472",
     "tests/akasha-stream.test.mjs": "71227f241fecba001b71e94894c55e5df99cd83a5c2947ffd24a5ac37ec67eb6",
-    "tests/antigravity-hooks.test.mjs": "ca21810f3c593eb51af2b3c48a35f23a69ecc4d61f1e84ec59334d2de48caf9f",
+    "tests/antigravity-hooks.test.mjs": "75c25a1b74dcb752d9156715e06b702b73b12c5026c32128ec2411578258ca28",
     "tests/antigravity-native-execution.test.mjs": "b1584062aacc118221ebddac1522202f83e901d7916355b278ab54d26617ecdd",
     "tests/antigravity-review-boundaries.test.mjs": "cd364994cc31d9f3ed4a111bad0c503aca5c666d03e18de8d1106b7164903002",
     "tests/antigravity-swarm-batch.test.mjs": "8ea782c077e714746999f54b3e8709980d73d7ad8f06ba98d7adfefb4555de31",
@@ -2189,9 +2208,11 @@
     "tests/configuration-portability.test.mjs": "10fe17420a418edc83cce35dfd9e01f57e474d395e1d5cc22cf71f1bc6f02f58",
     "tests/configuration-projections.test.mjs": "0ad12dbba04d0439f403e91d510b5903b5db2df42332f9256a68efd9f1f94ce9",
     "tests/conflict-family.test.mjs": "d72504e7fa8458d18e4070e5a5ff9fb05944820cf8530fe97531c6d1e7918ab5",
-    "tests/consolidate.test.mjs": "a5866fb50448275b53ffab94501e722dbe5e21298829a8a1e491aa877beb323b",
+    "tests/consolidate.test.mjs": "565257e8d85599b5ace31efa90176001f842f8972bbe3874669231f31a1948f8",
     "tests/coordination-knowledge-language.test.mjs": "896f2d4537df71699a55996d4859f839dffb79a24bf8aa5e0cfa4be6fcf1afd0",
     "tests/coordination-managed-sections.test.mjs": "60d16b4f1855f9e88cc31cdad2c2882b2262ea2922031fce78dc41bba1be8827",
+    "tests/crest-projection.test.mjs": "5626ae4f009edafb60f24c1fd42a7661a8fb9f5bb67d3af66d19cf2e6ffeca97",
+    "tests/crest-source-set.test.mjs": "3a622ba67ee77e177937262519db6be835447fb069728a65c5e3504659e075f0",
     "tests/cross-repo-privacy.test.mjs": "f209ad3f21390d1ac0d95892439fabfe5e9851f2e8db7ff9e4c4235fea68d038",
     "tests/decided-in-cli.test.mjs": "0067e35e7cf2bd1f41895d245ab1fae3d970c380acba51b792725cd247a0b7a6",
     "tests/decision-lifecycle.test.mjs": "e9eb752744d57475eeb46e29720d17bb4c6bdf1f1ba9cb785b42f9f121d76d54",
@@ -2238,6 +2259,8 @@
     "tests/fixtures/ci-impact/pr-32.json": "650dff043d72c2a432e95504c599256f91d480ce6d73e8a387313a3afcc5eb26",
     "tests/fixtures/ci-impact/pr-33.json": "216bef56f15186f03b00f7fc4228c9af256e3a2aa799966b20579d931e26beef",
     "tests/fixtures/codex-query-loop.json": "b84ef9e806991bddcd3312ab8e17117ab1f59538233a6e99c4866bde2c2bb756",
+    "tests/fixtures/crest-projection-client.mjs": "cca44c7bf080a16c5fe4224cbd24108bde962f400acfe7b5a135c982a0aac5c1",
+    "tests/fixtures/crest-set-client.mjs": "81b06f56aa0f764c5c21a4e8db6f3a666bd86c2e35d1767c10949653e324e8d9",
     "tests/fixtures/init093-equivalent-version.json": "4394dd567ca52553e01a2d3f8eaf2c3abc5a6dc7326702bbf05b276042e3c70c",
     "tests/fixtures/init093-normal-entry.json": "24b2b52f71121f8e5fc6190717e78c20148f1677a72d4f2da44a0677bb9cf39f",
     "tests/fixtures/legacy-workspace/control/events/000001.ndjson": "3c17e866810393a77bd08bcd4ea547cdeaf3899621385c1038db7ea040f35ad4",
@@ -2275,6 +2298,7 @@
     "tests/fixtures/s6-lessons/corpus.mjs": "3825122d9fb8c399f2de9c1262f77e5ff8fcc6ff63c6aea0c4dac1b646bad676",
     "tests/fixtures/s7-golden/persona-render.golden.mjs": "11b7f8d03a102240e58e1ce2a7edec2eb80d14d9b898a42b211482e203eb09bc",
     "tests/fixtures/skill/description-a.en.txt": "82af2c1a8cf8c80fd3920b22e1068fe98480353b6bbf610f19ba2c9612ac60a2",
+    "tests/fixtures/source-lease-actor.c": "3733fd5c709b0b69cf3fca39ff0fab0dd0e20576305f897406f36ae3064d2f7d",
     "tests/fixtures/work-template-backup-pilot/cases.json": "7041dcdeaaabefb009d60d3f900065d380162bdc41d4007b483f4f0979a3b05b",
     "tests/format-version.test.mjs": "951a2f4bf462bac6b060d04dcfd09a8b1843ba83657420a05b3615bd6ea32551",
     "tests/full-audit-config-protocol-regressions.test.mjs": "6906f156bc4dadeff54c9438cd946a8576c4931eaedfd2e96746cb7112117443",
@@ -2294,6 +2318,8 @@
     "tests/helpers/config-backup-fixture.mjs": "6921f1e40f24e56ea1adc7c7a06d787e47adbd37baca4af90d2b90820415c704",
     "tests/helpers/device-home.mjs": "832bbcfbccb22536045e0f1cb95e3f2f2cbc46d00b43b711f9bd923dfbdb02a0",
     "tests/helpers/dot-native-fixture.mjs": "bf484f8514897dc2fd845dd450bc4a0304f6ca3c5c0088510dad41ec7534f8b1",
+    "tests/helpers/executable-fixture.mjs": "2efa74988f95835b70570a57be913644a170b9d3642bb8d5f758dda1a591bc58",
+    "tests/helpers/filesystem-fixture.mjs": "882c79a94a6f614f4691080fe6b777a0660a2f3f719ad75adfefcf19425d9a3c",
     "tests/helpers/fs-read-recorder.mjs": "88b79de503bcfecdb9e822bef9d211dfa4092130a7dc2c7588c10b678a879675",
     "tests/helpers/fs-write-tripwire.mjs": "ca9d5289a56856e064e6a896d3f0fd90ba046f18a070cdc5c88875e24584c6e0",
     "tests/helpers/heavy-slots.mjs": "ff4d550869f7d7590f6608618722aa296d806a11dd87d2e27e8a64883a00e9c4",
@@ -2307,6 +2333,9 @@
     "tests/helpers/model-plan-history.mjs": "a6e89a49bc399939c13a6f56061a4bdc1b9eddaa4ee4c7fdf4f823310473d486",
     "tests/helpers/register-portal-libraries.mjs": "9b04d75c13c86894003fc5261e925f66419c5f49cd653a806a00aa56acf4ddcf",
     "tests/helpers/registry-control.mjs": "1c65dcbed418912cdc5eed25fb6c5f3c0120db2f3403adbe3426d245df606848",
+    "tests/helpers/release-fixture.mjs": "e61bac0c3c0af758e0787348f891231988cd1811972f56a30d49830b99017832",
+    "tests/helpers/source-attestor-observer.mjs": "aa904c068ea9ae2d89177ec824bd7059dc8543c702ffd3b9e31f5eaf9e1ecf30",
+    "tests/helpers/task-runtime-fixture.mjs": "a359d516b348de8ccdafff6e5fcee54152ccbae14b2291d79d305918a20eb0b1",
     "tests/helpers/work-lease-fixture.mjs": "1523d26edff3cdc5269e69c75543150bf74a423716e3bcf31be71f82e35e13c3",
     "tests/helpers/work-lease-gates-fixture.mjs": "603d6c335b63de49b91878d4b6649741219cc7fd9059c30946a6a152165b4250",
     "tests/helpers/workspace-fixture.mjs": "23ea6116e61f21d29591835f4438f5d1e43eec4d29d99ad82975bb50f975b56c",
@@ -2323,7 +2352,7 @@
     "tests/host-hooks-rollback.test.mjs": "847245ad3fac715a2a516154d59ed6e051304a2da842948bf9d9b8237321109a",
     "tests/host-hooks.test.mjs": "086ac264bcd12d0d2234ddf7bf9ee11ed78ff7242b1d5183c2c20a58c7e06dbe",
     "tests/host-native-dispatch.test.mjs": "91e054f9293ffa40c95daa400248b770bd3ea1890b72aeee87cd69d348129521",
-    "tests/host-probe.test.mjs": "af89efdd8eb0421b88329675cab9d28ec56e69dc3b3425fd19a48d45eeaf9193",
+    "tests/host-probe.test.mjs": "32a7ff6e15b2d979ccaee2a6926ed75767c0ef7e0bfea56220049e5fa99cdcd6",
     "tests/host-render.test.mjs": "d0479d3c227a54f09c8f150c9c69ae94cb03aa729f864c74ed6f2257496d7757",
     "tests/host-skill-install.test.mjs": "c086a2c9bba6ccaf09a3f646ec26f22905435a64199a8a04f487d55856069992",
     "tests/host-writable-roots.test.mjs": "8126a1e2f4af230a25910c46ef7eb34bfcdd187fdf1661630ec27532f24085fc",
@@ -2347,7 +2376,9 @@
     "tests/init080-work-create-validation.test.mjs": "f4bae3f5e840c329262d616317919608e2a1bd639ce5f42220b9100379699a5e",
     "tests/init093-knowledge.test.mjs": "0ccfb75f7af9e04879469cf3f2243d7886b0bcc94735fb167e3d8b780e472bf1",
     "tests/init095-cache.test.mjs": "67d9cd50346dac04fa4ede1e370d96759c75eea4c24cfb15af88fa6f65d9f992",
+    "tests/init095-fts-storage.test.mjs": "14d4ee9cce30fc29e14cc560dfdca9e524c00fd5424f70a7d22fa2c3f71e3af2",
     "tests/installer-cleanup-audit-regressions.test.mjs": "271ea2fd770b316930c90311553b0e91d48975365f19b2bcdddb79757bd06fef",
+    "tests/integration-release.test.mjs": "559efa478bb627fdba94839549f16d4f21258dbd8897f0da14e4abdfd31c557e",
     "tests/involved-projects-cli.test.mjs": "9a40e49858ece3c43bb92b6809083e2e95e72318235562a65885376b465f40ee",
     "tests/io-boundaries.test.mjs": "6587c80546f5efac57a2ed021960dbc26151d85d605a35af929b992a85dd0b32",
     "tests/io-policy.test.mjs": "3177d0e8054b62989bcfb00c4d11fb9e0297f075602d6bcf1495105e198af075",
@@ -2378,6 +2409,7 @@
     "tests/managed-write-lock-scope.test.mjs": "5647ccbd090bb27d8bd6423f23dca19d12fa11e78de2c8f9b64362712f14e69d",
     "tests/memory-budget.test.mjs": "555d12f2051359aa2cf579d9970f45a9278c0d795d534724a1f409164e3c189d",
     "tests/memory-policy-backup.test.mjs": "2cc5d0d393e39b1ac822a5409d7a4add8b01228a731eae3e6a1248f82d3fc63d",
+    "tests/memory-windows.test.mjs": "9fca35599126553997ffd30e50a5209e0d8def912595e478efec4690f53bec02",
     "tests/merge-alias-write-consistency.test.mjs": "12079880a81a95c758b81bb9b49249ce66c74f91fe87df0bd8be4db153f54d15",
     "tests/migrate-apply.test.mjs": "5f7a93ee64620ac710139c1816de7a4a1bb805a88d6cd8ea5f019590a298c57b",
     "tests/migrate-cleanup.test.mjs": "a1ba11279cb488e639e164c0d13a3ea22232997eb2f80388d35bbad43a7943a8",
@@ -2418,7 +2450,7 @@
     "tests/portal-device-isolation.test.mjs": "14f54513db74b6aff08f1e2d983f2efd3b491041eef23ee22638e84ffc823016",
     "tests/portal-knowledge-pagination.test.mjs": "50491db0144369c7b6672d234802553b741bd9a43756dedf5230563356f635f1",
     "tests/preflight.test.mjs": "7c434cfb7624a656affadd05562012da47bf14553beaf020db4cc92e0700dcb1",
-    "tests/privacy-boundary.test.mjs": "f6a8ddceb99a05e4586b58e8ac69fbe31550305acea33981b0fcf9e85d6ffc71",
+    "tests/privacy-boundary.test.mjs": "3d722efc6ecf68a4ada58bda6e81bfb5c075e47f388c28bc455167dd3c211e47",
     "tests/privacy-git-metadata.test.mjs": "ad735b2e79321a3dc5920cdb9fda47e8aae2d78b6177b3113bf054331b389fae",
     "tests/privacy-normalization.test.mjs": "40c3673e11eb16b3edbd05bffda98f2477a3fb20d967d9cd164cebd36e1f2905",
     "tests/project-chain-model.test.mjs": "4cfd744cf017f2122e34dfa13f4cbd2fae5a1dce960e979140e6875c4d3670cb",
@@ -2447,7 +2479,7 @@
     "tests/render-helper-docs.test.mjs": "78fcf99323e8010387a80b47605ac4a72ffb14e83d1bcb5326eba0366ad27ff9",
     "tests/retired-settings-replay.test.mjs": "254f9100bc325cae15b16a4fee28258d2749fd0288e3ad27e70621b1a6b56133",
     "tests/retrieval-delivery-eval.test.mjs": "9db1c5c477ed051829f3a9dd501083c6b1ed9aea43b0a659fbbd8b0bc4200757",
-    "tests/review-evidence.test.mjs": "ad9083f40dc047130042096e768a36a834c3ec903b85d96eb1832de453e50cc8",
+    "tests/review-evidence.test.mjs": "264f505024e773bb276e3591b89b71a6ecf428e7960905abe174ccd2ad237dea",
     "tests/root-boundaries.test.mjs": "c09ecd54f7d789d8b3501ac72f8809b0c15a14c88c2e41d9af8c627605e01c20",
     "tests/rules-catalog.test.mjs": "aa1da594899c4f65eb836498229b99109d0c0ea502cd63e2686c260a31fd351d",
     "tests/rules-cli.test.mjs": "2b5fb9863f29a0506eaccdd40b4abd1e96cf94bdaddcd283fe96bc2c7c2e2353",
@@ -2488,6 +2520,7 @@
     "tests/skill-references.test.mjs": "d396bd3ff754fd0d081135dab8d70d27326f4e6dcc942ce2e615a1c3cdbd302a",
     "tests/skill-render-cli.test.mjs": "3bf7295bea7883e98237f3ffea648af177946ef3987b6371102e15b5eaa70c6d",
     "tests/skill-render.test.mjs": "cc7cfabc6c304041062855f8b04d91125f4e7224d29789af9b85aca16ace09e7",
+    "tests/source-attestor.test.mjs": "2cf7a2615e94aaee1b25e76ff959064e2a83a0b2db16441e7cef67a250cf0438",
     "tests/source-verification.test.mjs": "c26fbd96cf59e684dcee6fde5d0dbb8103b6a48fc9a618b0d39c1b61fb070dbc",
     "tests/spawn-guard.test.mjs": "1cecdb4429a4dc69864b1820ef350472c1b8d2a9abb8b977d1f5490377c59ab3",
     "tests/staged-privacy-origin-diagnostics.test.mjs": "de482c754285815f00b034ed1ec4a48f95d1a81005fbe883191d42ed7d2feda2",
@@ -2520,6 +2553,8 @@
     "tests/vendored-runtime.test.mjs": "fa769b3e4f246b23b821752293e865b30c5cd5a5dc90150885d7be4f67a2ffc7",
     "tests/wiki-cli-reference.test.mjs": "569d6869d2940ba7d401b4620425b78eb6f80292b9aaafdc4d29e73d8ace52b6",
     "tests/wiki-pages.test.mjs": "680e180bdbe7920e21a1b9a64c76af7847c1df45de8e862feec70ae9cbd99bcc",
+    "tests/windows-platform.test.mjs": "135b9e4a5fac4d9906a3cff1aa8ef01fb9fd916f983996c702d0e72a6febe127",
+    "tests/windows-process.test.mjs": "cc858f1b72c5f2c20f0cc6b9dd571e7a233f5079971e4dab6f751b14c2f873a1",
     "tests/work-acceptance.test.mjs": "5c2685cbffc9b0633d926b225243d694c5b4082e30989ce7a8ed550e9ad96b3b",
     "tests/work-content-cli.test.mjs": "8a041bf9c8f926e9abd964be65fb87f36b9a0f9c664dcf81b2d83ea8b733bf27",
     "tests/work-content-context.test.mjs": "a4240346f1e8b0433c9fd60db5b33fa550afcb3a57c1299d8fd893c6e17ff68d",
@@ -2545,45 +2580,9 @@
     "tests/workspace-lock-holder.test.mjs": "0f416a685ab17596f97923d41ea34525aacc4ce434c46546fd29eb3de06347a0",
     "tests/workspace-lock-scope.test.mjs": "44656fdfdb921cac1608f64b3f9100efaa37b925268ad6f8dbb9736669b64de5",
     "tests/write-authorization.test.mjs": "db1407b2201e25aa0b5314353f73737462dca7a6b78c973ab9ab3688803c5717",
-    "THIRD_PARTY_NOTICES.txt": "4ed9fbf62ca58c4588755446b7563e411645d156b6a2542181641e4716d64af1",
-    "tsconfig.build.json": "bf5c6cc45229b059f840fd161891ba48ebec798b8ec7831b07628547947f23f3",
-    "tsconfig.json": "62d03c05312274643c24c37cc6ed8ea9cb2e6119aad318f989fb9dc494011d73",
-    "scripts/performance/README.md": "ff759164b35f5695479d24e132db8a9f538063b18d7838ca525e6f64a8d4f526",
-    "docs/design/continuous-source-attestor.md": "a6ac146b720e7db04541be596b35381cc4894917d0b682145f9c48f4805ec28c",
-    "native/linux-source-lease.c": "db3e6179849397a8e73bf16a424cdd9dd9871a8d66555edc47ce38389cb0ac8c",
-    "packages/core/src/source-attestor-client.ts": "64a607a6e1bf6ccb39650aa51f4bab99e2229eea38514af4c94e4ea6e238bcbf",
-    "packages/core/src/source-attestor-protocol.ts": "e923c3f0f84d3bb74c6e31c6c4556f66d1b353f89e97187788eac97c1b63bd92",
-    "packages/core/src/source-attestor-service.ts": "5dcbd62f14ce09d3527a92ccead3a73b50c895c8aea84201ca73d2ac240d6de9",
-    "scripts/build-source-lease.mjs": "00b2e84127bae9f7c87f605bd9958384f8f1f3f82e0e31482a85bdbc5c54c9b8",
-    "scripts/source-attestor-host.mjs": "9f63d234df1bddfe13d644d2bb8817849b3f6c754e4d7c951a0b8ef55a882091",
-    "tests/fixtures/source-lease-actor.c": "3733fd5c709b0b69cf3fca39ff0fab0dd0e20576305f897406f36ae3064d2f7d",
-    "tests/helpers/source-attestor-observer.mjs": "aa904c068ea9ae2d89177ec824bd7059dc8543c702ffd3b9e31f5eaf9e1ecf30",
-    "tests/source-attestor.test.mjs": "2cf7a2615e94aaee1b25e76ff959064e2a83a0b2db16441e7cef67a250cf0438",
-    "tests/helpers/task-runtime-fixture.mjs": "a359d516b348de8ccdafff6e5fcee54152ccbae14b2291d79d305918a20eb0b1",
-    "packages/core/src/crest-source-proof.ts": "55c68a4fb38040da1d64148a2e22111cf79c15b78914d5441ad5d3f2d40bb1cd",
-    "packages/core/src/source-attestor-crest.ts": "01a3d4decfcb2800f9c54d1c6cab705e488c6177a869d5dcc2d0860a71fd8437",
-    "tests/crest-projection.test.mjs": "5626ae4f009edafb60f24c1fd42a7661a8fb9f5bb67d3af66d19cf2e6ffeca97",
-    "tests/crest-source-set.test.mjs": "3a622ba67ee77e177937262519db6be835447fb069728a65c5e3504659e075f0",
-    "tests/fixtures/crest-projection-client.mjs": "cca44c7bf080a16c5fe4224cbd24108bde962f400acfe7b5a135c982a0aac5c1",
-    "tests/fixtures/crest-set-client.mjs": "81b06f56aa0f764c5c21a4e8db6f3a666bd86c2e35d1767c10949653e324e8d9",
-    "tests/init095-fts-storage.test.mjs": "14d4ee9cce30fc29e14cc560dfdca9e524c00fd5424f70a7d22fa2c3f71e3af2",
-    "packages/core/src/codex-tool-identity.ts": "c255c70f4efd8d28f0971942beedf12cedc2bade5eff1a2ddbcd140ba9d002d8",
     "tests/write-readback-cli.test.mjs": "06a80d2c996f2a675c81e6b6fbab7cb2fe22767cc16abfa1012b677394fcdd44",
-    "tests/helpers/release-fixture.mjs": "e61bac0c3c0af758e0787348f891231988cd1811972f56a30d49830b99017832",
-    "tests/integration-release.test.mjs": "559efa478bb627fdba94839549f16d4f21258dbd8897f0da14e4abdfd31c557e",
-    ".github/workflows/resource-guards.yml": "69807e837d1425ce933f36ad7fe82930cee54bf040a784a2550fc330e6d2ef9c",
-    "scripts/lib/windows-historical-coverage.mjs": "c08fe4531ca65324ff8d945038f2fb4e215006cc7d63fb49d755e53c1da10b6c",
-    "scripts/lib/windows-system.d.mts": "3a191d05062ccb514abba9019af551a8b4c2d076f62f8c55c9b7dacb023a73b5",
-    "scripts/lib/windows-system.mjs": "5d4aca422a780e7fab5e580f4be832c5acab92cf14e0df99146ff86652240cc0",
-    "scripts/lib/windows-test-controller.mjs": "6421e505dec54888343b474ebe0227cb2e8b76b868bac30b13ec4c3435262b11",
-    "skill/mana-orchestrate/scripts/process-launch.d.mts": "ccc1612c5c42141c4dec47cc3632ba05f8a72261e8d125885133b92dbdc1c79e",
-    "skill/mana-orchestrate/scripts/process-launch.mjs": "a00ac0c69ffcfd0af6dee70ec204345a65a12495ba271ac46b35a1fddd151dd4",
-    "skill/mana-orchestrate/scripts/windows-system.mjs": "7f11f88b1785b97fd16b3c0acaf118e08f898d1ae2e00b2eb11ca5051f41e9f3",
-    "tests/helpers/executable-fixture.mjs": "2efa74988f95835b70570a57be913644a170b9d3642bb8d5f758dda1a591bc58",
-    "tests/helpers/filesystem-fixture.mjs": "882c79a94a6f614f4691080fe6b777a0660a2f3f719ad75adfefcf19425d9a3c",
-    "tests/memory-windows.test.mjs": "9fca35599126553997ffd30e50a5209e0d8def912595e478efec4690f53bec02",
-    "tests/windows-platform.test.mjs": "135b9e4a5fac4d9906a3cff1aa8ef01fb9fd916f983996c702d0e72a6febe127",
-    "tests/windows-process.test.mjs": "cc858f1b72c5f2c20f0cc6b9dd571e7a233f5079971e4dab6f751b14c2f873a1"
+    "tsconfig.build.json": "bf5c6cc45229b059f840fd161891ba48ebec798b8ec7831b07628547947f23f3",
+    "tsconfig.json": "62d03c05312274643c24c37cc6ed8ea9cb2e6119aad318f989fb9dc494011d73"
   },
   "version": 68
 }

@@ -5,6 +5,15 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+### Windows hosts and resource management
+
+- Windows host runners discover executables and batch shims, pass arguments and standard input, and use Job Objects to manage child processes and cancellation. The installer can create private NTFS artifacts and verify directory access, handle identity, junctions and portable record names.
+- Managed tasks on Windows use physical and commit headroom, process working sets and CPU availability for admission. The existing memory policy and concurrency settings govern the core and Portal test runners.
+
+## 5.0.0
+
+Einzbern and Mana Orchestrate ship in lockstep at 5.0.0.
+
 ### Work lists and Atelier
 
 - Ordinary `work-list` calls now return compact records and the effective filter scope. Clients that read `records[].fields` from an unfiltered or filtered list should add `--full true` to keep the complete goal, acceptance and body. Use `work-show` for a single full record. Search keeps its bounded excerpts by default.
@@ -19,11 +28,6 @@ Versioning after the first accepted release.
 
 - Reuse verified history segments and validated local projections during CLI and hook reads. Compressed external-content FTS storage reduces local index size. Existing indexes can be rebuilt and the full source reader remains available.
 - An opt-in Linux source attestor can reuse verified local source reads while its native lease remains valid. A missing helper, unsupported filesystem or unavailable proof selects full verification.
-
-### Windows hosts and resource management
-
-- Windows host runners discover executables and batch shims, pass arguments and standard input, and use Job Objects to manage child processes and cancellation. The installer can create private NTFS artifacts and verify directory access, handle identity, junctions and portable record names.
-- Managed tasks on Windows use physical and commit headroom, process working sets and CPU availability for admission. The existing memory policy and concurrency settings govern the core and Portal test runners.
 
 ### Host navigation and portable gates
 
