@@ -1,8 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tests in this file run sequentially; Node isolates each file in a process.
+import { access } from "node:fs/promises";
 import { COMPLETE_ID, DS_CONTRACT, GHOST_TARGET, MUTATION, appendHistoricalGateCreate, asFixtureDevice, assert, cli, closePage, coordinationContainerFixture, join, keydown, loadExecutedDom, localeTable, mkdir, nextAt, openWorkEditor, policySwitchControls, policySwitchViews, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scratch, test, waitFor, writeFile } from "./ui-presence-support.mjs";
 
 if (!MUTATION) {
+
+  test("Portal fixture releases its server and scratch directory when requests fail to settle", async () => {
+    const page = await preparePage();
+    const failure = new Error("fixture requests did not settle");
+    page.waitForSettled = async () => { throw failure; };
+    try {
+      await assert.rejects(page.cleanup(), error => error === failure);
+      assert.ok(page.child.exitCode !== null || page.child.signalCode !== null);
+      await assert.rejects(access(page.fixture.base), { code: "ENOENT" });
+    } finally {
+      if (page.child.exitCode === null && page.child.signalCode === null) await closePage(page, page.fixture);
+    }
+  });
 
   test("INC-183 every live enum setting is its own dictionary entry", async () => {
     const page = await preparePage();

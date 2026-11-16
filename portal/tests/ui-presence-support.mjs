@@ -576,27 +576,22 @@ async function preparePage(env = {}) {
   try {
     await seed(fixture);
     page = await loadExecutedDom(fixture, env);
+    page.workspace = fixture.workspace;
+    page.deviceEnv = fixture.deviceEnv;
+    page.fixture = fixture;
+    page.cleanup = async () => {
+      try { await page.waitForSettled(); }
+      finally { await removePage(page, fixture); }
+    };
+    page.document.querySelector('[data-page-target="settings"]')?.click();
+    page.document.querySelector('[data-setting-group="execution"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return page;
   } catch (error) {
-    await rm(fixture.base, { recursive: true, force: true });
+    if (page) await removePage(page, fixture);
+    else await rm(fixture.base, { recursive: true, force: true });
     throw error;
   }
-  page.workspace = fixture.workspace;
-  page.deviceEnv = fixture.deviceEnv;
-  page.fixture = fixture;
-  page.cleanup = async () => {
-    await page.waitForSettled();
-    const exited = new Promise((resolveExit) => {
-      if (page.child.exitCode !== null || page.child.signalCode !== null) resolveExit();
-      else page.child.once("exit", resolveExit);
-    });
-    if (page.child.exitCode === null && page.child.signalCode === null) page.child.kill();
-    await exited;
-    await rm(fixture.base, { recursive: true, force: true });
-  };
-  page.document.querySelector('[data-page-target="settings"]')?.click();
-  page.document.querySelector('[data-setting-group="execution"]')?.click();
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  return page;
 }
 
 function assertDomContract(document) {
@@ -742,12 +737,15 @@ async function openWorkEditor(page) {
 // fail inside the page after the case has ended.
 async function closePage(page, fixture) {
   try { await page.waitForSettled(); } catch { /* the case's own assertion already failed */ }
+  await removePage(page, fixture);
+}
+
+async function removePage(page, fixture) {
   const exited = new Promise((resolveExit) => {
     if (page.child.exitCode !== null || page.child.signalCode !== null) resolveExit();
     else page.child.once("exit", resolveExit);
   });
-  if (page.child.exitCode === null && page.child.signalCode === null) page.child.kill();
-  await exited;
+  await stopPortal(page.child, exited);
   await rm(fixture.base, { recursive: true, force: true });
 }
 
