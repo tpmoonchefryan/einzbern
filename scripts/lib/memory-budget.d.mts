@@ -31,6 +31,7 @@ export function parseMemoryPolicy(text: string): MemoryPolicy;
 export function readMemoryPolicy(deviceHome: string): MemoryPolicy | null;
 export function memoryPhase(env?: NodeJS.ProcessEnv): { workers: number; bytes: number; token: string } | null;
 export function memoryTestArguments(args: readonly string[], env?: NodeJS.ProcessEnv): readonly string[];
+export function suiteTestArguments(args: readonly string[], env?: NodeJS.ProcessEnv): readonly string[];
 export function acquireMemoryBudget(options: { deviceHome: string; directory: string; command: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }): Promise<MemoryLease | null>;
 export function memoryWorkerCheck(env?: NodeJS.ProcessEnv): void;
 

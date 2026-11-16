@@ -126,6 +126,21 @@ assert.equal(m.processTable(), null);
 `);
 });
 
+test("Windows suites bound the default fan-out and preserve explicit Node worker counts", () => {
+  windowsFixture(`
+const args = ['--test', 'one.test.mjs'];
+for (const [capacity, workers] of [[1, 1], [4, 3], [32, 4]]) {
+  os.availableParallelism = () => capacity;
+  syncBuiltinESMExports();
+  assert.deepEqual(m.suiteTestArguments(args, {}), ['--test-concurrency=' + workers, ...args]);
+}
+for (const explicit of [['--test-concurrency=7'], ['--test-concurrency', '2']]) {
+  const requested = [...explicit, ...args];
+  assert.equal(m.suiteTestArguments(requested, {}), requested);
+}
+`);
+});
+
 test("Windows resource domains require a successful private ACL observation", () => {
   windowsFixture(`
 answer = true;
@@ -186,8 +201,10 @@ test("native Windows heavy entry admits, limits real Node workers and releases i
     const path = join(directory, `worker-${index}.test.mjs`);
     await writeFile(path, `
 import test from 'node:test';
+import assert from 'node:assert/strict';
 import { open, unlink } from 'node:fs/promises';
 test('one worker', async () => {
+  assert.ok(process.execArgv.some(arg => arg.includes('memory-worker-check.mjs')), 'the worker was admitted by the caller');
   const file = await open(${JSON.stringify(marker)}, 'wx');
   try { await new Promise(resolve => setTimeout(resolve, 100)); }
   finally {
@@ -211,9 +228,11 @@ test('one worker', async () => {
     });
     assert.equal(result.code, 0, result.output);
   } finally { slot.release(); }
+  const { runPortalTestFiles } = await import("../scripts/portal-tests.mjs");
+  assert.equal(await runPortalTestFiles(tests, env, { stdio: "pipe" }), 0);
   const state = JSON.parse(await readFile(join(directory, "locks", "memory-budget.json"), "utf8"));
   assert.equal(state.leases.length, 0);
-  assert.equal((await readdir(join(directory, "locks", "memory-receipts"))).length, 1);
+  assert.equal((await readdir(join(directory, "locks", "memory-receipts"))).length, 2);
 });
 
 test("native Windows domain rejects an unrelated writable ACL", { skip: process.platform !== "win32" }, async t => {

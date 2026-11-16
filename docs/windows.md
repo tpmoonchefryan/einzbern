@@ -31,8 +31,8 @@ handle also terminates its descendants.
 
 The standard and selectively planned test entries use the Windows job controller.
 It preserves the selected roster, memory admission, timeout result, raw output
-and file-level diagnostics. The Windows test runner defaults to at most four
-concurrent files and leaves a logical CPU available on multi-core systems. An
+and file-level diagnostics. The Windows core and Portal test runners default to
+at most four concurrent files and leave a logical CPU available on multi-core systems. An
 explicit test worker count or the memory admission policy takes precedence.
 The full Windows suite has a 60-minute controller
 limit, configurable downward with `TCRN_TEST_CONTROLLER_TIMEOUT_MS`. Its POSIX

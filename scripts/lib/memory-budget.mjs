@@ -392,6 +392,14 @@ export function memoryTestArguments(args, env = process.env) {
   return [...args.slice(0, index + 1), `--test-concurrency=${phase.workers}`, `--import=${new URL(workerPath, import.meta.url).href}`, ...args.slice(index + 1)];
 }
 
+/** Core and Portal use the same Windows fan-out when no worker count was supplied or admitted. */
+export function suiteTestArguments(args, env = process.env) {
+  const planned = memoryTestArguments(args, env);
+  if (process.platform !== "win32" || !planned.includes("--test") || planned.some(arg => arg === "--test-concurrency" || arg.startsWith("--test-concurrency="))) return planned;
+  const workers = Math.min(4, Math.max(1, availableParallelism() - 1));
+  return [`--test-concurrency=${workers}`, ...planned];
+}
+
 /** Worker startup check is read-only and does not start observer child processes. */
 export function memoryWorkerCheck(env = process.env, sample = sampleMemory) {
   const ref = leaseReference(env); if (!ref) return;
