@@ -40,6 +40,11 @@ process-group recovery fixtures run on Linux. Native Job Object and NTFS recover
 fixtures run on Windows. The Python CI observer holds output descriptors until
 it has retained and verified the bytes, then removes the captured Windows files.
 
+The historical INC-155 coverage proof runs against the files from its pinned Git
+commit. On Windows its coverage checker uses the engine's NTFS file walker and
+checks the discovered test names against that commit's Git tree. On Ubuntu it
+uses the original POSIX walker. Both jobs verify the same recorded output bytes.
+
 PATH and PATHEXT lookup support native executables and `.cmd` or `.bat` shims.
 Batch arguments preserve spaces, Unicode, quotes and shell metacharacters.
 Generated Portal `.cmd` launchers use encoded PowerShell arguments and forward

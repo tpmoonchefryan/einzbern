@@ -52,6 +52,7 @@ const HISTORICAL_EVIDENCE = new Map([
     outputBytes: 2048,
     outputSha256: "6d5b7fe9a7e8b44981e84ea2e544b7ed104697faf2a631bf62a6642933e168ec",
     typescriptVersion: "5.9.3",
+    windowsCoverageFileWalk: true,
   }],
   // TCRN-CROSS-STORY-533. SUB-473 (dc77e6d6) added observedReasonCodes and unreconciledReasons
   // to the absent-source leg of this proof. The block records the proof as it stood before that
@@ -522,6 +523,13 @@ async function replayHistoricalBlock(block, evidence) {
       GIT_DIR: gitDirectory,
     };
     delete env.GIT_WORK_TREE;
+    const nativeCoverage = process.platform === "win32" && evidence.windowsCoverageFileWalk === true;
+    if (nativeCoverage) {
+      // The original proof spawns its own Node processes. Keep this import within
+      // their environment so both the proof and its nested coverage runs use the archive.
+      const adapter = new URL("./lib/windows-historical-coverage.mjs", import.meta.url).href;
+      env.NODE_OPTIONS = [env.NODE_OPTIONS, `--import=${adapter}`].filter(Boolean).join(" ");
+    }
     stage = "historical-command-parse";
     const args = await parseNodeCommand(block.command, { checkoutRoot: historicalRoot, commit: evidence.commit });
     stage = "historical-command";
@@ -540,6 +548,7 @@ async function replayHistoricalBlock(block, evidence) {
     return {
       ok,
       mode: "historical-version-replay",
+      ...(nativeCoverage ? { filesystemAdapter: "windows-archive-file-walk" } : {}),
       commit: evidence.commit,
       evidenceSha256: sourceDigest,
       outputBytes: Buffer.byteLength(result.stdout, "utf8"),

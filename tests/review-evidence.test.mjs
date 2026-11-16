@@ -233,6 +233,28 @@ function gitFixture(t) {
   return { root, base };
 }
 
+test("the Windows coverage replay walks the pinned archive and refuses a substituted test file", t => {
+  const { root } = gitFixture(t);
+  mkdirSync(join(root, "scripts"));
+  const script = join(root, "scripts", "coverage-conservation.mjs");
+  writeFileSync(script, `
+import { walkFiles, repositoryRoot, toPosixPath } from "./lib/files.mjs";
+import { relative } from "node:path";
+const files = (await walkFiles()).map(file => toPosixPath(relative(repositoryRoot, file)));
+console.log(JSON.stringify(files.filter(file => file.endsWith(".test.mjs"))));
+`);
+  const adapter = new URL("../scripts/lib/windows-historical-coverage.mjs", import.meta.url).href;
+  const run = () => spawnSync(process.execPath, ["--import", adapter, script], { cwd: root, encoding: "utf8", windowsHide: true });
+  const matching = run();
+  assert.equal(matching.status, 0, matching.stderr);
+  assert.deepEqual(JSON.parse(matching.stdout), ["tests/fixture.test.mjs"]);
+  rmSync(join(root, "tests", "fixture.test.mjs"));
+  writeFileSync(join(root, "tests", "replacement.test.mjs"), "");
+  const changed = run();
+  assert.notEqual(changed.status, 0);
+  assert.match(changed.stderr, /EVIDENCE_HISTORY_TEST_ROSTER_MISMATCH/u);
+});
+
 function runUnpreloadedCollect(options) {
   const moduleUrl = new URL("../scripts/review-evidence.mjs", import.meta.url).href;
   const source = `import { collectReviewEvidence } from ${JSON.stringify(moduleUrl)}; process.stdout.write(JSON.stringify(collectReviewEvidence(${JSON.stringify(options)})));`;
