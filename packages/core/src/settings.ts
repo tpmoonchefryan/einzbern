@@ -921,7 +921,7 @@ export function validateSettingValue(key: unknown, value: unknown, workspaceRoot
   if (entry.key === "knowledge.articlesPath") {
     if (/[\u0000-\u001f\u007f]/u.test(value)) fail("SETTINGS_VALUE_INVALID", `${entry.key} must not contain control characters`);
     if (isAbsolute(value)) {
-      if (value.includes("\\") || resolve(value) !== value) {
+      if ((process.platform !== "win32" && value.includes("\\")) || resolve(value) !== value) {
         fail("SETTINGS_VALUE_INVALID", `${entry.key} must be a normalized absolute path`);
       }
       if (workspaceRoot !== undefined && pathIsInside(resolve(workspaceRoot, LEGACY_CONTROL_DIRECTORY), resolve(value))) {

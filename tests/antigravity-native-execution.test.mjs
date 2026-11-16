@@ -1,3 +1,6 @@
+import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
+import { spawnCommandSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
+import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -247,7 +250,7 @@ test("INIT091-B2: agy-run uses stream-json input/output protocol, preserves mult
   assert.deepEqual(JSON.parse(stdinPayload), { event: "user", message: { content: expectedPrompt } });
 
   // Strict protocol-parsing probe matching official agy 1.5.5 CLI flag + stream-json stdin behavior without live network calls.
-  const executable = join(f.root, "strict-agy-probe");
+  let executable = join(f.root, "strict-agy-probe");
   const script = [
     "#!/usr/bin/env node",
     "const argv = process.argv.slice(2);",
@@ -311,10 +314,10 @@ test("INIT091-B2: agy-run uses stream-json input/output protocol, preserves mult
     "  process.exitCode = 1;",
     "}",
   ].join("\n");
-  await writeFile(executable, `${script}\n`, { encoding: "utf8", mode: 0o700, flag: "wx" });
+  executable = await writeNodeExecutable(executable, script);
 
   // Regression guard: confirm the probe rejects the legacy broken `--print --output-format stream-json` argv with exit 2.
-  const brokenProbe = spawnSync(executable, ["--print", "--output-format", "stream-json"], {
+  const brokenProbe = spawnCommandSync(executable, ["--print", "--output-format", "stream-json"], {
     encoding: "utf8",
     input: expectedPrompt,
   });
@@ -423,7 +426,8 @@ test("INIT091-B2: CLI exposes execution-antigravity-{preflight,record,evidence} 
   assert.equal(calls, 1);
   const racedEvidence = JSON.parse(await readFile(raced, "utf8"));
   assert.equal((await runNativeToolCommand("execution-antigravity-evidence", { "from-file": raced }, context)).digest, racedEvidence.digest);
-  assert.equal((await stat(raced)).mode & 0o777, 0o600);
+  if (process.platform === "win32") assert.equal(hasPrivateWindowsPermissions(raced), true);
+  else assert.equal((await stat(raced)).mode & 0o777, 0o600);
   assert.equal((await readdir(f.root)).some((name) => name.startsWith(".einzbern-agy-run-")), false);
 
   const failedOutput = join(f.root, "failed-output.json");

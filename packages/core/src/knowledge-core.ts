@@ -1,6 +1,7 @@
 import { recallAuthorityState } from "./recall-authority.js";
 import type { RecallAuthority } from "./recall-authority.js";
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
+import { syncWindowsDirectory } from "../../../scripts/lib/windows-system.mjs";
 import { scopedWorkspaceState } from "./project-scope.js";
 // SPDX-License-Identifier: Apache-2.0
 
@@ -19,11 +20,11 @@ import {
   rm,
   unlink,
 } from "node:fs/promises";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { pathIsInside as inside } from "./path-containment.js";
-import { resolveStoreBackend, SegmentedKnowledgeStoreBackend } from "./store-backend.js";
+import { resolveStoreBackend, SegmentedKnowledgeStoreBackend, storeRecordPath } from "./store-backend.js";
 import type { FileStoreBackendProfile, StoreBackend } from "./store-backend.js";
 
 import {
@@ -850,11 +851,14 @@ async function resolveSourceFile(reference: string, workspaceRoot: string, works
 }
 
 async function hashSourceFile(path: string): Promise<string> {
+  const before = await lstat(path);
+  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) fail("KNOWLEDGE_LINK_UNSAFE", path);
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   const hash = createHash("sha256");
   try {
     const initial = await handle.stat();
     if (!initial.isFile() || initial.nlink !== 1) fail("KNOWLEDGE_SPECIAL_FILE", path);
+    if (!sameIdentity(before, initial)) fail("KNOWLEDGE_SOURCE_CHANGED", path);
     const buffer = Buffer.allocUnsafe(64 * 1024);
     let position = 0;
     for (;;) {
@@ -970,9 +974,12 @@ async function articlePathFor(workspaceRoot: string, workspace: WorkspaceState, 
 async function readArticleBytes(path: string): Promise<Buffer> {
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
+    const before = await lstat(path);
+    if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) fail("KNOWLEDGE_LINK_UNSAFE", path);
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const initial = await handle.stat();
     if (!initial.isFile() || initial.nlink !== 1) fail("KNOWLEDGE_SPECIAL_FILE", path);
+    if (!sameIdentity(before, initial)) fail("KNOWLEDGE_SOURCE_CHANGED", path);
     if (initial.size > KNOWLEDGE_LIMITS.maximumArticleBytes) fail("KNOWLEDGE_LIMIT_EXCEEDED", "article file");
     const bytes = await handle.readFile();
     const final = await handle.stat();
@@ -995,8 +1002,16 @@ async function writeArticleBytes(path: string, bytes: Buffer, replace: boolean):
   if (bytes.length > KNOWLEDGE_LIMITS.maximumArticleBytes) fail("KNOWLEDGE_LIMIT_EXCEEDED", "article file");
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const flags = constants.O_WRONLY | constants.O_CREAT | constants.O_NOFOLLOW | (replace ? constants.O_TRUNC : constants.O_EXCL);
+    const before = replace ? await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    }) : undefined;
+    if (before && (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1)) fail("KNOWLEDGE_LINK_UNSAFE", path);
+    const flags = constants.O_WRONLY | constants.O_NOFOLLOW | (before ? 0 : constants.O_CREAT | constants.O_EXCL);
     handle = await open(path, flags, 0o600);
+    const opened = await handle.stat();
+    if (!opened.isFile() || opened.nlink !== 1 || (before && !sameIdentity(before, opened))) fail("KNOWLEDGE_LINK_UNSAFE", path);
+    if (before) await handle.truncate(0);
     await handle.writeFile(bytes);
     await handle.sync();
     const written = await handle.stat();
@@ -1416,6 +1431,7 @@ async function backupKnowledgeBodies(directory: string, files: readonly { readon
 // interrupted writer of the metadata/body layout left. Only the data-plane IO rides through the
 // StoreBackend; these helpers stay.
 async function syncDirectory(path: string): Promise<void> {
+  if (process.platform === "win32") return syncWindowsDirectory(path);
   const handle = await open(path, constants.O_RDONLY);
   try {
     await handle.sync();
@@ -2234,8 +2250,8 @@ async function scanStoreRecords(
   const danglingWorkLinks: { knowledgeId: string; workIds: readonly string[] }[] = [];
   const missingBodies: string[] = [];
   for (const id of metadataIds) {
-    const metadataPath = resolve(roots.metadataRoot, `${id}.json`);
-    const bodyPath = resolve(roots.bodiesRoot, `${id}.body`);
+    const metadataPath = storeRecordPath(roots.metadataRoot, `${id}.json`);
+    const bodyPath = storeRecordPath(roots.bodiesRoot, `${id}.body`);
     const metadataBytes = await backend.readKnowledgeMetadata(id);
     const metadata = checks.shape(parseCanonicalObject(metadataBytes, "knowledge metadata", "KNOWLEDGE_RECORD_INVALID"));
     if (checks.danglingWorkLinks !== null && metadata.lifecycle !== "retired") {
@@ -2665,7 +2681,7 @@ async function scanLibraryCrest(
   const records = crestRecords({ units, duplicates });
   if (!imported && isSharedLibrary(workspace)) for (const unit of records) {
     if (unit.metadata.projectId !== null) continue;
-    const source = workspace.library?.consolidation?.sources.find(source => unit.metadataPath.startsWith(join(workspaceRoot, source.archive, "crest") + "/") ||
+    const source = workspace.library?.consolidation?.sources.find(source => unit.metadataPath.startsWith(join(workspaceRoot, source.archive, "crest") + sep) ||
       (source.manifest.libraryId === workspace.metadata.workspaceId && source.inventory.some(file => join(workspaceRoot, file.path) === unit.metadataPath)));
     migratedKnowledgeScopes.set(unit.metadata, source?.bindings.map(binding => binding.projectId) ?? []);
   }

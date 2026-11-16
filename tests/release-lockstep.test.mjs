@@ -1345,7 +1345,7 @@ async function materializeReleaseDependencies(fixture) {
     // Read a static committed index snapshot without opening a shared WAL or
     // taking a writable SQLite connection. Missing cache inputs still fail the
     // real offline install below; no shared installation is used by the build.
-    const copied = JSON.parse(execFileSync("python3", ["-I", "-c", String.raw`
+    const copied = JSON.parse(execFileSync((process.platform === "win32" ? "python" : "python3"), ["-I", "-c", String.raw`
 import hashlib, json, pathlib, sqlite3, stat, sys
 source_store, target_store = map(pathlib.Path, sys.argv[1:3])
 packages = json.loads(sys.argv[3])

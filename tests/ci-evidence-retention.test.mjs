@@ -3,10 +3,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const runner = join(root, "scripts/ci/p1-evidence.py");
@@ -18,11 +19,11 @@ spec.loader.exec_module(m)
 `;
 
 function python(code, args = [], environment = {}) {
-  const result = spawnSync("python3", ["-B", "-c", loadRunner + code, runner, ...args], {
+  const result = spawnSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", loadRunner + code, runner, ...args], {
     cwd: root,
     encoding: "utf8",
     env: { ...process.env, ...environment, PYTHONDONTWRITEBYTECODE: "1" },
-    timeout: 15_000,
+    timeout: process.platform === "win32" ? 60_000 : 15_000,
     maxBuffer: 4 * 1024 * 1024,
   });
   assert.equal(result.status, 0, result.stderr || String(result.error));
@@ -55,11 +56,11 @@ print(json.dumps({"positiveInjectedOnly": m.fixture_checks_pass(checks),
 
 test("actual fixture inspection refuses a Git ancestor, symlink path, and regular file", async (context) => {
   const base = await scratch(context);
+  await mkdir(join(base, "tmp"));
+  await symlink(join(base, "tmp"), join(base, "link"), process.platform === "win32" ? "junction" : "dir");
   const result = python(`
 base = pathlib.Path(sys.argv[2])
 (base / ".git").mkdir()
-(base / "tmp").mkdir()
-(base / "link").symlink_to(base / "tmp", target_is_directory=True)
 (base / "file").write_text("not a directory")
 records = {key: m.fixture_location(base / key) for key in ("tmp", "link", "file")}
 print(json.dumps(records))
@@ -223,7 +224,7 @@ print(json.dumps(dict(p1=rows, h1=dict(status=status, result=json.loads(output.g
 });
 
 for (const childExit of [0, 7]) {
-  test(`harmless fixture retains whole outer/controller bytes after unlink and preserves child exit ${childExit}`, async (context) => {
+  test(`harmless fixture retains whole outer/controller bytes through cleanup and preserves child exit ${childExit}`, async (context) => {
     const base = await scratch(context);
     const result = python(`
 base = pathlib.Path(sys.argv[2])
@@ -254,9 +255,10 @@ while not (base.parent.parent / "held").exists():
     time.sleep(0.01)
 with (base / "stdout").open("ab") as stream:
     stream.write(sys.argv[2].encode())
-(base / "stdout").unlink()
-(base / "stderr").unlink()
-base.rmdir()
+if os.name != "nt":
+    (base / "stdout").unlink()
+    (base / "stderr").unlink()
+    base.rmdir()
 sys.exit(int(sys.argv[3]))
 '''
 record = m.capture_process([sys.executable, "-B", "-c", child, str(tmp), sys.argv[3], sys.argv[4]],
@@ -287,6 +289,7 @@ print(json.dumps(dict(record=record, wrapperExit=m.wrapper_exit(record["exitCode
 
 test("missing controller and symlink controller output remain failed evidence", async (context) => {
   const base = await scratch(context);
+  if (!await fileSymlinksAvailable(base)) return context.skip("Windows file symlink creation privilege is unavailable");
   const result = python(`
 base = pathlib.Path(sys.argv[2])
 tmp = base / "tmp"
@@ -411,7 +414,7 @@ test("CLI retains actual preflight refusal, does not launch P1, omits secrets an
   const args = ["-B", runner, "--repo", await realpath(root), "--evidence", evidence,
     "--tmp", join(base, "tmp"), "--device", join(base, "device"), "--node-bin", dirname(process.execPath)];
   const env = { ...process.env, DO_NOT_RECORD_SECRET_KEY: "must-not-appear-in-metadata", PYTHONDONTWRITEBYTECODE: "1" };
-  const first = spawnSync("python3", args, { encoding: "utf8", env, timeout: 10_000 });
+  const first = spawnSync((process.platform === "win32" ? "python" : "python3"), args, { encoding: "utf8", env, timeout: 10_000 });
   assert.equal(first.status, 1, first.stderr);
   const receipt = JSON.parse(first.stdout);
   assert.equal(receipt.ok, false);
@@ -422,7 +425,7 @@ test("CLI retains actual preflight refusal, does not launch P1, omits secrets an
   assert.equal(metadata.includes("must-not-appear-in-metadata"), false);
   assert.equal(JSON.parse(metadata).argv, undefined);
   await writeFile(join(evidence, "sentinel"), "retained");
-  const second = spawnSync("python3", args, { encoding: "utf8", env, timeout: 10_000 });
+  const second = spawnSync((process.platform === "win32" ? "python" : "python3"), args, { encoding: "utf8", env, timeout: 10_000 });
   assert.equal(second.status, 1);
   assert.equal(await readFile(join(evidence, "p1.meta.json"), "utf8"), metadata);
   assert.equal(await readFile(join(evidence, "sentinel"), "utf8"), "retained");
@@ -449,7 +452,7 @@ m.fixture_location = lambda path: dict(checksPassed=True, checks=dict(entriesAtR
 m.identity = lambda repo: dict(head="a" * 40, tree="b" * 40, branch="fixture", statusPorcelainAll="")
 m.source_manifest = lambda *args: dict(files=["fixture"], coreTestFiles=["tests/fixture.test.mjs"], coreTestFileCount=1)
 m.shutil.which = lambda name, **kwargs: "/tools/" + name
-m.checked_output = lambda argv, **kwargs: (m.NODE_VERSION if argv[0].endswith("/node") else
+m.checked_output = lambda argv, **kwargs: (m.NODE_VERSION if pathlib.Path(argv[0]).stem == "node" else
     m.COREPACK_VERSION if argv == ["/tools/corepack", "--version"] else m.PNPM_VERSION)
 m.leftovers = lambda path: []
 m.time.sleep = lambda seconds: None
@@ -490,7 +493,7 @@ if mode == "pf2-h1":
         negatives.extend([bool(m.evaluate({**meta, key: None})), bool(m.evaluate({**meta, key: ["123 task.mjs"]}))])
     negatives.append(bool(m.evaluate({**meta, config["receiptKey"]: dict(ok=True, reasonCode="TESTS_VERIFIED", tests=[])})))
     args.evidence = str(base / "shadowed-corepack")
-    m.checked_output = lambda argv, **kwargs: m.NODE_VERSION if argv[0].endswith("/node") else "0.0.0"
+    m.checked_output = lambda argv, **kwargs: m.NODE_VERSION if pathlib.Path(argv[0]).stem == "node" else "0.0.0"
     with contextlib.redirect_stdout(io.StringIO()):
         shadowed_status = m.main()
     shadowed = json.loads((pathlib.Path(args.evidence) / "h1.meta.json").read_text())
@@ -498,16 +501,16 @@ if mode == "pf2-h1":
                      and any("Pinned Corepack" in error for error in shadowed["errors"]))
 print(json.dumps(dict(status=status, calls=calls, refused=refused, meta=meta, negatives=negatives)))
 `, [base, mode, summary()]);
-    assert.equal(result.status, 0);
+    assert.equal(result.status, 0, JSON.stringify(result.meta));
     assert.equal(result.calls.length, 1, "one core train only, no second execution on an occupied evidence directory");
     assert.deepEqual(result.calls[0].argv, mode === "pf2-h1"
       ? ["/tools/corepack", "pnpm@11.3.0", "-C", join(base, "repo"), "run", "test"]
       : ["/tools/pnpm", "-C", join(base, "repo"), "run", "verify:p1"]);
     assert.equal(result.calls[0].offline, "0");
-    assert.equal(result.meta.stdin, "/dev/null");
+    assert.equal(result.meta.stdin, process.platform === "win32" ? "nul" : "/dev/null");
     if (mode === "pf2-h1") {
       assert.equal(result.meta.corepackVersion, "0.34.6");
-      assert.equal(result.meta.corepackRealpath, "/tools/corepack");
+      assert.equal(result.meta.corepackRealpath, resolve("/tools/corepack"));
     }
     assert.equal(result.refused, true);
     assert.ok(result.negatives.every(Boolean));
@@ -538,7 +541,7 @@ for patch in [dict(head="b"*40), dict(runId="2"), dict(attempt="2"),dict(planDig
  results.append(m.validate_plan_shape({**p,**patch},"a"*40,"1","1"))
 print(json.dumps(results))
 `;
-  const result = spawnSync("python3", ["-B", "-c", code, modulePath], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
+  const result = spawnSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", code, modulePath], { encoding: "utf8", env: { ...process.env, PYTHONDONTWRITEBYTECODE: "1" } });
   assert.equal(result.status, 0, result.stderr);
   const [good, ...negative] = JSON.parse(result.stdout);
   assert.deepEqual(good, []);

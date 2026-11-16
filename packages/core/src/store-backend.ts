@@ -20,7 +20,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes } from "node:crypto";
-import { constants } from "node:fs";
+import { constants, lstatSync } from "node:fs";
 import {
   lstat,
   link,
@@ -31,10 +31,31 @@ import {
   rename,
   rm,
 } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve } from "node:path";
 
 import { assertCanonicalJson, canonicalJson, canonicalSha256, compareCanonicalText } from "../../protocol/src/index.js";
 import type { JsonValue } from "../../protocol/src/index.js";
+
+/** Encode record ID separators that NTFS would interpret as alternate streams.
+ * Existing POSIX names and portable names are both readable after relocation. */
+export function storeRecordPath(root: string, name: string): string {
+  const original = resolve(root, name);
+  const portable = resolve(root, name.replace(/([a-z]+):(?=[a-f0-9]{24}\.)/gu, "$1%3A"));
+  if (portable === original || process.platform === "win32") return portable;
+  try {
+    lstatSync(portable);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return original;
+    throw error;
+  }
+  try {
+    lstatSync(original);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return portable;
+    throw error;
+  }
+  throw new StoreBackendError("STORE_RECORD_AMBIGUOUS", name);
+}
 
 export interface StoreBackend {
   // knowledge marker (store.json). TCRN-CROSS-SUB-414 (MIN-235 D7): read only. Initialization creates
@@ -292,7 +313,7 @@ export class FileStoreBackend implements StoreBackend {
 
   private path(relativePath: string): string {
     this.assertRelativePath(relativePath);
-    const candidate = resolve(this.storeRoot, relativePath);
+    const candidate = storeRecordPath(this.storeRoot, relativePath);
     if (!this.inside(this.storeRoot, candidate)) {
       throw new StoreBackendError(this.codes.pathInvalid, relativePath);
     }
@@ -303,6 +324,9 @@ export class FileStoreBackend implements StoreBackend {
     if (typeof value !== "string" || value.length === 0 || value.startsWith("/") || value.includes("\\")) {
       throw new StoreBackendError(this.codes.pathInvalid, value);
     }
+    if (process.platform === "win32" && value.replace(/([a-z]+):(?=[a-f0-9]{24}\.)/gu, "$1%3A").includes(":")) {
+      throw new StoreBackendError(this.codes.pathInvalid, value);
+    }
     const segments = value.split("/");
     if (segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       throw new StoreBackendError(this.codes.pathInvalid, value);
@@ -311,7 +335,7 @@ export class FileStoreBackend implements StoreBackend {
 
   private inside(parent: string, candidate: string): boolean {
     const relation = relative(parent, candidate);
-    return relation === "" || (!relation.startsWith("..") && !relation.startsWith(sep));
+    return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
   }
 
   private sameIdentity(left: FileIdentity, right: FileIdentity): boolean {
@@ -353,7 +377,8 @@ export class FileStoreBackend implements StoreBackend {
 
   private async listDirectory(relativePath: string): Promise<string[]> {
     const root = await this.boundDirectory(this.path(relativePath));
-    const entries = await readdir(root);
+    const entries = (await readdir(root)).map(name => name.replace(/^([a-z]+)%3A(?=[a-f0-9]{24}\.)/u, "$1:"));
+    if (new Set(entries).size !== entries.length) throw new StoreBackendError(this.codes.pathInvalid, root);
     // Canonical byte order; compareCanonicalText lives in protocol's index but
     // importing it here would pull the whole protocol module. The store re-sorts
     // anyway; a plain UTF-8 compare is behaviour-identical for the ASCII .json/.body
@@ -584,6 +609,10 @@ export class FileStoreBackend implements StoreBackend {
   }
 
   private async syncDirectory(path: string): Promise<void> {
+    if (process.platform === "win32") {
+      const { syncWindowsDirectory } = await import("../../../scripts/lib/windows-system.mjs");
+      return syncWindowsDirectory(path);
+    }
     const handle = await open(path, constants.O_RDONLY);
     try {
       await handle.sync();

@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { lstat, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -104,7 +105,7 @@ test("an output ancestor replaced after staging fails its final inode check", as
   await withExclusiveOutputSession(root, async () => {
     await assert.rejects(safeWriteOutput(root, "dist/ordinary/existing.json", "replacement", { beforePublish: async () => {
       await rename(directory, join(root, "saved"));
-      await symlink(outside, directory);
+      await symlink(outside, directory, process.platform === "win32" ? "junction" : "dir");
     } }), { reasonCode: "OUTPUT_DIRECTORY_CHANGED" });
   });
   assert.equal(await readFile(join(root, "saved/existing.json"), "utf8"), "original bytes");
@@ -117,7 +118,7 @@ test("a reservation marker does not traverse backup payload links", async t => {
   await reserve(retained);
   const outside = join(root, "outside");
   await bytes(join(outside, "private.txt"), "untouched");
-  await symlink(outside, join(retained, "config-backups"));
+  await symlink(outside, join(retained, "config-backups"), process.platform === "win32" ? "junction" : "dir");
   await withExclusiveOutputSession(root, () => safeCleanOutputRoot(root));
   assert.equal(await readFile(join(outside, "private.txt"), "utf8"), "untouched");
   assert.ok((await lstat(join(retained, "config-backups"))).isSymbolicLink());
@@ -127,6 +128,7 @@ test("invalid, unknown, linked and unmarked legacy reservations fail before any 
   for (const kind of ["truncated", "unknown-version", "symlink", "hardlink", "legacy-active", "legacy-staging", "legacy-recovery"]) {
     await t.test(kind, async sub => {
       const root = await fixture(sub);
+      if (kind === "symlink" && !await fileSymlinksAvailable(root)) return sub.skip("File symlink creation privilege is unavailable");
       const target = join(root, "dist/build/z-reserved");
       await mkdir(target, { recursive: true });
       const marker = join(target, CONFIG_BACKUP_RESERVATION_FILE);
@@ -197,7 +199,7 @@ test("a planned ancestor replaced by a link fails without touching either origin
   await withExclusiveOutputSession(root, async () => {
     await assert.rejects(safeCleanOutputRoot(root, { afterPlan: async () => {
       await rename(original, join(root, "saved-original"));
-      await symlink(outside, original);
+      await symlink(outside, original, process.platform === "win32" ? "junction" : "dir");
     } }), { reasonCode: "OUTPUT_DIRECTORY_CHANGED" });
   });
   assert.equal(await readFile(join(outside, "file.json"), "utf8"), "outside");

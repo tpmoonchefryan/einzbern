@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync, writeFileSync, writeSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { summarizeProgress } from "./incremental-output.mjs";
+import { hasPrivateWindowsPermissions } from "./windows-system.mjs";
 
 export const DIAGNOSTIC_LIMITS = Object.freeze({ planBytes: 65_536, ledgerBytes: 1_048_576, lineBytes: 2_048, jsonBytes: 524_288, controllerEvents: 64 });
 const VERSION = "einzbern.test-run-diagnostics.v1";
@@ -15,6 +16,9 @@ const FAILURES = [...INTERRUPTED, "subtestsFailed", "testCodeFailure", "hookFail
 const IO_CODES = new Set(["EACCES", "EPERM", "ENOENT", "ENOTDIR", "EEXIST", "ENOSPC", "EDQUOT", "EMFILE", "ENFILE", "EIO", "ELOOP", "EINVAL", "EBADF", "EROFS", "EFBIG"]);
 const ERRORS = new Set(["PRIVATE_FILE_INVALID", "PRIVATE_FILE_CHANGED", "PRIVATE_READ_FAILED", "PLAN_INVALID", "PLAN_BUDGET", "NODE_UNSUPPORTED", "ROOT_IDENTITY_INVALID", "LEDGER_INVALID", "LEDGER_BUDGET", "OBSERVER_IO", "OBSERVER_DATA", "GROUP_JOIN_UNCONFIRMED", "HEADER_MISSING", "MANDATORY_ROSTER_EXCEEDS_BUDGET", "JSON_BUDGET"]);
 const integer = (value) => Number.isSafeInteger(value) && value >= 0;
+// Node exposes filesystem identifiers as numbers, including 64-bit Windows
+// volume identifiers. Compare these opaque values without arithmetic.
+const filesystemIdentifier = (value) => Number.isInteger(value) && value >= 0;
 const elapsed = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
 const bytes = (value) => Buffer.byteLength(JSON.stringify(value));
 const digest = (value) => createHash("sha256").update(value).digest("hex");
@@ -31,12 +35,13 @@ export function expectedDiagnosticError(error) {
 }
 function owned(metadata, directory = false) {
   return (directory ? metadata.isDirectory() : metadata.isFile() && metadata.nlink === 1) &&
-    !metadata.isSymbolicLink() && (metadata.mode & 0o777) === (directory ? 0o700 : 0o600) &&
+    !metadata.isSymbolicLink() && (process.platform === "win32" || (metadata.mode & 0o777) === (directory ? 0o700 : 0o600)) &&
     (typeof process.getuid !== "function" || metadata.uid === process.getuid());
 }
 function openPrivate(path, flags, identity = null) {
   requireDiagnostic(typeof path === "string" && !path.includes("\0") && isAbsolute(path) && resolve(path) === path && owned(lstatSync(dirname(path)), true), "PRIVATE_FILE_INVALID");
-  requireDiagnostic(typeof constants.O_NOFOLLOW === "number", "PRIVATE_FILE_INVALID");
+  requireDiagnostic(typeof constants.O_NOFOLLOW === "number" || process.platform === "win32", "PRIVATE_FILE_INVALID");
+  if (process.platform === "win32") requireDiagnostic(hasPrivateWindowsPermissions(dirname(path)) && hasPrivateWindowsPermissions(path), "PRIVATE_FILE_INVALID");
   const before = lstatSync(path);
   requireDiagnostic(owned(before) && (!identity || same(before, identity)), "PRIVATE_FILE_INVALID");
   const fd = openSync(path, flags | constants.O_NOFOLLOW);
@@ -60,11 +65,11 @@ export function readPrivateDiagnosticFile(path, limit, identity = null, offset =
 
 export function createDiagnosticPlan(files, cwd, taskPid) {
   requireDiagnostic(Array.isArray(files) && typeof cwd === "string" && !cwd.includes("\0") && isAbsolute(cwd) && resolve(cwd) === cwd && integer(taskPid) && taskPid > 0, "PLAN_INVALID");
-  requireDiagnostic(files.every((file) => typeof file === "string" && file.startsWith("tests/") && file.endsWith(".test.mjs") && !/[\\\x00-\x1f\x7f]/.test(file) && relative(cwd, resolve(cwd, file)) === file) && new Set(files).size === files.length, "PLAN_INVALID");
+  requireDiagnostic(files.every((file) => typeof file === "string" && file.startsWith("tests/") && file.endsWith(".test.mjs") && !/[\\\x00-\x1f\x7f]/.test(file) && relative(cwd, resolve(cwd, file)).replaceAll("\\", "/") === file) && new Set(files).size === files.length, "PLAN_INVALID");
   return { schemaVersion: VERSION, nodeVersion: NODE_VERSION, taskPid, cwd, files: [...files], planDigest: digest(JSON.stringify(files)) };
 }
 export function diagnosticArguments(files, reporterPath) {
-  return ["--test", "--test-reporter=spec", "--test-reporter-destination=stdout", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stdout", ...files];
+  return ["--test", `--test-reporter=${process.platform === "win32" ? "tap" : "spec"}`, "--test-reporter-destination=stdout", `--test-reporter=${reporterPath}`, "--test-reporter-destination=stdout", ...files];
 }
 export function prepareTestDiagnostics(directory, files, cwd, reporterPath) {
   const prepared = { plan: { files: [], fileCount: files.length, planDigest: digest(JSON.stringify(files)) }, arguments: ["--test", ...files], environment: {}, error: null, ledgerPath: null };
@@ -73,6 +78,7 @@ export function prepareTestDiagnostics(directory, files, cwd, reporterPath) {
     prepared.plan = plan;
     requireDiagnostic(process.version === NODE_VERSION, "NODE_UNSUPPORTED");
     requireDiagnostic(owned(lstatSync(directory), true), "PRIVATE_FILE_INVALID");
+    if (process.platform === "win32") requireDiagnostic(hasPrivateWindowsPermissions(directory), "PRIVATE_FILE_INVALID");
     const ledgerPath = join(directory, "file-events.ndjson");
     const planPath = join(directory, "plan.json");
     writeFileSync(ledgerPath, "", { flag: "wx", mode: 0o600 });
@@ -218,7 +224,7 @@ export function openFileObserver(environment, identity) {
   catch (error) { if (error instanceof SyntaxError) throw new DiagnosticError("PLAN_INVALID"); throw error; }
   requireDiagnostic(plan && typeof plan === "object" && !Array.isArray(plan), "PLAN_INVALID");
   const expected = createDiagnosticPlan(plan.files, plan.cwd, plan.taskPid);
-  requireDiagnostic(plan.schemaVersion === expected.schemaVersion && plan.nodeVersion === expected.nodeVersion && plan.planDigest === expected.planDigest && integer(plan.ledgerIdentity?.dev) && integer(plan.ledgerIdentity?.ino), "PLAN_INVALID");
+  requireDiagnostic(plan.schemaVersion === expected.schemaVersion && plan.nodeVersion === expected.nodeVersion && plan.planDigest === expected.planDigest && filesystemIdentifier(plan.ledgerIdentity?.dev) && filesystemIdentifier(plan.ledgerIdentity?.ino), "PLAN_INVALID");
   requireDiagnostic(isDiagnosticRoot(plan, identity), "ROOT_IDENTITY_INVALID");
   const fd = openPrivate(ledgerPath, constants.O_WRONLY | constants.O_APPEND, plan.ledgerIdentity);
   let active = true;

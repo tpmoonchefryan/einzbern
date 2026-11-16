@@ -7,6 +7,8 @@ const EXECUTOR_FILES = Object.freeze([
   "package.json", "scripts/task.mjs", "scripts/verify-portal.mjs", "scripts/portal-tests.mjs", "scripts/release.mjs",
   "scripts/lib/memory-budget.mjs", "scripts/lib/memory-worker-check.mjs", "scripts/lib/heavy-runs.mjs", "scripts/lib/storage-location.mjs", "scripts/lib/windows-system.mjs",
   "scripts/test-controller-bootstrap.mjs", "scripts/test-controller-child-policy.mjs",
+  "scripts/lib/windows-test-controller.mjs", "skill/mana-orchestrate/scripts/process-launch.mjs",
+  "skill/mana-orchestrate/scripts/windows-system.mjs",
 ]);
 const EXECUTOR_SCHEMA = "einzbern.memory-executors.v1";
 const executorDigest = bytes => createHash("sha256").update(bytes).digest("hex");

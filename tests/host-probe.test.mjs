@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
 
 import { probeHost, HOST_PROBE_OUTPUT_BYTES } from "../dist/build/packages/core/src/host-probe.js";
 import { COMMAND_CATALOG } from "../dist/build/packages/cli/src/index.js";
@@ -18,9 +19,7 @@ async function fakeExecutable(t, source) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "tcrn-host-probe-")));
   t.after(() => rm(root, { recursive: true, force: true }));
   const path = join(root, "fake-host");
-  await writeFile(path, `#!${process.execPath}\n${source}\n`, { mode: 0o700 });
-  await chmod(path, 0o700);
-  return path;
+  return writeNodeExecutable(path, source);
 }
 
 async function runUnpreloadedRelay(t, source) {
@@ -28,7 +27,9 @@ async function runUnpreloadedRelay(t, source) {
   t.after(() => rm(directory, { recursive: true, force: true }));
   const scriptPath = join(directory, "relay.mjs");
   await writeFile(scriptPath, `import { probeHost } from ${JSON.stringify(HOST_PROBE_MODULE_URL)};\n${source}\n`, { mode: 0o700 });
-  const child = spawn("/usr/bin/env", ["-u", "NODE_OPTIONS", process.execPath, scriptPath], { stdio: ["ignore", "pipe", "pipe"] });
+  const env = { ...process.env };
+  delete env.NODE_OPTIONS;
+  const child = spawn(process.execPath, [scriptPath], { env, stdio: ["ignore", "pipe", "pipe"] });
   const stdout = [];
   const stderr = [];
   child.stdout.on("data", (chunk) => stdout.push(chunk));
@@ -119,7 +120,7 @@ test("TCRN-CROSS-INC-387: without a test executable host-probe runs the host Cla
 test("TCRN-CROSS-INC-387: a usable host CLI wins over a claude on PATH and an unusable one falls back to the PATH claude named bare", async (t) => {
   const host = await fakeExecutable(t, "process.stdout.write('host')");
   const path = await pathDirectory(t);
-  await writeFile(join(path, "claude"), `#!${process.execPath}\nprocess.stdout.write('path')\n`, { mode: 0o700 });
+  await writeNodeExecutable(join(path, "claude"), "process.stdout.write('path')");
   await writeFile(join(path, "not-executable"), "", { mode: 0o600 });
   const preferred = await probeWithEnv(t, { PATH: path, CLAUDE_CODE_EXECPATH: host });
   assert.deepEqual([preferred.command[0], preferred.stdout], [host, "host"], "the host CLI runs even with a claude on PATH");

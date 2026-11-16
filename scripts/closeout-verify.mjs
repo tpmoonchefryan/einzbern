@@ -38,7 +38,7 @@
 // redLeg field fails closed rather than being waved through.
 
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, relative, resolve } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PLATFORM_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
@@ -199,7 +199,7 @@ function evidenceProblems(note, item, projectRoot, evidenceRoots = []) {
     const exists = roots.some((root) => {
       const candidate = resolve(root, path);
       const rel = relative(root, candidate);
-      return !rel.startsWith("..") && !rel.includes("\\") && existsSync(candidate);
+      return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel) && existsSync(candidate);
     });
     if (!exists) {
       problems.push(`item ${item} live chain note names missing evidence file ${path}`);

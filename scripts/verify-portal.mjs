@@ -8,7 +8,7 @@
 // starts inherit the slot through EINZBERN_HEAVY_SLOT.
 
 import { memoryPhase, memoryTestArguments } from "./lib/memory-budget.mjs";
-import { spawnSync } from "node:child_process";
+import { spawnCommandSync as spawnSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

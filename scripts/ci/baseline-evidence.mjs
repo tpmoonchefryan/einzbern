@@ -50,10 +50,10 @@ export async function collectBaseline(input, root, pinnedRun) {
       receipts.push({ id: artifact.id, name: artifact.name, digest: createHash("sha256").update(bytes).digest("hex") });
       const zip = join(temporary, `${artifact.id}.zip`);
       writeFileSync(zip, bytes, { flag: "wx" });
-      execFileSync("python3", ["-c", "import zipfile,sys,pathlib,stat\nz=zipfile.ZipFile(sys.argv[1]); root=pathlib.Path(sys.argv[2]); seen=set()\nfor i in z.infolist():\n p=pathlib.PurePosixPath(i.filename)\n if p.is_absolute() or '..' in p.parts or i.filename in seen or stat.S_ISLNK(i.external_attr >> 16): raise ValueError('unsafe zip')\n seen.add(i.filename)\nz.extractall(root)", zip, join(temporary, artifact.name)]);
+      execFileSync((process.platform === "win32" ? "python" : "python3"), ["-c", "import zipfile,sys,pathlib,stat\nz=zipfile.ZipFile(sys.argv[1]); root=pathlib.Path(sys.argv[2]); seen=set()\nfor i in z.infolist():\n p=pathlib.PurePosixPath(i.filename)\n if p.is_absolute() or '..' in p.parts or i.filename in seen or stat.S_ISLNK(i.external_attr >> 16): raise ValueError('unsafe zip')\n seen.add(i.filename)\nz.extractall(root)", zip, join(temporary, artifact.name)]);
       unlinkSync(zip);
     }
-    const validated = JSON.parse(execFileSync("python3", [resolve(root, "scripts/ci/aggregate-evidence.py"), "--baseline-artifacts", temporary, "--sha", run.head_sha, "--run-id", String(run.id), "--attempt", String(run.run_attempt), "--repo", root], { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }));
+    const validated = JSON.parse(execFileSync((process.platform === "win32" ? "python" : "python3"), [resolve(root, "scripts/ci/aggregate-evidence.py"), "--baseline-artifacts", temporary, "--sha", run.head_sha, "--run-id", String(run.id), "--attempt", String(run.run_attempt), "--repo", root], { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 }));
     if (!validated.ok) throw new Error("baseline-evidence-refused");
     const expectedJobs = ["plan", "verify", ...validated.shards.map((shard) => `p1 (p1-${shard})`)];
     if (jobs.jobs.length !== expectedJobs.length || expectedJobs.some((name) => jobs.jobs.filter((job) => job.name === name && job.conclusion === "success").length !== 1)) throw new Error("baseline-selected-jobs-not-successful");

@@ -34,7 +34,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // replaced. It is not part of the run record. The push gate reads it to leave out verify:p1 when
 // the same run has already passed each of P1's legs (scripts/lib/push-gate-p1-coverage.mjs).
 
-import { spawn } from "node:child_process";
+import { spawnCommand as spawn } from "../../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import type { ChildProcess } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstat, mkdir, readdir, readFile, readlink, realpath } from "node:fs/promises";
@@ -330,14 +330,16 @@ function runGateProcess(command: readonly string[], cwd: string, timeoutMs: numb
     started.stderr?.on("data", append);
     started.once("error", (error: NodeJS.ErrnoException) => finish(null, null, error.code ?? error.message));
     started.once("close", (exitCode: number | null, signal: NodeJS.Signals | null) => finish(exitCode, signal, null));
-    timer = setTimeout(() => {
-      timedOut = true;
-      terminate(started, "SIGTERM");
-      killTimer = setTimeout(() => {
-        if (!settled) terminate(started, "SIGKILL");
-      }, 1_000);
-      killTimer.unref();
-    }, timeoutMs);
+    started.once("spawn", () => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        terminate(started, "SIGTERM");
+        killTimer = setTimeout(() => {
+          if (!settled) terminate(started, "SIGKILL");
+        }, 1_000);
+        killTimer.unref();
+      }, timeoutMs);
+    });
   });
 }
 

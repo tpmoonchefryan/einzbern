@@ -1669,7 +1669,7 @@ export async function readNativeBatchState({ workspace, engineCli, workIds = [],
       return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: String(error?.message ?? error) };
     }
   }
-  if (typeof workspace !== "string" || !workspace.startsWith("/") || workspace.includes("\u0000")) return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: "absolute workspace is required" };
+  if (typeof workspace !== "string" || !isAbsolute(workspace) || workspace.includes("\u0000")) return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: "absolute workspace is required" };
   if (!Number.isSafeInteger(readTimeoutMs) || readTimeoutMs < 1 || readTimeoutMs > RUNTIME_CAPACITY.timerMilliseconds) return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: "readTimeoutMs must be a positive integer supported by the Node timer" };
   if (!(typeof series === "string" && series.length > 0) && workIds.length === 0) return { ok: false, reasonCode: "BATCH_NATIVE_SCOPE_NOT_VERIFIABLE", error: "series or bound work ids are required for a scoped native read" };
   const cli = typeof engineCli === "string" && engineCli.length > 0 ? engineCli : resolve(repositoryRoot, "scripts/einzbern.mjs");

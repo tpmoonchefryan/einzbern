@@ -191,8 +191,8 @@ test("478-AC5: declined adds SessionStart; prompt, subagent and read-guard hooks
     const declined = planHostHooks({ host, scope: "user", deviceHome, platform: "linux", navigation: "declined" });
     assert.deepEqual(Object.keys(declined.groups), ["UserPromptSubmit", "SubagentStart", "PreToolUse", ...(host === "codex" ? ["PostToolUse", "Stop"] : []), "SessionStart"], host);
     assert.equal(declined.navigation, "declined");
-    assert.equal(declined.groups.SessionStart[0].hooks[0].command, hostHookCommand("/srv/einzbern/device/engine/hook.mjs", "SessionStart"));
-    assert.equal(declined.groups.SubagentStart[0].hooks[0].command, hostHookCommand("/srv/einzbern/device/engine/hook.mjs", "SubagentStart"));
+    assert.equal(declined.groups.SessionStart[0].hooks[0].command, hostHookCommand("/srv/einzbern/device/engine/hook.mjs", "SessionStart", undefined, "linux"));
+    assert.equal(declined.groups.SubagentStart[0].hooks[0].command, hostHookCommand("/srv/einzbern/device/engine/hook.mjs", "SubagentStart", undefined, "linux"));
     for (const choice of ["written", null, undefined]) {
       const expected = planHostHooks({ host, scope: "user", deviceHome, platform: "linux", ...(choice === undefined ? {} : { navigation: choice }) });
       assert.deepEqual(Object.keys(expected.groups), ["UserPromptSubmit", "SubagentStart", "PreToolUse", ...(host === "codex" ? ["PostToolUse", "Stop"] : [])], `${host}: ${choice}`);

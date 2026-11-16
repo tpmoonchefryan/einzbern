@@ -120,10 +120,12 @@ export function planMemory(policy, sample, reservations = [], now = Date.now()) 
 }
 
 function readPrivate(path) {
+  const before = lstatSync(path);
+  if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) fail("MEMORY_STATE_INVALID");
   const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = fstatSync(descriptor);
-    if (!metadata.isFile() || metadata.nlink !== 1 || (typeof process.getuid === "function" && metadata.uid !== process.getuid())) fail("MEMORY_STATE_INVALID");
+    if (!metadata.isFile() || metadata.nlink !== 1 || metadata.dev !== before.dev || metadata.ino !== before.ino || (typeof process.getuid === "function" && metadata.uid !== process.getuid())) fail("MEMORY_STATE_INVALID");
     return JSON.parse(readFileSync(descriptor, "utf8"));
   } finally { closeSync(descriptor); }
 }
@@ -416,7 +418,7 @@ function verifiedExecutorProject(cwd) {
     if (member?.size !== bytes.length || member.sha256 !== executorDigest(bytes)) fail("MEMORY_EXECUTOR_UNSUPPORTED");
     contract = JSON.parse(bytes.toString("utf8"));
   } else contract = JSON.parse(readFileSync(metadataPath, "utf8"));
-  if (contract?.schemaVersion !== EXECUTOR_SCHEMA || !/^pnpm@\d+\.\d+\.\d+$/u.test(contract.packageManager ?? "") || !contract.files || Array.isArray(contract.files) || Object.keys(contract.files).length !== 12 || !Object.hasOwn(contract.files, "scripts/lib/windows-system.mjs")) fail("MEMORY_EXECUTOR_UNSUPPORTED");
+  if (contract?.schemaVersion !== EXECUTOR_SCHEMA || !/^pnpm@\d+\.\d+\.\d+$/u.test(contract.packageManager ?? "") || !contract.files || Array.isArray(contract.files) || Object.keys(contract.files).length !== 15 || !Object.hasOwn(contract.files, "scripts/lib/windows-system.mjs") || !Object.hasOwn(contract.files, "scripts/lib/windows-test-controller.mjs") || !Object.hasOwn(contract.files, "skill/mana-orchestrate/scripts/process-launch.mjs") || !Object.hasOwn(contract.files, "skill/mana-orchestrate/scripts/windows-system.mjs")) fail("MEMORY_EXECUTOR_UNSUPPORTED");
   const projectRoot = realpathSync(cwd);
   for (const path of Object.keys(contract.files)) {
     if (isAbsolute(path) || path.includes("\\") || path.split("/").some(part => part === ".." || part === "." || part === "") || !/^[a-f0-9]{64}$/u.test(contract.files[path] ?? "")) fail("MEMORY_EXECUTOR_UNSUPPORTED");

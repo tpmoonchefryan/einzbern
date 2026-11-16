@@ -1,3 +1,4 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -6,6 +7,8 @@ import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
+import { spawnCommandSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 
 import { hookProtocolOutput } from "../dist/build/packages/core/src/hook-recall.js";
 import {
@@ -68,7 +71,7 @@ function request(root, values = {}) {
     deviceHome: values.deviceHome,
     userHome: values.home,
     scope: values.scope ?? "user",
-    platform: "linux",
+    platform: process.platform,
     install: values.install,
     navigation: values.navigation,
   };
@@ -79,9 +82,8 @@ test("INIT091-A1: Antigravity CLI and surface probes stay independent and protoc
   await mkdirFixture(f);
   await mkdir(join(f.home, ".gemini", "config"), { recursive: true });
   await mkdir(join(f.home, ".gemini", "antigravity-ide"), { recursive: true });
-  const fakeAgy = join(f.home, ".local", "bin", "agy");
   await mkdir(join(f.home, ".local", "bin"), { recursive: true });
-  await writeFile(fakeAgy, "#!/bin/sh\necho 'Antigravity CLI 0.2.2'\n", { mode: 0o755 });
+  const fakeAgy = await writeNodeExecutable(join(f.home, ".local", "bin", "agy"), "console.log('Antigravity CLI 0.2.2');");
 
   const notDetected = probeAntigravityHost({ home: f.home, env: { PATH: join(f.root, "empty-bin") }, observedAt: "2026-11-11T00:00:00Z" });
   assert.equal(notDetected.cli.status, "not-detected");
@@ -105,8 +107,10 @@ test("INIT091-A1: Antigravity CLI and surface probes stay independent and protoc
 
   // Shell command fallback emits valid JSON without inner double-quote breakage when launcher is absent.
   for (const [event, expected] of [["UserPromptSubmit", "{}\n"], ["PreToolUse", "{\"decision\":\"allow\"}\n"]]) {
-    const cmd = hostHookCommand(join(f.deviceHome, "missing", "hook.mjs"), event, f.home, "linux", "antigravity");
-    const run = spawnSync("sh", ["-c", cmd], { encoding: "utf8", input: "{}" });
+    const cmd = hostHookCommand(join(f.deviceHome, "missing", "hook.mjs"), event, f.home, process.platform, "antigravity");
+    const run = process.platform === "win32"
+      ? spawnCommandSync(join(process.env.SystemRoot, "System32", "cmd.exe"), ["/d", "/s", "/c", `"${cmd}"`], { encoding: "utf8", input: "{}", windowsVerbatimArguments: true })
+      : spawnSync("sh", ["-c", cmd], { encoding: "utf8", input: "{}" });
     assert.equal(run.status, 0, run.stderr);
     assert.equal(run.stdout, expected);
     assert.doesNotThrow(() => JSON.parse(run.stdout));
@@ -150,7 +154,7 @@ test("INIT091-A2: Antigravity hooks merge only the einzbern group, preserve othe
   assert.equal(refreshed[ANTIGRAVITY_OWNED_HOOK_GROUP].SessionStart, undefined);
   assert.equal(
     refreshed[ANTIGRAVITY_OWNED_HOOK_GROUP].PreInvocation[0].command,
-    hostHookCommand(hookLauncherPath(relocatedDevice, "linux"), "UserPromptSubmit", f.home, "linux", "antigravity"),
+    hostHookCommand(hookLauncherPath(relocatedDevice, process.platform), "UserPromptSubmit", f.home, process.platform, "antigravity"),
   );
 
   // Editing the owned group triggers ANTIGRAVITY_HOOKS_OWNERSHIP_CONFLICT.
@@ -173,10 +177,12 @@ test("INIT091-A2: Antigravity hooks merge only the einzbern group, preserve othe
   const outside = join(f.root, "outside.json");
   await writeFile(outside, "{}\n");
   await rm(hookFile);
-  await symlink(outside, hookFile);
-  await assert.rejects(planAntigravityHooks(request(configRoot, { home: f.home, deviceHome: f.deviceHome })), { reasonCode: "ANTIGRAVITY_HOOKS_PATH_UNSUPPORTED" });
-  assert.notEqual((await inspectAntigravityHookScope(configRoot, "user")).error, null);
-  await rm(hookFile);
+  await t.test("symbolic hook file is refused", { skip: !(await fileSymlinksAvailable(f.root)) }, async () => {
+    await symlink(outside, hookFile);
+    await assert.rejects(planAntigravityHooks(request(configRoot, { home: f.home, deviceHome: f.deviceHome })), { reasonCode: "ANTIGRAVITY_HOOKS_PATH_UNSUPPORTED" });
+    assert.notEqual((await inspectAntigravityHookScope(configRoot, "user")).error, null);
+    await rm(hookFile);
+  });
   await writeFile(hookFile, "[]\n");
   await assert.rejects(planAntigravityHooks(request(configRoot, { home: f.home, deviceHome: f.deviceHome })), { reasonCode: "ANTIGRAVITY_HOOKS_FILE_UNSUPPORTED" });
 });
@@ -286,14 +292,14 @@ test("INIT091-A2: multi-project repair preserves global hooks for sibling projec
   await mkdir(join(projectA, ".agents"), { recursive: true });
   await mkdir(projectB, { recursive: true });
   await mkdir(join(f.deviceHome, "engine"), { recursive: true });
-  await writeFile(hookLauncherPath(f.deviceHome, "linux"), "// launcher\n");
+  await writeFile(hookLauncherPath(f.deviceHome, process.platform), "// launcher\n");
 
   await writeFile(
     join(configRoot, ANTIGRAVITY_USER_HOOKS_FILE),
     `${JSON.stringify({ "user-security": { PreToolUse: [{ matcher: "run_command", hooks: [{ type: "command", command: "echo guard", timeout: 10 }] }] } }, null, 2)}\n`,
   );
 
-  const common = { home: f.home, antigravityConfigHome: configRoot, deviceHome: f.deviceHome, navigation: "always", platform: "linux" };
+  const common = { home: f.home, antigravityConfigHome: configRoot, deviceHome: f.deviceHome, navigation: "always", platform: process.platform };
   const repair = async (projectRoot, at) => {
     const plans = await planAntigravityHookScopes({ ...common, projectRoot });
     for (const plan of plans) {
@@ -335,7 +341,7 @@ test("INIT091-A2: multi-project repair preserves global hooks for sibling projec
   assert.equal((await inspectAntigravityHookScope(projectB, "project")).count, 0);
 
   for (const projectRoot of [projectA, projectB]) {
-    const docHost = (await runDoctor({ projectRoot, home: f.home, deviceHome: f.deviceHome, platform: "linux", env: { ...process.env, ANTIGRAVITY_CONFIG_DIR: configRoot } }))
+    const docHost = (await runDoctor({ projectRoot, home: f.home, deviceHome: f.deviceHome, platform: process.platform, env: { ...process.env, ANTIGRAVITY_CONFIG_DIR: configRoot } }))
       .find((entry) => entry.check === "hooks-present")
       .detail.hosts.find((host) => host.host === "antigravity");
     assert.equal(docHost.hooks, 2);
@@ -362,7 +368,7 @@ test("INIT091-A2: fresh/uninstall wiring honors ANTIGRAVITY_CONFIG_DIR, manages 
   installed["keep-me"] = { SessionStart: [{ type: "command", command: "echo hi", timeout: 5 }] };
   await writeFile(hookPath, `${JSON.stringify(installed, null, 2)}\n`);
 
-  const docSelected = (await runDoctor({ projectRoot: f.project, home: f.home, deviceHome: f.deviceHome, platform: "linux", env: { ...process.env, ANTIGRAVITY_CONFIG_DIR: customConfig } }))
+  const docSelected = (await runDoctor({ projectRoot: f.project, home: f.home, deviceHome: f.deviceHome, platform: process.platform, env: { ...process.env, ANTIGRAVITY_CONFIG_DIR: customConfig } }))
     .find((entry) => entry.check === "hooks-present")
     .detail.hosts.find((host) => host.host === "antigravity");
   assert.equal(docSelected.selection, "selected");

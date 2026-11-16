@@ -91,7 +91,7 @@ test("470-AC5: a library given through a symbolic link is created, registered an
   const cloud = join(base, "CloudStorage", "OneDrive-Personal");
   await mkdir(cloud, { recursive: true });
   const link = join(base, "OneDrive");
-  await symlink(cloud, link);
+  await symlink(cloud, link, process.platform === "win32" ? "junction" : "dir");
   const project = join(base, "project");
   await mkdir(project);
 
@@ -105,13 +105,13 @@ test("470-AC5: a library given through a symbolic link is created, registered an
   // A library path that is itself a link is accepted and stored as the real path; --cloud-hosted is
   // the user's word over the suggestion.
   const direct = join(base, "direct-link");
-  await symlink(realLibrary, direct);
+  await symlink(realLibrary, direct, process.platform === "win32" ? "junction" : "dir");
   const registered = await cli(["library-register", "--project", project, "--library", direct, "--at", at(), "--cloud-hosted", "true"]);
   assert.deepEqual([registered.realPath, registered.entry.libraryPath, registered.entry.cloudHosted, registered.suggestedCloudHosted], [realLibrary, realLibrary, true, false]);
   const registry = JSON.parse(await readFile(join(base, "device", "registry.json"), "utf8"));
   // init --project also created and registered this device's coordination library (EPIC-144 R2),
   // in the device directory and not cloud-hosted; the project's entry is the real library path.
   assert.equal(registry.schemaVersion, "einzbern.registry.v2");
-  assert.deepEqual(registry.entries.map((entry) => [entry.projectPath, entry.libraryPath, entry.cloudHosted]), [["coordination-library", "coordination-library", false], [relative(join(base, "device"), project), relative(join(base, "device"), realLibrary), true]]);
+  assert.deepEqual(registry.entries.map((entry) => [entry.projectPath, entry.libraryPath, entry.cloudHosted]), [["coordination-library", "coordination-library", false], [relative(join(base, "device"), project).replaceAll("\\", "/"), relative(join(base, "device"), realLibrary).replaceAll("\\", "/"), true]]);
   assert.equal((await cli(["library-resolve", "--cwd", project])).libraryPath, realLibrary);
 });

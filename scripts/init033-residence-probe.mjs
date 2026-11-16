@@ -6,21 +6,19 @@
 // surface it exposes, and removes the fixture before returning. It deliberately
 // never opens a model session or touches a real project configuration.
 
-import { execFile } from "node:child_process";
+import { spawnCommandSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { promisify } from "node:util";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-const execFileAsync = promisify(execFile);
 // TCRN-CROSS-INC-387 (STORY-461 R3): the Claude CLI is the host's own executable
 // (CLAUDE_CODE_EXECPATH naming an executable regular file) first, `claude` from PATH only as the
 // named fallback -- the rule host-probe applies (packages/core/src/host-probe.ts) -- and every
 // Claude result carries cliSource (host or path). Codex runs as before.
 function hostClaudeCli(env = process.env) {
   const host = typeof env.CLAUDE_CODE_EXECPATH === "string" ? env.CLAUDE_CODE_EXECPATH : "";
-  if (host.length > 0) {
+  if (host.length > 0 && (process.platform !== "win32" || /\.(?:exe|com|cmd|bat)$/iu.test(host))) {
     try {
       accessSync(host, fsConstants.X_OK);
       if (statSync(host).isFile()) return { executable: host, source: "host" };
@@ -32,13 +30,14 @@ const claudeCli = hostClaudeCli();
 
 async function run(label, executable, args, cwd, environment = {}) {
   try {
-    const result = await execFileAsync(executable, args, {
+    const result = spawnCommandSync(executable, args, {
       cwd,
       env: { ...process.env, ...environment },
       timeout: 15_000,
       maxBuffer: 1_048_576,
+      encoding: "utf8",
     });
-    return { label, executable, args, cwd, exitCode: 0, stdout: result.stdout, stderr: result.stderr };
+    return { label, executable, args, cwd, exitCode: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr || String(result.error ?? "") };
   } catch (error) {
     return {
       label,
@@ -67,8 +66,8 @@ try {
   await writeFile(join(root, ".claude", "settings.json"), `${JSON.stringify({
     permissions: { deny: ["Bash(echo INIT033_DENY_MARKER)"] },
     hooks: {
-      SessionStart: [{ hooks: [{ type: "command", command: "printf INIT033_SESSION_HOOK" }] }],
-      Stop: [{ hooks: [{ type: "command", command: "printf INIT033_STOP_HOOK" }] }],
+      SessionStart: [{ hooks: [{ type: "command", command: "node -e \"process.stdout.write('INIT033_SESSION_HOOK')\"" }] }],
+      Stop: [{ hooks: [{ type: "command", command: "node -e \"process.stdout.write('INIT033_STOP_HOOK')\"" }] }],
     },
   }, null, 2)}\n`);
   await writeFile(join(root, ".mcp.json"), `${JSON.stringify({

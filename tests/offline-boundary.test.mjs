@@ -212,7 +212,12 @@ if (process.env.TCRN_OFFLINE_PROOF !== "1") {
   });
 }
 
-test("offline permits only canonical owned private filesystem Unix IPC", async t => {
+test("offline refuses Windows named-pipe destinations", { skip: process.platform !== "win32" }, () => {
+  refuses("named pipe", () => net.connect("\\\\.\\pipe\\einzbern-offline-test"));
+  refuses("named pipe options", () => namedCreateConnection({ path: "\\\\.\\pipe\\einzbern-offline-test" }));
+});
+
+test("offline permits only canonical owned private filesystem Unix IPC", { skip: process.platform === "win32" }, async t => {
   const parent = await realpath(tmpdir());
   assertOfflineUnixFixturePathBudget(join(parent, `${offlineUnixFixtureLayout.directoryPrefix}${offlineUnixFixtureLayout.suffix}`));
   const directory = await realpath(await mkdtemp(join(parent, offlineUnixFixtureLayout.directoryPrefix)));

@@ -223,9 +223,18 @@ function isUnsharedRegularFile(info: Awaited<ReturnType<typeof lstat>>): boolean
 async function readWithoutFollowingLink(path: string): Promise<Buffer> {
   let handle;
   try {
+    const before = process.platform === "win32" ? await lstat(path) : null;
+    if (before !== null && !isUnsharedRegularFile(before)) throw new AkashaFileShapeError();
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const info = await handle.stat();
     if (!isUnsharedRegularFile(info)) throw new AkashaFileShapeError();
+    if (before !== null) {
+      const after = await lstat(path);
+      if (!isUnsharedRegularFile(after) ||
+          !((before.dev === info.dev && before.ino === info.ino) || (after.dev === info.dev && after.ino === info.ino))) {
+        throw new AkashaFileShapeError();
+      }
+    }
     return await handle.readFile();
   } catch (error) {
     if ((error as { code?: string }).code === "ELOOP") throw new AkashaFileShapeError();

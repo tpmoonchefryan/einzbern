@@ -1,17 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { readBoundRegularFile, safeWriteOutput, withExclusiveOutputSession } from "../scripts/lib/safe-io.mjs";
-import { walkFiles } from "../scripts/lib/files.mjs";
+import { isInside, walkFiles } from "../scripts/lib/files.mjs";
 import { configureStorageLocation } from "../dist/build/packages/core/src/storage-configure.js";
 import { readSnapshotManifestFile } from "../dist/build/packages/core/src/workspace-snapshot.js";
 import { memoryPackageTask } from "../dist/build/scripts/lib/memory-budget.mjs";
 import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
+import { storePath, loadPath } from "../dist/build/packages/core/src/stored-path.js";
+import { validateSettingValue } from "../dist/build/packages/core/src/settings.js";
+import { FileStoreBackend } from "../dist/build/packages/core/src/store-backend.js";
 
 async function fixture(t) {
   const root = await realpath(await mkdtemp(join(tmpdir(), "einzbern windows 中文 ")));
@@ -19,24 +22,72 @@ async function fixture(t) {
   return root;
 }
 
+test("portable record names preserve logical IDs, bytes and existing POSIX records", async t => {
+  const root = await fixture(t);
+  await mkdir(join(root, "records"));
+  const profile = {
+    reasonCodes: { pathInvalid: "PATH_INVALID", linkUnsafe: "LINK_UNSAFE", specialFile: "SPECIAL_FILE", limitExceeded: "LIMIT_EXCEEDED", sourceChanged: "SOURCE_CHANGED", alreadyExists: "ALREADY_EXISTS" },
+    limits: { markerBytes: 1024, metadataBytes: 1024, bodyBytes: 1024, viewBytes: 1024, recordBytes: 1024 },
+  };
+  const backend = new FileStoreBackend(root, profile);
+  const id = `artifact:${"a".repeat(24)}`;
+  const portable = `${id.replace(":", "%3A")}.json`;
+  await writeFile(join(root, "records", portable), "original");
+  assert.deepEqual(await backend.listArtifactRecords(), [`${id}.json`]);
+  assert.equal((await backend.readArtifactRecord(id)).toString(), "original");
+  await backend.writeArtifactRecord(id, "updated");
+  assert.equal(await readFile(join(root, "records", portable), "utf8"), "updated");
+  const next = `artifact:${"b".repeat(24)}`;
+  await backend.writeArtifactRecord(next, "new");
+  const nextName = process.platform === "win32" ? next.replace(":", "%3A") : next;
+  assert.equal(await readFile(join(root, "records", `${nextName}.json`), "utf8"), "new");
+  if (process.platform === "win32") await assert.rejects(backend.writeArtifactRecord("other:stream", "invalid"), { reasonCode: "PATH_INVALID" });
+  if (process.platform !== "win32") {
+    await writeFile(join(root, "records", `${id}.json`), "ambiguous");
+    await assert.rejects(backend.listArtifactRecords(), { reasonCode: "PATH_INVALID" });
+    await assert.rejects(backend.readArtifactRecord(id), { reasonCode: "STORE_RECORD_AMBIGUOUS" });
+  }
+});
+
+test("Windows stored paths round-trip across volumes and UNC shares", { skip: process.platform !== "win32" }, () => {
+  for (const [base, target, stored] of [
+    ["C:\\device", "D:\\runtime\\cache", "D:/runtime/cache"],
+    ["C:\\device", "C:\\runtime\\cache", "../runtime/cache"],
+    ["C:\\device", "\\\\server\\share\\runtime", "//server/share/runtime"],
+  ]) {
+    assert.equal(storePath(base, target), stored);
+    assert.equal(loadPath(base, stored), target);
+  }
+});
+
+test("Windows path boundaries reject other volumes and accept normalized article bindings", { skip: process.platform !== "win32" }, () => {
+  assert.equal(isInside("C:\\device", "D:\\runtime"), false);
+  assert.equal(isInside("C:\\device", "\\\\server\\share\\runtime"), false);
+  assert.equal(isInside("C:\\device", "C:\\device\\cache"), true);
+  assert.equal(validateSettingValue("knowledge.articlesPath", "D:\\knowledge"), "D:\\knowledge");
+});
+
 test("the built resource adapter resolves its source executor on the native platform", () => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   assert.deepEqual(memoryPackageTask(["pnpm", "build"], root), { entry: "scripts/task.mjs", args: ["build"] });
 });
 
-test("Windows full-suite entry reports its unsupported controller before launching it", { skip: process.platform !== "win32" }, async t => {
+test("Windows suite controller reports success, failures and a joined timeout", { skip: process.platform !== "win32" }, async t => {
   const root = await fixture(t);
-  await cp(new URL("../scripts", import.meta.url), join(root, "scripts"), { recursive: true });
-  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(root, "node_modules"), "junction");
-  await mkdir(join(root, ".git"));
-  await writeFile(join(root, "package.json"), '{"type":"module"}\n');
-  const child = spawnSync(process.execPath, [join(root, "scripts", "task.mjs"), "test"], {
-    encoding: "utf8", windowsHide: true, timeout: 15_000,
-    env: { ...process.env, EINZBERN_HOME: join(root, "device"), EINZBERN_HEAVY_LOCK_DIR: join(root, "locks") },
+  const { runWindowsTestController } = await import("../scripts/lib/windows-test-controller.mjs");
+  const file = join(root, "example.test.mjs");
+  const options = { cwd: root, env: { ...process.env }, timeoutMs: 30_000 };
+  await writeFile(file, "import test from 'node:test'; test('pass',()=>{});\n");
+  const success = await runWindowsTestController(["--test", file], options);
+  assert.equal(success.progress.lastProgress.writerQuiescent, true);
+  await writeFile(file, "import test from 'node:test'; test('fail',()=>{throw new Error('fixture failure')});\n");
+  await assert.rejects(runWindowsTestController(["--test", file], options), { reasonCode: "COMMAND_FAILED" });
+  await writeFile(file, "setInterval(()=>{},1000);\n");
+  await assert.rejects(runWindowsTestController(["--test", file], { ...options, timeoutMs: 3000 }), error => {
+    assert.equal(error.reasonCode, "TEST_CONTROLLER_TIMEOUT");
+    assert.equal(error.details.progress.lastProgress.writerQuiescent, true);
+    return true;
   });
-  assert.equal(child.status, 1, child.stderr);
-  assert.match(child.stderr, /^\{/u, child.stderr);
-  assert.equal(JSON.parse(child.stderr.trim()).reasonCode, "TEST_CONTROLLER_PLATFORM_UNSUPPORTED");
 });
 
 test("descriptor-bound reads reject hardlinks and path replacement on native filesystems", async t => {

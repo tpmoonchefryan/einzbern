@@ -658,6 +658,12 @@ async function build() {
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-budget.mjs", memoryBudget);
   const windowsSystem = await readSourceFile(resolve(repositoryRoot, "scripts/lib/windows-system.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/windows-system.mjs", windowsSystem);
+  // Runtime imports make the built skill directory discoverable by skill-render.
+  // Keep that template complete for packaging and installed host copies.
+  for (const path of await walkFiles(resolve(repositoryRoot, "skill/mana-orchestrate"))) {
+    const target = toPosixPath(relative(repositoryRoot, path));
+    await safeWriteOutput(repositoryRoot, `dist/build/${target}`, await readSourceFile(path));
+  }
   const memoryWorkerCheck = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-worker-check.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-worker-check.mjs", memoryWorkerCheck);
   const heavyRuns = await readSourceFile(resolve(repositoryRoot, "scripts/lib/heavy-runs.mjs"));
@@ -684,9 +690,6 @@ async function build() {
 // caller that is not a `verify:*` name: `p8Only` is the release train's dogfood leg. The
 // external-trust leg (`trustOnly`) retired with the trust root (TCRN-CROSS-STORY-467 R2).
 async function runTests({ p8Only = false, extraEnvironment = {}, ciPlan } = {}) {
-  if (process.platform === "win32") {
-    fail("TEST_CONTROLLER_PLATFORM_UNSUPPORTED", "The suite controller requires POSIX process groups. Run the focused Node tests documented in docs/windows.md on Windows.");
-  }
   await build();
   let tests = selectTestFiles((await walkFiles())
     .map((path) => toPosixPath(relative(repositoryRoot, path))), "core")
@@ -701,13 +704,17 @@ async function runTests({ p8Only = false, extraEnvironment = {}, ciPlan } = {}) 
   const deviceDirectory = await mkdtemp(join(tmpdir(), "einzbern-test-device-"));
   let controller;
   try {
-    controller = await runDetachedTestController(coreTestArgv(tests), {
+    const environment = {
+      ...process.env,
       NODE_OPTIONS: `--import=${noNetworkImport}`,
       TCRN_OFFLINE_PROOF: "1",
       EINZBERN_HOME: join(deviceDirectory, "einzbern"),
       EINZBERN_TEST_DEVICE_ROOT: deviceDirectory,
       ...extraEnvironment,
-    }, tests, p8Only);
+    };
+    controller = process.platform === "win32"
+      ? await (await import("./lib/windows-test-controller.mjs")).runWindowsTestController(coreTestArgv(tests), { cwd: repositoryRoot, env: environment, timeoutMs: controllerTimeoutMs(p8Only), onFailure: fail, tests })
+      : await runDetachedTestController(coreTestArgv(tests), environment, tests, p8Only);
   } finally {
     await rm(deviceDirectory, { recursive: true, force: true });
   }
@@ -1656,6 +1663,26 @@ async function invoke(name) {
 // and the processes a leg starts inherit it, so no leg waits for a slot its own run holds or
 // carries a waiting line on its stderr; the only waiting line is p1's own, before any leg starts.
 const HEAVY_COMMANDS = new Set(["test", "verify-p1"]);
+if (process.platform === "win32") {
+  const { windowsJobState } = await import("./lib/windows-system.mjs");
+  if (windowsJobState(process.env.EINZBERN_WINDOWS_JOB) !== "member") {
+    const { spawnCommand } = await import("../skill/mana-orchestrate/scripts/process-launch.mjs");
+    const child = spawnCommand(process.execPath, process.argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout.pipe(process.stdout);
+    child.stderr.pipe(process.stderr);
+    const interrupt = () => child.kill("SIGINT");
+    const terminate = () => child.kill("SIGTERM");
+    process.once("SIGINT", interrupt);
+    process.once("SIGTERM", terminate);
+    const code = await new Promise((resolveCode, reject) => {
+      child.once("error", reject);
+      child.once("close", exitCode => resolveCode(exitCode ?? 1));
+    });
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", terminate);
+    process.exit(code);
+  }
+}
 let heavySlot = null;
 try {
   if (HEAVY_COMMANDS.has(command)) heavySlot = await acquireHeavySlot({ command });

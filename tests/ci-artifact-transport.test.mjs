@@ -5,6 +5,7 @@ import { mkdtemp, readFile, writeFile, rm, symlink, rename, realpath } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createTransport, verifyTransport } from "../scripts/ci/transport-evidence.mjs";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 const plan = { head: "a".repeat(40), planDigest: "b".repeat(64), runId: "12", attempt: "2" };
 test("local component fixture rehashes real bytes; this does not establish remote action transfer", async (t) => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "einzbern-transport-")));
@@ -26,6 +27,8 @@ test("local component fixture rehashes real bytes; this does not establish remot
   await rename(join(path, "extra"), join(root, "retained-extra"));
   await rename(join(path, "payload.bin"), join(root, "payload.bin"));
   await assert.rejects(verifyTransport(path, plan));
-  await symlink(join(root, "payload.bin"), join(path, "payload.bin"));
-  await assert.rejects(verifyTransport(path, plan));
+  await t.test("symbolic transport payload is refused", { skip: !await fileSymlinksAvailable(root) }, async () => {
+    await symlink(join(root, "payload.bin"), join(path, "payload.bin"));
+    await assert.rejects(verifyTransport(path, plan));
+  });
 });

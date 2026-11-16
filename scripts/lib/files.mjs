@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { isAbsolute, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { compareCanonicalText } from "./canonical-order.mjs";
@@ -40,7 +40,7 @@ export function toPosixPath(value) {
 
 export function isInside(parent, candidate) {
   const relation = relative(parent, candidate);
-  return relation === "" || (!relation.startsWith("..") && !relation.startsWith(sep));
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
 }
 
 // walkFiles returns paths, never contents, so it probes each candidate for the boundary

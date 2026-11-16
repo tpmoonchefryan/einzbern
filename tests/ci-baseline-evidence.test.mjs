@@ -119,7 +119,7 @@ async function localBundle(t, coverage) {
   const core = await captureFixtureCore(fixture, plan, join(bundle, `p1-core-evidence-${head}-1`));
   const program = `
 import importlib.util,json,pathlib,sys,hashlib
-root=pathlib.Path(sys.argv[1]); repo=pathlib.Path(sys.argv[2]); plan=json.loads(sys.argv[3]); actual=json.loads(sys.argv[4])
+root=pathlib.Path(sys.argv[1]); repo=pathlib.Path(sys.argv[2]); plan,actual=json.load(sys.stdin)
 spec=importlib.util.spec_from_file_location("aggregate",repo/"scripts/ci/aggregate-evidence.py")
 a=importlib.util.module_from_spec(spec);spec.loader.exec_module(a);m=a.evidence_runner
 def write(path,value):
@@ -139,7 +139,7 @@ for shard,tasks in plan["shards"].items():
   meta=dict(actual["capture"],mode=mode,fixtures=actual["fixtures"],input=actual["input"],output=actual["output"],inputManifest=actual["inputManifest"],outputManifest=actual["outputManifest"],impactPlan=plan,coverage=plan["coverage"],planDigest=plan["planDigest"],selectedCoreTests=plan["coreTests"],ciIdentity={"GITHUB_RUN_ID":"71","GITHUB_RUN_ATTEMPT":"1","GITHUB_JOB":"p1"},artifactFiles={},extraArtifacts={},finalShardReceipt=final,finalReceiptStream="stdout",receipt={"ok":actual["capture"]["exitCode"]==0,"scope":"actual Core child; component wrapper metadata"})
   for name,value in [("fixture-location.json",meta["fixtures"]),("source-before.json",meta["inputManifest"]),("source-after.json",meta["outputManifest"]),("impact-plan.json",plan)]:
    write(d/name,value);meta["artifactFiles"][name]=m.file_receipt(d/name)
-  for path in [d/"shard.json",*sorted((d/"steps").iterdir())]: seal(d,meta,str(path.relative_to(d)))
+  for path in [d/"shard.json",*sorted((d/"steps").iterdir())]: seal(d,meta,path.relative_to(d).as_posix())
   meta["testTotals"]=m.parse_test_totals((d/(mode+"-controller.stdout")).read_bytes())
   meta["retainedArtifactsVerified"]=not m.verify_retained_artifacts(d,meta)
   write(d/"receipt.json",meta["receipt"]);write(d/(mode+".meta.json"),meta)
@@ -180,11 +180,11 @@ for name,reason in [("install.json","INSTALL_ENGINE_READY"),("setup-plan.json","
 write(p/"fixture.tar.gz.sha256",hashlib.sha256((p/"fixture.tar.gz").read_bytes()).hexdigest()+" fixture.tar.gz\\n")
 write(p/"package-seal.json",dict(identity={k:plan[k] for k in ["head","runId","attempt","planDigest"]},files={x.name:dict(bytes=x.stat().st_size,sha256=hashlib.sha256(x.read_bytes()).hexdigest()) for x in p.iterdir()}))
 `;
-  execFileSync("python3", ["-B", "-c", program, bundle, repo, JSON.stringify(plan), JSON.stringify(core)], { env: fixture.env, maxBuffer: 8 * 1024 * 1024 });
+  execFileSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", program, bundle, repo], { input: JSON.stringify([plan, core]), env: fixture.env, maxBuffer: 8 * 1024 * 1024 });
   const aggregate = () => {
     const summaryPath = join(directory, "aggregate-summary.md");
     writeFileSync(summaryPath, "");
-    const run = spawnSync("python3", ["-B", join(repo, "scripts/ci/aggregate-evidence.py"), "--baseline-artifacts", bundle, "--repo", repo, "--sha", head, "--run-id", "71", "--attempt", "1"], { env: { ...fixture.env, GITHUB_STEP_SUMMARY: summaryPath }, encoding: "utf8" });
+    const run = spawnSync((process.platform === "win32" ? "python" : "python3"), ["-B", join(repo, "scripts/ci/aggregate-evidence.py"), "--baseline-artifacts", bundle, "--repo", repo, "--sha", head, "--run-id", "71", "--attempt", "1"], { env: { ...fixture.env, GITHUB_STEP_SUMMARY: summaryPath }, encoding: "utf8" });
     assert.ok(run.stdout, run.stderr);
     const result = JSON.parse(run.stdout);
     assert.equal(run.status, result.ok ? 0 : 1, "terminal exit still agrees with aggregate verdict");
@@ -194,7 +194,7 @@ write(p/"package-seal.json",dict(identity={k:plan[k] for k in ["head","runId","a
     return { ...result, stepSummary: summary };
   };
   const zipRows = async () => {
-    const result = JSON.parse(execFileSync("python3", ["-B", "-c", 'import pathlib,zipfile,io,base64,json,sys\nr=[]\nfor n,d in enumerate(sorted(pathlib.Path(sys.argv[1]).iterdir()),1):\n b=io.BytesIO()\n with zipfile.ZipFile(b,"w") as z:\n  for p in d.rglob("*"):\n   if p.is_file(): z.write(p,p.relative_to(d))\n r.append(dict(id=n,name=d.name,expired=False,bytes=base64.b64encode(b.getvalue()).decode()))\nprint(json.dumps(r))', bundle], { encoding: "utf8" }));
+    const result = JSON.parse(execFileSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", 'import pathlib,zipfile,io,base64,json,sys\nr=[]\nfor n,d in enumerate(sorted(pathlib.Path(sys.argv[1]).iterdir()),1):\n b=io.BytesIO()\n with zipfile.ZipFile(b,"w") as z:\n  for p in d.rglob("*"):\n   if p.is_file(): z.write(p,p.relative_to(d))\n r.append(dict(id=n,name=d.name,expired=False,bytes=base64.b64encode(b.getvalue()).decode()))\nprint(json.dumps(r))', bundle], { encoding: "utf8" }));
     return result;
   };
   return { ...fixture, bundle, plan, core, aggregate, zipRows, fs, join };
@@ -372,7 +372,7 @@ for (const coverage of ["full", "selective"]) {
           await t.test("current source rejects independent derivation", () => {
             assert.throws(() => validatePlan(forged, fixture.repo, fixture.env), /independently derived source\/event\/rules\/rosters/u);
           });
-          execFileSync("python3", ["-B", "-c", `
+          execFileSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", `
 import json,pathlib,sys,hashlib
 root=pathlib.Path(sys.argv[1]);p=json.loads(sys.argv[2])
 def write(path,value): path.write_text(json.dumps(value,indent=2)+"\\n")

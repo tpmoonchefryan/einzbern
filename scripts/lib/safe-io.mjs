@@ -7,7 +7,7 @@ import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { CONFIG_BACKUP_RESERVATION_FILE, CONFIG_BACKUP_RESERVED_AREAS, readConfigBackupReservation } from "./config-backup-reservation.mjs";
-import { createPrivateWindowsDirectory, hasPrivateWindowsPermissions } from "./windows-system.mjs";
+import { createPrivateWindowsDirectory, hasPrivateWindowsPermissions, retireWindowsOutputSession, windowsJobState } from "./windows-system.mjs";
 
 let temporarySequence = 0;
 const outputSessionStorage = new AsyncLocalStorage();
@@ -1079,7 +1079,7 @@ function sameIdentity(left, right) {
 
 function inside(parent, candidate) {
   const relation = relative(parent, candidate);
-  return relation === "" || (!relation.startsWith("..") && !relation.startsWith(sep));
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
 }
 
 async function pathMetadata(path, reasonCode) {
@@ -1213,45 +1213,79 @@ export async function bindOutputSessionProcessGroup(processGroup) {
   session.ownerIdentity = sealed.identity;
 }
 
-async function withWindowsOutputSession(repository, gitDirectory, gitFile, operation) {
-  const lockPath = resolve(gitDirectory, outputLockName);
-  if (!createPrivateWindowsDirectory(lockPath)) {
-    // A dead parent does not prove that its output-writing descendants have exited.
+async function recoverWindowsOutputSession(lockPath) {
+  const ownerPath = resolve(lockPath, outputLockMetadataName);
+  const metadata = await lstat(lockPath);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || !hasPrivateWindowsPermissions(lockPath)) fail("OUTPUT_SESSION_OWNER_INVALID", lockPath);
+  const owner = await readBoundRegularFile(ownerPath);
+  let record;
+  try { record = JSON.parse(owner.content); } catch { fail("OUTPUT_SESSION_OWNER_INVALID", ownerPath); }
+  let dead = false;
+  try { process.kill(record.pid, 0); } catch (error) { dead = error.code === "ESRCH"; }
+  if (!dead || !["missing", "empty"].includes(windowsJobState(record.jobName))) {
     fail("OUTPUT_SESSION_RECOVERY_REQUIRED", `An existing Windows output session owns ${lockPath}`);
   }
-  const lockIdentity = await pathMetadata(lockPath, "OUTPUT_SESSION_LOST");
-  if (lockIdentity.isSymbolicLink() || !lockIdentity.isDirectory() || !hasPrivateWindowsPermissions(lockPath)) {
-    fail("OUTPUT_SESSION_OWNER_INVALID", lockPath);
-  }
-  const ownerPath = resolve(lockPath, outputLockMetadataName);
+  retireWindowsOutputSession(lockPath, owner.content, `${lockPath}.retired-${randomBytes(16).toString("hex")}`);
+}
+
+async function withWindowsOutputSession(repository, gitDirectory, gitFile, operation) {
+  const lockPath = resolve(gitDirectory, outputLockName);
+  const stagePath = `${lockPath}.stage-${randomBytes(16).toString("hex")}`;
   const ownerBytes = Buffer.from(`${JSON.stringify({
     schemaVersion: "einzbern.windows-output-session.v1", pid: process.pid, token: randomBytes(32).toString("hex"),
+    ...(windowsJobState(process.env.EINZBERN_WINDOWS_JOB) === "member" ? { jobName: process.env.EINZBERN_WINDOWS_JOB } : {}),
   })}\n`);
-  const handle = await open(ownerPath, "wx", 0o600);
+  if (!createPrivateWindowsDirectory(stagePath)) fail("OUTPUT_SESSION_OWNER_INVALID", stagePath);
+  const stageIdentity = await lstat(stagePath);
+  const stagedOwner = resolve(stagePath, outputLockMetadataName);
+  let published = false;
   let ownerIdentity;
   try {
-    await handle.writeFile(ownerBytes);
-    await handle.sync();
-    ownerIdentity = await handle.stat();
-  } finally {
-    await handle.close();
-  }
-  const session = {
-    windows: true, repositoryReal: repository.realPath, repositoryIdentity: repository.metadata,
-    gitFile, lockPath, lockIdentity, ownerIdentity, ownerBytes,
-  };
-  try {
-    return await outputSessionStorage.run(session, async () => {
-      await requireOutputSession(repository.realPath);
-      return operation();
-    });
-  } finally {
-    await assertOutputSessionBinding(session, await resolveOutputRepository(repository.realPath));
-    if (!hasPrivateWindowsPermissions(lockPath) || (await readdir(lockPath)).join() !== outputLockMetadataName) {
-      fail("OUTPUT_SESSION_RELEASE_REPLACED", lockPath);
+    const handle = await open(stagedOwner, "wx", 0o600);
+    try {
+        ownerIdentity = await handle.stat();
+      await handle.writeFile(ownerBytes);
+      await handle.sync();
+    } finally { await handle.close(); }
+    // Publish a complete ownership record atomically. A killed initializer
+    // cannot leave an ownerless fixed lock that blocks future work.
+    try { await rename(stagePath, lockPath); }
+    catch (error) {
+      if (!["EEXIST", "EPERM", "EACCES", "ENOTEMPTY"].includes(error.code)) throw error;
+      await recoverWindowsOutputSession(lockPath);
+      await rename(stagePath, lockPath);
     }
-    await rm(ownerPath);
-    await rmdir(lockPath);
+    published = true;
+    const lockIdentity = await pathMetadata(lockPath, "OUTPUT_SESSION_LOST");
+    if (!sameIdentity(stageIdentity, lockIdentity) || !hasPrivateWindowsPermissions(lockPath)) fail("OUTPUT_SESSION_OWNER_INVALID", lockPath);
+    const session = {
+      windows: true, repositoryReal: repository.realPath, repositoryIdentity: repository.metadata,
+      gitFile, lockPath, lockIdentity, ownerIdentity, ownerBytes,
+    };
+    try {
+      return await outputSessionStorage.run(session, async () => {
+        await requireOutputSession(repository.realPath);
+        return operation();
+      });
+    } finally {
+      await assertOutputSessionBinding(session, await resolveOutputRepository(repository.realPath));
+      if (!hasPrivateWindowsPermissions(lockPath) || (await readdir(lockPath)).join() !== outputLockMetadataName) fail("OUTPUT_SESSION_RELEASE_REPLACED", lockPath);
+      await rm(resolve(lockPath, outputLockMetadataName));
+      await rmdir(lockPath);
+    }
+  } finally {
+    const remainingStage = !published ? await lstat(stagePath).catch(error => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }) : null;
+    if (remainingStage && sameIdentity(stageIdentity, remainingStage)) {
+      const remainingOwner = await lstat(stagedOwner).catch(error => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (ownerIdentity && remainingOwner && sameIdentity(ownerIdentity, remainingOwner)) await rm(stagedOwner);
+      await rmdir(stagePath);
+    }
   }
 }
 

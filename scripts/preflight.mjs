@@ -7,7 +7,7 @@
 // isolated clone, so a second-world mismatch cannot hide behind the working tree.
 
 import { mkdtemp, realpath, rm } from "node:fs/promises";
-import { spawnSync } from "node:child_process";
+import { spawnCommandSync as spawnSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";

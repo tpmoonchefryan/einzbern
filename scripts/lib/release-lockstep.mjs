@@ -2,8 +2,9 @@
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { spawnCommandSync } from "../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { lstat, mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, basename, dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { README_NAMES, renderReadmes } from "../render-readme.mjs";
@@ -120,7 +121,8 @@ function helperReadmeVersion(content) {
 // `raw` keeps stdout as the exact bytes (committed blobs are compared byte for byte); stderr is
 // always text.
 function run(command, args, { cwd, env = process.env, raw = false } = {}) {
-  const result = spawnSync(command, args, {
+  const launch = command === "git" ? spawnSync : spawnCommandSync;
+  const result = launch(command, args, {
     cwd,
     env,
     encoding: raw ? "buffer" : "utf8",
@@ -322,7 +324,7 @@ function releaseCli(engineRoot, args, env) {
 
 function inside(parent, candidate) {
   const path = relative(parent, candidate);
-  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !path.startsWith(sep));
+  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 }
 
 // Absence means the library default; an explicit project is never inferred from roots or digests.

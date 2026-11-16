@@ -8,7 +8,7 @@
 // unedited project-scope "einzbern" groups so multi-project setups share a single active hook
 // without duplicate execution while preserving unrelated hook groups and user edits.
 
-import { spawnSync } from "node:child_process";
+import { spawnCommandSync as spawnSync } from "../../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { createHash } from "node:crypto";
 import * as fsModule from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
@@ -168,7 +168,7 @@ export function probeAntigravityHost(
         ideDataDir: directoryExistsSync(join(probeHome, ".gemini", "antigravity-ide")),
         appDataDir: directoryExistsSync(join(probeHome, ".gemini", "antigravity")),
       };
-  const timeout = input.timeoutMs ?? 2_000;
+  const timeout = input.timeoutMs ?? (process.platform === "win32" ? 5_000 : 2_000);
   let candidate = input.executable ?? "agy";
   let run = spawnSync(candidate, ["--version"], {
     encoding: "utf8",
@@ -179,8 +179,9 @@ export function probeAntigravityHost(
   });
   const firstCode = (run.error as NodeJS.ErrnoException | undefined)?.code;
   if (input.executable === undefined && input.env?.PATH === undefined && firstCode === "ENOENT" && probeHome !== null) {
-    const localBin = join(probeHome, ".local", "bin", process.platform === "win32" ? "agy.exe" : "agy");
-    if (regularFileExistsSync(localBin)) {
+    const names = process.platform === "win32" ? ["agy.exe", "agy.cmd", "agy.bat"] : ["agy"];
+    const localBin = names.map(name => join(probeHome, ".local", "bin", name)).find(regularFileExistsSync);
+    if (localBin !== undefined) {
       candidate = localBin;
       run = spawnSync(candidate, ["--version"], {
         encoding: "utf8",
@@ -280,6 +281,13 @@ function isCanonicalAntigravityHookCommand(
     ? "process.stdout.write(JSON.stringify({decision:'allow'})+'\\n')"
     : "process.stdout.write('{}\\n')";
   const suffix = `'));process.env.EINZBERN_HOME=d;process.env.EINZBERN_HOST='antigravity';import(require('node:url').pathToFileURL(p.join(d,'engine/hook.mjs')).href).then(m=>m.launch(process.argv.slice(1),process.env)).then(s=>{if(s)process.stdout.write(s);else ${emptyWrite}}).catch(e=>{process.stderr.write(JSON.stringify({ok:false,reasonCode:e.reasonCode||'HOOK_LAUNCH_FAILED',error:e.message})+'\\n');${emptyWrite}})" ${expectedWord}`;
+  const encodedPrefix = `${ANTIGRAVITY_COMMAND_PREFIX.slice(0, -1)}Buffer.from('`;
+  const encodedSuffix = `','base64').toString('utf8')${suffix.slice(1)}`;
+  if (platform === "win32" && command.startsWith(encodedPrefix) && command.endsWith(encodedSuffix)) {
+    const encoded = command.slice(encodedPrefix.length, -encodedSuffix.length);
+    const decoded = Buffer.from(encoded, "base64").toString("utf8");
+    return decoded.length > 0 && !/[\u0000-\u001f\u007f"]/u.test(decoded) && Buffer.from(decoded, "utf8").toString("base64") === encoded;
+  }
   if (command.length <= ANTIGRAVITY_COMMAND_PREFIX.length + suffix.length) return false;
   if (!command.startsWith(ANTIGRAVITY_COMMAND_PREFIX) || !command.endsWith(suffix)) return false;
   const escapedLiteral = command.slice(ANTIGRAVITY_COMMAND_PREFIX.length, command.length - suffix.length);

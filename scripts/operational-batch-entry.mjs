@@ -11,8 +11,8 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import { spawnCommandSync as spawnSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
+import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { LEGACY_ENGINE_NAME, LEGACY_HOOK_CHILD_SCRIPTS, LEGACY_HOOK_SCRIPTS, LOCAL_DIRECTORY_NAMES } from "./lib/names.mjs";
@@ -307,7 +307,7 @@ function candidateSnapshot({ archivePath = sourceArchivePath } = {}) {
     const head = gitOutput(["rev-parse", "HEAD"]).trim();
     const tree = gitOutput(["rev-parse", "HEAD^{tree}"]).trim();
     const status = gitOutput(["status", "--porcelain=v1", "--untracked-files=all"]);
-    if (typeof archivePath !== "string" || !archivePath.startsWith("/") || !existsSync(archivePath) || !lstatSync(archivePath).isFile() || lstatSync(archivePath).isSymbolicLink()) return { observed: false, stable: false, id: tree || head || null, digest: null, records: [], reasonCode: "BATCH_CANDIDATE_ARCHIVE_NOT_VERIFIABLE" };
+    if (typeof archivePath !== "string" || !isAbsolute(archivePath) || !existsSync(archivePath) || !lstatSync(archivePath).isFile() || lstatSync(archivePath).isSymbolicLink()) return { observed: false, stable: false, id: tree || head || null, digest: null, records: [], reasonCode: "BATCH_CANDIDATE_ARCHIVE_NOT_VERIFIABLE" };
     const archiveIdentity = archiveSourceIdentity(archivePath, tree);
     const cleanSource = status.trim() === "" && /^[0-9a-f]{40}$/u.test(head) && /^[0-9a-f]{40}$/u.test(tree);
     const stable = cleanSource && archiveIdentity.matches;

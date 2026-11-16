@@ -30,6 +30,7 @@ import type { JsonValue } from "../../protocol/src/index.js";
 // the whole group is discovered live from the kernel every scan.
 
 export const BACKGROUND_RESOURCE_REGISTRATION_VERSION = "tcrn.background-resource-registration.v1" as const;
+export const WINDOWS_RESOURCE_REGISTRATION_VERSION = "tcrn.background-resource-registration.v2" as const;
 export const BACKGROUND_RESOURCE_RESIDUE_VERSION = "tcrn.background-resource-residue.v1" as const;
 
 export const BACKGROUND_RESOURCE_LIMITS = Object.freeze({
@@ -80,6 +81,7 @@ export interface SpawnRegistration {
   readonly pattern: string;
   readonly purpose: string;
   readonly spawnedAt: string;
+  readonly windowsJobName?: string;
 }
 
 // One row of a process-table snapshot (a parsed `ps` line). cpu is carried as the
@@ -168,12 +170,16 @@ export function buildRegistrationLine(registration: SpawnRegistration): string {
   const pattern = assertBoundedText(registration.pattern, "pattern");
   const purpose = assertBoundedText(registration.purpose, "purpose");
   if (pattern.length === 0) fail("BACKGROUND_RESOURCE_REGISTRATION_INVALID", "pattern must be non-empty");
+  if (registration.windowsJobName !== undefined && !/^Local\\Einzbern-[0-9a-f-]{36}$/u.test(registration.windowsJobName)) {
+    fail("BACKGROUND_RESOURCE_REGISTRATION_INVALID", "invalid Windows job name");
+  }
   return canonicalJson({
-    schemaVersion: BACKGROUND_RESOURCE_REGISTRATION_VERSION,
+    schemaVersion: registration.windowsJobName === undefined ? BACKGROUND_RESOURCE_REGISTRATION_VERSION : WINDOWS_RESOURCE_REGISTRATION_VERSION,
     pgid,
     pattern,
     purpose,
     spawnedAt: registration.spawnedAt,
+    ...(registration.windowsJobName === undefined ? {} : { windowsJobName: registration.windowsJobName }),
   });
 }
 
@@ -189,22 +195,27 @@ export function parseRegistrationLine(line: string): SpawnRegistration {
     if (error instanceof ProtocolError) fail("BACKGROUND_RESOURCE_REGISTRATION_INVALID", error.message);
     throw error;
   }
-  if (!isJsonObject(document) || document.schemaVersion !== BACKGROUND_RESOURCE_REGISTRATION_VERSION) {
+  if (!isJsonObject(document) || ![BACKGROUND_RESOURCE_REGISTRATION_VERSION, WINDOWS_RESOURCE_REGISTRATION_VERSION].includes(document.schemaVersion as typeof BACKGROUND_RESOURCE_REGISTRATION_VERSION)) {
     fail("BACKGROUND_RESOURCE_REGISTRATION_INVALID", "unexpected registration shape");
   }
   const keys = Object.keys(document).sort(compareCanonicalText);
   const expected = ["pattern", "pgid", "purpose", "schemaVersion", "spawnedAt"];
+  if (document.schemaVersion === WINDOWS_RESOURCE_REGISTRATION_VERSION) expected.push("windowsJobName");
   if (keys.length !== expected.length || keys.some((key, index) => key !== expected[index])) {
     fail("BACKGROUND_RESOURCE_REGISTRATION_INVALID", "registration fields must be exactly the v1 set");
   }
   const pattern = assertBoundedText(document.pattern, "pattern");
   if (pattern.length === 0) fail("BACKGROUND_RESOURCE_REGISTRATION_INVALID", "pattern must be non-empty");
   assertStrictInstant(document.spawnedAt);
+  if (document.schemaVersion === WINDOWS_RESOURCE_REGISTRATION_VERSION && (typeof document.windowsJobName !== "string" || !/^Local\\Einzbern-[0-9a-f-]{36}$/u.test(document.windowsJobName))) {
+    fail("BACKGROUND_RESOURCE_REGISTRATION_INVALID", "invalid Windows job name");
+  }
   return {
     pgid: assertProcessId(document.pgid, "pgid"),
     pattern,
     purpose: assertBoundedText(document.purpose, "purpose"),
     spawnedAt: document.spawnedAt as string,
+    ...(document.schemaVersion === WINDOWS_RESOURCE_REGISTRATION_VERSION ? { windowsJobName: document.windowsJobName as string } : {}),
   };
 }
 
@@ -231,7 +242,7 @@ export function parseRegistry(text: string): readonly SpawnRegistration[] {
 // of the line. Any line that does not match the shape fails the whole parse — the
 // same fail-closed stance the reaper takes (scripts/test-controller-reaper.mjs:37),
 // so a truncated or reformatted process table cannot silently drop an orphan.
-const PROCESS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?)\s+(.*\S)\s*$/u;
+const PROCESS_ROW = /^\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+(?:\.\d+)?|unknown)\s+(.*\S)\s*$/u;
 
 export function parseProcessTable(text: string): readonly ProcessRow[] {
   if (typeof text !== "string") fail("BACKGROUND_RESOURCE_INPUT_INVALID", "process table must be a string");

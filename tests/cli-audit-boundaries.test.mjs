@@ -116,11 +116,11 @@ async function integrationFunction(name, globals) {
 
 test("INIT062 running identity source seam binds actual bundle layout and two stable content reads", async () => {
   // Source seam fixture, not an actual packaged-CLI or E4 acceptance receipt.
-  const { basename, dirname } = await import("node:path");
+  const { posix: { basename, dirname, join } } = await import("node:path");
   const { fileURLToPath } = await import("node:url");
   const calls = [];
   const globals = {
-    moduleUrl: "file:///fixture/package/scripts/einzbern.mjs", fileURLToPath, basename, dirname, join,
+    moduleUrl: "file:///fixture/package/scripts/einzbern.mjs", fileURLToPath: url => fileURLToPath(url, { windows: false }), basename, dirname, join,
     realpath: async path => path, readFile: async () => JSON.stringify({ schemaVersion: "einzbern.release-manifest.v1", version: "3.1.0" }),
     FRAMEWORK_VERSION: "3.1.0", DOT_AGENTS_TEMPLATE_VERSION: "dot-template-fixture", BUILT_IN_RULES: [{ id: "fixture", version: 1 }],
     computeInstallTreeDigest: async root => { calls.push(["hash", root]); return { schemaVersion: "einzbern.install-tree-digest.v1", sha256: "a".repeat(64), entries: [{ path: "scripts/einzbern.mjs" }] }; },
@@ -182,7 +182,7 @@ test("RJ03 public policy approval seam rejects non-string noChangePolicy before 
 });
 
 test("configuration backup boundary resolution separates actual containers from hard control roots", async () => {
-  const { resolve } = await import("node:path");
+  const { posix: { resolve, join } } = await import("node:path");
   const { DIRECTORY, LEGACY_CONTROL_DIRECTORY } = await import("../dist/build/packages/core/src/names.js");
   const { CONFIG_BACKUP_UNSAFE_DIRECTORY_NAMES } = await import("../dist/build/packages/core/src/config-backup.js");
   const { SHARED_SUBMIT_RESERVED_ROOT } = await import("../dist/build/packages/core/src/shared-submit.js");

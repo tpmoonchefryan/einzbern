@@ -9,6 +9,7 @@
 // caller-supplied passed flag or test count as evidence.
 
 import { spawnSync } from "node:child_process";
+import { spawnCommandSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
@@ -82,6 +83,7 @@ function fullOutput(path) {
 }
 
 function terminateProcessGroup(pid) {
+  if (process.platform === "win32") return;
   if (!Number.isSafeInteger(pid) || pid <= 0) return;
   try { process.kill(-pid, "SIGTERM"); } catch { /* group already ended */ }
   try { process.kill(-pid, "SIGKILL"); } catch { /* group already ended */ }
@@ -110,9 +112,13 @@ function runShell(command, cwd, timeoutMs = REVIEW_COMMAND_TIMEOUT_MS) {
     // A detached shell owns a private process group. Node's synchronous timeout
     // sends the kill signal to that process group on this host; regular output
     // files keep a timed-out grandchild from holding a pipe open.
-    result = spawnSync("/bin/sh", ["-c", command], {
+    const run = process.platform === "win32" ? spawnCommandSync : spawnSync;
+    const shell = process.platform === "win32" ? join(process.env.SystemRoot, "System32", "cmd.exe") : "/bin/sh";
+    const arguments_ = process.platform === "win32" ? ["/d", "/s", "/c", `"${command}"`] : ["-c", command];
+    result = run(shell, arguments_, {
       cwd,
-      detached: true,
+      detached: process.platform !== "win32",
+      windowsVerbatimArguments: process.platform === "win32",
       shell: false,
       timeout: timeoutMs,
       maxBuffer: REVIEW_OUTPUT_BYTES * 2,
@@ -173,7 +179,7 @@ function repositoryRelative(repositoryRoot, candidate) {
   const root = resolve(repositoryRoot);
   const absolute = resolve(root, candidate);
   const rest = relative(root, absolute);
-  if (rest === "" || rest.startsWith("..") || rest.startsWith(sep) || rest.includes("\\")) return null;
+  if (rest === "" || rest.startsWith("..") || isAbsolute(rest)) return null;
   return rest.split(sep).join("/");
 }
 
@@ -379,7 +385,7 @@ function readBoundVerify({ workspace, workId, engineCli }) {
     } catch (error) {
       reason = String(error?.message ?? error);
     }
-    if (attempt < 2) spawnSync("/bin/sleep", ["0.25"]);
+    if (attempt < 2) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
   }
   if (output === undefined) {
     return { status: "unavailable", reason, command: null };

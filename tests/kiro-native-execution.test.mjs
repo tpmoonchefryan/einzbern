@@ -1,3 +1,5 @@
+import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
+import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -191,7 +193,7 @@ test("INIT085-B3: missing API key reaches Kiro CLI and records its authenticatio
   await configureKiroPolicy(f);
   const preparation = await prepare(f);
   const preflight = inspectKiroProcessPreparation(preparation);
-  const executable = join(f.root, "fake-kiro-cli");
+  let executable = join(f.root, "fake-kiro-cli");
   const source = [
     "#!/usr/bin/env node",
     "let input = \"\";",
@@ -200,7 +202,7 @@ test("INIT085-B3: missing API key reaches Kiro CLI and records its authenticatio
     "process.stderr.write(\"Authentication required\\n\");",
     "process.exitCode = 2;",
   ].join("\n");
-  await writeFile(executable, `${source}\n`, { encoding: "utf8", mode: 0o700, flag: "wx" });
+  executable = await writeNodeExecutable(executable, source);
   const env = { PATH: process.env.PATH ?? "", HOME: f.root };
   assert.equal(Object.hasOwn(env, "KIRO_API_KEY"), false);
 
@@ -302,7 +304,8 @@ test("INIT085-B3: runner reserves a private destination before spawning and reta
   const racedRecord = JSON.parse(await readFile(raced, "utf8"));
   assert.equal(normalizeKiroProcessEvidence(racedRecord).process.status, "exited-zero");
   assert.equal(JSON.stringify(racedRecord).includes("synthetic-fixture-secret"), false);
-  assert.equal((await stat(raced)).mode & 0o777, 0o600);
+  if (process.platform === "win32") assert.equal(hasPrivateWindowsPermissions(raced), true);
+  else assert.equal((await stat(raced)).mode & 0o777, 0o600);
   assert.equal((await readdir(f.root)).some(name => name.startsWith(".einzbern-kiro-run-")), false, "successful runs remove their private scratch directory");
 
   const failedOutput = join(f.root, "failed-output.json");
@@ -319,8 +322,11 @@ test("INIT085-B3: runner reserves a private destination before spawning and reta
   assert.equal(returned.processStarted, true);
   assert.equal(returned.processClosed, true);
   assert.equal(returned.stdout, '{"type":"fixture"}\n');
-  assert.equal((await stat(recovery)).mode & 0o777, 0o600);
-  assert.equal((await stat(dirname(recovery))).mode & 0o777, 0o700);
+  if (process.platform === "win32") assert.equal(hasPrivateWindowsPermissions(recovery), true);
+  else {
+    assert.equal((await stat(recovery)).mode & 0o777, 0o600);
+    assert.equal((await stat(dirname(recovery))).mode & 0o777, 0o700);
+  }
   assert.equal(await readFile(failedOutput, "utf8"), "");
   assert.equal(await readFile(existing, "utf8"), "sentinel");
   const recovered = await runNativeToolCommand("execution-kiro-record", { binding, result: recovery, output: join(f.root, "recovered.json") }, context);

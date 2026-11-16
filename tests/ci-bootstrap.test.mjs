@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawnCommandSync as spawnSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import test from "node:test";

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 import { LIGHT_STEPS, LIGHT_TESTS } from "../scripts/ci/light-roster.mjs";
 
 const source = new URL("../scripts/ci/light-runner.mjs", import.meta.url).href;
@@ -231,7 +232,7 @@ negative('ambiguous-receipts',lambda d,m:(d/'steps/build.stderr').write_bytes((d
 negative('archive-bytes-changed',lambda d,m:(d/'source-archive.tar').write_bytes(b'changed'))
 def replace_link(d,m):
  p=d/'steps/build.stdout'; p.unlink(); p.symlink_to(evidence/'steps/build.stdout')
-negative('symlink',replace_link,False)
+if sys.argv[3] == 'yes': negative('symlink',replace_link,False)
 _, wrong_sha=a.validate_light_directory(evidence,'c'*40,roster); assert wrong_sha
 for mode in ['p1','pf2-h1','p1-core','p1-checks','p1-portal']:
  value=copy.deepcopy(meta); value['mode']=mode
@@ -311,10 +312,11 @@ put(target/'source-before.json',changed['inputManifest']); put(target/'source-af
 _,errors,_=a.validate_light_bundle(bundle,sha,'91','2',repo); assert errors; results.append({'case':'bundle-source-bytes','refused':True})
 print(json.dumps(results))
 `;
-  const child = spawnSync("python3", ["-B", "-c", program, aggregatePath, root], { encoding: "utf8", timeout: 15000, maxBuffer: 4 * 1024 * 1024 });
+  const supportsSymlinks = await fileSymlinksAvailable(root);
+  const child = spawnSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", program, aggregatePath, root, supportsSymlinks ? "yes" : "no"], { encoding: "utf8", timeout: process.platform === "win32" ? 60_000 : 15_000, maxBuffer: 4 * 1024 * 1024 });
   assert.equal(child.status, 0, child.stderr);
   const results = JSON.parse(child.stdout);
-  assert.equal(results.length, 31);
+  assert.equal(results.length, supportsSymlinks ? 31 : 30);
   assert.ok(results.every(row => row.refused));
 });
 
@@ -362,10 +364,11 @@ negative('doctor-false-check',lambda d,i:(d/'doctor.json').write_text(json.dumps
 negative('digest-resealed-wrong',lambda d,i:(d/'fixture.tar.gz.sha256').write_text('0'*64+'  fixture.tar.gz'),True)
 def symlink(d,i):
  p=d/'install.json'; p.unlink(); p.symlink_to(package/'install.json')
-negative('symlink',symlink)
+if sys.argv[3] == 'yes': negative('symlink',symlink)
 print(json.dumps(results))
 `;
-  const child = spawnSync("python3", ["-B", "-c", program, aggregatePath, root], { encoding: "utf8", timeout: 15000, maxBuffer: 4 * 1024 * 1024 });
+  const supportsSymlinks = await fileSymlinksAvailable(root);
+  const child = spawnSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", program, aggregatePath, root, supportsSymlinks ? "yes" : "no"], { encoding: "utf8", timeout: process.platform === "win32" ? 60_000 : 15_000, maxBuffer: 4 * 1024 * 1024 });
   assert.equal(child.status, 0, child.stderr);
-  assert.equal(JSON.parse(child.stdout).length, 17);
+  assert.equal(JSON.parse(child.stdout).length, supportsSymlinks ? 17 : 16);
 });

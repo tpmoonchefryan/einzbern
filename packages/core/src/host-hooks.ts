@@ -210,7 +210,9 @@ export function hookLauncherPath(deviceHome: string, platform: NodeJS.Platform =
     fail("HOST_HOOKS_PATH_UNSUPPORTED", `the device directory must be an absolute ${platform} path`, { deviceHome: String(deviceHome) });
   }
   const launcher = paths.join(deviceHome, DEVICE_HOME_ENTRIES.engine, HOST_HOOK_LAUNCHER);
-  const reason = unquotable(launcher, platform);
+  const reason = platform === "win32"
+    ? /[\u0000-\u001f\u007f"]/u.test(launcher) ? "an invalid Windows path character" : null
+    : unquotable(launcher, platform);
   if (reason !== null) fail("HOST_HOOKS_PATH_UNSUPPORTED", `${launcher} holds ${reason}, which a shell would read inside the quotes`, { launcher });
   return launcher;
 }
@@ -221,17 +223,20 @@ export function hostHookCommand(launcher: string, event: string, userHome: strin
   if (word === undefined) fail("HOST_HOOKS_INPUT_INVALID", `${event} is not an event Einzbern hooks`, { event });
   const paths = platform === "win32" ? win32 : posix;
   const device = paths.relative(userHome, paths.dirname(paths.dirname(launcher))).replaceAll("\\", "/") || ".";
-  if (paths.isAbsolute(device)) fail("HOST_HOOKS_PATH_UNSUPPORTED", "the device directory needs a relative home binding", { launcher });
+  if (paths.isAbsolute(device) && platform !== "win32") fail("HOST_HOOKS_PATH_UNSUPPORTED", "the device directory needs a relative home binding", { launcher });
   const literal = device.replaceAll("'", "\\'");
+  const deviceExpression = platform === "win32" && (paths.isAbsolute(device) || unquotable(device, platform) !== null)
+    ? `Buffer.from('${Buffer.from(device, "utf8").toString("base64")}','base64').toString('utf8')`
+    : `'${literal}'`;
   const hostBinding = runningHost === undefined ? "" : `process.env.EINZBERN_HOST='${runningHost}';`;
   if (runningHost === "antigravity") {
     const emptyWrite = word === "pre-tool-use"
       ? "process.stdout.write(JSON.stringify({decision:'allow'})+'\\n')"
       : "process.stdout.write('{}\\n')";
-    const code = `/*einzbern-hook*/const p=require('node:path');const d=p.resolve(process.env.EINZBERN_HOME||p.resolve(require('node:os').homedir(),'${literal}'));process.env.EINZBERN_HOME=d;${hostBinding}import(require('node:url').pathToFileURL(p.join(d,'engine/hook.mjs')).href).then(m=>m.launch(process.argv.slice(1),process.env)).then(s=>{if(s)process.stdout.write(s);else ${emptyWrite}}).catch(e=>{process.stderr.write(JSON.stringify({ok:false,reasonCode:e.reasonCode||'HOOK_LAUNCH_FAILED',error:e.message})+'\\n');${emptyWrite}})`;
+    const code = `/*einzbern-hook*/const p=require('node:path');const d=p.resolve(process.env.EINZBERN_HOME||p.resolve(require('node:os').homedir(),${deviceExpression}));process.env.EINZBERN_HOME=d;${hostBinding}import(require('node:url').pathToFileURL(p.join(d,'engine/hook.mjs')).href).then(m=>m.launch(process.argv.slice(1),process.env)).then(s=>{if(s)process.stdout.write(s);else ${emptyWrite}}).catch(e=>{process.stderr.write(JSON.stringify({ok:false,reasonCode:e.reasonCode||'HOOK_LAUNCH_FAILED',error:e.message})+'\\n');${emptyWrite}})`;
     return `node -e "${code}" ${word}`;
   }
-  const code = `/*einzbern-hook*/const p=require('node:path');const d=p.resolve(process.env.EINZBERN_HOME||p.resolve(require('node:os').homedir(),'${literal}'));process.env.EINZBERN_HOME=d;${hostBinding}import(require('node:url').pathToFileURL(p.join(d,'engine/hook.mjs')).href).then(m=>m.launch(process.argv.slice(1),process.env)).then(s=>{if(s)process.stdout.write(s)}).catch(e=>process.stderr.write(JSON.stringify({ok:false,reasonCode:e.reasonCode||'HOOK_LAUNCH_FAILED',error:e.message})+'\\n'))`;
+  const code = `/*einzbern-hook*/const p=require('node:path');const d=p.resolve(process.env.EINZBERN_HOME||p.resolve(require('node:os').homedir(),${deviceExpression}));process.env.EINZBERN_HOME=d;${hostBinding}import(require('node:url').pathToFileURL(p.join(d,'engine/hook.mjs')).href).then(m=>m.launch(process.argv.slice(1),process.env)).then(s=>{if(s)process.stdout.write(s)}).catch(e=>process.stderr.write(JSON.stringify({ok:false,reasonCode:e.reasonCode||'HOOK_LAUNCH_FAILED',error:e.message})+'\\n'))`;
   return `node -e "${code}" ${word}`;
 }
 

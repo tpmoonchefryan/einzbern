@@ -1,36 +1,71 @@
 # Windows support
 
-Use Node 24.16.0 and pnpm 11.3.0 for source development. Git for Windows is
-required for repository operations. Run commands from PowerShell in the checkout.
+Use Windows 10 or later with NTFS and Windows PowerShell 5.1. Source development
+uses Node 24.16.0, pnpm 11.3.0, Git for Windows and Python 3 for CI evidence tools.
+Run commands from PowerShell in the checkout.
 
 ```powershell
 corepack pnpm install --frozen-lockfile --ignore-scripts --config.offline=false
 corepack pnpm run build
 corepack pnpm run typecheck
 corepack pnpm run format:check
-node --test --test-concurrency=1 tests/windows-platform.test.mjs tests/memory-windows.test.mjs
+corepack pnpm exec node --test --test-concurrency=1 tests/windows-platform.test.mjs tests/windows-process.test.mjs tests/memory-windows.test.mjs
+corepack pnpm test
 ```
 
 Source reads bind a regular file's descriptor to filesystem identity observations
 before and after reading. Hardlinks, changed identities and reparse-point
 substitution are rejected. Windows builds use an exclusive directory claim with
 a private NTFS DACL. Nested operations share the current claim, while independent
-writers receive a refusal until its release. Exceptions release a verified claim. An
-interrupted process leaves a claim requiring recovery because parent termination
-does not establish that every descendant has stopped writing.
+writers receive a refusal until its release. Exceptions release a verified claim.
+After interruption, recovery verifies the owner's termination and that its
+recorded Job Object is empty or gone. A named kernel mutex serializes recovery.
+Claims without job evidence remain available for explicit investigation.
 
-The POSIX process-group test controller used by `pnpm test` and full P1 verification
-requires additional Windows lifecycle support. The Windows CI job runs the listed
-Node test files directly and reports that coverage separately. The full-suite
-entry returns `TEST_CONTROLLER_PLATFORM_UNSUPPORTED` before starting its controller.
+Windows child commands run in a Job Object. The launcher creates the child
+suspended, assigns it to the job and resumes it. Normal exit and cancellation
+terminate remaining descendants and wait for the job to become empty before
+reporting completion. The monitor holds an operating-system handle to its parent
+and terminates the job when that parent exits. Closing the monitor's final job
+handle also terminates its descendants.
+
+The standard and selectively planned test entries use the Windows job controller.
+It preserves the selected roster, memory admission, timeout result, raw output
+and file-level diagnostics. The Python CI observer holds output descriptors until
+it has retained and verified the bytes, then removes the captured Windows files.
+
+PATH and PATHEXT lookup support native executables and `.cmd` or `.bat` shims.
+Batch arguments preserve spaces, Unicode, quotes and shell metacharacters.
+Kiro and Antigravity runners send prompts through stdin. Kiro discovery checks
+the executable and product metadata in per-user and Program Files installations.
+
+`spawn-guard.mjs register` accepts `--job` with the launcher's `jobName`, or reads
+`EINZBERN_WINDOWS_JOB` inside the job. Pass the actual root process ID as `--pgid`.
+Windows registrations use the v2 record with `windowsJobName`. Detection reads
+kernel job membership and CIM process observations. Existing v1 POSIX records
+remain readable. A Windows live check requires a job registration to establish
+the lifetime of detached descendants.
 
 Runtime relocation uses NTFS junctions, preserving access through the original
-device paths without requiring symbolic-link privileges. Relative stored paths
-require the device and runtime directories to be on the same volume. Nested
+device paths without requiring symbolic-link privileges. Stored paths support
+different drive letters and UNC roots. Nested
 runtime destinations inside the device directory are rejected before mutation.
+
+Dispatch artifacts and runner recovery files inherit private NTFS permissions at
+creation. Atomic replacement retains open readers of the previous file while new
+readers see the replacement. Durable directory updates use a Windows directory
+handle with write access and `FlushFileBuffers`.
+
+Legacy metadata/body records and artifact records encode their ID separator as
+`%3A` when created on Windows. Both operating systems read these portable names.
+POSIX systems continue to read existing colon-containing names and reject
+ambiguous duplicate names. Migrate a legacy colon-containing library to its
+event-stream layout before transferring its files to NTFS.
 
 The Mana Orchestrate installer accepts quoted paths containing spaces and Unicode.
 It checks the release digest and rejects Windows device names, alternate data
 streams, trailing dots or spaces and case-colliding archive files before unpacking.
 The generated distribution pins LF endings so Windows checkouts reproduce the
-published files. Both repositories run Windows Server 2022 CI jobs.
+published files. Both repositories run Windows Server 2022 and Ubuntu 24.04 jobs.
+File-symlink tests report a skip when the account lacks Windows symbolic-link
+creation privileges. Directory junction tests run with ordinary user permissions.

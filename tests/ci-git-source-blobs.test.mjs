@@ -49,13 +49,13 @@ test("one tree and one batch process bind exact OIDs, deduplicate only within re
 });
 test("immutable scanner preserves candidate bytes and unresolved binary inputs across refs", async (t) => {
   const fixture = await createCiComponentFixture(t);
-  for (const [path, bytes] of [["scripts/sp ace 雪.py", Buffer.from("print('雪')\n")], ["opaque.dat", Buffer.from([255])], ["nul.data", Buffer.from("a\0b")], ["excluded.md", Buffer.from([255])]]) await writeFixtureFile(fixture.repo, path, bytes);
+  for (const [path, bytes] of [["scripts/sp ace 雪.py", Buffer.from("print('雪')\n")], ["opaque.dat", Buffer.from([255])], ["contains-nul.data", Buffer.from("a\0b")], ["excluded.md", Buffer.from([255])]]) await writeFixtureFile(fixture.repo, path, bytes);
   fixture.git("add", ".");
   const first = fixture.commit();
   const actual = documentReaderSources(fixture.repo, first);
   assert.equal(actual.texts.get("scripts/sp ace 雪.py"), "print('雪')\n");
   assert.ok(!actual.texts.has("excluded.md"));
-  assert.deepEqual(actual.unresolved, ["nul.data", "opaque.dat"]);
+  assert.deepEqual(actual.unresolved, ["contains-nul.data", "opaque.dat"]);
   const files = execFileSync("git", ["-C", fixture.repo, "ls-tree", "-r", "--name-only", "-z", first]).toString("utf8").split("\0").filter(Boolean);
   for (const path of files) if (actual.texts.has(path)) {
     const expected = execFileSync("git", ["-C", fixture.repo, "show", `${first}:${path}`]);
