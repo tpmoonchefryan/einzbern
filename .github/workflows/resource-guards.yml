@@ -42,6 +42,7 @@ jobs:
           npm_config_fund: "false"
         run: |
           npm install --global pnpm@11.3.0 --ignore-scripts --no-audit --no-fund
+          corepack install --global --cache-only pnpm@11.3.0
           pnpm install --frozen-lockfile --ignore-scripts --config.offline=false
       - name: Build and verify resource admission regressions
         if: runner.os == 'Linux'
