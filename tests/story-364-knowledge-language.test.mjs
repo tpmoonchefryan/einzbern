@@ -966,7 +966,10 @@ test("552: corrupt installed policy is not downgraded to an unavailable translat
 
 test("552: recall tolerates absent economy in a valid host policy but execution and ceiling errors stay explicit", async (context) => {
   const directory = await mkdtemp(join(tmpdir(), "einzbern-language-optional-economy-"));
-  context.after(() => rm(directory, { recursive: true, force: true }));
+  context.after(async () => {
+    resetRecallCache();
+    await rm(directory, { recursive: true, force: true });
+  });
   const previous = process.env.EINZBERN_HOME;
   process.env.EINZBERN_HOME = directory;
   const settings = [{ key: "artifact.language", value: "zh-CN" }];
