@@ -91,13 +91,14 @@ test("STORY-341 knowledge body migration is explicit and keeps metadata outside 
   await mkdir(join(root, "metadata"), { recursive: true });
   const file = new FileStoreBackend(root, profile);
   const segmented = new SegmentedKnowledgeStoreBackend(file);
-  const metadata = Buffer.from("{\"id\":\"knowledge:metadata\"}\n", "utf8");
-  await file.writeKnowledgeMetadata("knowledge:metadata", metadata);
-  await file.writeKnowledgeBody("knowledge:metadata", Buffer.from("body", "utf8"));
+  const id = `knowledge:${"a".repeat(24)}`;
+  const metadata = Buffer.from(canonicalJson({ id }), "utf8");
+  await file.writeKnowledgeMetadata(id, metadata);
+  await file.writeKnowledgeBody(id, Buffer.from("body", "utf8"));
   await segmented.migrateKnowledgeBodies(4096);
-  assert.deepEqual(await segmented.readKnowledgeMetadata("knowledge:metadata"), metadata);
-  assert.deepEqual(await segmented.readKnowledgeBody("knowledge:metadata"), Buffer.from("body", "utf8"));
-  assert.equal((await readdir(join(root, "metadata"))).includes("knowledge:metadata.json"), true);
+  assert.deepEqual(await segmented.readKnowledgeMetadata(id), metadata);
+  assert.deepEqual(await segmented.readKnowledgeBody(id), Buffer.from("body", "utf8"));
+  assert.deepEqual(await readFile(storeRecordPath(join(root, "metadata"), `${id}.json`)), metadata);
   assert.equal((await readdir(join(root, "bodies"))).some((name) => name.endsWith(".body")), false);
 });
 

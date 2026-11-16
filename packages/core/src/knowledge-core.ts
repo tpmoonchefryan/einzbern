@@ -1,7 +1,7 @@
 import { recallAuthorityState } from "./recall-authority.js";
 import type { RecallAuthority } from "./recall-authority.js";
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
-import { syncWindowsDirectory } from "../../../scripts/lib/windows-system.mjs";
+import { hasPrivateWindowsPermissions, openPrivateWindowsFile, syncWindowsDirectory } from "../../../scripts/lib/windows-system.mjs";
 import { scopedWorkspaceState } from "./project-scope.js";
 // SPDX-License-Identifier: Apache-2.0
 
@@ -1528,7 +1528,8 @@ async function writeExclusiveFile(path: string, bytes: Buffer | string, deviceId
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   let staged: BigIntStats | undefined;
   try {
-    handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+    handle = process.platform === "win32" ? await openPrivateWindowsFile(temporary)
+      : await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     staged = await handle.stat({ bigint: true });
     await handle.writeFile(expected);
     await handle.sync();
@@ -3774,7 +3775,7 @@ async function recoverCrestPublications(storeRootInput: string, home: string, wo
       const final = join(directory, match[5]!);
       const before = await lstat(temporary, { bigint: true });
       if (!before.isFile() || before.isSymbolicLink() || (before.nlink !== 1n && before.nlink !== 2n) ||
-        (before.mode & 0o777n) !== 0o600n || (process.geteuid !== undefined && before.uid !== BigInt(process.geteuid()))) {
+        (process.platform === "win32" ? !hasPrivateWindowsPermissions(temporary, true) : (before.mode & 0o777n) !== 0o600n) || (process.geteuid !== undefined && before.uid !== BigInt(process.geteuid()))) {
         fail("KNOWLEDGE_LINK_UNSAFE", temporary);
       }
       let named: BigIntStats | undefined;

@@ -46,6 +46,7 @@ import {
 } from "../dist/build/packages/core/src/knowledge-core.js";
 import { applyMachineSettingSet, readUserCrestPath } from "../dist/build/packages/core/src/machine-settings.js";
 import { recall, recallDocuments, resetRecallCache } from "../dist/build/packages/core/src/recall.js";
+import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
 import { formatRecallLine, readRecallCards, recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
 import { canonicalJson, canonicalSha256, deriveStableId } from "../dist/build/packages/protocol/src/index.js";
 
@@ -64,13 +65,13 @@ function publicationWriter(context, shared, input, type, phases) {
     import fs from "node:fs/promises";
     import { constants } from "node:fs";
     import { syncBuiltinESMExports } from "node:module";
-    import { basename } from "node:path";
+    import { basename, dirname, join, sep } from "node:path";
     const payload = ${JSON.stringify(payload)};
     const states = new Map(), published = new Map();
-    const target = (path) => String(path).startsWith(payload.crest + "/") &&
+    const target = (path) => String(path).startsWith(payload.crest + sep) &&
       (payload.type === "marker" ? basename(String(path)).endsWith("store.json") :
         new RegExp("[0-9]{8}-[a-f0-9]{64}\\\\." + payload.type + "$", "u").test(basename(String(path))));
-    const finalName = (path) => String(path).replace(/[^/]+$/u,
+    const finalName = (path) => join(dirname(String(path)),
       basename(String(path)).match(/(?:store\\.json|[0-9]{8}-[a-f0-9]{64}\\.(?:json|body))$/u)[0]);
     const hold = async (phase, data) => {
       if (!payload.phases.includes(phase)) return;
@@ -83,7 +84,7 @@ function publicationWriter(context, shared, input, type, phases) {
     const open = fs.open;
     fs.open = async (path, flags, ...rest) => {
       const handle = await open(path, flags, ...rest);
-      if (!target(path) || typeof flags !== "number" || !(flags & constants.O_CREAT)) return handle;
+      if (!target(path) || !(typeof flags === "number" && (flags & constants.O_CREAT) || process.platform === "win32" && flags === "r+")) return handle;
       const state = { synced: false, closed: false }; states.set(String(path), state);
       const write = handle.writeFile.bind(handle), sync = handle.sync.bind(handle), close = handle.close.bind(handle);
       handle.writeFile = async (data, ...options) => {
@@ -590,7 +591,9 @@ test("INC-400: a partial event stays private, closed complete bytes publish excl
   assert.deepEqual([ready.synced, ready.closed], [true, true], "actual sync and close finished before link");
   assert.deepEqual(await readFile(ready.path), Buffer.from(partial.complete, "base64"));
   const staged = await lstat(ready.path, { bigint: true });
-  assert.deepEqual([staged.nlink, staged.mode & 0o777n], [1n, 0o600n]);
+  assert.equal(staged.nlink, 1n);
+  if (process.platform === "win32") assert.equal(hasPrivateWindowsPermissions(ready.path, true), true);
+  else assert.equal(staged.mode & 0o777n, 0o600n);
   await assert.rejects(lstat(ready.final), { code: "ENOENT" });
   writer.release("before-link");
   const linked = await writer.wait("linked");

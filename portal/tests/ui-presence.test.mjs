@@ -381,7 +381,7 @@ if (!MUTATION) {
       // control must also be rebuilt and released by the settings handler's finally.
       const changeAuthority = async (url, body, label) => {
         const startedAt = Date.now();
-        const deadline = startedAt + 30_000;
+        const deadline = startedAt + (process.platform === "win32" ? 90_000 : 30_000);
         const expectedContract = new URL("/tcrn-design-authority.json", url).href;
         const currentInput = () => page.document.querySelector('[data-setting-control="design.authority"]');
         const currentPanel = () => page.document.querySelector("#design-authority [data-design-authority-state]");

@@ -143,7 +143,7 @@ test("INC-320/432: owned-group deregistration requires exact owner and terminal 
 
 test("spawn-guard: registryPath derives the transient sibling of a workspace root", () => {
   const path = registryPath({ workspace: "/a/b/partition/workspace" });
-  assert.equal(path, "/a/b/partition/transient/spawn-registry/registrations.jsonl");
+  assert.equal(path, resolve("/a/b/partition/transient/spawn-registry/registrations.jsonl"));
   assert.throws(() => registryPath({}), (error) => error instanceof SpawnGuardError);
 });
 
@@ -156,7 +156,7 @@ test("guard bootstrap uses the current background module without initializing th
   const root = await mkdtemp(join(tmpdir(), "guard-bootstrap-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const source = fileURLToPath(new URL("..", import.meta.url));
-  const files = ["scripts/spawn-guard.mjs", "scripts/lib/runtime-capacity.mjs", "dist/build/packages/core/src/background-resource.js", "dist/build/packages/protocol/src/index.js", "dist/build/packages/protocol/src/work-order.js", "dist/build/scripts/lib/runtime-capacity.mjs", "dist/build/scripts/lib/canonical-order.mjs"];
+  const files = ["scripts/spawn-guard.mjs", "scripts/lib/runtime-capacity.mjs", "scripts/lib/windows-system.mjs", "skill/mana-orchestrate/scripts/windows-system.mjs", "dist/build/packages/core/src/background-resource.js", "dist/build/packages/protocol/src/index.js", "dist/build/packages/protocol/src/work-order.js", "dist/build/scripts/lib/runtime-capacity.mjs", "dist/build/scripts/lib/canonical-order.mjs"];
   for (const name of files) {
     await mkdir(resolve(root, name, ".."), { recursive: true });
     await copyFile(join(source, name), join(root, name));

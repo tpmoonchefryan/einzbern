@@ -10,6 +10,8 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { hostname } from "node:os";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { mkdir, mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -249,4 +251,29 @@ test("an interrupted real owner is reclaimed and an operation failure still rele
   await assert.rejects(withFileLock(path, async () => { throw failure; }), error => error === failure);
   await assert.rejects(readFile(path), { code: "ENOENT" });
   const next = await acquireFileLock(path); await next.release();
+});
+
+test("Windows sharing violations retry the same claim and keep permanent permission failures observable", { skip: process.platform !== "win32" }, async t => {
+  const path = await isolatedLock(t);
+  const original = fs.open;
+  let attempts = 0;
+  let deny = false;
+  const mocked = t.mock.method(fs, "open", (file, flags, ...options) => {
+    if (file === path && flags === "wx" && (++attempts === 1 || deny)) {
+      throw Object.assign(new Error("sharing violation"), { code: "EPERM" });
+    }
+    return original(file, flags, ...options);
+  });
+  syncBuiltinESMExports();
+  try {
+    const lock = await acquireFileLock(path);
+    assert.equal(attempts, 2);
+    await Promise.all([lock.release(), lock.release()]);
+    deny = true;
+    await assert.rejects(acquireFileLock(path), { code: "EPERM" });
+    await assert.rejects(readFile(path), { code: "ENOENT" });
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
 });

@@ -55,6 +55,8 @@ const tripwirePath = join(repositoryRoot, "tests/helpers/fs-write-tripwire.mjs")
 
 // Anything that fell back to the user's home would land in this empty directory, not the real one.
 const guardHome = mkdtempSync(join(tmpdir(), "einzbern-migrate-plan-guard-home-"));
+if (process.platform === "win32") await mkdir(join(guardHome, "AppData", "Roaming"), { recursive: true });
+const fallbackBaseline = await treeDigest(guardHome);
 process.env.HOME = guardHome;
 process.env.USERPROFILE = guardHome;
 process.once("exit", () => rmSync(guardHome, { recursive: true, force: true }));
@@ -137,7 +139,7 @@ async function oldKnowledgePartition(m, name, broken = false) {
     await writeFile(storeRecordPath(join(knowledge, "bodies"), `${record.id}.body`), bodies.get(record.id));
   }
   await writeFile(join(knowledge, "views", "index.json"), await readFile(join(cachePath(expected.workspaceId), "crest-views", "index.json")));
-  const damaged = ["store.json", `metadata/${listed.records[0].id}.json`];
+  const damaged = ["store.json", relative(knowledge, storeRecordPath(join(knowledge, "metadata"), `${listed.records[0].id}.json`)).replaceAll("\\", "/")];
   if (broken) for (const file of damaged) await writeFile(join(knowledge, file), JSON.stringify(JSON.parse(await readFile(join(knowledge, file), "utf8")), null, 4));
   return { root, knowledge, damaged };
 }
@@ -158,7 +160,7 @@ async function treeDigest(root) {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
       const path = join(directory, entry.name);
       const metadata = await stat(path);
-      rows.push(`${relative(root, path)}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : "directory"}`);
+      rows.push(`${relative(root, path).replaceAll("\\", "/")}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : "directory"}`);
       if (entry.isDirectory()) await walk(path);
     }
   };
@@ -668,7 +670,7 @@ for (const language of ["en", "zh-CN", "ja", "ko", "fr"]) {
     assert.equal(run.status, 0, run.stderr);
     const after = await treeDigest(m.base);
     assert.deepEqual(after, before, `${language}: the CLI plan wrote nothing`);
-    assert.deepEqual(await readdir(guardHome), [], "the fallback home stays empty");
+    assert.deepEqual(await treeDigest(guardHome), fallbackBaseline, "the fallback home stays unchanged");
     const planned = JSON.parse(run.stdout);
     assert.deepEqual([planned.reasonCode, planned.mode, planned.questions], ["SETUP_PLAN_READY", "migrate", []]);
     assert.deepEqual(planned.resolved, { artifacts: join(m.container, ".ether"), cloud: true, language, navigation: false });

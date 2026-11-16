@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import test from "node:test";
 import assert from "node:assert/strict";
+import { resolve } from "node:path";
 import { DOT_REQUIRED_CHECKS, resolveDotExecutionAdmission, dotDigest } from "../dist/build/packages/core/src/dot-execution.js";
 import { createNativeToolAttempt, recordNativeToolResponse, normalizeNativeToolEvidence, appendNativeToolRecord } from "../dist/build/packages/core/src/native-tool-evidence.js";
 import { contextReadFixture, preparationFixture } from "./helpers/dot-native-fixture.mjs";
@@ -111,7 +112,7 @@ test("J09 complete native evidence retains preparation and rechecks actual-sessi
     request => { request.contextRead.observations.forEach(row => { row.source = "patrol"; }); },
     request => { request.contextRead.record.files[0].sourceVersion = "stale"; },
     request => { request.contextRead.record.files[0].sha256 = "9".repeat(64); },
-    request => { request.contextRead.record.effectiveRoots = ["/fixture/wrong"]; },
+    request => { request.contextRead.record.effectiveRoots = [resolve("/fixture/wrong")]; },
   ]) {
     const request = structuredClone(f.admission.request); mutate(request);
     const admission = resolveDotExecutionAdmission(request, { deviceLimit: 4, now: at, contextDigest: "e".repeat(64) });

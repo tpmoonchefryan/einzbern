@@ -93,7 +93,7 @@ async function treeDigest(root) {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
       const path = join(directory, entry.name);
       const metadata = await stat(path);
-      rows.push(`${relative(root, path)}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : "directory"}`);
+      rows.push(`${relative(root, path).replaceAll("\\", "/")}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : "directory"}`);
       if (entry.isDirectory()) await walk(path);
     }
   };
@@ -114,6 +114,7 @@ async function machine(context) {
   const deviceHome = join(base, "device");
   const legacyDevice = join(home, LEGACY_DEVICE_DIRECTORY);
   await mkdir(legacyDevice, { recursive: true });
+  if (process.platform === "win32") await mkdir(join(home, "AppData", "Roaming"), { recursive: true });
   await mkdir(container);
   const version = join(deviceHome, "engine", FRAMEWORK_VERSION);
   const files = [ENGINE_FILES.entry, ...FRESH_ENGINE_TREE.launchers.map((launcher) => launcher.from), `${FRESH_ENGINE_TREE.skill}/${FRESH_ENGINE_TREE.skillEntry}`];

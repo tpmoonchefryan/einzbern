@@ -56,8 +56,10 @@ device paths without requiring symbolic-link privileges. Stored paths support
 different drive letters and UNC roots. Nested
 runtime destinations inside the device directory are rejected before mutation.
 
-Dispatch artifacts and runner recovery files inherit private NTFS permissions at
-creation. Atomic replacement retains open readers of the previous file while new
+Dispatch receipts and knowledge publication files are created with an owner-only
+NTFS ACL that also admits SYSTEM and local administrators. The writer checks the
+volume and file ID before writing. Runner recovery files inherit their private
+runtime directory’s permissions. Atomic replacement retains open readers of the previous file while new
 readers see the replacement. Durable directory updates use a Windows directory
 handle with write access and `FlushFileBuffers`.
 

@@ -322,7 +322,8 @@ function runGateProcess(command: readonly string[], cwd: string, timeoutMs: numb
         windowsHide: true,
       });
     } catch (error) {
-      finish(null, null, String((error as Error).message ?? error));
+      const failure = error as NodeJS.ErrnoException;
+      finish(null, null, failure.code ?? String(failure.message ?? error));
       return;
     }
     const started = child;

@@ -259,7 +259,7 @@ test("real engine keeps legacy bytes/readback intact while adding portable knowl
   const workspace = join(root, "library"), instant = "2026-10-25T00:00:00Z";
   const f = await legacyLibraryFixture(workspace, instant);
   const before = await libraryInventory(workspace);
-  const oldPaths = before.filter(item => item.path.includes(":"));
+  const oldPaths = before.filter(item => /knowledge(?::|%3A)[a-f0-9]{24}\.(?:json|body)$/u.test(item.path));
   assert.equal(oldPaths.length, 2);
   assert.equal((await validateKnowledgeStore(workspace)).records, 1);
   const oldBody = await readKnowledgeBody(workspace, f.oldCard.id, { at: instant });

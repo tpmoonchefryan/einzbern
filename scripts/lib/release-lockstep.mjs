@@ -233,7 +233,7 @@ export async function checkRelease({ engineRoot, helperRoot, version, env = proc
   const packageFiles = [join(engine.root, "package.json"), ...await enginePackagePaths(engine.root)];
   for (const path of packageFiles) {
     const manifest = await readJson(path);
-    const mismatch = versionMismatch(version, path.slice(engine.root.length + 1), manifest.version);
+    const mismatch = versionMismatch(version, relative(engine.root, path).split(sep).join("/"), manifest.version);
     if (mismatch) mismatches.push(mismatch);
   }
   const helperManifest = await readJson(join(helper.root, "package.json"));
@@ -275,7 +275,7 @@ export async function checkRelease({ engineRoot, helperRoot, version, env = proc
     version,
     engine: engine.root,
     helper: helper.root,
-    packageFiles: packageFiles.map((path) => path.slice(engine.root.length + 1)),
+    packageFiles: packageFiles.map((path) => relative(engine.root, path).split(sep).join("/")),
     changelog: CHANGELOG_FILE,
     readmes: README_NAMES,
     skill: `skill/${HELPER_PACKAGE_NAME}/SKILL.md`,
@@ -583,7 +583,7 @@ async function currentReleaseState(engineRoot) {
     if (typeof manifest.version !== "string" || !RELEASE_VERSION_SHAPE.test(manifest.version)) {
       refuse("RELEASE_VERSION_INVALID", `${path} does not contain a stable version`, { path, version: manifest.version ?? null });
     }
-    sourceVersions.push({ path: path.slice(engineRoot.length + 1), version: manifest.version });
+    sourceVersions.push({ path: relative(engineRoot, path).split(sep).join("/"), version: manifest.version });
   }
   const currentVersions = new Set(sourceVersions.map((entry) => entry.version));
   if (currentVersions.size !== 1) {

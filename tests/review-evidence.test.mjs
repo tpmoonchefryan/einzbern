@@ -3,10 +3,12 @@
 
 import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
+import { createPrivateWindowsDirectory } from "../scripts/lib/windows-system.mjs";
 import { spawnSync } from "node:child_process";
 import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { cp } from "node:fs/promises";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -78,9 +80,15 @@ test("INC-391 preserves historical child exit, signal, and buffer diagnostics wi
 
   const signaled = await run('process.kill(process.pid, "SIGTERM");', 1024);
   assert.equal(signaled.ok, false);
-  assert.equal(signaled.failure.failureKind, "signal");
-  assert.equal(signaled.failure.exitCode, null);
-  assert.equal(signaled.failure.signal, "SIGTERM");
+  if (process.platform === "win32") {
+    assert.equal(signaled.failure.failureKind, "child-exit");
+    assert.notEqual(signaled.failure.exitCode, 0);
+    assert.equal(signaled.failure.signal, null);
+  } else {
+    assert.equal(signaled.failure.failureKind, "signal");
+    assert.equal(signaled.failure.exitCode, null);
+    assert.equal(signaled.failure.signal, "SIGTERM");
+  }
 
   const overflowed = await run('process.stdout.write("x".repeat(4096));', 1024);
   assert.equal(overflowed.ok, false);
@@ -102,8 +110,8 @@ test("INC-391 copies only the TypeScript runtime and ignores a package self-link
   const runtime = "module.exports = { createSourceFile() {} };\n";
   writeFileSync(join(packageRoot, "package.json"), manifest);
   writeFileSync(join(packageRoot, "lib", "typescript.js"), runtime);
-  symlinkSync(packageRoot, packageAlias, "dir");
-  symlinkSync(packageAlias, join(packageRoot, "typescript"), "dir");
+  symlinkSync(packageRoot, packageAlias, process.platform === "win32" ? "junction" : "dir");
+  symlinkSync(packageAlias, join(packageRoot, "typescript"), process.platform === "win32" ? "junction" : "dir");
 
   await assert.rejects(
     cp(packageAlias, join(directory, "unsafe-copy"), { recursive: true, dereference: true }),
@@ -228,7 +236,8 @@ function gitFixture(t) {
 function runUnpreloadedCollect(options) {
   const moduleUrl = new URL("../scripts/review-evidence.mjs", import.meta.url).href;
   const source = `import { collectReviewEvidence } from ${JSON.stringify(moduleUrl)}; process.stdout.write(JSON.stringify(collectReviewEvidence(${JSON.stringify(options)})));`;
-  const result = spawnSync("/usr/bin/env", ["-u", "NODE_OPTIONS", process.execPath, "--input-type=module", "--eval", source], { encoding: "utf8" });
+  const { NODE_OPTIONS, ...env } = process.env;
+  const result = spawnSync(process.execPath, ["--input-type=module", "--eval", source], { encoding: "utf8", env });
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(result.stdout);
 }
@@ -744,7 +753,8 @@ test("DOT-E01 native review uses the supported native evidence command and fails
 });
 
 // INIT-062: pure event arrays and small private files, no controller or lifecycle probe.
-const diagnosticPlan = () => createDiagnosticPlan(["tests/a.test.mjs", "tests/空 格\".test.mjs"], "/owned/repository", 123);
+const diagnosticRoot = resolve("/owned/repository");
+const diagnosticPlan = () => createDiagnosticPlan(["tests/a.test.mjs", "tests/空 格\".test.mjs"], diagnosticRoot, 123);
 const diagnosticCounts = () => ({ tests: 2, suites: 0, passed: 1, failed: 0, cancelled: 1, skipped: 0, todo: 0, topLevel: 2 });
 const diagnosticHeader = (plan) => ({ kind: "header", schemaVersion: plan.schemaVersion, nodeVersion: plan.nodeVersion, planDigest: plan.planDigest, fileCount: plan.files.length });
 const diagnosticLines = (records) => Buffer.from(records.map((record) => `${JSON.stringify(record)}\n`).join(""));
@@ -765,16 +775,16 @@ function diagnosticRecords(plan) {
 
 test("INIT-062 diagnostics: argv and root identity retain the original files without inherited worker authority", () => {
   for (const files of [[], ["tests/a.test.mjs"], diagnosticPlan().files]) {
-    const plan = createDiagnosticPlan(files, "/owned/repository", 123);
+    const plan = createDiagnosticPlan(files, diagnosticRoot, 123);
     const argv = diagnosticArguments(files, "/owned/repository/scripts/test-file-progress-reporter.mjs");
-    assert.deepEqual(argv.slice(0, 5), ["--test", "--test-reporter=spec", "--test-reporter-destination=stdout", "--test-reporter=/owned/repository/scripts/test-file-progress-reporter.mjs", "--test-reporter-destination=stdout"]);
+    assert.deepEqual(argv.slice(0, 5), ["--test", process.platform === "win32" ? "--test-reporter=tap" : "--test-reporter=spec", "--test-reporter-destination=stdout", "--test-reporter=/owned/repository/scripts/test-file-progress-reporter.mjs", "--test-reporter-destination=stdout"]);
     assert.deepEqual(argv.slice(5), files);
     const identity = { nodeVersion: "v24.16.0", pid: 125, ppid: 124, outerPid: "123", groupPid: "124" };
     assert.equal(isDiagnosticRoot(plan, identity), true);
     for (const change of [{ nodeVersion: "v24.19.0" }, { ppid: 125 }, { outerPid: undefined }, { groupPid: "0124" }, { pid: 124 }]) assert.equal(isDiagnosticRoot(plan, { ...identity, ...change }), false);
   }
-  for (const file of ["/elsewhere/tests/a.test.mjs", "tests/../a.test.mjs", "tests/secret\n.test.mjs"]) assert.throws(() => createDiagnosticPlan([file], "/owned/repository", 123));
-  assert.throws(() => createDiagnosticPlan(["tests/a.test.mjs", "tests/a.test.mjs"], "/owned/repository", 123));
+  for (const file of ["/elsewhere/tests/a.test.mjs", "tests/../a.test.mjs", "tests/secret\n.test.mjs"]) assert.throws(() => createDiagnosticPlan([file], diagnosticRoot, 123));
+  assert.throws(() => createDiagnosticPlan(["tests/a.test.mjs", "tests/a.test.mjs"], diagnosticRoot, 123));
   assert.equal(expectedDiagnosticError(new TypeError("unexpected programming error")), null);
   assert.equal(expectedDiagnosticError(Object.assign(new Error("private path"), { code: "ENOSPC" })), "OBSERVER_IO");
 });
@@ -905,17 +915,27 @@ test("INIT-062 diagnostics: byte budgets retain only recomputable prefixes inclu
   assert.equal(DIAGNOSTIC_LIMITS.jsonBytes, 524_288);
 });
 
+function diagnosticDirectory(t, prefix) {
+  const base = mkdtempSync(join(tmpdir(), prefix));
+  t.after(() => rmSync(base, { recursive: true, force: true }));
+  if (process.platform !== "win32") return base;
+  const path = join(base, "private");
+  assert.equal(createPrivateWindowsDirectory(path), true);
+  return path;
+}
+
 test("INIT-062 diagnostics: private small files refuse links and observer IO cannot turn a failed run green", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "einzbern-diagnostic-samples-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = diagnosticDirectory(t, "einzbern-diagnostic-samples-");
   const plan = diagnosticPlan();
   const source = join(root, "source");
   writeFileSync(source, "sample", { mode: 0o600 });
   assert.equal(readPrivateDiagnosticFile(source, 2).buffer.length, 3);
   assert.equal(readPrivateDiagnosticFile(source, 10).buffer.toString(), "sample");
   const symbolic = join(root, "symbolic");
-  symlinkSync(source, symbolic);
-  assert.throws(() => readPrivateDiagnosticFile(symbolic, 10));
+  if (await fileSymlinksAvailable(root)) {
+    symlinkSync(source, symbolic);
+    assert.throws(() => readPrivateDiagnosticFile(symbolic, 10));
+  }
   const hard = join(root, "hard");
   linkSync(source, hard);
   assert.throws(() => readPrivateDiagnosticFile(hard, 10));
@@ -942,8 +962,7 @@ test("INIT-062 diagnostics: private small files refuse links and observer IO can
 });
 
 test("INIT-062 diagnostics: frozen controller counters and later cleanup observations are not retimestamped", (t) => {
-  const root = mkdtempSync(join(tmpdir(), "einzbern-diagnostic-progress-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = diagnosticDirectory(t, "einzbern-diagnostic-progress-");
   const path = join(root, "events.ndjson");
   const first = { schemaVersion: "tcrn.progress-event.v1", type: "controller-started", pid: 77, coverageDirectory: "/private/home", observedAt: "2026-10-20T10:00:00.000Z" };
   const last = { schemaVersion: "tcrn.progress-event.v1", type: "completed", ok: true, code: 0, signal: null, observedAt: "2026-10-20T10:10:01.000Z" };
@@ -972,8 +991,7 @@ test("INIT-062 diagnostics: frozen controller counters and later cleanup observa
 });
 
 test("INIT-062 diagnostics: in-memory reporter drains without text and private observer keeps bounded slots", async (t) => {
-  const root = mkdtempSync(join(tmpdir(), "einzbern-diagnostic-observer-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const root = diagnosticDirectory(t, "einzbern-diagnostic-observer-");
   const plan = diagnosticPlan();
   const ledgerPath = join(root, "file-events.ndjson");
   writeFileSync(ledgerPath, "", { mode: 0o600 });

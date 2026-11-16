@@ -103,9 +103,22 @@ function parseOwner(text: string): LockOwner | null {
   }
 }
 
+// An NTFS name can remain delete-pending until the last handle closes. A
+// brief sharing error authorizes only another attempt at the same operation.
+async function retryLockAccess<T>(operation: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try { return await operation(); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (process.platform !== "win32" || attempt >= 5 || !["EPERM", "EACCES", "EBUSY"].includes(code ?? "")) throw error;
+      await delay(5 * 2 ** attempt);
+    }
+  }
+}
+
 async function readOwner(path: string): Promise<{ readonly owner: LockOwner | null; readonly text: string } | null> {
   try {
-    const text = await readFile(path, "utf8");
+    const text = await retryLockAccess(() => readFile(path, "utf8"));
     return { owner: parseOwner(text), text };
   } catch (error) {
     if ((error as { code?: string }).code === "ENOENT") return null;
@@ -116,7 +129,7 @@ async function readOwner(path: string): Promise<{ readonly owner: LockOwner | nu
 async function createExclusive(path: string, content: string): Promise<boolean> {
   let handle;
   try {
-    handle = await open(path, "wx", 0o600);
+    handle = await retryLockAccess(() => open(path, "wx", 0o600));
   } catch (error) {
     if ((error as { code?: string }).code === "EEXIST") return false;
     throw error;
@@ -156,11 +169,13 @@ async function breakStaleLock(path: string, judgedText: string, options: FileLoc
   processAlive: (pid: number) => boolean): Promise<boolean> {
   const breaker = await acquireFileLock(`${path}.breaker`, options);
   try {
-    const current = await readOwner(path);
-    if (current === null) return true;
-    if (current.text !== judgedText || !isDeadOwner(current.owner, processAlive)) return false;
-    await rm(path, { force: true });
-    return true;
+    return await retryLockAccess(async () => {
+      const current = await readOwner(path);
+      if (current === null) return true;
+      if (current.text !== judgedText || !isDeadOwner(current.owner, processAlive)) return false;
+      await rm(path, { force: true });
+      return true;
+    });
   } finally {
     await breaker.release();
   }
@@ -188,18 +203,22 @@ export async function acquireFileLock(lockPath: string, options: FileLockOptions
   let wait = 5;
   for (;;) {
     if (await createExclusive(lockPath, content)) {
-      let released = false;
+      let release: Promise<void> | undefined;
       return {
         path: lockPath,
         token,
-        async release(): Promise<void> {
-          if (released) return;
-          released = true;
-          const current = await readOwner(lockPath);
-          if (current === null || current.owner?.token !== token) {
-            throw new FileLockError("FILE_LOCK_LOST", `${lockPath} is no longer held by this writer`, { lockPath });
-          }
-          await rm(lockPath, { force: true });
+        release(): Promise<void> {
+          release ??= retryLockAccess(async () => {
+            const current = await readOwner(lockPath);
+            if (current === null || current.owner?.token !== token) {
+              throw new FileLockError("FILE_LOCK_LOST", `${lockPath} is no longer held by this writer`, { lockPath });
+            }
+            await rm(lockPath, { force: true });
+          }).catch(error => {
+            release = undefined;
+            throw error;
+          });
+          return release;
         },
       };
     }

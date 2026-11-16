@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { lstat } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 
 import Ajv2020 from "ajv/dist/2020.js";
 
@@ -149,7 +149,7 @@ export async function validateP2SchemasAndFixtures() {
     assertion(document.type === "object" && document.additionalProperties === false, "P2_SCHEMA_CLOSED", name);
     const content = (await readSourceFile(path)).toString("utf8");
     for (const match of content.matchAll(/"\$ref": "\.\/([^"#]+)(?:#[^"]*)?"/gu)) {
-      assertion(schemas.some((candidate) => candidate.endsWith(`/${match[1]}`)), "P2_SCHEMA_REF_MISSING", `${name}:${match[1]}`);
+      assertion(schemas.includes(resolve(dirname(path), match[1])), "P2_SCHEMA_REF_MISSING", `${name}:${match[1]}`);
       resolvedLocalRefs += 1;
     }
     if (p2SchemaNames.has(name.slice("schemas/".length))) {

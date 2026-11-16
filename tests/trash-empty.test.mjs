@@ -43,7 +43,7 @@ async function scratch(context) {
 /** The tool run with a home of the fixture's own; its JSON answer and exit code. */
 async function run(paths, args) {
   try {
-    const { stdout } = await execFileAsync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...process.env, HOME: paths.home } });
+    const { stdout } = await execFileAsync(process.execPath, [SCRIPT, ...args], { encoding: "utf8", env: { ...process.env, HOME: paths.home, USERPROFILE: paths.home } });
     return { code: 0, answer: stdout.trim().startsWith("{") ? JSON.parse(stdout) : stdout.trim() };
   } catch (error) {
     return { code: error.code, answer: JSON.parse(String(error.stderr).trim().split("\n").at(-1)) };
@@ -57,7 +57,7 @@ async function everyFile(paths) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       const path = join(directory, entry.name);
       if (entry.isDirectory()) await walk(path);
-      else if (entry.isFile()) files[path.slice(paths.base.length + 1)] = await readFile(path, "utf8");
+      else if (entry.isFile()) files[path.slice(paths.base.length + 1).replaceAll("\\", "/")] = await readFile(path, "utf8");
     }
   };
   await walk(paths.base);

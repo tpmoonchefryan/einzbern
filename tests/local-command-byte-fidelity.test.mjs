@@ -20,7 +20,7 @@ const joinParts = (parts, separator) => parts.join(separator);
 
 function fixtureGit(root, arguments_, { raw = false } = {}) {
   const publicEmail = joinParts(["fixture", "@", "users.noreply.github.com"], "");
-  const result = spawnSync("git", arguments_, {
+  const result = spawnSync("git", ["-c", "core.autocrlf=false", ...arguments_], {
     cwd: root,
     encoding: raw ? undefined : "utf8",
     env: {
@@ -47,9 +47,9 @@ async function gitObjectFixture(context) {
   const text = Buffer.from("ordinary textual Git blob\n", "utf8");
   await mkdir(join(root, "nested"));
   await writeFile(join(root, "invalid.bin"), invalidUtf8);
-  await writeFile(join(root, "nested", "nul.bin"), nulBearing);
+  await writeFile(join(root, "nested", "embedded-nul.bin"), nulBearing);
   await writeFile(join(root, "text.txt"), text);
-  fixtureGit(root, ["add", "--", "invalid.bin", "nested/nul.bin", "text.txt"]);
+  fixtureGit(root, ["add", "--", "invalid.bin", "nested/embedded-nul.bin", "text.txt"]);
   fixtureGit(root, ["commit", "-q", "-m", "ordinary textual commit"]);
   fixtureGit(root, ["tag", "-a", "fixture-tag", "-m", "ordinary textual tag"]);
   return { root, invalidUtf8, nulBearing, text };
@@ -72,7 +72,7 @@ function independentAggregate(records) {
 
 test("raw command capture preserves invalid UTF-8, NUL and textual Git object bytes", async (context) => {
   const fixture = await gitObjectFixture(context);
-  const paths = ["invalid.bin", "nested/nul.bin", "text.txt"];
+  const paths = ["invalid.bin", "nested/embedded-nul.bin", "text.txt"];
   const expected = [fixture.invalidUtf8, fixture.nulBearing, fixture.text];
   for (let index = 0; index < paths.length; index += 1) {
     const object = fixtureGit(fixture.root, ["hash-object", paths[index]]);
@@ -119,7 +119,7 @@ test("raw ls-tree and for-each-ref callers use explicit strict metadata decoding
   assert.ok(Buffer.isBuffer(treeBytes));
   assert.deepEqual(
     parseHistoricalTreePaths(decodeGitMetadataBytes(treeBytes, "PRIVACY_TREE_UTF8_INVALID")),
-    ["invalid.bin", "nested/nul.bin", "text.txt"],
+    ["invalid.bin", "nested/embedded-nul.bin", "text.txt"],
   );
   const refBytes = runLocalCommand("git", ["for-each-ref", "--format=%(refname)%00%(objectname)%00%(upstream)"], { cwd: root, raw: true });
   assert.ok(Buffer.isBuffer(refBytes));

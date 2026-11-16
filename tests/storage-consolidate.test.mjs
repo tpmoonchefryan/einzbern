@@ -68,7 +68,18 @@ test("one Ether retains native history and evidence, isolates runtime, retires b
   assert.equal(await readFile(join(f.home, "cache", "gate-evidence.log"), "utf8"), "original evidence bytes");
   const files = await libraryTreeDigests(f.to);
   assert.equal(files.some(file => file.path.startsWith(".einzbern/")), false, "runtime is excluded from library snapshots");
+  const forwarding = join(f.home, "cache");
+  if (process.platform === "win32") {
+    // Reconstruct the persisted state between retaining the old junction and installing its replacement.
+    const journalPath = join(f.home, "storage-consolidation.json");
+    const journal = JSON.parse(await readFile(journalPath, "utf8"));
+    delete journal.completed;
+    await writeFile(journalPath, JSON.stringify(journal));
+    await rename(forwarding, forwarding + ".storage-previous");
+  }
   assert.equal((await consolidateStorage(f.home, f.from, f.to, f.runtimeRoot, at, decision, true)).resumed, true);
+  assert.equal(await realpath(forwarding), join(pointer.runtime, "cache"));
+  await assert.rejects(readlink(forwarding + ".storage-previous"), { code: "ENOENT" });
 });
 test("an occupied destination and a runtime root shared with another device are refused", async t => {
   const f = await fixture(t);
@@ -200,8 +211,8 @@ test("storage recovery after publishing the pointer keeps the original transport
   assert.equal(await readFile(join(f.home, "cache", "gate-evidence.log"), "utf8"), "original evidence bytes");
   const hostAfter = await projectHostFiles(project);
   assert.deepEqual(JSON.parse(hostAfter.claude).permissions.additionalDirectories.map(path => resolve(project, path)).sort(), [f.from, target].sort());
-  assert.ok(hostAfter.codex.includes(JSON.stringify(relative(join(project, ".codex"), target))));
-  assert.ok(!hostAfter.codex.includes(JSON.stringify(relative(join(project, ".codex"), f.runtime))));
+  assert.ok(hostAfter.codex.includes(JSON.stringify(relative(join(project, ".codex"), target).replaceAll("\\", "/"))));
+  assert.ok(!hostAfter.codex.includes(JSON.stringify(relative(join(project, ".codex"), f.runtime).replaceAll("\\", "/"))));
 });
 
 test("S4 J1: configuring the current runtime preserves a different verified relocation for CLI recovery", async t => {
@@ -309,8 +320,8 @@ test("S4 J2: storage relocation detects drift in a current host plan and CLI ret
   const recovered = JSON.parse(retry.stdout);
   assert.equal(recovered.reasonCode, "STORAGE_LOCATION_CONFIGURED");
   const actualCodex = await readFile(codexFile, "utf8");
-  assert.ok(actualCodex.includes(JSON.stringify(relative(dirname(codexFile), target))));
-  assert.ok(!actualCodex.includes(JSON.stringify(relative(dirname(codexFile), f.runtime))));
+  assert.ok(actualCodex.includes(JSON.stringify(relative(dirname(codexFile), target).replaceAll("\\", "/"))));
+  assert.ok(!actualCodex.includes(JSON.stringify(relative(dirname(codexFile), f.runtime).replaceAll("\\", "/"))));
   assert.ok(actualCodex.includes("# concurrent user edit restores the old runtime root"));
   assert.equal(await readFile(join(recovered.hostWiring[0].backupDir, codexPath), "utf8"), userEdit);
   assert.equal(await readFile(join(target, oldBackup), "utf8"), oldCodex);
@@ -369,6 +380,7 @@ test("storage repair converts intact legacy absolute forwarding links without mo
   await unlink(link); await symlink(join(target, "cache"), link, process.platform === "win32" ? "junction" : "dir");
   assert.equal(isAbsolute(await readlink(link)), true);
   await configureStorageLocation(f.home, f.from, target, at, decision, true);
-  assert.equal(isAbsolute(await readlink(link)), false);
+  assert.equal(isAbsolute(await readlink(link)), process.platform === "win32");
+  assert.equal(await realpath(link), await realpath(join(target, "cache")));
   assert.equal(await readFile(join(link, "gate-evidence.log"), "utf8"), "original evidence bytes");
 });

@@ -1067,6 +1067,38 @@
     "schemaVersion": "einzbern.runtime-input-contract.v1",
     "entries": [
       {
+        "classification": "internal-transient",
+        "visibility": "internal",
+        "transport": "environment-string",
+        "defaultValue": null,
+        "owner": "Windows process launcher",
+        "source": "process environment",
+        "persistence": "invocation",
+        "sensitivity": "transient-token",
+        "pathBase": null,
+        "sharing": "device-local; never a shared library declaration",
+        "export": "child invocation only",
+        "restart": "next invocation; restart a long-running process to change its startup input",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "env:EINZBERN_WINDOWS_JOB",
+        "kind": "environment",
+        "name": "EINZBERN_WINDOWS_JOB",
+        "semanticType": "string",
+        "validation": "Named Job Object emitted by the launcher; live membership is verified through Windows kernel APIs before recovery or spawn-guard admission.",
+        "defaultDescription": "no inherited Windows Job Object",
+        "precedence": [
+          "launcher-provided job identity"
+        ],
+        "scope": "Windows managed process tree",
+        "consumer": [
+          "skill/mana-orchestrate/scripts/process-launch.mjs",
+          "skill/mana-orchestrate/scripts/spawn-guard.mjs",
+          "scripts/lib/safe-io.mjs"
+        ],
+        "effect": "Binds descendant lifecycle and output-session recovery to the owning Windows job."
+      },
+      {
         "classification": "startup-override",
         "visibility": "public",
         "transport": "environment-string",

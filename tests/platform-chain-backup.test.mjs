@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
-import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
 
 import {
   SNAPSHOT_RETENTION,
@@ -65,9 +66,7 @@ test("S272 uses an external gpg reference without placing encryption material in
   const root = await syntheticPlatform(context);
   const toolRoot = await mkdtemp(join(tmpdir(), "tcrn-chain-backup-tool-"));
   context.after(() => rm(toolRoot, { recursive: true, force: true }));
-  const fakeGpg = join(toolRoot, "gpg.mjs");
-  await writeFile(fakeGpg, `#!/usr/bin/env node\nimport { copyFileSync } from "node:fs";\nif (process.argv.includes("--version")) process.exit(0);\nconst output = process.argv[process.argv.indexOf("--output") + 1];\ncopyFileSync(process.argv.at(-1), output);\n`);
-  await chmod(fakeGpg, 0o755);
+  const fakeGpg = await writeNodeExecutable(join(toolRoot, "gpg"), `#!/usr/bin/env node\nimport { copyFileSync } from "node:fs";\nif (process.argv.includes("--version")) process.exit(0);\nconst output = process.argv[process.argv.indexOf("--output") + 1];\ncopyFileSync(process.argv.at(-1), output);\n`);
   const phrase = join(toolRoot, "passphrase");
   await writeFile(phrase, "synthetic-secret\n", { mode: 0o600 });
   const snapshot = await createSnapshot(root, { chainVersions: [{ partition: "cross-project", version: 1 }] });

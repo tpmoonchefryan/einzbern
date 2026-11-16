@@ -19,7 +19,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, toNamespacedPath } from "node:path";
 import { pathToFileURL } from "node:url";
 import { gzipSync, gunzipSync, constants as zlibConstants } from "node:zlib";
 import test, { after } from "node:test";
@@ -791,10 +791,11 @@ test("execution evidence is usable from the archive with product source denied a
     assert.equal(offline.status, 0, offline.stderr);
   }
   for (const path of [join(repositoryRoot, "package.json"), join(repositoryRoot, "packages/core/src/dispatch-evidence.ts"), join(repositoryRoot, "packages/cli/src/index.ts"), join(repositoryRoot, "node_modules/typescript/package.json")]) {
-    const denied = node([...permission, "--input-type=module", "-e", `import { readFileSync } from 'node:fs'; readFileSync(${JSON.stringify(path)});`], isolated);
+    const denied = node([...permission, "--input-type=module", "-e", `import { readFileSync } from 'node:fs'; try { readFileSync(${JSON.stringify(path)}); } catch (error) { process.stderr.write(JSON.stringify({code:error.code,resource:error.resource})); process.exitCode=1; }`], isolated);
     assert.notEqual(denied.status, 0);
-    assert.match(denied.stderr, /ERR_ACCESS_DENIED/);
-    assert.ok(denied.stderr.includes(path), `the denial must name ${safeDiagnostic(path)}, not instrumentation: ${safeDiagnostic(denied.stderr)}`);
+    const failure = JSON.parse(denied.stderr);
+    assert.equal(failure.code, "ERR_ACCESS_DENIED");
+    assert.equal(failure.resource, process.platform === "win32" ? toNamespacedPath(path) : path);
   }
   // This is the helper installed inside this archive, not a sibling checkout.
   const skillEntry = entries.find(entry => entry.path === `${RELEASE}/skill/${BRAND.helper.id}/SKILL.md`);
@@ -858,7 +859,14 @@ test("PR24-1: packed knowledge-capture preserves legacy language writes with exp
     if (inheritedOptions.includes(`--import=${pathToFileURL(instrumentation).href}`)) permission.push(`--allow-fs-read=${instrumentation}`);
   }
   const cli = join(tree, "scripts/einzbern.mjs");
-  const execute = (args, options) => node([...permission, cli, ...args], options);
+  const helperTemp = join(root, "native-temporary");
+  if (process.platform === "win32") {
+    // Knowledge publication uses the signed-in Windows account's NTFS and the native directory flush helper.
+    await mkdir(helperTemp, { recursive: true });
+    permission.push("--allow-child-process");
+  }
+  const execute = (args, options) => node([...permission, cli, ...args], process.platform === "win32"
+    ? { ...options, env: { ...options.env, TEMP: helperTemp, TMP: helperTemp } } : options);
   await runCaptureCliUpgradeMatrix({ root, execute });
   const isolated = await environment("capture-catalog");
   for (const args of [["commands"], ["knowledge-capture", "--help"]]) {

@@ -284,7 +284,7 @@ test("480-AC1: the default answers install the library, the registry entry, both
   const coordination = join(dirname(f.deviceHome), "Ether");
   const coordinationId = chainIdentity(await materializeWorkspace(join(dirname(f.deviceHome), "Ether"))).coordinationLibraryId;
   assert.deepEqual(registry.entries.map((entry) => [entry.projectPath, entry.libraryPath, entry.libraryId, entry.cloudHosted, entry.chainRole]),
-    [[relative(f.deviceHome, f.project), relative(f.deviceHome, join(dirname(f.deviceHome), "Ether")), applied.library.libraryId, false, "project"]]);
+    [[relative(f.deviceHome, f.project).replaceAll("\\", "/"), relative(f.deviceHome, join(dirname(f.deviceHome), "Ether")).replaceAll("\\", "/"), applied.library.libraryId, false, "project"]]);
   assert.deepEqual(applied.coordination, { libraryId: coordinationId, status: "registered", path: coordination });
   const state = await materializeWorkspace(join(dirname(f.deviceHome), "Ether"));
   assert.equal(state.settings.find((setting) => setting.key === "artifact.language")?.value, "en");
@@ -301,7 +301,7 @@ test("480-AC1: the default answers install the library, the registry entry, both
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "written");
   // Nothing in the project names this machine's paths, and the project's own host settings are untouched.
   for (const file of ["AGENTS.md", "CLAUDE.md"]) assert.ok(!(await readFile(join(f.project, file), "utf8")).includes(f.base), file);
-  assert.ok((await readFile(join(f.project, ".claude/settings.local.json"), "utf8")).includes(relative(f.project, applied.library.path)));
+  assert.ok((await readFile(join(f.project, ".claude/settings.local.json"), "utf8")).includes(relative(f.project, applied.library.path).replaceAll("\\", "/")));
   assert.equal(await lstat(join(f.project, ".ether")).catch(() => null), null);
   assertSelfCheckGreen(applied);
 });
@@ -399,8 +399,8 @@ test("480-R5: every host file and project file is backed up before it is replace
   assert.deepEqual(applied.backups, planned.backups);
   const copies = [];
   for (const line of await snapshot([backupDir])) {
-    const path = line.slice(0, line.indexOf(" "));
-    if (!line.includes(" dir ")) copies.push(await readFile(path, "utf8"));
+    const [, path, kind] = /^(.*) (dir|\d+) \S+$/u.exec(line);
+    if (kind !== "dir") copies.push(await readFile(path, "utf8"));
   }
   assert.deepEqual([...copies].sort(), [...originals.values()].sort(), "each original is backed up byte for byte");
   const settings = JSON.parse(await readFile(join(f.home, ".claude", "settings.json"), "utf8"));
@@ -427,8 +427,8 @@ test("480-R2: a library outside the project gets the project's host write roots;
   const applied = await applySetup(planned);
   assert.deepEqual(applied.warnings, []);
   assert.equal(applied.library.path, library);
-  assert.deepEqual(JSON.parse(await readFile(roots[0], "utf8")).permissions.additionalDirectories, [relative(f.project, library)]);
-  assert.ok((await readFile(roots[1], "utf8")).includes(JSON.stringify(relative(join(f.project, ".codex"), library))));
+  assert.deepEqual(JSON.parse(await readFile(roots[0], "utf8")).permissions.additionalDirectories, [relative(f.project, library).replaceAll("\\", "/")]);
+  assert.ok((await readFile(roots[1], "utf8")).includes(JSON.stringify(relative(join(f.project, ".codex"), library).replaceAll("\\", "/"))));
   // Device decline changes local hooks, not the shared project navigation declaration.
   assert.match(await readFile(join(f.project, "AGENTS.md"), "utf8"), /id=navigation /u);
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "declined");
@@ -488,7 +488,7 @@ test("385-R16: with the library outside the project, fresh and repair name each 
   assert.equal(applied.reasonCode, "SETUP_APPLIED");
   assert.deepEqual(applied.warnings, trackedWarnings(), "SETUP_APPLIED names the same files");
   // The wizard warns and leaves Git alone: both files name the library, stay staged as they were, and nothing is committed.
-  for (const file of HOST_FILES) assert.ok((await readFile(join(f.project, ...file.split("/")), "utf8")).includes(relative(file.startsWith(".codex") ? join(f.project, ".codex") : f.project, library)), file);
+  for (const file of HOST_FILES) assert.ok((await readFile(join(f.project, ...file.split("/")), "utf8")).includes(relative(file.startsWith(".codex") ? join(f.project, ".codex") : f.project, library).replaceAll("\\", "/")), file);
   assert.equal(git(f.project, "status", "--porcelain", "--", ...HOST_FILES), HOST_FILES.map((file) => `AM ${file}\n`).join(""));
   assert.notEqual(spawnSync("git", ["-C", f.project, "rev-parse", "--verify", "--quiet", "HEAD"]).status, 0, "no commit was made");
   assertSelfCheckGreen(applied);
@@ -704,7 +704,11 @@ test("fresh installation is portable: no device paths persist and a moved instal
     seen.add(root);
     for (const entry of await readdir(root, { withFileTypes: true })) {
       const file = join(root, entry.name);
-      if (entry.isSymbolicLink()) assert.equal(isAbsolute(await readlink(file)), false, file);
+      if (entry.isSymbolicLink()) {
+        if (process.platform === "win32" && ["cache", "locks", "backups"].some(area => file === join(f.deviceHome, area))) {
+          assert.equal(await realpath(file), join(readStorageLocation(f.deviceHome).runtime, entry.name));
+        } else assert.equal(isAbsolute(await readlink(file)), false, file);
+      }
       else if (entry.isDirectory()) await inspect(file);
       else if (entry.isFile()) {
         const bytes = await readFile(file, "utf8");

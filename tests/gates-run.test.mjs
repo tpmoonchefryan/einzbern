@@ -192,7 +192,7 @@ test("485-R3: a gate past its timeout is stopped and red; output is cut at its b
     stray: declare([node, "-e", `const c = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' }); c.unref(); require('node:fs').writeFileSync(${JSON.stringify(pidFile)}, String(c.pid));`], ["**"]),
   });
   const plan = await planGates({ projectRoot: project, gates: listGates(state), release: true });
-  const { run, recordPath } = await runGates(plan, { libraryId: state.metadata.workspaceId, at: at(), deviceHome: desk, timeoutMs: 500, outputBytes: 1_024 });
+  const { run, recordPath } = await runGates(plan, { libraryId: state.metadata.workspaceId, at: at(), deviceHome: desk, timeoutMs: process.platform === "win32" ? 3_000 : 500, outputBytes: 1_024 });
   const byName = Object.fromEntries(run.gates.map((gate) => [gate.name, gate]));
   assert.equal(byName.chatty.ok, true, gateDiagnostic(run, recordPath));
   assert.equal(byName.chatty.truncated, true, gateDiagnostic(run, recordPath));

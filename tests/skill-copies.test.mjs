@@ -133,8 +133,8 @@ test("479-R4: skills.json records each copy's path and install-tree digest, and 
     skill: SKILL,
     installedAt: now,
     copies: [
-      { host: "claude", path: relative(device, copyPath(home, ".claude/skills")), installTreeDigest: report.installTreeDigest },
-      { host: "codex", path: relative(device, copyPath(home, ".agents/skills")), installTreeDigest: report.installTreeDigest },
+      { host: "claude", path: relative(device, copyPath(home, ".claude/skills")).replaceAll("\\", "/"), installTreeDigest: report.installTreeDigest },
+      { host: "codex", path: relative(device, copyPath(home, ".agents/skills")).replaceAll("\\", "/"), installTreeDigest: report.installTreeDigest },
     ],
   });
   for (const copy of record.copies) assert.equal(await digestOf(resolve(device, copy.path)), copy.installTreeDigest);

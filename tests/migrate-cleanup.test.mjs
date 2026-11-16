@@ -65,7 +65,7 @@ async function treeDigest(root) {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
       const path = join(directory, entry.name);
       const metadata = await lstat(path);
-      rows.push(`${relative(root, path)}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : entry.isDirectory() ? "directory" : "other"}`);
+      rows.push(`${relative(root, path).replaceAll("\\", "/")}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : entry.isDirectory() ? "directory" : "other"}`);
       if (entry.isDirectory()) await walk(path);
     }
   };

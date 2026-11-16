@@ -3,6 +3,7 @@ import "./helpers/device-home.mjs";
 import { standInForAtelier } from "./helpers/workspace-fixture.mjs";
 import { spawnSync } from "node:child_process";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -75,7 +76,8 @@ test("Story649: direct absolute selection, project isolation, fresh reads, actua
   await rename(unavailable, roots[0]);
   const readonly = join(base, "readonly");
   await mkdir(readonly);
-  await chmod(readonly, 0o555);
+  if (process.platform === "win32") execFileSync("icacls.exe", [readonly, "/deny", "*S-1-1-0:(WD,AD)"], { windowsHide: true });
+  else await chmod(readonly, 0o555);
   try {
     // Exercise the real process credentials; a string-only path rejection cannot prove permissions.
     await assert.rejects(writeFile(join(readonly, "permission-probe"), "probe"), error => ["EACCES", "EPERM"].includes(error.code));
@@ -83,7 +85,8 @@ test("Story649: direct absolute selection, project isolation, fresh reads, actua
     assert.equal((await catalog(a)).deviceValue, roots[0]);
     assert.equal((await catalog(b)).deviceValue, roots[1]);
   } finally {
-    await chmod(readonly, 0o755);
+    if (process.platform === "win32") execFileSync("icacls.exe", [readonly, "/remove:d", "*S-1-1-0"], { windowsHide: true });
+    else await chmod(readonly, 0o755);
   }
   t.diagnostic(`actual filesystem devices: library=${(await stat(workspace)).dev}; target=${(await stat(roots[0])).dev}; cross-volume proof only when device numbers differ`);
 });
