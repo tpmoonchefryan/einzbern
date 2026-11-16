@@ -52,7 +52,7 @@ const calls = [];
 cp.execFileSync = (executable, args, options) => {
   calls.push({ executable, args, options });
   assert.equal(options.windowsHide, true);
-  assert.equal(options.timeout, 2000);
+  assert.equal(options.timeout, 5000);
   assert.deepEqual(args.slice(0, 3), ['-NoProfile', '-NonInteractive', '-Command']);
   if (failure) throw new Error('Synthetic Windows query failure');
   return JSON.stringify(answer);

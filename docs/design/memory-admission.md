@@ -47,7 +47,7 @@ read-only `/usr/bin/memory_pressure -Q` query, constraining available memory wit
 its system free percentage. Windows uses local `Win32_OperatingSystem` CIM
 observations to bound available memory by both physical and virtual headroom.
 The Windows query runs the system Windows PowerShell executable without a profile
-or a visible window, uses its inbox modules, and has a two-second timeout. Windows
+or a visible window, uses its inbox modules, and has a five-second timeout. Windows
 and macOS report the unavailable PSI stall percentage as `null`. See Microsoft's
 [Win32_OperatingSystem properties](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem).
 Missing, malformed, stale or future required observations refuse this opt-in

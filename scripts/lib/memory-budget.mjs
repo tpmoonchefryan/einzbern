@@ -56,7 +56,7 @@ function queryWindows(script) {
   // A PowerShell 7 parent may export module paths incompatible with Windows PowerShell.
   const command = `$ErrorActionPreference = 'Stop'; $env:PSModulePath = Join-Path $PSHOME 'Modules'; ${script}`;
   return JSON.parse(execFileSync(executable, ["-NoProfile", "-NonInteractive", "-Command", command], {
-    encoding: "utf8", timeout: 2000, maxBuffer: 8 * MiB, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8", timeout: 5000, maxBuffer: 8 * MiB, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   }));
 }
 
