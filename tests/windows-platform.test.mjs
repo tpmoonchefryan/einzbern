@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { cp, link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -26,11 +26,16 @@ test("the built resource adapter resolves its source executor on the native plat
 
 test("Windows full-suite entry reports its unsupported controller before launching it", { skip: process.platform !== "win32" }, async t => {
   const root = await fixture(t);
-  const child = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/task.mjs", import.meta.url)), "test"], {
+  await cp(new URL("../scripts", import.meta.url), join(root, "scripts"), { recursive: true });
+  await symlink(fileURLToPath(new URL("../node_modules", import.meta.url)), join(root, "node_modules"), "junction");
+  await mkdir(join(root, ".git"));
+  await writeFile(join(root, "package.json"), '{"type":"module"}\n');
+  const child = spawnSync(process.execPath, [join(root, "scripts", "task.mjs"), "test"], {
     encoding: "utf8", windowsHide: true, timeout: 15_000,
-    env: { ...process.env, EINZBERN_HOME: root, EINZBERN_HEAVY_LOCK_DIR: join(root, "locks") },
+    env: { ...process.env, EINZBERN_HOME: join(root, "device"), EINZBERN_HEAVY_LOCK_DIR: join(root, "locks") },
   });
   assert.equal(child.status, 1, child.stderr);
+  assert.match(child.stderr, /^\{/u, child.stderr);
   assert.equal(JSON.parse(child.stderr.trim()).reasonCode, "TEST_CONTROLLER_PLATFORM_UNSUPPORTED");
 });
 
@@ -80,7 +85,10 @@ test("Windows output sessions retain an interrupted owner's claim", { skip: proc
   const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
 import { withExclusiveOutputSession } from ${JSON.stringify(module)};
 await withExclusiveOutputSession(${JSON.stringify(root)}, () => process.exit(0));
-`], { encoding: "utf8", windowsHide: true, timeout: 10_000 });
+`], {
+    encoding: "utf8", windowsHide: true, timeout: 20_000,
+    env: { ...process.env, HOME: root, USERPROFILE: root },
+  });
   assert.equal(child.status, 0, child.stderr);
   const ownerPath = join(root, ".git", "einzbern-output.lock", "owner.json");
   const before = await readFile(ownerPath);

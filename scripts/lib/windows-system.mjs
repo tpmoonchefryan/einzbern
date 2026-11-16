@@ -2,14 +2,14 @@
 import { execFileSync } from "node:child_process";
 import { isAbsolute, join, toNamespacedPath } from "node:path";
 
-export function queryWindows(script) {
+export function queryWindows(script, timeoutMs = 5000) {
   const systemRoot = process.env.SystemRoot;
   if (!systemRoot || !isAbsolute(systemRoot)) throw new Error("Windows system directory is unavailable");
   const executable = join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   // A PowerShell 7 parent can export module paths incompatible with Windows PowerShell.
   const command = `$ErrorActionPreference = 'Stop'; $env:PSModulePath = Join-Path $PSHOME 'Modules'; ${script}`;
   return JSON.parse(execFileSync(executable, ["-NoProfile", "-NonInteractive", "-Command", command], {
-    encoding: "utf8", timeout: 5000, maxBuffer: 8 * 1024 * 1024, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+    encoding: "utf8", timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024, windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
   }));
 }
 
@@ -32,6 +32,7 @@ ConvertTo-Json -Compress -InputObject $safe`) === true;
 /** Atomically create an exclusive directory with its private DACL already in place. */
 export function createPrivateWindowsDirectory(path) {
   const encodedPath = Buffer.from(toNamespacedPath(path), "utf8").toString("base64");
+  // Compiling the tiny native bridge can take longer on a fresh Windows profile.
   return queryWindows(`
 $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encodedPath}'));
 $owner = [Security.Principal.WindowsIdentity]::GetCurrent().User;
@@ -68,5 +69,5 @@ public static class EinzbernPrivateDirectory {
 '@;
 $errorCode = [EinzbernPrivateDirectory]::Create($path, $acl.GetSecurityDescriptorBinaryForm());
 if ($errorCode -ne 0 -and $errorCode -ne 183) { throw [ComponentModel.Win32Exception]::new($errorCode); }
-ConvertTo-Json -InputObject ($errorCode -eq 0)`);
+ConvertTo-Json -InputObject ($errorCode -eq 0)`, 15_000);
 }
