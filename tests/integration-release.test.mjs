@@ -285,7 +285,8 @@ test("607-R2: complete generated release readiness, native multi-Story gates, pa
       // its real run command; its implicit install would inherit controller IO.
       const install = ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts"];
       calls.push({ command, args: install, phase: "native-offline-readiness" });
-      execFileSync(command, install, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      const invocation = commandInvocation(command, install, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      execFileSync(invocation.command, invocation.args, invocation.options);
     }
     calls.push({ command, args });
     const invocation = commandInvocation(command, args, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });

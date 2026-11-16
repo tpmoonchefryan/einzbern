@@ -16,6 +16,7 @@ import { isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { LEGACY_ENGINE_NAME, LEGACY_HOOK_CHILD_SCRIPTS, LEGACY_HOOK_SCRIPTS, LOCAL_DIRECTORY_NAMES } from "./lib/names.mjs";
+import { queryWindows } from "./lib/windows-system.mjs";
 import { buildContainedExecutionPlan } from "./lib/push-gate-children.mjs";
 import {
   buildDynamicGatePlan,
@@ -30,6 +31,7 @@ import {
 export const OPERATIONAL_BATCH_ENTRY_VERSION = "tcrn.operational-batch-entry.v2";
 export const CODE_OWNED_RUNNER_VERSION = "tcrn-code-owned-runner.v1";
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const commandRoot = process.platform === "win32" ? repositoryRoot.replaceAll("\\", "/") : repositoryRoot;
 const platformRoot = resolve(repositoryRoot, "../..");
 const chainContainer = [".tcrn", "workspace"].join("-");
 const workspaceDefault = resolve(platformRoot, chainContainer, "cross-project/workspace");
@@ -186,16 +188,18 @@ function hostHookProcess(command) {
 }
 
 function classifyProcess(row, { selfPid = process.pid, selfPgid = null } = {}) {
-  const command = text(row.command);
+  const command = process.platform === "win32" ? text(row.command).replaceAll("\\", "/") : text(row.command);
+  // A checkout named "review" or "implement" does not assign that role to every process.
+  const roleCommand = command.replaceAll(commandRoot, "");
   const state = text(row.state).trim();
   const isOwn = row.pid === selfPid || selfPgid !== null && row.pgid === selfPgid;
   const formalEntryWrapper = /(?:^|\s)(?:node\s+)?[^\s]*operational-batch-entry\.mjs(?:\s|$)/u.test(command);
-  const absoluteRepository = command.includes(repositoryRoot) || text(row.cwd).startsWith(repositoryRoot);
-  const taskBound = command.includes("TCRN-CROSS-STORY-") || command.includes("EPIC135");
+  const absoluteRepository = command.includes(commandRoot) || text(row.cwd).startsWith(repositoryRoot);
+  const taskBound = roleCommand.includes("TCRN-CROSS-STORY-") || roleCommand.includes("EPIC135");
   const relativeRepository = RELATIVE_REPOSITORY_COMMAND.test(command);
   const inRepository = absoluteRepository || taskBound;
   const appService = /(?:Codex \((?:Service|Renderer)\)|Claude Helper|static-serve|portal\/portal\.mjs|\/Applications\/(?:ChatGPT|Claude)\.app|codex app-server)/iu.test(command);
-  const taskRole = /(?:\b(?:luna|astra|sonnet|sol|rework|acceptance|review|implement)\b|TCRN-CROSS-STORY-4(?:1[5-9]|2[0-2]))/iu.test(command);
+  const taskRole = /(?:\b(?:luna|astra|sonnet|sol|rework|acceptance|review|implement)\b|TCRN-CROSS-STORY-4(?:1[5-9]|2[0-2]))/iu.test(roleCommand);
   const likelyGovernedWrite = GOVERNED_WRITE_COMMAND.test(command) || relativeRepository && /\b(?:put|set|create|delete|transition|recover|capture|promote|retire|migrate|annotate|batch)\b/iu.test(command);
   let scope = "unknown";
   let active = true;
@@ -221,7 +225,7 @@ function classifyProcess(row, { selfPid = process.pid, selfPgid = null } = {}) {
     active = false;
     scopeBasis = "registered-host-hook";
   } else if (taskRole && inRepository) {
-    scope = /(?:review|acceptance|astra)/iu.test(command) ? "review" : "implementation";
+    scope = /(?:review|acceptance|astra)/iu.test(roleCommand) ? "review" : "implementation";
     role = scope;
     scopeBasis = absoluteRepository ? "absolute-repository" : "task-bound";
   } else if (inRepository) {
@@ -245,6 +249,22 @@ function classifyProcess(row, { selfPid = process.pid, selfPgid = null } = {}) {
 }
 
 function processSnapshot() {
+  if (process.platform === "win32") {
+    try {
+      const rows = queryWindows(`
+$rows = @(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CommandLine,Name |
+  Where-Object { $_.ProcessId -gt 0 -and $_.ProcessId -ne $PID } | ForEach-Object {
+    [pscustomobject]@{ pid = [int]$_.ProcessId; ppid = [int]$_.ParentProcessId; command = $(if ($_.CommandLine) { $_.CommandLine } else { $_.Name }) }
+  });
+ConvertTo-Json -Compress -InputObject $rows`, 15_000);
+      if (!Array.isArray(rows) || !rows.some(row => row.pid === process.pid)) throw new Error("CIM process table did not include the observer");
+      // CIM provides parentage and command lines without POSIX process groups or scheduler state.
+      const summary = summarizeProcesses(rows.map(row => ({ ...row, pgid: null, state: null })));
+      return { ...summary, source: "code-owned-cim-host-snapshot", ok: true };
+    } catch (error) {
+      return { ok: false, reasonCode: "BATCH_HOST_SNAPSHOT_NOT_VERIFIABLE", error: String(error.message ?? error) };
+    }
+  }
   const result = run("ps", ["-axo", "pid=,ppid=,pgid=,stat=,command="], { timeout: 5_000, maxBuffer: 4 * 1024 * 1024 });
   if (!result.ok) return { ok: false, reasonCode: "BATCH_HOST_SNAPSHOT_NOT_VERIFIABLE", error: result.stderr || result.error || "ps failed" };
   const rows = text(result.stdout).split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).map((line) => {

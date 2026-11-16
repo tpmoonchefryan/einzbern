@@ -1060,7 +1060,7 @@ test("670: missing, ambiguous, wrong and escaping repository bindings preserve p
   git(projectB, ["remote", "set-url", "origin", `https://${repository}.git`]);
   const outside = join(base, "outside");
   await mkdir(outside);
-  await symlink(outside, join(projectB, "escape"), "dir");
+  await symlink(outside, join(projectB, "escape"), "junction");
   await declare(library, "portable", null, ["--root", "escape"]);
   assert.equal((await refusal(plan)).reasonCode, "GATES_ROOT_INVALID");
   await declare(library, "portable", [node, "-e", "process.exit(7)"], ["--root", "src"]);

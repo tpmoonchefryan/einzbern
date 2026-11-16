@@ -13,6 +13,7 @@ import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile }
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { pathToFileURL } from "node:url";
 
 import { FRAMEWORK_VERSION, createProject, createWork, initializeLibrary, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
@@ -40,6 +41,7 @@ async function scratch(context) {
   const home = join(base, "device");
   process.env.EINZBERN_HOME = home;
   context.after(async () => {
+    resetRecallCache();
     process.env.EINZBERN_HOME = previous;
     await rm(base, { recursive: true, force: true });
   });

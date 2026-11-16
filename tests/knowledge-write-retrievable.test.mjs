@@ -37,6 +37,7 @@ import {
 import { readKnowledgeStoreMarker } from "../dist/build/packages/core/src/knowledge-core.js";
 import { readRecallAuthority } from "../dist/build/packages/core/src/recall-authority.js";
 import { readRecallCards } from "../dist/build/packages/core/src/recall-inputs.js";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { canonicalJson, canonicalSha256 } from "../dist/build/packages/protocol/src/index.js";
 
 const AT = "2026-09-26T09:00:00.000Z";
@@ -44,7 +45,7 @@ const OWNER = "owner:sub-308";
 
 async function fixture(t, externalKey) {
   const base = await realpath(await mkdtemp(join(tmpdir(), "einzbern-sub308-")));
-  t.after(() => rm(base, { recursive: true, force: true }));
+  t.after(async () => { resetRecallCache(); await rm(base, { recursive: true, force: true }); });
   const workspace = join(base, "workspace");
   await initializeLibrary({ root: workspace, createdAt: "2026-01-01T00:00:00Z" });
   const project = await createProject(workspace, {

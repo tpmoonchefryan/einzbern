@@ -59,6 +59,10 @@ kernel job membership and CIM process observations. Existing v1 POSIX records
 remain readable. A Windows live check requires a job registration to establish
 the lifetime of detached descendants.
 
+The operational batch observer uses CIM to read process IDs, parent IDs and
+command lines on Windows. Its snapshot leaves POSIX groups and scheduler state
+unknown. An unavailable CIM query fails the observation.
+
 Runtime relocation uses NTFS junctions, preserving access through the original
 device paths without requiring symbolic-link privileges. Stored paths support
 different drive letters and UNC roots. Nested

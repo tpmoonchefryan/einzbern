@@ -26,11 +26,31 @@ const documents = [
   ] }),
 ];
 
-async function directory(t) {
+async function fixture(t) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "fts095-")));
-  t.after(async () => { resetRecallCache(); await fs.rm(root, { recursive: true, force: true }); });
-  return root;
+  const indexes = [];
+  t.after(async () => {
+    for (const index of indexes) index.close();
+    resetRecallCache();
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  return { root, openIndex(...args) {
+    const index = new RecallIndex(...args);
+    indexes.push(index);
+    return index;
+  } };
 }
+
+test("a Windows recall index can commit and query beyond MAX_PATH", { skip: process.platform !== "win32" }, async t => {
+  const { root, openIndex } = await fixture(t);
+  let directory = root;
+  while (directory.length < 260) directory = join(directory, "long-cache-directory");
+  await fs.mkdir(directory, { recursive: true });
+  const file = join(directory, "recall.sqlite");
+  const index = openIndex(documents, "long-path", file);
+  assert.ok(index.search("alloy").length > 0);
+  assert.ok((await fs.stat(file)).size > 0);
+});
 
 // Observe actual production connections without exporting a decoder or test API.
 function connections(t) {
@@ -53,10 +73,9 @@ function integrity(database) {
 }
 
 test("095 FTS storage: real external-content text, BM25, Unicode, clauses and same-head delta equal the plain index", async t => {
-  const root = await directory(t), seen = connections(t);
-  const plain = new RecallIndex(documents, "fixed-head");
-  const packed = new RecallIndex(documents, "fixed-head", join(root, "index.sqlite"));
-  t.after(() => { plain.close(); packed.close(); });
+  const { root, openIndex } = await fixture(t), seen = connections(t);
+  const plain = openIndex(documents, "fixed-head");
+  const packed = openIndex(documents, "fixed-head", join(root, "index.sqlite"));
   const [original, compressed] = seen;
   assert.deepEqual(compressed.prepare(`SELECT rowId, ${columns} FROM recall_fts_content`).all(), original.prepare(`SELECT rowId, ${columns} FROM recall_fts_content`).all());
   for (const query of ["alloy", "café", "合金", "AlloySensor_v2", "FTS095-MIN-3#D2", "FTS095-MIN", ""]) assert.deepEqual(packed.search(query), plain.search(query), query);
@@ -83,10 +102,9 @@ function frame(fields, tail = Buffer.alloc(0)) {
 }
 
 test("095 FTS storage: NULL versus empty prose and a legal large row round trip through SQLite", async t => {
-  const root = await directory(t), seen = connections(t);
+  const { root, openIndex } = await fixture(t), seen = connections(t);
   const large = doc("large", { body: "alloy " + "🧪".repeat(300000) });
-  const index = new RecallIndex([large], "head", join(root, "large.sqlite"));
-  t.after(() => index.close());
+  const index = openIndex([large], "head", join(root, "large.sqlite"));
   const database = seen[0];
   assert.equal(database.prepare("SELECT body FROM recall_fts_content").get().body, large.body);
   integrity(database);
@@ -98,9 +116,8 @@ test("095 FTS storage: NULL versus empty prose and a legal large row round trip 
 });
 
 test("095 FTS storage: malformed frames fail the complete external-content query and FTS integrity check", async t => {
-  const root = await directory(t), seen = connections(t);
-  const index = new RecallIndex(documents, "head", join(root, "malformed.sqlite"));
-  t.after(() => index.close());
+  const { root, openIndex } = await fixture(t), seen = connections(t);
+  openIndex(documents, "head", join(root, "malformed.sqlite"));
   const database = seen[0], good = Buffer.from(database.prepare("SELECT payload FROM recall_fts_payload WHERE rowId = 1").get().payload);
   const header = Buffer.from(good); header[0] |= 0x80;
   const length = Buffer.from(good); length.writeDoubleLE(length.readDoubleLE(4) + 1, 4);
@@ -129,7 +146,7 @@ test("095 FTS storage: malformed frames fail the complete external-content query
 });
 
 test("095 FTS storage: close and fresh-process reopen, unchanged bytes, old format and engine/schema/binding invalidation", async t => {
-  const base = await directory(t), home = join(base, "device"), root = join(base, "library"), previous = process.env.EINZBERN_HOME;
+  const { root: base } = await fixture(t), home = join(base, "device"), root = join(base, "library"), previous = process.env.EINZBERN_HOME;
   process.env.EINZBERN_HOME = home;
   t.after(() => { process.env.EINZBERN_HOME = previous; });
   await initializeLibrary({ root, createdAt: at, libraryId: "library:000000000000000000095018" });

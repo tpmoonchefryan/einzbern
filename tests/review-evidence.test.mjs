@@ -746,7 +746,7 @@ test("INC-384: a governed write under a hook stays in writes and a read with no 
   // (TCRN-CROSS-STORY-467 R3). The rule is structural — any registered hook ancestor — so
   // the remaining handler stands in as the ancestor.
   const hookWrite = [
-    { pid: 510, ppid: 500, pgid: 510, state: "S", command: `node ${REPOSITORY_ROOT}/scripts/knowledge-inject-hook.mjs --container-root /container --host claude` },
+    { pid: 510, ppid: 500, pgid: 510, state: "S", command: `node "${join(REPOSITORY_ROOT, "scripts", "knowledge-inject-hook.mjs")}" --container-root /container --host claude` },
     { pid: 511, ppid: 510, pgid: 510, state: "S", command: `${cli} knowledge-capture --workspace ${workspace} --from-file /tmp/card.json` },
   ];
   const mainSessionRead = { pid: 520, ppid: 500, pgid: 520, state: "S", command: `${cli} work-show --workspace ${workspace} --id work:000000000000000000000384` };
@@ -756,6 +756,16 @@ test("INC-384: a governed write under a hook stays in writes and a read with no 
   const summary = operationalBatchEntry.summarizeProcesses([...hookedSnapshot(), ...hookWrite, mainSessionRead, orphanRead, loopA, loopB], { selfPid: 1, selfPgid: null });
   assert.deepEqual(summary.writes.records.map((row) => row.pid), [511], "the batch still waits for a real write a hook started");
   assert.deepEqual(summary.agents.records.map((row) => [row.pid, row.role]).sort((left, right) => left[0] - right[0]), [[511, "orchestration"], [520, "orchestration"], [521, "orchestration"], [530, "orchestration"], [531, "orchestration"]], "no hook ancestor, a missing parent, or a parent cycle keeps the existing rule");
+});
+
+test("the Windows batch observer reads native process ancestry through CIM", { skip: process.platform !== "win32" }, () => {
+  const snapshot = operationalBatchEntry.processSnapshot();
+  assert.equal(snapshot.ok, true, snapshot.error);
+  assert.equal(snapshot.source, "code-owned-cim-host-snapshot");
+  const parent = Object.values(snapshot.scopeObservations).flat().find(row => row.pid === process.ppid);
+  assert.ok(parent, "the native snapshot includes the live test controller");
+  assert.equal(parent.pgid, null);
+  assert.equal(parent.stateKnown, false);
 });
 
 test("DOT-E01 native review uses the supported native evidence command and fails closed if unavailable", async () => {

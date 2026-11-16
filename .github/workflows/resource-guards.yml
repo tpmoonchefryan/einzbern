@@ -54,14 +54,16 @@ jobs:
       - name: Verify native Windows entry points
         if: runner.os == 'Windows'
         run: |
-          pnpm exec node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/windows-platform.test.mjs tests/windows-process.test.mjs tests/ci-selective-runner.test.mjs tests/p1-all-legs.test.mjs tests/file-lock-concurrency.test.mjs tests/akasha-stream.test.mjs tests/host-probe.test.mjs tests/kiro-hooks.test.mjs tests/kiro-native-execution.test.mjs tests/antigravity-hooks.test.mjs tests/antigravity-native-execution.test.mjs tests/antigravity-review-boundaries.test.mjs tests/backup-snapshot.test.mjs tests/cloud-roots.test.mjs tests/ci-evidence-retention.test.mjs tests/ci-light-evidence.test.mjs tests/ci-bootstrap.test.mjs tests/ci-test-roster.test.mjs tests/gates.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/installer-cleanup-audit-regressions.test.mjs tests/skill-install-bootstrap.test.mjs
+          pnpm exec node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/windows-platform.test.mjs tests/windows-process.test.mjs tests/ci-selective-runner.test.mjs tests/p1-all-legs.test.mjs tests/file-lock-concurrency.test.mjs tests/akasha-stream.test.mjs tests/host-probe.test.mjs tests/kiro-hooks.test.mjs tests/kiro-native-execution.test.mjs tests/antigravity-hooks.test.mjs tests/antigravity-native-execution.test.mjs tests/antigravity-review-boundaries.test.mjs tests/antigravity-swarm-guard.test.mjs tests/antigravity-swarm-batch.test.mjs tests/init095-fts-storage.test.mjs tests/backup-snapshot.test.mjs tests/cloud-roots.test.mjs tests/ci-evidence-retention.test.mjs tests/ci-light-evidence.test.mjs tests/ci-bootstrap.test.mjs tests/ci-test-roster.test.mjs tests/gates.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/installer-cleanup-audit-regressions.test.mjs tests/skill-install-bootstrap.test.mjs
       - name: Verify Linux resource and filesystem regressions
         if: runner.os == 'Linux'
         run: |
           pnpm exec node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/memory-budget.test.mjs tests/memory-policy-backup.test.mjs tests/heavy-runs.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/io-boundaries.test.mjs tests/output-session-lifecycle.test.mjs tests/storage-defensive-maintenance.test.mjs tests/backup-snapshot.test.mjs tests/render-helper-docs.test.mjs tests/skill-install-bootstrap.test.mjs tests/windows-platform.test.mjs tests/windows-process.test.mjs tests/ci-selective-runner.test.mjs tests/p1-all-legs.test.mjs tests/host-probe.test.mjs tests/kiro-native-execution.test.mjs tests/antigravity-native-execution.test.mjs tests/background-resource.test.mjs
       - name: Run full Linux P1 on the reviewed commit
         if: runner.os == 'Linux' && contains(github.event.pull_request.labels.*.name, 'full-p1')
-        run: pnpm verify:p1
+        run: |
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          pnpm verify:p1
       - name: Retain full P1 and test receipts
         if: always() && runner.os == 'Linux' && contains(github.event.pull_request.labels.*.name, 'full-p1')
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

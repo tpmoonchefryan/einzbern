@@ -12,6 +12,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { pathToFileURL } from "node:url";
 
 import { createProject, createWork, initializeLibrary, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
@@ -53,6 +54,7 @@ async function registeredProject(context) {
   const saved = Object.fromEntries(["EINZBERN_HOME", "EINZBERN_HOST", "CLAUDE_PROJECT_DIR"].map((key) => [key, process.env[key]]));
   process.env.EINZBERN_HOME = join(base, "device");
   context.after(async () => {
+    resetRecallCache();
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

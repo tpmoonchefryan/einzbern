@@ -192,7 +192,7 @@ test("095: tree metadata batches yield before admitting the complete file set", 
 // writable page need not change ctime. Restore even when the assertion fails.
 async function withWritableMapping(path, offset, operation) {
   const original = await fs.readFile(path);
-  const python = spawn("python3", ["-u", "-c", `import hashlib,json,mmap,sys
+  const python = spawn(process.platform === "win32" ? "python" : "python3", ["-u", "-c", `import hashlib,json,mmap,sys
 with open(sys.argv[1], 'r+b', buffering=0) as f:
  with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_WRITE) as m:
   offsets=json.loads(sys.argv[2]); original=[m[offset] for offset in offsets]

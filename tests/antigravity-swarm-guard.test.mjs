@@ -7,6 +7,8 @@ import { mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
+import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
 
 import {
   ANTIGRAVITY_SWARM_GUARD_VERSION,
@@ -298,15 +300,22 @@ test("INIT092-SUB710-3: guard state staging enforces 0700/0600 permissions, exac
 
   const writtenPath = await stageAntigravitySwarmGuardState(f.deviceHome, state);
   assert.equal(writtenPath, expectedPath);
-  assert.equal((await stat(join(f.deviceHome, "cache", "antigravity-swarm-guards"))).mode & 0o777, 0o700);
-  assert.equal((await stat(writtenPath)).mode & 0o777, 0o600);
+  const guardDir = join(f.deviceHome, "cache", "antigravity-swarm-guards");
+  if (process.platform === "win32") {
+    assert.ok(hasPrivateWindowsPermissions(guardDir, true));
+    assert.ok(hasPrivateWindowsPermissions(writtenPath, true));
+  } else {
+    assert.equal((await stat(guardDir)).mode & 0o777, 0o700);
+    assert.equal((await stat(writtenPath)).mode & 0o777, 0o600);
+  }
   assert.equal(readAntigravitySwarmGuardStatesSync(f.deviceHome).length, 1);
 
   // Symlink at target path is refused on write and skipped on read.
   const evil = join(f.root, "evil.json");
   await writeFile(evil, "{}");
   const symPath = antigravitySwarmGuardPath(f.deviceHome, "coord-symlink");
-  await symlink(evil, symPath);
+  if (await fileSymlinksAvailable(f.root)) await symlink(evil, symPath, "file");
+  else await symlink(f.root, symPath, "junction");
   await assert.rejects(
     stageAntigravitySwarmGuardState(f.deviceHome, { ...state, coordinator: { ...state.coordinator, conversationId: "coord-symlink" } }),
     { reasonCode: "ANTIGRAVITY_SWARM_GUARD_SYMLINK" },
@@ -497,7 +506,7 @@ test("INIT092-SUB710-4: landing verifier & PreToolUse guard cover share/branch, 
   const realTarget = join(f.root, "outside-guards");
   await mkdir(join(symlinkDevice, "cache"), { recursive: true });
   await mkdir(realTarget, { recursive: true });
-  await symlink(realTarget, join(symlinkDevice, "cache", "antigravity-swarm-guards"));
+  await symlink(realTarget, join(symlinkDevice, "cache", "antigravity-swarm-guards"), "junction");
 
   for (const action of ["add", "model"]) {
     const res = antigravitySwarmPreToolObservation(
@@ -532,7 +541,7 @@ test("INIT092-SUB710-5: relocated storage-location.json with symlinked deviceHom
   await mkdir(relocatedDevice, { recursive: true });
   await mkdir(join(runtimeDir, "cache"), { recursive: true });
   await mkdir(libraryDir, { recursive: true });
-  await symlink(join(runtimeDir, "cache"), join(relocatedDevice, "cache"));
+  await symlink(join(runtimeDir, "cache"), join(relocatedDevice, "cache"), "junction");
   await writeFile(
     join(relocatedDevice, "storage-location.json"),
     `${JSON.stringify({

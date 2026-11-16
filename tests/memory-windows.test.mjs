@@ -6,9 +6,15 @@ import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireHeavySlot } from "../scripts/lib/heavy-runs.mjs";
+import { queryWindows } from "../scripts/lib/windows-system.mjs";
 import { checkMemorySample, memoryTestArguments, parseMemoryPolicy, processTable, resolveMemoryDirectory, sampleMemory } from "../scripts/lib/memory-budget.mjs";
 
 const memoryModule = new URL("../scripts/lib/memory-budget.mjs", import.meta.url).href;
+
+test("Windows system queries preserve Unicode independently of the console code page", { skip: process.platform !== "win32" }, () => {
+  const value = queryWindows("ConvertTo-Json -Compress -InputObject ([string][char]0x5B50 + [string][char]0x4F8B)");
+  assert.equal(value, "子例");
+});
 
 async function privateWindowsDirectory(t) {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "memory-windows-native-")));

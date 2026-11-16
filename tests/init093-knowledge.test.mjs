@@ -16,6 +16,7 @@ import { registerLibrary } from "../dist/build/packages/core/src/registry.js";
 import { knowledgeProjectionConflict } from "../dist/build/packages/core/src/knowledge-core.js";
 import { assessKnowledgePair, knowledgeTopicTokens } from "../dist/build/packages/core/src/knowledge-conflict.js";
 import { readRecallCards } from "../dist/build/packages/core/src/recall-inputs.js";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { canonicalJson, canonicalSha256 } from "../dist/build/packages/protocol/src/index.js";
 
 const at = "2026-11-13T06:00:00Z";
@@ -96,7 +97,7 @@ async function fixture(t) {
     await writeFile(join(home, "device.json"), canonicalJson({ schemaVersion: "einzbern.device.v1", deviceId: devices[n], createdAt: at, displayName: `test-${n}` }));
   }
   process.env.EINZBERN_HOME = homes[0];
-  t.after(async () => { process.env.EINZBERN_HOME = previous; await rm(root, { recursive: true, force: true }); });
+  t.after(async () => { resetRecallCache(); process.env.EINZBERN_HOME = previous; await rm(root, { recursive: true, force: true }); });
   const workspace = join(root, "library");
   await initializeLibrary({ root: workspace, createdAt: at });
   const a = await createProject(workspace, { externalKey: "SCOPE-A", name: "A", occurredAt: at });

@@ -39,7 +39,7 @@ import type { BigIntStats } from "node:fs";
 import { constants, rmSync, closeSync, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { mkdir, open, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, toNamespacedPath } from "node:path";
 import { cachePath } from "./device-home.js";
 import { openLibrary } from "./ether-library.js";
 import { readProtectedProjection, writeProtectedProjection } from "./protected-projection.js";
@@ -612,7 +612,7 @@ function ftsContentText(payload: SQLOutputValue, column: SQLOutputValue): string
 }
 
 function openRecallDatabase(path: string, readOnly = false): DatabaseSync {
-  const database = new DatabaseSync(path, { readOnly });
+  const database = new DatabaseSync(isAbsolute(path) ? toNamespacedPath(path) : path, { readOnly });
   try {
     if (path !== ":memory:") database.function("recall_fts_text", { deterministic: true }, ftsContentText);
     return database;
@@ -1804,7 +1804,7 @@ export async function recallPersistent(request: RecallRequest, root: string, pre
       cachedIndexes.set(request.cacheKey, index);
       return recall(request);
     }
-    temporary = join(directory, `.tmp-${name}-${process.pid}-${crypto.randomUUID()}.sqlite`);
+    temporary = join(directory, `.tmp-recall-${crypto.randomUUID()}.sqlite`);
     let moved;
     if (index !== undefined && bytes !== undefined) {
       await writeFile(temporary, bytes, { flag: "wx", mode: 0o600 });
