@@ -1015,7 +1015,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor privacy-boundary project-chain-model
     push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate release-tooling-audit-boundaries release-trust
     render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
-    story-346-pg-disabled story-378-incident-replay story-rule-conservation`);
+    story-346-pg-disabled story-378-incident-replay story-rule-conservation windows-process`);
   const ordinaryWiki = ["Atelier", "CLI-Reference", "Ether-Layout", "FAQ", "Gates", "Glossary", "Home", "Install-Wizard", "Managed-Sections-and-Command-Spell", "Migrating-from-TCRN-Workflow", "Multi-Device-and-Cloud", "Variables", "_Sidebar"].map((name) => `docs/wiki/${name}.md`);
   assert.deepEqual(Object.keys(rules.docs).sort(), ["README.md", ...ordinaryWiki].sort());
   const expectedDocuments = Object.fromEntries(ordinaryWiki.map((document) => [document, sorted([...integrity, ...names("privacy-boundary push-wiki wiki-pages")])]));
@@ -1029,7 +1029,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     operational-audit-boundaries otel-privacy-guard output-session-lifecycle p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor
     privacy-boundary privacy-git-metadata privacy-normalization project-chain-model push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate
     release-tooling-audit-boundaries release-trust render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
-    staged-privacy-origin-diagnostics staged-privacy-reviewed-paths storage-defensive-maintenance story-346-pg-disabled story-378-incident-replay story-rule-conservation token-attribution`);
+    staged-privacy-origin-diagnostics staged-privacy-reviewed-paths storage-defensive-maintenance story-346-pg-disabled story-378-incident-replay story-rule-conservation token-attribution windows-process`);
   const pr33 = JSON.parse(readFileSync(new URL("./fixtures/ci-impact/pr-33.json", import.meta.url)));
   assert.deepEqual(pr33.records.flatMap((record) => record.paths), ["scripts/lib/privacy.mjs", "tests/privacy-git-metadata.test.mjs"]);
   const cases = [

@@ -2194,7 +2194,7 @@
     "tests/ci-bootstrap.test.mjs": "a829bd68dfee9b3b064a38df0b4b1171da5b7d2ee556d2a9a4801b48c6ac9429",
     "tests/ci-evidence-retention.test.mjs": "154fb55ca5b9187b897e25ccdd4f2a6a6fedcb4dfd2ace923c632bcfefbcc5e7",
     "tests/ci-git-source-blobs.test.mjs": "febeb32b18bcce935e8f448b0de580b0c4951cc8950445d0993da987f7d47e16",
-    "tests/ci-impact-plan.test.mjs": "7213acb9d129816883ff7b7e94b2a376ca07a3678a04e718f6a0f537525eee2d",
+    "tests/ci-impact-plan.test.mjs": "ce2ff3764afdf6fa12b84a0a0ffd1d5a332a0aa2e3e0530ae4212723dc520139",
     "tests/ci-light-contract.test.mjs": "b841fe04482417cdd1c863fd9cc41e797ca83acc3434410bc28bfae1c7f097e2",
     "tests/ci-light-evidence.test.mjs": "6c1c1ee0f72d3f819ce6d97ca7db2f98fb892c18a8cb521a784cd3eea9d354bf",
     "tests/ci-selective-runner.test.mjs": "b67f9c47be46d3cc2adb680b3619fd66836c23dd127aba4c97cc81014d44fb7a",
