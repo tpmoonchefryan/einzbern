@@ -2577,7 +2577,7 @@
     "scripts/lib/windows-system.mjs": "5d4aca422a780e7fab5e580f4be832c5acab92cf14e0df99146ff86652240cc0",
     "scripts/lib/windows-test-controller.mjs": "6421e505dec54888343b474ebe0227cb2e8b76b868bac30b13ec4c3435262b11",
     "skill/mana-orchestrate/scripts/process-launch.d.mts": "ccc1612c5c42141c4dec47cc3632ba05f8a72261e8d125885133b92dbdc1c79e",
-    "skill/mana-orchestrate/scripts/process-launch.mjs": "cb2e32e0b23fcaaff3b9bcce8fcc88e26b58aae7c565da3112e0f66e23e8855b",
+    "skill/mana-orchestrate/scripts/process-launch.mjs": "a00ac0c69ffcfd0af6dee70ec204345a65a12495ba271ac46b35a1fddd151dd4",
     "skill/mana-orchestrate/scripts/windows-system.mjs": "7f11f88b1785b97fd16b3c0acaf118e08f898d1ae2e00b2eb11ca5051f41e9f3",
     "tests/helpers/executable-fixture.mjs": "2efa74988f95835b70570a57be913644a170b9d3642bb8d5f758dda1a591bc58",
     "tests/helpers/filesystem-fixture.mjs": "882c79a94a6f614f4691080fe6b777a0660a2f3f719ad75adfefcf19425d9a3c",
