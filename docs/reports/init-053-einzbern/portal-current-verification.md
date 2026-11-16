@@ -159,14 +159,19 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
       "sha256": "6468d345bbf01b31efa6150d71aa1860a4711a183c7380b46845aeaadcc5dc50"
     },
     {
+      "path": "scripts/lib/windows-historical-coverage.mjs",
+      "bytes": 1749,
+      "sha256": "c08fe4531ca65324ff8d945038f2fb4e215006cc7d63fb49d755e53c1da10b6c"
+    },
+    {
       "path": "scripts/verbatim-evidence-meta-proof.mjs",
-      "bytes": 5368,
-      "sha256": "83287b2f71d61b0c0a2046607488abd8aa9da0aa02e1bba2ce78a14137552741"
+      "bytes": 5572,
+      "sha256": "41ed592413e7f7c77adef496e436c86ab66f05b68ddaabcfbc14505fa10c7c7e"
     },
     {
       "path": "scripts/verbatim-evidence-proof.mjs",
-      "bytes": 28912,
-      "sha256": "9a8374c5c815917a4c89812059f933dd6762e788064b99e5d82ee5c6ef61b767"
+      "bytes": 29018,
+      "sha256": "b0aa4f0e24ecfcd29012a83adc4b90331f34bb15f0810c70031ea80458a2efd3"
     }
   ],
   "hostRoleScan": {

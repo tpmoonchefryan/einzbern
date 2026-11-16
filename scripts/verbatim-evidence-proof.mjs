@@ -94,6 +94,7 @@ const CURRENT_PORTAL_PROOF_FILES = [
   "packages/core/src/doctor.ts",
   "tests/doctor.test.mjs",
   "scripts/verify-portal.mjs",
+  "scripts/lib/windows-historical-coverage.mjs",
   "scripts/verbatim-evidence-meta-proof.mjs",
   "scripts/verbatim-evidence-proof.mjs",
 ];
@@ -479,7 +480,8 @@ async function replayHistoricalBlock(block, evidence) {
     stage = "historical-archive-create";
     const archive = runGit(["archive", "--format=tar", evidence.commit], { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 });
     stage = "historical-archive-extract";
-    execFileSync("tar", ["-xf", "-", "-C", historicalRoot], { cwd: repositoryRoot, input: archive, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    // Git Bash tar and Windows tar both inherit the native process directory.
+    execFileSync("tar", ["-xf", "-"], { cwd: historicalRoot, input: archive, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
 
     stage = "historical-git-alternates";
     const commonDirectory = resolve(repositoryRoot, String(runGit(["rev-parse", "--git-common-dir"], { encoding: "utf8" })).trim());
