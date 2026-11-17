@@ -9,6 +9,11 @@ Versioning after the first accepted release.
 
 - Windows host runners discover executables and batch shims, pass arguments and standard input, and use Job Objects to manage child processes and cancellation. The installer can create private NTFS artifacts and verify directory access, handle identity, junctions and portable record names.
 - Managed tasks on Windows use physical and commit headroom, process working sets and CPU availability for admission. The existing memory policy and concurrency settings govern the core and Portal test runners.
+- Review commands on Windows now write stdout and stderr directly to their destination files. The review report records the full byte count and SHA-256 of each stream, including logs above the 4 MiB text limit. Interrupted commands report incomplete output.
+
+### Workspace diagnostics
+
+- On hosts without cloud-root detection rules, `doctor` now reports an unknown suggestion and respects the workspace’s registered cloud setting. Hosts with detection rules continue to report mismatches.
 
 ## 5.0.0
 
