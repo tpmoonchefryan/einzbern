@@ -2053,7 +2053,7 @@
     "scripts/lib/memory-worker-check.mjs": "3e94968ba11b5582da309c433c9e824ca77e55d32bfb041656db81e531e23506",
     "scripts/lib/names.mjs": "12b7838f5edaf792fb2bfee3688328d50b3ba8b896f7bf1d960addc9e50c7b3f",
     "scripts/lib/p8-workflow-rc.mjs": "f34e3006756daf413e32f6a98b6008a06d6cbbf4271565363c6cd925bf4ce4bc",
-    "scripts/lib/privacy.mjs": "31e5edc5becf92d150c7dd94d0fd3df3b015a5970b5181a71f9f1ee294918065",
+    "scripts/lib/privacy.mjs": "6b18f4d2da4d8f54389458ab865259770ba33859788f69d6e5be7e76c6df857b",
     "scripts/lib/private-token-roster.mjs": "b1215d2e2b701213980d35fac6100aa38ceed4f3e5285db36bdf2551faa97571",
     "scripts/lib/protocol-proof.mjs": "3a24c629926d592ba4fc0a9801b24ffb24abf22188a60ada9d90b10fe39bab99",
     "scripts/lib/push-gate-children.mjs": "24cd269f3c99eddca52ef81f78db8e8c830f54e567fcb9679e041fa6a0ca5ecc",

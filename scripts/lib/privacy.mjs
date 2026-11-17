@@ -296,7 +296,7 @@ const CLASSIFIED_P8_RELEASE_ENTRY_SOURCES = new Map([
   ["dist/release/einzbern-5.0.0.tar.gz/einzbern-5.0.0/scripts/einzbern-hook.mjs", "dist/build/packages/core/src/names.js"],
   ["dist/release/einzbern-5.0.0.tar.gz/einzbern-5.0.0/scripts/einzbern.mjs", "dist/build/packages/core/src/names.js"],
   ["dist/release/einzbern-5.0.0.tar.gz/einzbern-5.0.0/scripts/library-catalog-worker.mjs", "dist/build/packages/core/src/names.js"],
-  // The 5.0.1 package (6fd62d5f183f722da8c74c0fb55d311b9d71278fd47333b0e6c1aca8ca04971a) contains
+  // The reviewed 5.0.1 release candidate (fb56882cc10483ae9004a33543882313ba642b68cec468f75fc9aee04fe913b8) contains
   // the same public names.js owner declaration once in each measured bundle.
   ["dist/release/einzbern-5.0.1.tar.gz/einzbern-5.0.1/atelier/portal.mjs", "dist/build/packages/core/src/names.js"],
   ["dist/release/einzbern-5.0.1.tar.gz/einzbern-5.0.1/scripts/einzbern-hook.mjs", "dist/build/packages/core/src/names.js"],
