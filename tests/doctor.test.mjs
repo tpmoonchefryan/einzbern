@@ -319,13 +319,26 @@ test("541 GWT3: an entry whose library is gone is a hint of the registry check, 
   assert.deepEqual(byCheck(unregistered, "registry").detail.hints.map((hint) => hint.projectPath), [other]);
 });
 
-test("480-AC5: cloud-flag is red, as a hint, when the registry's flag differs from the cloud folder table", async (context) => {
+test("480-AC5: cloud-flag is red, as a hint, when the registry's flag differs from an available cloud folder table", async (context) => {
   const fixture = await healthy(context);
   await registerLibrary({ projectPath: fixture.project, libraryPath: fixture.library, registeredAt: AT, cloudHosted: true, gitRemote: null }, fixture.deviceHome);
-  const results = await doctor(fixture);
+  const results = await doctor(fixture, { platform: "darwin", env: {} });
   assertOnlyRed(results, "cloud-flag", "CLOUD_FLAG_DIFFERS_FROM_SUGGESTION");
   const detail = byCheck(results, "cloud-flag").detail;
   assert.deepEqual([detail.cloudHosted, detail.suggested, detail.advisory], [true, false, true]);
+});
+
+test("cloud-flag preserves explicit registration when the platform has no cloud folder rules", async (context) => {
+  const fixture = await healthy(context);
+  for (const cloudHosted of [false, true]) {
+    await registerLibrary({ projectPath: fixture.project, libraryPath: fixture.library, registeredAt: AT, cloudHosted, gitRemote: null }, fixture.deviceHome);
+    const results = await doctor(fixture, { platform: "linux", env: {} });
+    const check = byCheck(results, "cloud-flag");
+    assert.equal(check.ok, true);
+    assert.equal(check.reasonCode, null);
+    assert.deepEqual(check.detail.causes, []);
+    assert.deepEqual([check.detail.cloudHosted, check.detail.suggested, check.detail.provider, check.detail.cloudRoot], [cloudHosted, null, null, null]);
+  }
 });
 
 // An engine never locks or writes a library it may not open (format-version.ts): a library in a
