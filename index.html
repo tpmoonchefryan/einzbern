@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dot-drive-sync — Personal Google Drive synchronization</title>
+<meta name="description" content="Information about the personal dot-drive-sync Google Drive synchronization application.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body><main>
+<div class="eyebrow">Personal application</div>
+<h1>dot-drive-sync</h1>
+<p>dot-drive-sync is a personal Google Drive synchronization configuration operated by the account owner. It uses <a href="https://rclone.org/">rclone</a> to synchronize a selected Google Drive folder with the owner's computer.</p>
+<h2>What it does</h2>
+<p>The application reads file contents and metadata and creates, updates, moves, or deletes files as needed to synchronize changes in both directions. It is configured for a folder selected by the account owner.</p>
+<p class="note">Google's authorization screen requests Drive read and write access. The configured folder limits normal synchronization operations; it does not limit the permissions granted by Google OAuth.</p>
+<h2>Who uses it</h2>
+<p>This deployment is for the owner's personal use. It is not a hosted service for the public, is not a Google product, and does not provide a sign-up flow.</p>
+<h2>Your data</h2>
+<p>Google Drive data is transferred between Google and the owner's computer. OAuth tokens are stored on that computer so scheduled synchronization can continue. This informational website does not receive OAuth tokens or synchronized files.</p>
+<p>Read the <a href="privacy.html">privacy policy</a> for details about access, local storage, backups, and revoking authorization.</p>
+<nav aria-label="Information"><a href="privacy.html">Privacy policy</a><a href="https://myaccount.google.com/connections">Manage Google connections</a></nav>
+</main></body>
+</html>
