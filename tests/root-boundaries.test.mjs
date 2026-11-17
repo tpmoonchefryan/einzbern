@@ -61,7 +61,7 @@ test("lexical and symlink aliases fail closed", async (context) => {
     "ROOT_PATH_ALIAS",
   );
   const alias = resolve(fixture.root, "workspace-alias");
-  await symlink(fixture.roots[1].path, alias);
+  await symlink(fixture.roots[1].path, alias, process.platform === "win32" ? "junction" : "dir");
   await expectRootReason(
     fixture.roots.map((root, index) => index === 1 ? { ...root, path: alias } : root),
     "ROOT_PATH_SYMLINK",

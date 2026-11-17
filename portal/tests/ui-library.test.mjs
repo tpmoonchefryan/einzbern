@@ -400,7 +400,7 @@ if (!MUTATION) {
       assert.equal(text("#workspace-label"), firstName);
       assert.equal(text("#stat-version"), "1");
       const healthReasons = () => [...page.document.querySelectorAll("[data-doctor-check]")].map((row) => [row.dataset.doctorCheck, row.querySelectorAll(".tcrn-operation-feedback__identity code")[1]?.textContent ?? ""]);
-      const initialDoctor = await cli(["doctor", "--project", fixture.proseRoot], { ...fixture.deviceEnv, HOME: fixture.home });
+      const initialDoctor = await cli(["doctor", "--project", fixture.proseRoot], { ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home });
       assert.deepEqual(healthReasons(), initialDoctor.checks.map((check) => [check.check, check.reasonCode ?? "—"]));
 
       const secondVersion = String((await cli(["status", "--workspace", fixture.second.library], fixture.deviceEnv)).version);
@@ -410,7 +410,7 @@ if (!MUTATION) {
       assert.equal(text("#rail-workspace-label"), secondName);
       assert.notEqual(text("#library-label"), firstId);
       assert.ok(text("#library-label").includes(fixture.second.library), "Details retains the full selected path");
-      const secondDoctor = await cli(["doctor", "--project", fixture.second.project], { ...fixture.deviceEnv, HOME: fixture.home });
+      const secondDoctor = await cli(["doctor", "--project", fixture.second.project], { ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home });
       assert.equal(page.document.querySelector("#health-chip")?.className.includes("tcrn-badge--positive"), secondDoctor.ok);
       assert.deepEqual(healthReasons(), secondDoctor.checks.map((check) => [check.check, check.reasonCode ?? "—"]));
       assert.equal(text('#library-state [data-library-field="versionVector"]'), JSON.stringify((await cli(["status", "--workspace", fixture.second.library], fixture.deviceEnv)).versionVector));
@@ -441,7 +441,7 @@ if (!MUTATION) {
       page.document.querySelector("#library-select").dispatchEvent(new page.window.Event("change", { bubbles: true }));
       await waitFor(() => text("#workspace-label") === firstNameInFrench && text("#stat-version") === firstVersion && text("#agents-path") === join(fixture.proseRoot, "AGENTS.md"), "the page to return to the first library");
       assert.equal(text("#library-label"), firstId);
-      const firstDoctor = await cli(["doctor", "--project", fixture.proseRoot], { ...fixture.deviceEnv, HOME: fixture.home });
+      const firstDoctor = await cli(["doctor", "--project", fixture.proseRoot], { ...fixture.deviceEnv, HOME: fixture.home, USERPROFILE: fixture.home });
       assert.equal(page.document.querySelector("#health-chip")?.className.includes("tcrn-badge--positive"), firstDoctor.ok);
       assert.deepEqual(healthReasons(), firstDoctor.checks.map((check) => [check.check, check.reasonCode ?? "—"]));
     } finally { await closePage(page, fixture); }

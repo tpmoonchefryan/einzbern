@@ -7,8 +7,38 @@ import { join } from "node:path";
 import { prepareHostNativeDispatch } from "../dist/build/packages/core/src/dispatch-workflow.js";
 import { recordHostNativeEvents, normalizeHostNativeRecord } from "../dist/build/packages/core/src/native-tool-evidence.js";
 import { workProjectContexts } from "../dist/build/packages/core/src/project-chain.js";
+import { applyMachineSettingSet } from "../dist/build/packages/core/src/machine-settings.js";
+import { setWorkspaceSetting } from "../dist/build/packages/core/src/workspace.js";
 import { runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
 import { nativeFixture, selection } from "./helpers/host-native-fixture.mjs";
+
+test("native preparation enforces persisted string device and project concurrency caps", async t => {
+  for (const scope of ["device", "project"]) {
+    await t.test(scope, async t => {
+      const f = await nativeFixture(t);
+      const setting = { key: "execution.maxConcurrentAgents", value: "1", occurredAt: new Date().toISOString() };
+      let state = f.state;
+      if (scope === "device") {
+        await applyMachineSettingSet({ ...setting, path: join(f.home, "machine-settings.json") });
+      } else {
+        state = await setWorkspaceSetting(f.workspace, { ...setting, key: "execution.maxConcurrentSubagents" });
+      }
+      const reason = `configured-${scope === "device" ? "total" : "children"}-concurrency-exceeded`;
+      const request = { ...f.request, requestedAgents: 2 };
+      const context = await workProjectContexts(state, f.work.id, f.home, request);
+      assert.equal(context.dispatchAdmitted, false);
+      assert.ok(context.executionDecision.reasons.includes(reason));
+      const preparation = await prepareHostNativeDispatch(state, request, { selection, argumentsValue: { prompt: "Fixture" } }, f.home);
+      assert.equal(preparation.decision.status, "blocked");
+      assert.equal(preparation.attempt, null);
+      const withinCap = await workProjectContexts(state, f.work.id, f.home, f.request);
+      assert.equal(withinCap.dispatchAdmitted, true, "missing optional occupancy does not block a request within the cap");
+      const occupied = { ...f.request, capabilities: { ...f.request.capabilities, platformCapacity: { limit: 8, active: 2, includesParent: true, parentActive: true } } };
+      assert.ok((await workProjectContexts(state, f.work.id, f.home, occupied)).executionDecision.reasons.includes(reason));
+    });
+  }
+});
+
 const report = at => ({ id: "report", at, kind: "work-report", report: { summary: "Fixture decomposition delivered", contextReads: ["fixture:AGENTS", "fixture:Skill"], artifacts: ["fixture:decomposition"], checks: [], limitations: ["Synthetic fixture, not real-host acceptance"] } });
 const response = (at, state = "completed") => ({ id: `host-${state}`, at, kind: "host-response", sourceTool: "fixture.spawn", raw: { state, terminal: true }, status: { pointer: "/state", mapping: { [state]: state } }, terminal: { pointer: "/terminal", values: ["true"], contract: "Fixture terminal response contract" } });
 async function prepared(t, extra = {}) { const f = await nativeFixture(t); const p = await prepareHostNativeDispatch(f.state, { ...f.request, ...extra }, { selection, argumentsValue: { prompt: "Read required context, then deliver decomposition report." } }, f.home); return { ...f, p }; }

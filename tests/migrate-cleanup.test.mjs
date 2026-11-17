@@ -1,3 +1,4 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 import { hostHookCommand } from "../dist/build/packages/core/src/host-hooks.js";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-489 R3, AC2 (fixture) (TCRN-CROSS-SUB-366; MIN-238 D4; STORY-479 R5): the cleanup
@@ -64,7 +65,7 @@ async function treeDigest(root) {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
       const path = join(directory, entry.name);
       const metadata = await lstat(path);
-      rows.push(`${relative(root, path)}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : entry.isDirectory() ? "directory" : "other"}`);
+      rows.push(`${relative(root, path).replaceAll("\\", "/")}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : entry.isDirectory() ? "directory" : "other"}`);
       if (entry.isDirectory()) await walk(path);
     }
   };
@@ -460,6 +461,7 @@ test("489-R3: a backup is never overwritten: a taken backup place stops the plan
 
 test("489-R3: a project host file host-hooks.ts will not render stops the plan; the user's is left to the wiring, which plans the same file", async (context) => {
   const m = await machine(context);
+  if (!await fileSymlinksAvailable(m.base)) return context.skip("File symlinks require Windows Developer Mode or elevation");
   await writeJson(join(m.base, "shared-settings.json"), { hooks: claudeOldGroups() });
   await mkdir(join(m.container, ".claude"), { recursive: true });
   await symlink(join(m.base, "shared-settings.json"), join(m.container, CLAUDE));

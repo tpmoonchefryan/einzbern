@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 
-import { spawnSync } from "node:child_process";
+import { spawnCommandSync as spawnSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { mkdir, readdir, rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import { isAbsolute, resolve } from "node:path";
 
 import { createDependencyMaterialization, populateDependencyStore, verifyDependencyMaterialization } from "./lib/dependency-materialization.mjs";
 import { repositoryRoot } from "./lib/files.mjs";
@@ -13,7 +13,7 @@ function argument(name) { const index = process.argv.indexOf(name); return index
 
 const mode = argument("--mode");
 const materialization = argument("--materialization");
-if (!["fetch", "verify", "populate"].includes(mode) || !materialization || !resolve(materialization).startsWith("/")) fail("DEPENDENCY_MATERIALIZATION_ARGUMENTS");
+if (!["fetch", "verify", "populate"].includes(mode) || !materialization || !isAbsolute(resolve(materialization))) fail("DEPENDENCY_MATERIALIZATION_ARGUMENTS");
 
 let result;
 if (mode === "fetch") {
@@ -34,7 +34,7 @@ if (mode === "fetch") {
   result = await verifyDependencyMaterialization(repositoryRoot, materialization);
 } else {
   const store = argument("--target-store");
-  if (!store || !resolve(store).startsWith("/")) fail("DEPENDENCY_MATERIALIZATION_ARGUMENTS");
+  if (!store || !isAbsolute(resolve(store))) fail("DEPENDENCY_MATERIALIZATION_ARGUMENTS");
   result = await populateDependencyStore(repositoryRoot, materialization, store);
 }
 process.stdout.write(`${JSON.stringify({ ok: true, reasonCode: "DEPENDENCY_MATERIALIZATION_VERIFIED", lockSha256: result.lockSha256, packages: result.packages.length, storeFiles: result.store.length })}\n`);

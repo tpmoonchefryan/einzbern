@@ -20,6 +20,7 @@ import {
   buildEventPayload,
   initializeLibrary,
 } from "../../dist/build/packages/core/src/index.js";
+import { resetRecallCache } from "../../dist/build/packages/core/src/recall.js";
 import { canonicalExternalKey, canonicalSha256, compareCanonicalText, deriveStableId } from "../../dist/build/packages/protocol/src/index.js";
 
 export const repositoryRoot = resolve(import.meta.dirname, "../..");
@@ -89,7 +90,10 @@ export async function withSurface(surface, operation) {
  */
 export async function workspaceFixture(context, { externalKey = "FIXTURE-WORKSPACE", project = true } = {}) {
   const base = await realpath(await mkdtemp(join(tmpdir(), "einzbern-fixture-")));
-  context.after(() => rm(base, { recursive: true, force: true }));
+  context.after(async () => {
+    resetRecallCache();
+    await rm(base, { recursive: true, force: true });
+  });
   const workspace = join(base, "workspace");
   await initializeLibrary({ root: workspace, createdAt: instant(0) });
   let projectId = null;

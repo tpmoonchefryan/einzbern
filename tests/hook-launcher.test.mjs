@@ -12,7 +12,7 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFile, cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
-import { devNull, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
@@ -45,7 +45,7 @@ const ECHO_ENTRY = [
   "",
 ].join("\n");
 // git as a test runs it: no user or system configuration (signing, hooks) reaches it.
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_NOSYSTEM: "1" };
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 
 function git(args) {
   return execFileSync("git", args, { env: GIT_ENV, encoding: "utf8" });

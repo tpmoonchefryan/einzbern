@@ -3,10 +3,11 @@
 import { spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
-import { lstat, mkdir, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import { parseStrictInstant } from "../../protocol/src/index.js";
+import { createPrivateWindowsDirectory, hasPrivateWindowsPermissions, openPrivateWindowsFile } from "../../../scripts/lib/windows-system.mjs";
 import {
   resolveNativePolicyIntentFromSnapshot,
   validateEngineModelPolicyFile,
@@ -473,13 +474,25 @@ export async function stageAntigravitySwarmGuardState(
   await assertNotSymlink(cacheDir);
   await mkdir(cacheDir, { recursive: true, mode: 0o700 });
   await assertNotSymlink(guardDir);
-  await mkdir(guardDir, { recursive: true, mode: 0o700 });
+  if (process.platform === "win32") {
+    if (!createPrivateWindowsDirectory(guardDir) && !hasPrivateWindowsPermissions(guardDir, true)) {
+      throw new AntigravitySwarmError("ANTIGRAVITY_SWARM_GUARD_PERMISSIONS", "swarm guard directory requires a private ACL", { path: guardDir });
+    }
+  } else {
+    await mkdir(guardDir, { recursive: true, mode: 0o700 });
+  }
   await assertNotSymlink(target);
 
   const temporary = join(guardDir, `.tmp-${randomUUID()}.json`);
   const payload = `${JSON.stringify(validated, null, 2)}\n`;
+  const handle = process.platform === "win32" ? await openPrivateWindowsFile(temporary) : await open(temporary, "wx", 0o600);
   try {
-    await writeFile(temporary, payload, { flag: "wx", mode: 0o600 });
+    try {
+      await handle.writeFile(payload);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
     await rename(temporary, target);
   } catch (error) {
     await rm(temporary, { force: true }).catch(() => undefined);

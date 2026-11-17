@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
   normalizeAntigravitySwarmBatch,
@@ -16,8 +17,10 @@ import {
 import { prepareHostNativeDispatch } from "../dist/build/packages/core/src/dispatch-workflow.js";
 import { applyEngineModelPolicySet, engineModelPolicyOnboarding } from "../dist/build/packages/core/src/engine-model-policy.js";
 import { nativeFixture } from "./helpers/host-native-fixture.mjs";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
+import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
 
-const cli = new URL("../scripts/einzbern.mjs", import.meta.url).pathname;
+const cli = fileURLToPath(new URL("../scripts/einzbern.mjs", import.meta.url));
 const at = "2026-11-12T00:00:00Z";
 const selection = { kind: "explicit", tuple: { runner: "antigravity", model: "gemini-4-carbon-medium", effort: "medium" } };
 const economySelection = { kind: "explicit", tuple: { runner: "antigravity", model: "gemini-4-argon-medium", effort: "medium" } };
@@ -181,7 +184,8 @@ test("execution-antigravity-swarm-record and evidence roundtrip stages guard and
   const guardHash = createHash("sha256").update(f.manifest.coordinator.conversationId).digest("hex");
   const guardPath = join(f.home, "cache", "antigravity-swarm-guards", `${guardHash}.json`);
   const guardStat = await lstat(guardPath);
-  assert.equal(guardStat.mode & 0o777, 0o600);
+  if (process.platform === "win32") assert.ok(hasPrivateWindowsPermissions(guardPath, true));
+  else assert.equal(guardStat.mode & 0o777, 0o600);
   const guard = JSON.parse(await readFile(guardPath, "utf8"));
   assert.equal(guard.schemaVersion, "einzbern.antigravity-swarm-guard.v1");
   assert.equal(guard.members.find(m => m.name === "author-1").landed, true);
@@ -307,7 +311,8 @@ test("negative cases: forged actual.*, out-of-bounds output, unlanded killed wor
   const guardHash = createHash("sha256").update(f.manifest.coordinator.conversationId).digest("hex");
   const guardFile = join(guardDir, `${guardHash}.json`);
   await rm(guardFile, { force: true });
-  await symlink(join(f.root, "target.json"), guardFile);
+  if (await fileSymlinksAvailable(f.root)) await symlink(join(f.root, "target.json"), guardFile, "file");
+  else await symlink(f.root, guardFile, "junction");
   await assert.rejects(() => stageAntigravitySwarmGuardFromBatch(validReceipt, f.home, f.state.metadata.workspaceId), /symlink/u);
 });
 
@@ -471,7 +476,7 @@ test("modelSwitches preparation binding, groupSize numbered instances, and symli
   t.after(() => rm(symlinkHome, { recursive: true, force: true }));
   const targetDir = await mkdtemp(join(tmpdir(), "einzbern-swarm-symtarget-"));
   t.after(() => rm(targetDir, { recursive: true, force: true }));
-  await symlink(targetDir, join(symlinkHome, "cache"));
+  await symlink(targetDir, join(symlinkHome, "cache"), "junction");
   await assert.rejects(
     () => stageAntigravitySwarmGuardFromBatch(landedGroupReceipt, symlinkHome, f.state.metadata.workspaceId),
     /symlink/u,
@@ -491,7 +496,7 @@ test("modelSwitches preparation binding, groupSize numbered instances, and symli
     library: relocatedLibrary,
     runtime: relocatedRuntime,
   }));
-  await symlink(join(relocatedRuntime, "cache"), join(relocatedHome, "cache"));
+  await symlink(join(relocatedRuntime, "cache"), join(relocatedHome, "cache"), "junction");
   const relocatedGuardPath = await stageAntigravitySwarmGuardFromBatch(
     landedGroupReceipt,
     relocatedHome,

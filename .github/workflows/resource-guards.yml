@@ -1,0 +1,77 @@
+name: Windows and resource guards
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: resource-guards-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  memory-adapters:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'ubuntu-24.04' && contains(github.event.pull_request.labels.*.name, 'full-p1') && 90 || 30 }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.16.0
+      - name: Verify platform adapters and native Windows lifecycle
+        run: node --test --test-concurrency=1 tests/memory-windows.test.mjs
+      - name: Acquire pinned verification dependencies
+        env:
+          npm_config_offline: "false"
+          npm_config_prefer_offline: "false"
+          npm_config_ignore_scripts: "true"
+          npm_config_audit: "false"
+          npm_config_fund: "false"
+        run: |
+          npm install --global pnpm@11.3.0 --ignore-scripts --no-audit --no-fund
+          corepack install --global --cache-only pnpm@11.3.0
+          pnpm install --frozen-lockfile --ignore-scripts --config.offline=false
+      - name: Build on the native platform
+        run: pnpm build
+      - name: Replay current and pinned historical Portal evidence
+        run: node scripts/verbatim-evidence-meta-proof.mjs
+      - name: Verify native Windows entry points
+        if: runner.os == 'Windows'
+        run: |
+          pnpm exec node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/windows-platform.test.mjs tests/windows-process.test.mjs tests/ci-selective-runner.test.mjs tests/p1-all-legs.test.mjs tests/file-lock-concurrency.test.mjs tests/akasha-stream.test.mjs tests/host-probe.test.mjs tests/kiro-hooks.test.mjs tests/kiro-native-execution.test.mjs tests/antigravity-hooks.test.mjs tests/antigravity-native-execution.test.mjs tests/antigravity-review-boundaries.test.mjs tests/antigravity-swarm-guard.test.mjs tests/antigravity-swarm-batch.test.mjs tests/init095-fts-storage.test.mjs tests/story-364-knowledge-language.test.mjs tests/workspace-lock-scope.test.mjs tests/backup-snapshot.test.mjs tests/cloud-roots.test.mjs tests/ci-evidence-retention.test.mjs tests/ci-light-evidence.test.mjs tests/ci-bootstrap.test.mjs tests/ci-test-roster.test.mjs tests/gates.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/installer-cleanup-audit-regressions.test.mjs tests/skill-install-bootstrap.test.mjs
+      - name: Verify Linux resource and filesystem regressions
+        if: runner.os == 'Linux'
+        run: |
+          pnpm exec node --import ./scripts/no-network.mjs --test --test-concurrency=1 tests/memory-budget.test.mjs tests/memory-policy-backup.test.mjs tests/heavy-runs.test.mjs tests/host-native-dispatch.test.mjs tests/host-fallback.test.mjs tests/io-boundaries.test.mjs tests/output-session-lifecycle.test.mjs tests/storage-defensive-maintenance.test.mjs tests/backup-snapshot.test.mjs tests/render-helper-docs.test.mjs tests/skill-install-bootstrap.test.mjs tests/windows-platform.test.mjs tests/windows-process.test.mjs tests/ci-selective-runner.test.mjs tests/p1-all-legs.test.mjs tests/host-probe.test.mjs tests/kiro-native-execution.test.mjs tests/antigravity-native-execution.test.mjs tests/background-resource.test.mjs
+      - name: Run full Linux P1 on the reviewed commit
+        if: runner.os == 'Linux' && contains(github.event.pull_request.labels.*.name, 'full-p1')
+        run: |
+          git remote set-url origin "https://github.com/${GITHUB_REPOSITORY}.git"
+          pnpm verify:p1
+      - name: Retain full P1 and test receipts
+        if: always() && runner.os == 'Linux' && contains(github.event.pull_request.labels.*.name, 'full-p1')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-full-p1-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: |
+            dist/evidence/p1/verify-p1.json
+            dist/evidence/p1/test.json
+            dist/evidence/p1/portal.json
+          if-no-files-found: error
+          retention-days: 14

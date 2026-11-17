@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { createHash } from "node:crypto";
-import { lstat, mkdir, readFile, readdir, realpath, rename, rmdir, symlink, unlink } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, rmdir, symlink, unlink } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertStrictInstant, canonicalJson } from "../../protocol/src/index.js";
 import type { JsonValue } from "../../protocol/src/index.js";
@@ -35,6 +35,31 @@ interface Journal {
   readonly completed?: boolean;
   readonly relocation?: RelocationReport;
   readonly actor?: string;
+}
+
+// NTFS cannot rename a directory junction over an existing junction. Retain the
+// verified old entry until the direct forwarding is installed, including across retries.
+async function installWindowsForwarding(link: string, destination: string): Promise<void> {
+  const previous = `${link}.storage-previous`;
+  const verified = async (path: string) => (await lstat(path)).isSymbolicLink() && await realpath(path) === destination;
+  let retained = await exists(previous);
+  if (retained && !await verified(previous)) refuse(`unexpected saved device forwarding path: ${previous}`);
+  if (await exists(link)) {
+    if (!await verified(link)) refuse(`unexpected device forwarding path: ${link}`);
+    if (resolve(dirname(link), await readlink(link)) === destination) {
+      if (retained) await unlink(previous);
+      return;
+    }
+    if (retained) refuse(`device forwarding backup is occupied: ${previous}`);
+    await rename(link, previous);
+    retained = true;
+  }
+  try { await symlink(destination, link, "junction"); }
+  catch (error) {
+    if (retained && !await exists(link)) await rename(previous, link);
+    throw error;
+  }
+  if (retained) await unlink(previous);
 }
 
 /** One shared library, at a user-chosen parent. No cloud-provider or source-path restriction. */
@@ -93,13 +118,17 @@ export async function consolidateStorage(home: string, fromInput: string, toInpu
     for (const area of ["cache", "locks", "backups"]) {
       const link = join(home, area), destination = join(journal.runtimeTo, area);
       if (!await exists(destination)) continue;
+      if (process.platform === "win32") {
+        await installWindowsForwarding(link, destination);
+        continue;
+      }
       if (await exists(link)) {
         if (!(await lstat(link)).isSymbolicLink() || await realpath(link) !== destination) refuse(`unexpected device forwarding path: ${link}`);
         const staging = `${link}.storage-link`;
         if (await exists(staging)) refuse(`link staging is occupied: ${staging}`);
-        await symlink(destination, staging, process.platform === "win32" ? "junction" : "dir");
+        await symlink(destination, staging, "dir");
         await rename(staging, link);
-      } else await symlink(destination, link, process.platform === "win32" ? "junction" : "dir");
+      } else await symlink(destination, link, "dir");
     }
     if (await exists(journal.runtimeFrom)) {
       for (const area of ["cache", "locks", "backups"]) {

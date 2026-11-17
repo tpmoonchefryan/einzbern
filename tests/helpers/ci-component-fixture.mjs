@@ -64,7 +64,7 @@ export function environmentDocumentCategoryFixture() {
       files: {
         [reader]: 'import os\nfrom pathlib import Path\nassert True\n',
         "tests/a.test.mjs": 'import test from "node:test"; import assert from "node:assert/strict"; import { readFileSync } from "node:fs"; test("document remains nonempty", () => assert.ok(readFileSync("README.md", "utf8").length));\n',
-        "tests/b.test.mjs": 'import test from "node:test"; import { execFileSync } from "node:child_process"; test("existing privacy helper root", () => execFileSync("python3", ["scripts/privacy-reader.py"], { env: { ...process.env, DOCUMENT_INPUT: "README.md" } }));\n',
+        "tests/b.test.mjs": 'import test from "node:test"; import { execFileSync } from "node:child_process"; test("existing privacy helper root", () => execFileSync(process.platform === "win32" ? "python" : "python3", ["scripts/privacy-reader.py"], { env: { ...process.env, DOCUMENT_INPUT: "README.md" } }));\n',
       },
     },
   };
@@ -92,13 +92,16 @@ export async function createCiComponentFixture(context, { production = false, fi
     let runtimeManifest = {};
     if (production) {
       await cp(join(componentSourceRoot, "scripts"), join(repo, "scripts"), { recursive: true });
+      await mkdir(join(repo, "skill/mana-orchestrate/scripts"), { recursive: true });
+      await cp(join(componentSourceRoot, "skill/mana-orchestrate/scripts/process-launch.mjs"), join(repo, "skill/mana-orchestrate/scripts/process-launch.mjs"));
+      await cp(join(componentSourceRoot, "skill/mana-orchestrate/scripts/windows-system.mjs"), join(repo, "skill/mana-orchestrate/scripts/windows-system.mjs"));
       runtimeManifest = await copyTaskRuntimeInputs(repo);
       // Task's imports need the already installed Ajv and TypeScript dependencies.
       // The actual node_modules directory is excluded by the unchanged walker.
       await mkdir(join(repo, "node_modules"));
       for (const dependency of ["ajv", "typescript", "@types/node"]) {
         await mkdir(dirname(join(repo, "node_modules", dependency)), { recursive: true });
-        await symlink(await realpath(join(componentSourceRoot, "node_modules", dependency)), join(repo, "node_modules", dependency), "dir");
+        await symlink(await realpath(join(componentSourceRoot, "node_modules", dependency)), join(repo, "node_modules", dependency), process.platform === "win32" ? "junction" : "dir");
       }
     }
     const defaults = {
@@ -112,6 +115,7 @@ export async function createCiComponentFixture(context, { production = false, fi
     for (const [path, bytes] of Object.entries({ ...defaults, ...files })) await writeFixtureFile(repo, path, bytes);
     const git = (...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
     git("init", "--quiet");
+    git("config", "core.autocrlf", "false");
     const commit = () => {
       git("add", ".");
       git("-c", "user.name=Fixture", "-c", "user.email=fixture-identity", "-c", "commit.gpgsign=false", "commit", "--quiet", "-m", "component source");
@@ -172,7 +176,7 @@ export function runFixtureTask(fixture, args, overrides = {}) {
   // Keep NODE_OPTIONS intact. The existing sealed policy recognizes this real
   // task entrypoint and handles its controller lifetime itself.
   return spawnSync(process.execPath, [join(fixture.repo, "scripts/task.mjs"), ...args], {
-    cwd: fixture.repo, env: { ...fixture.env, ...overrides }, encoding: "utf8", timeout: 30_000, maxBuffer: 8 * 1024 * 1024,
+    cwd: fixture.repo, env: { ...fixture.env, ...overrides }, encoding: "utf8", timeout: process.platform === "win32" ? 90_000 : 30_000, maxBuffer: 8 * 1024 * 1024,
   });
 }
 
@@ -197,8 +201,8 @@ if not all(f["checksPassed"] for f in fixtures.values()): raise RuntimeError("CI
 record=m.capture_process([node,str(repo/"scripts/ci/p1-shard.mjs"),"core",plan],repo,env,tmp,evidence,"p1-core")
 print(json.dumps(dict(capture=record,input=before,output=m.identity(repo),inputManifest=manifest,outputManifest=m.source_manifest(repo,node,env),fixtures=fixtures)))
 `;
-  const capture = JSON.parse(execFileSync("python3", ["-B", "-c", program, fixture.repo, process.execPath, planPath, temporary, device, evidence], {
-    cwd: fixture.repo, env, encoding: "utf8", timeout: 45_000, maxBuffer: 8 * 1024 * 1024,
+  const capture = JSON.parse(execFileSync((process.platform === "win32" ? "python" : "python3"), ["-B", "-c", program, fixture.repo, process.execPath, planPath, temporary, device, evidence], {
+    cwd: fixture.repo, env, encoding: "utf8", timeout: process.platform === "win32" ? 120_000 : 45_000, maxBuffer: 8 * 1024 * 1024,
   }));
   const step = JSON.parse(await readFile(join(evidence, "steps/leg-test.json"), "utf8"));
   const taskStreams = await Promise.all(["stdout", "stderr"].map((kind) => readFile(join(evidence, `steps/leg-test.${kind}`), "utf8")));
@@ -233,7 +237,7 @@ export async function createOfflineScannerFixture(context, { unexpectedSource = 
     const unixPathBudget = assertOfflineUnixFixturePathBudget(join(temporaryRoot, `${offlineUnixFixtureLayout.directoryPrefix}${offlineUnixFixtureLayout.suffix}`));
     await mkdir(join(root, ".git"), { recursive: true });
     await cp(join(componentSourceRoot, "scripts"), join(root, "scripts"), { recursive: true });
-    for (const path of ["skill/mana-orchestrate/scripts/install.mjs", "tests/offline-boundary.test.mjs", "tests/ci-light-evidence.test.mjs", "tests/source-attestor.test.mjs", "packages/core/src/source-attestor-client.ts", "packages/core/src/source-attestor-service.ts", "packages/core/src/source-attestor-protocol.ts", "tests/helpers/ci-component-fixture.mjs", "tests/helpers/heavy-slots.mjs", "tests/helpers/task-runtime-fixture.mjs", "package.json", ".npmrc", "portal/tests/ui-presence-support.mjs", "portal/tests/disposable-portal-fetch.test.mjs", "portal/tests/helpers/disposable-portal-fetch.mjs"]) {
+    for (const path of ["skill/mana-orchestrate/scripts/process-launch.mjs", "skill/mana-orchestrate/scripts/windows-system.mjs", "tests/helpers/filesystem-fixture.mjs", "skill/mana-orchestrate/scripts/install.mjs", "tests/offline-boundary.test.mjs", "tests/ci-light-evidence.test.mjs", "tests/helpers/ci-component-fixture.mjs", "tests/helpers/heavy-slots.mjs", "package.json", ".npmrc", "portal/tests/ui-presence-support.mjs", "portal/tests/disposable-portal-fetch.test.mjs", "portal/tests/helpers/disposable-portal-fetch.mjs", "tests/source-attestor.test.mjs", "packages/core/src/source-attestor-client.ts", "packages/core/src/source-attestor-service.ts", "packages/core/src/source-attestor-protocol.ts", "tests/helpers/task-runtime-fixture.mjs"]) {
       await mkdir(dirname(join(root, path)), { recursive: true });
       await cp(join(componentSourceRoot, path), join(root, path));
     }
@@ -254,7 +258,7 @@ export async function createOfflineScannerFixture(context, { unexpectedSource = 
     }
     if (nativeNetworkSource) await writeFile(join(root, "scripts/unexpected-native-network.mjs"), nativeNetworkSource);
     await mkdir(join(root, "node_modules"));
-    for (const dependency of ["ajv", "typescript"]) await symlink(await realpath(join(componentSourceRoot, "node_modules", dependency)), join(root, "node_modules", dependency), "dir");
+    for (const dependency of ["ajv", "typescript"]) await symlink(await realpath(join(componentSourceRoot, "node_modules", dependency)), join(root, "node_modules", dependency), process.platform === "win32" ? "junction" : "dir");
     const unexpectedRequest = ["await f", 'etch("https://example.invalid");\n'].join("");
     if (unexpectedSource) await writeFile(join(root, "scripts/unexpected-network.mjs"), unexpectedRequest);
     if (extraInstallerFetch) {

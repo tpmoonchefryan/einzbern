@@ -91,6 +91,9 @@ try {
       reasonCode: restored.report.reasonCode,
       ok: restored.report.ok,
       blockCount: restored.report.blockCount,
+      ...(!restored.report.ok && Array.isArray(restored.report.problems) ? {
+        problems: restored.report.problems.map(({ path, reasonCode, stage }) => ({ path, reasonCode, stage })),
+      } : {}),
     },
   };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

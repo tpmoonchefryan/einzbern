@@ -1,3 +1,4 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
 import assert from "node:assert/strict";
@@ -45,7 +46,7 @@ async function mkdirFixture({ home, project }) {
 }
 
 function request(root, values = {}) {
-  return { root, deviceHome: values.deviceHome, userHome: values.home, scope: values.scope ?? "user", platform: "linux", install: values.install, navigation: values.navigation };
+  return { root, deviceHome: values.deviceHome, userHome: values.home, scope: values.scope ?? "user", platform: process.platform, install: values.install, navigation: values.navigation };
 }
 
 test("INIT085-B1: Kiro CLI and IDE identity stay independent; documented aliases and plain-text hooks match V3", async (t) => {
@@ -128,7 +129,7 @@ test("INIT085-B1/B2: Kiro hooks install, repeat cleanly, preserve custom files, 
   await applyKiroHookPlan(relocated, { at: "2026-11-01T00:01:00Z", deviceHome: f.deviceHome });
   const refreshed = JSON.parse(await readFile(join(kiroHome, KIRO_USER_HOOKS_FILE), "utf8"));
   const command = refreshed.hooks.find(hook => hook.name === "einzbern-prompt-recall").action.command;
-  assert.equal(command, hostHookCommand(hookLauncherPath(relocatedDeviceHome, "linux"), "UserPromptSubmit", f.home, "linux", "kiro"));
+  assert.equal(command, hostHookCommand(hookLauncherPath(relocatedDeviceHome, process.platform), "UserPromptSubmit", f.home, process.platform, "kiro"));
   assert.ok(command.includes("process.env.EINZBERN_HOME"), "the command can resolve a moved device from its home-relative path or EINZBERN_HOME");
 
   const edited = JSON.parse(await readFile(join(kiroHome, KIRO_USER_HOOKS_FILE), "utf8"));
@@ -140,10 +141,12 @@ test("INIT085-B1/B2: Kiro hooks install, repeat cleanly, preserve custom files, 
   const outside = join(f.root, "outside-hooks.json");
   await writeFile(outside, "{\"version\":\"v1\",\"hooks\":[]}\n");
   await rm(join(kiroHome, KIRO_USER_HOOKS_FILE));
-  await symlink(outside, join(kiroHome, KIRO_USER_HOOKS_FILE));
-  await assert.rejects(planKiroHooks(request(kiroHome, { home: f.home, deviceHome: f.deviceHome })), { reasonCode: "KIRO_HOOKS_PATH_UNSUPPORTED" });
-  assert.notEqual((await inspectKiroHookScope(kiroHome, "user")).error, null, "doctor can report symlinked standalone files as unreadable");
-  await rm(join(kiroHome, KIRO_USER_HOOKS_FILE));
+  await t.test("symbolic hook file is refused", { skip: !(await fileSymlinksAvailable(f.root)) }, async () => {
+    await symlink(outside, join(kiroHome, KIRO_USER_HOOKS_FILE));
+    await assert.rejects(planKiroHooks(request(kiroHome, { home: f.home, deviceHome: f.deviceHome })), { reasonCode: "KIRO_HOOKS_PATH_UNSUPPORTED" });
+    assert.notEqual((await inspectKiroHookScope(kiroHome, "user")).error, null, "doctor can report symlinked standalone files as unreadable");
+    await rm(join(kiroHome, KIRO_USER_HOOKS_FILE));
+  });
   await writeFile(join(kiroHome, KIRO_USER_HOOKS_FILE), "null\n");
   await assert.rejects(planKiroHooks(request(kiroHome, { home: f.home, deviceHome: f.deviceHome })), { reasonCode: "KIRO_HOOKS_FILE_UNSUPPORTED" });
 });
@@ -245,7 +248,7 @@ test("INIT085-B2: doctor reports Kiro applicability as not-selected or selected 
   const f = await fixture(t);
   await mkdirFixture(f);
   delete process.env.KIRO_HOME;
-  const run = () => runDoctor({ projectRoot: f.project, home: f.home, deviceHome: f.deviceHome, platform: "linux", env: { ...process.env, KIRO_HOME: undefined } });
+  const run = () => runDoctor({ projectRoot: f.project, home: f.home, deviceHome: f.deviceHome, platform: process.platform, env: { ...process.env, KIRO_HOME: undefined, LOCALAPPDATA: f.home, ProgramFiles: f.home, "ProgramFiles(x86)": f.home } });
   const first = (await run()).find(check => check.check === "hooks-present");
   const firstKiro = first.detail.hosts.find(host => host.host === "kiro");
   assert.equal(firstKiro.applicability, "not-selected");

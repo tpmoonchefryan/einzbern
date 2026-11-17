@@ -4,9 +4,9 @@
 import { createHash } from "node:crypto";
 import { lstat, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawnCommandSync as spawnSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 
 import { repositoryRoot } from "./lib/files.mjs";
 import { ENGINE_REPOSITORY_NAMES } from "./lib/names.mjs";
@@ -72,7 +72,7 @@ if (!ENGINE_REPOSITORY_NAMES.some((name) => new RegExp(`^https://github\\.com/[^
 const temporary = await mkdtemp(join(tmpdir(), "tcrn-isolated-proof-"));
 const checkout = resolve(temporary, "checkout");
 const dependencyMaterialization = process.env.TCRN_DEPENDENCY_MATERIALIZATION_ROOT;
-if (typeof dependencyMaterialization !== "string" || !dependencyMaterialization.startsWith("/")) {
+if (typeof dependencyMaterialization !== "string" || !isAbsolute(dependencyMaterialization)) {
   throw new Error("ISOLATED_DEPENDENCY_MATERIALIZATION_REQUIRED");
 }
 try {

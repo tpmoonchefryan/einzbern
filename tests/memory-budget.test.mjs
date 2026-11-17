@@ -3,7 +3,8 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createPrivateWindowsDirectory } from "../scripts/lib/windows-system.mjs";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
 import test from "node:test";
@@ -12,8 +13,11 @@ import { acquireMemoryBudget, checkMemorySample, MEMORY_LEASE_VARIABLE, MEMORY_P
 const snapshot = () => ({ sampledAt: Date.now(), limitBytes: 16 * 1024 * MiB, availableBytes: 12 * 1024 * MiB, stallPercent: 0, pressureSource: "linux-psi-full-avg10" });
 const policy = (overrides = {}) => parseMemoryPolicy(JSON.stringify({ enabled: true, reserveMiB: 1024, budgetMiB: 1024, fixedMiB: 128, workerMiB: 256, maxWorkers: 8, ...overrides }));
 async function fixture(t, value = policy()) {
-  const home = await realpath(await mkdtemp(join(tmpdir(), "memory-budget-test-")));
-  t.after(() => rm(home, { recursive: true, force: true }));
+  const scratch = await realpath(await mkdtemp(join(tmpdir(), "memory-budget-test-")));
+  const home = join(scratch, "device");
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  if (process.platform === "win32") assert.ok(createPrivateWindowsDirectory(home));
+  else await mkdir(home);
   await writeFile(join(home, "machine-settings.json"), JSON.stringify({ schemaVersion: "tcrn.machine-settings.v1", values: { [MEMORY_POLICY_SETTING]: JSON.stringify(value) } }));
   return { deviceHome: home, directory: join(home, "locks"), command: "test", env: {}, sample: snapshot };
 }
@@ -125,8 +129,8 @@ test("instrumented Node runner honors actual worker limit with explicit syntheti
     await writeFile(file, `import test from 'node:test';import assert from 'node:assert/strict';import {writeFile,readdir,unlink} from 'node:fs/promises';import {join} from 'node:path';test('bounded',async()=>{const p=join(${JSON.stringify(active)},String(process.pid));await writeFile(p,'active');assert.ok((await readdir(${JSON.stringify(active)})).length<=2);await new Promise(r=>setTimeout(r,100));await unlink(p)});`);
   }
   const module = new URL("../scripts/lib/memory-budget.mjs", import.meta.url).href;
-  const script = `import {acquireMemoryBudget,memoryTestArguments} from ${JSON.stringify(module)};import {spawnSync} from 'node:child_process';const lease=await acquireMemoryBudget(${JSON.stringify({ deviceHome: options.deviceHome, directory: options.directory, command: "test" })});const args=memoryTestArguments(${JSON.stringify(["--test", `--import=${mock}`, ...files])});console.log(JSON.stringify({workers:lease.workers,args}));const child=spawnSync(process.execPath,args,{env:process.env,encoding:'utf8'});process.stdout.write(child.stdout);process.stderr.write(child.stderr);lease.release();process.exitCode=child.status;`;
-  const child = spawnSync(process.execPath, ["--import", mock, "--input-type=module", "-e", script], { encoding: "utf8", timeout: 20_000, env: { ...process.env, [MEMORY_LEASE_VARIABLE]: undefined } });
+  const script = `import {acquireMemoryBudget,memoryTestArguments} from ${JSON.stringify(module)};import {spawnSync} from 'node:child_process';const lease=await acquireMemoryBudget(${JSON.stringify({ deviceHome: options.deviceHome, directory: options.directory, command: "test" })});const args=memoryTestArguments(${JSON.stringify(["--test", `--import=${pathToFileURL(mock).href}`, ...files])});console.log(JSON.stringify({workers:lease.workers,args}));const child=spawnSync(process.execPath,args,{env:process.env,encoding:'utf8'});process.stdout.write(child.stdout);process.stderr.write(child.stderr);lease.release();process.exitCode=child.status;`;
+  const child = spawnSync(process.execPath, ["--import", pathToFileURL(mock).href, "--input-type=module", "-e", script], { encoding: "utf8", timeout: process.platform === "win32" ? 45_000 : 20_000, env: { ...process.env, [MEMORY_LEASE_VARIABLE]: undefined } });
   assert.equal(child.status, 0, child.stderr + child.stdout);
   const decision = JSON.parse(child.stdout.split("\n")[0]); assert.equal(decision.workers, 2); assert.ok(decision.args.includes("--test-concurrency=2"));
   assert.deepEqual(await readFile(join(options.directory, "memory-budget.json"), "utf8").then(JSON.parse).then(x=>x.leases), []);
@@ -182,8 +186,11 @@ const gatesPlanUrl = new URL("../dist/build/packages/core/src/gates-plan.js", im
 const gatesRunUrl = new URL("../dist/build/packages/core/src/gates-run.js", import.meta.url).href;
 
 async function isolatedAdapterFixture(t, source) {
-  const directory = await mkdtemp(join(tmpdir(), "memory-adapter-"));
-  t.after(() => rm(directory, { recursive: true, force: true }));
+  const scratch = await realpath(await mkdtemp(join(tmpdir(), "memory-adapter-")));
+  const directory = join(scratch, "adapter");
+  t.after(() => rm(scratch, { recursive: true, force: true }));
+  if (process.platform === "win32") assert.ok(createPrivateWindowsDirectory(directory));
+  else await mkdir(directory);
   const home = join(directory, "device"); await mkdir(home);
   const telemetry = join(directory, "telemetry.mjs");
   // Explicit synthetic capacity/pressure only; real process identities and real commands.
@@ -198,7 +205,7 @@ const root=${JSON.stringify(root)},directory=${JSON.stringify(directory)},home=$
 const m=await import(${JSON.stringify(moduleUrl)}),h=await import(${JSON.stringify(heavyUrl)});`;
   const env = { ...process.env, EINZBERN_HOME: home, COREPACK_ENABLE_NETWORK: "0", pnpm_config_verify_deps_before_run: "false" };
   delete env.EINZBERN_MEMORY_LEASE; delete env.EINZBERN_HEAVY_SLOT; delete env.EINZBERN_HEAVY_LOCK_DIR;
-  const child = spawnSync(process.execPath, ["--import", telemetry, "--input-type=module", "-e", prelude + source], { cwd: root, env, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
+  const child = spawnSync(process.execPath, ["--import", pathToFileURL(telemetry).href, "--input-type=module", "-e", prelude + source], { cwd: root, env, encoding: "utf8", timeout: 120_000, maxBuffer: 8 * 1024 * 1024 });
   assert.equal(child.status, 0, child.stderr + child.stdout);
   return child.stdout;
 }
@@ -212,19 +219,21 @@ const env={EINZBERN_HOME:home};const slot=await h.acquireHeavySlot({command:'tes
 const canonical=await realpath(join(runtime,'locks'));assert.equal(slot.path,join(canonical,'heavy.lock'));assert.equal(slot.memory.directory,canonical);assert.equal(JSON.parse(env.EINZBERN_MEMORY_LEASE).directory,canonical);assert.ok(env.EINZBERN_HEAVY_SLOT.endsWith(slot.path));
 const child=await h.acquireHeavySlot({command:'child',env:{...env},timeoutMs:0});assert.equal(child.inherited,true);assert.equal(child.memory.directory,canonical);child.release();slot.release();
 assert.deepEqual(JSON.parse(await readFile(join(canonical,'memory-budget.json'),'utf8')).leases,[]);
-await unlink(join(home,'locks'));const wrong=join(directory,'wrong');await mkdir(wrong);await symlink(wrong,join(home,'locks'),'dir');
+await unlink(join(home,'locks'));const wrong=join(directory,'wrong');await mkdir(wrong);await symlink(wrong,join(home,'locks'),process.platform === 'win32' ? 'junction' : 'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 `);
 });
 
 test("unregistered forwarding, explicit linked overrides and unsafe resource directories refuse", async t => {
   await isolatedAdapterFixture(t, `
-const target=join(directory,'target');await mkdir(target);await symlink(target,join(home,'locks'),'dir');
+const target=join(directory,'target');await mkdir(target);await symlink(target,join(home,'locks'),process.platform === 'win32' ? 'junction' : 'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
-const alias=join(directory,'alias');await symlink(target,alias,'dir');
+const alias=join(directory,'alias');await symlink(target,alias,process.platform === 'win32' ? 'junction' : 'dir');
 await assert.rejects(h.acquireHeavySlot({command:'test',env:{EINZBERN_HOME:home,EINZBERN_HEAVY_LOCK_DIR:alias},timeoutMs:0}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 if(process.platform==='linux'&&process.getuid?.()>0&&process.getuid()===process.getgid?.()){await chmod(target,0o775);const lease=await m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}});lease.release();}
-await chmod(target,0o777);await assert.rejects(m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
+if (process.platform === 'win32') execFileSync('icacls.exe',[target,'/grant','*S-1-1-0:(M)'],{windowsHide:true});
+else await chmod(target,0o777);
+await assert.rejects(m.acquireMemoryBudget({deviceHome:home,directory:target,command:'test',env:{}}),e=>e.reasonCode==='MEMORY_DOMAIN_INVALID');
 `);
 });
 
@@ -244,7 +253,7 @@ test("actual planGates and runGates execute pinned Corepack format gate with ena
 const {planGates}=await import(${JSON.stringify(gatesPlanUrl)}),{runGates}=await import(${JSON.stringify(gatesRunUrl)});
 const env={...process.env};const lease=await m.acquireMemoryBudget({deviceHome:home,directory:join(home,'locks'),command:'gates-run',env});
 try {
-const target=join(directory,'project');await cp(root,target,{recursive:true,filter:p=>!['.git','dist'].some(n=>p===join(root,n)||p.startsWith(join(root,n)+'/'))});execFileSync('git',['init','-q',target],{stdio:['ignore','pipe','pipe']});const plan=await planGates({projectRoot:target,release:true,gates:[{name:'engine:format',root:'.',command:['corepack','pnpm@11.3.0','run','--silent','format:check'],covers:['**'],required:true,enabled:true,releaseOnly:false}]});
+const target=join(directory,'project');await cp(root,target,{recursive:true,filter:p=>!['.git','dist','node_modules'].some(n=>p===join(root,n))});const {copyDependencyTree}=await import(${JSON.stringify(new URL("./helpers/filesystem-fixture.mjs", import.meta.url).href)});await copyDependencyTree(join(root,'node_modules'),join(target,'node_modules'));execFileSync('git',['init','-q',target],{stdio:['ignore','pipe','pipe']});const plan=await planGates({projectRoot:target,release:true,gates:[{name:'engine:format',root:'.',command:['corepack','pnpm@11.3.0','run','--silent','format:check'],covers:['**'],required:true,enabled:true,releaseOnly:false}]});
 const run=await runGates(plan,{libraryId:'workspace:'+ '1'.repeat(24),at:'2026-10-29T18:00:00Z',deviceHome:home,env});
 const diagnostic=await readFile(join(home,'derived-cache','workspace-'+ '1'.repeat(24),'gate-runs',run.run.gates[0].outputFile),'utf8');assert.deepEqual(run.run.reds,[],JSON.stringify(run)+diagnostic);assert.equal(run.run.gates.length,1);assert.equal(run.run.gates[0].ok,true,JSON.stringify(run));assert.equal(run.run.gates[0].exitCode,0);console.log(JSON.stringify(run));
 } finally {lease.release()}

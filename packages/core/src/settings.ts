@@ -4,7 +4,7 @@ import { isPortablePathBinding, isProjectArtifactBinding, resolvePortablePath } 
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
-import { isAbsolute, resolve, win32 } from "node:path";
+import { isAbsolute, posix, resolve, win32 } from "node:path";
 
 import { PROTOCOL_LIMITS, assertStrictInstant, canonicalJson, compareCanonicalText } from "../../protocol/src/index.js";
 import { ARTIFACT_LANGUAGE_TAGS, parsePromptLanguages } from "./knowledge-language.js";
@@ -295,21 +295,29 @@ function assertWorkspaceRelativeSettingPath(value: string, label: string): void 
 // artifact-store.ts: `settings-set` calls it before recording the value, and
 // `artifact-put` calls it again before writing a byte, because a directory that was real
 // when it was declared is not necessarily real when it is used.
+function settingPathSyntax(value: string): typeof posix {
+  return value.startsWith("/") && !value.startsWith("//") ? posix : win32;
+}
+
+function normalizedAbsoluteSettingPath(value: string): boolean {
+  if (value.startsWith("/") && !value.startsWith("//")) return !value.includes("\\") && posix.resolve(value) === value;
+  if (!/^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/])/u.test(value)) return false;
+  const native = win32.normalize(value);
+  return value === native || value === native.replaceAll("\\", "/");
+}
+
 function assertAbsoluteArtifactsSettingPath(value: string, label: string, workspaceRoot?: string): void {
-  if (process.platform !== "win32" && value.includes("\\")) {
-    fail("SETTINGS_VALUE_INVALID", `${label} must not contain a backslash`);
-  }
   // Containment below is decided on the RESOLVED path, so an unnormalized value would be
   // judged as something other than what was written. Refusing it is cheaper than
   // normalizing it: silently storing a different string than the operator typed is the
   // same act the url branch below refuses to commit when it declines to upgrade http.
-  if (resolve(value) !== value) {
+  if (!normalizedAbsoluteSettingPath(value)) {
     fail("SETTINGS_VALUE_INVALID", `${label} must be a normalized absolute path`);
   }
   if (workspaceRoot === undefined) return;
   const workspace = resolve(workspaceRoot);
-  const destination = resolve(value);
-  if (pathIsInside(workspace, destination) || pathIsInside(resolve(workspace, LEGACY_CONTROL_DIRECTORY), destination)) {
+  const syntax = settingPathSyntax(value);
+  if (syntax === settingPathSyntax(workspace) && pathIsInside(workspace, value, syntax)) {
     fail("SETTINGS_VALUE_INVALID", `${label} must be outside the workspace and its control tree`);
   }
 }
@@ -912,7 +920,7 @@ export function validateSettingValue(key: unknown, value: unknown, workspaceRoot
     // to a directory the operator manages — a cloud-synced folder is the case Owner asked
     // for — while the chain, the lease and this manifest stay inside the workspace. The
     // relative form is unchanged and remains the default.
-    if (isAbsolute(value)) {
+    if (isAbsolute(value) || win32.isAbsolute(value)) {
       assertAbsoluteArtifactsSettingPath(value, entry.key, workspaceRoot);
     } else {
       assertWorkspaceRelativeSettingPath(value, entry.key);
@@ -920,11 +928,13 @@ export function validateSettingValue(key: unknown, value: unknown, workspaceRoot
   }
   if (entry.key === "knowledge.articlesPath") {
     if (/[\u0000-\u001f\u007f]/u.test(value)) fail("SETTINGS_VALUE_INVALID", `${entry.key} must not contain control characters`);
-    if (isAbsolute(value)) {
-      if (value.includes("\\") || resolve(value) !== value) {
+    if (isAbsolute(value) || win32.isAbsolute(value)) {
+      if (!normalizedAbsoluteSettingPath(value)) {
         fail("SETTINGS_VALUE_INVALID", `${entry.key} must be a normalized absolute path`);
       }
-      if (workspaceRoot !== undefined && pathIsInside(resolve(workspaceRoot, LEGACY_CONTROL_DIRECTORY), resolve(value))) {
+      const syntax = settingPathSyntax(value);
+      if (workspaceRoot !== undefined && syntax === settingPathSyntax(resolve(workspaceRoot)) &&
+        pathIsInside(resolve(workspaceRoot, LEGACY_CONTROL_DIRECTORY), value, syntax)) {
         fail("SETTINGS_VALUE_INVALID", `${entry.key} must not target the workspace control tree`);
       }
     } else {

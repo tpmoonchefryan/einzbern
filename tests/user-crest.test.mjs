@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-STORY-476 R5, AC3 at the core (TCRN-CROSS-SUB-310): the user-level crest. A card written
 // with scope "user" lands in this user's crest -- `crest` in the device directory, or the place the
 // device-level key crest.userPath names, which may be a cloud folder -- and not in the library it
@@ -46,6 +47,7 @@ import {
 } from "../dist/build/packages/core/src/knowledge-core.js";
 import { applyMachineSettingSet, readUserCrestPath } from "../dist/build/packages/core/src/machine-settings.js";
 import { recall, recallDocuments, resetRecallCache } from "../dist/build/packages/core/src/recall.js";
+import { hasPrivateWindowsPermissions } from "../scripts/lib/windows-system.mjs";
 import { formatRecallLine, readRecallCards, recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
 import { canonicalJson, canonicalSha256, deriveStableId } from "../dist/build/packages/protocol/src/index.js";
 
@@ -64,13 +66,13 @@ function publicationWriter(context, shared, input, type, phases) {
     import fs from "node:fs/promises";
     import { constants } from "node:fs";
     import { syncBuiltinESMExports } from "node:module";
-    import { basename } from "node:path";
+    import { basename, dirname, join, sep } from "node:path";
     const payload = ${JSON.stringify(payload)};
     const states = new Map(), published = new Map();
-    const target = (path) => String(path).startsWith(payload.crest + "/") &&
+    const target = (path) => String(path).startsWith(payload.crest + sep) &&
       (payload.type === "marker" ? basename(String(path)).endsWith("store.json") :
         new RegExp("[0-9]{8}-[a-f0-9]{64}\\\\." + payload.type + "$", "u").test(basename(String(path))));
-    const finalName = (path) => String(path).replace(/[^/]+$/u,
+    const finalName = (path) => join(dirname(String(path)),
       basename(String(path)).match(/(?:store\\.json|[0-9]{8}-[a-f0-9]{64}\\.(?:json|body))$/u)[0]);
     const hold = async (phase, data) => {
       if (!payload.phases.includes(phase)) return;
@@ -83,7 +85,7 @@ function publicationWriter(context, shared, input, type, phases) {
     const open = fs.open;
     fs.open = async (path, flags, ...rest) => {
       const handle = await open(path, flags, ...rest);
-      if (!target(path) || typeof flags !== "number" || !(flags & constants.O_CREAT)) return handle;
+      if (!target(path) || !(typeof flags === "number" && (flags & constants.O_CREAT) || process.platform === "win32" && flags === "r+")) return handle;
       const state = { synced: false, closed: false }; states.set(String(path), state);
       const write = handle.writeFile.bind(handle), sync = handle.sync.bind(handle), close = handle.close.bind(handle);
       handle.writeFile = async (data, ...options) => {
@@ -434,8 +436,8 @@ test("R13: a legacy user crest stays readable as new events append, with its met
   const event = JSON.parse(await readFile(join(eventDirectory, eventFile), "utf8"));
   await mkdir(join(crest, "metadata"));
   await mkdir(join(crest, "bodies"));
-  const legacyMetadataPath = join(crest, "metadata", `${legacyCard.id}.json`);
-  const legacyBodyPath = join(crest, "bodies", `${legacyCard.id}.body`);
+  const legacyMetadataPath = storeRecordPath(join(crest, "metadata"), `${legacyCard.id}.json`);
+  const legacyBodyPath = storeRecordPath(join(crest, "bodies"), `${legacyCard.id}.body`);
   await writeFile(legacyMetadataPath, canonicalJson(event.metadata));
   await writeFile(legacyBodyPath, await readFile(join(eventDirectory, event.body.file)));
   await rm(join(crest, "events"), { recursive: true, force: true });
@@ -498,7 +500,7 @@ test("476-R5: crest.userPath puts the user crest in a cloud folder, stored as it
   await mkdir(cloud);
   // A cloud folder is often reached through a link; the setting keeps the real path, because the
   // crest refuses a link on its way in.
-  await symlink(cloud, join(base, "Cloud"));
+  await symlink(cloud, join(base, "Cloud"), process.platform === "win32" ? "junction" : "dir");
   const settings = await applyMachineSettingSet({ key: "crest.userPath", value: join(base, "Cloud", "crest"), occurredAt: at });
   assert.equal(settings.values["crest.userPath"], join(cloud, "crest"));
   assert.equal(await readUserCrestPath(), join(cloud, "crest"));
@@ -590,7 +592,9 @@ test("INC-400: a partial event stays private, closed complete bytes publish excl
   assert.deepEqual([ready.synced, ready.closed], [true, true], "actual sync and close finished before link");
   assert.deepEqual(await readFile(ready.path), Buffer.from(partial.complete, "base64"));
   const staged = await lstat(ready.path, { bigint: true });
-  assert.deepEqual([staged.nlink, staged.mode & 0o777n], [1n, 0o600n]);
+  assert.equal(staged.nlink, 1n);
+  if (process.platform === "win32") assert.equal(hasPrivateWindowsPermissions(ready.path, true), true);
+  else assert.equal(staged.mode & 0o777n, 0o600n);
   await assert.rejects(lstat(ready.final), { code: "ENOENT" });
   writer.release("before-link");
   const linked = await writer.wait("linked");
@@ -912,8 +916,8 @@ test("R14 (a) D7: cards one writer wrote -- here the metadata/body layout, whose
   for (const name of (await readdir(stream)).filter((entry) => entry.endsWith(".json"))) {
     const event = JSON.parse(await readFile(join(stream, name), "utf8"));
     const metadata = { ...event.metadata, extensions: {} };
-    await writeFile(join(crest, "metadata", `${metadata.id}.json`), canonicalJson(metadata));
-    await writeFile(join(crest, "bodies", `${metadata.id}.body`), bodies.get(event.body.file) ?? await readFile(join(stream, event.body.file)));
+    await writeFile(storeRecordPath(join(crest, "metadata"), `${metadata.id}.json`), canonicalJson(metadata));
+    await writeFile(storeRecordPath(join(crest, "bodies"), `${metadata.id}.body`), bodies.get(event.body.file) ?? await readFile(join(stream, event.body.file)));
   }
   await rm(join(crest, "events"), { recursive: true, force: true });
 
@@ -1166,8 +1170,8 @@ test("R15 D7 (SUB-413): a version the metadata/body layout holds and a device's 
   const legacyHeld = join(base, "legacy-held");
   await mkdir(join(legacyHeld, "metadata"), { recursive: true });
   await mkdir(join(legacyHeld, "bodies"), { recursive: true });
-  await writeFile(join(legacyHeld, "metadata", `${kestrel.id}.json`), canonicalJson(event.metadata));
-  await writeFile(join(legacyHeld, "bodies", `${kestrel.id}.body`), await readFile(join(crest, "events", stream, event.body.file)));
+  await writeFile(storeRecordPath(join(legacyHeld, "metadata"), `${kestrel.id}.json`), canonicalJson(event.metadata));
+  await writeFile(storeRecordPath(join(legacyHeld, "bodies"), `${kestrel.id}.body`), await readFile(join(crest, "events", stream, event.body.file)));
   await rm(join(crest, "events"), { recursive: true, force: true });
   const beaver = await asDevice(deviceB, () => createKnowledgeUnit(workspace, card("UC-SHARED-LEGACY", { subject: "Beaver dam height", body: "Stream beaver body" })));
   for (const name of ["metadata", "bodies"]) await rename(join(legacyHeld, name), join(crest, name));
@@ -1335,8 +1339,8 @@ test("R14 (c) D7: recovering a crest that holds the metadata/body layout, event 
   const event = JSON.parse(await readFile(join(stream, (await readdir(stream)).find((name) => name.endsWith(".json"))), "utf8"));
   await mkdir(join(crest, "metadata"));
   await mkdir(join(crest, "bodies"));
-  await writeFile(join(crest, "metadata", `${legacyCard.id}.json`), canonicalJson(event.metadata));
-  await writeFile(join(crest, "bodies", `${legacyCard.id}.body`), await readFile(join(stream, event.body.file)));
+  await writeFile(storeRecordPath(join(crest, "metadata"), `${legacyCard.id}.json`), canonicalJson(event.metadata));
+  await writeFile(storeRecordPath(join(crest, "bodies"), `${legacyCard.id}.body`), await readFile(join(stream, event.body.file)));
   await rm(join(crest, "events"), { recursive: true, force: true });
   const legacyMarker = JSON.parse(await readFile(join(crest, "store.json"), "utf8"));
   legacyMarker.version = 1;

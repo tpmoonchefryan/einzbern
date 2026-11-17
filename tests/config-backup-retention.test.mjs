@@ -5,6 +5,7 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile, readdir,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 import { configBackupDigest, verifyConfigBackup, configBackupCanonical, planConfigBackup, writeConfigBackupPackage } from "../dist/build/packages/core/src/config-backup.js";
 import { prepareConfigBackup, commitConfigBackup, createConfigBackup, evaluateConfigBackupEnablement, listConfigBackups, resumeConfigBackup, retireConfigBackup, validateConfigBackupRetentionPolicy, validateConfigBackupGroupIndex } from "../dist/build/packages/core/src/config-backup-retention.js";
 import { CONFIG_BACKUP_RESERVATION_FILE, CONFIG_BACKUP_RESERVATION_TEXT } from "../scripts/lib/config-backup-reservation.mjs";
@@ -42,6 +43,10 @@ test("CFG-B02/P01: retained project and generated subdirectories create and list
 test("CFG-B02: corrupt or linked reservation metadata is never overwritten", async t => {
   for (const linked of [false, true]) {
     const f = await fixture(t), marker = join(f.store.reservedRoot, CONFIG_BACKUP_RESERVATION_FILE);
+    if (linked && !await fileSymlinksAvailable(f.root)) {
+      await t.test("linked reservation", { skip: "File symlink creation privilege is unavailable" }, () => {});
+      continue;
+    }
     if (linked) { const outside = join(f.root, "marker-source"); await writeFile(outside, CONFIG_BACKUP_RESERVATION_TEXT); await symlink(outside, marker); }
     else await writeFile(marker, "not a reservation");
     const proposal = f.proposal("5", "dark", "2026-10-20T00:00:00Z");
@@ -412,7 +417,12 @@ test("repair-staged reconstructs missing bytes from persisted original plan, nev
 });
 test("repair-staged validates all surviving bytes before filling holes and retains conflicts", async t => {
   for (const problem of ["changed-member", "extra-file", "symlink", "changed-plan", "lost-plan", "commit-pending"]) {
-    const f = await stagedFixture(t); await rm(join(f.stagedRoot, "manifest.json"));
+    const f = await stagedFixture(t);
+    if (problem === "symlink" && !await fileSymlinksAvailable(f.root)) {
+      await t.test("linked staged member", { skip: "File symlink creation privilege is unavailable" }, () => {});
+      continue;
+    }
+    await rm(join(f.stagedRoot, "manifest.json"));
     const memberPath = join(f.stagedRoot, f.next.manifest.files[0].memberPath);
     if (problem === "changed-member") await writeFile(memberPath, "{}");
     if (problem === "extra-file") await writeFile(join(f.stagedRoot, "unexpected.json"), "{}");

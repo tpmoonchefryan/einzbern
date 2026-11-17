@@ -9,12 +9,17 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import test from "node:test";
+import nodeTest from "node:test";
 
 import { appendProgressIfConfigured, readProgressDelta } from "../scripts/lib/incremental-output.mjs";
 import { admitLegacyOutputSessionReceipt, bindOutputSessionProcessGroup, readBoundClaim, recoverStaleOutputSessionLock, safeWriteOutput, withExclusiveOutputSession } from "../scripts/lib/safe-io.mjs";
 import { privateHeavyEnvironment } from "./helpers/heavy-slots.mjs";
+import { copyDependencyTree } from "./helpers/filesystem-fixture.mjs";
 import { copyTaskRuntimeInputs } from "./helpers/task-runtime-fixture.mjs";
+
+// These fixtures model uid ownership, POSIX process groups and the POSIX recovery protocol.
+// Windows Job Object recovery is exercised in windows-platform and windows-process.
+const test = process.platform === "win32" ? nodeTest.skip : nodeTest;
 
 const ownerSchema = "tcrn.output-session-owner.v1";
 async function fixture(context, { tempRoot = tmpdir(), prefix = "tcrn-output-session-", resolvePath = true } = {}) {
@@ -203,7 +208,8 @@ async function taskEntrypointFixture(context, testSource, { includeEngineSources
   const root = await mkdtemp(join(tmpdir(), "tcrn-task-entrypoint-"));
   context.after(() => rm(root, { recursive: true, force: true }));
   await cp(resolve(productRoot, "scripts"), resolve(root, "scripts"), { recursive: true });
-  await cp(resolve(productRoot, "node_modules"), resolve(root, "node_modules"), { recursive: true });
+  await cp(resolve(productRoot, "skill"), resolve(root, "skill"), { recursive: true });
+  await copyDependencyTree(resolve(productRoot, "node_modules"), resolve(root, "node_modules"));
   await mkdir(resolve(root, "tests"));
   if (includeEngineSources) {
     await cp(resolve(productRoot, "packages"), resolve(root, "packages"), { recursive: true });
@@ -218,7 +224,7 @@ async function taskEntrypointFixture(context, testSource, { includeEngineSources
   runGit(root, ["init", "--quiet"]);
   runGit(root, ["config", "user.email", "tcrn-fixture"]);
   runGit(root, ["config", "user.name", "TCRN Fixture"]);
-  runGit(root, ["add", "package.json", ".gitignore", "scripts", "tests", "packages", "tsconfig.json"]);
+  runGit(root, ["add", "package.json", ".gitignore", "scripts", "skill", "tests", "packages", "tsconfig.json"]);
   runGit(root, ["commit", "--quiet", "-m", "fixture"]);
   assert.equal(spawnSync("git", ["status", "--porcelain=v1"], { cwd: root, encoding: "utf8" }).stdout, "");
   return root;
@@ -602,6 +608,7 @@ async function loadSafeIoHarness(root, name, transform, { asUrl = false } = {}) 
   const harnessPath = resolve(root, `${name}-safe-io-harness.mjs`);
   await writeFile(resolve(root, "runtime-capacity.mjs"), await readFile(new URL("../scripts/lib/runtime-capacity.mjs", import.meta.url)), { mode: 0o600 });
   await writeFile(resolve(root, "config-backup-reservation.mjs"), await readFile(new URL("../scripts/lib/config-backup-reservation.mjs", import.meta.url)), { mode: 0o600 });
+  await writeFile(resolve(root, "windows-system.mjs"), await readFile(new URL("../skill/mana-orchestrate/scripts/windows-system.mjs", import.meta.url)), { mode: 0o600 });
   await writeFile(harnessPath, instrumented, { mode: 0o600 });
   const url = pathToFileURL(harnessPath).href;
   return asUrl ? url : import(`${url}?${Date.now()}`);
@@ -661,6 +668,7 @@ async function crashInjectionHarness(root, name, marker, { before = false, parti
   const runnerPath = resolve(root, `${name}-runner.mjs`);
   await writeFile(resolve(root, "runtime-capacity.mjs"), await readFile(new URL("../scripts/lib/runtime-capacity.mjs", import.meta.url)), { mode: 0o600 });
   await writeFile(resolve(root, "config-backup-reservation.mjs"), await readFile(new URL("../scripts/lib/config-backup-reservation.mjs", import.meta.url)), { mode: 0o600 });
+  await writeFile(resolve(root, "windows-system.mjs"), await readFile(new URL("../skill/mana-orchestrate/scripts/windows-system.mjs", import.meta.url)), { mode: 0o600 });
   await writeFile(harnessPath, instrumented, { mode: 0o600 });
   await writeFile(runnerPath, `import { recoverStaleOutputSessionLock } from ${JSON.stringify(pathToFileURL(harnessPath).href)};\nawait recoverStaleOutputSessionLock(process.argv[2]);\n`, { mode: 0o600 });
   const child = spawn(process.execPath, [runnerPath, root], { stdio: "ignore" });
@@ -1117,7 +1125,7 @@ test("632-Q1: linked worktrees isolate output sessions and recover their own cla
     await assert.rejects(admitLegacyOutputSessionReceipt(legacy.request), expectReason("OUTPUT_SESSION_RECOVERY_LEGACY_RECEIPT_MISMATCH"));
     assert.equal((await recoverStaleOutputSessionLock(first)).reasonCode, "OUTPUT_SESSION_STALE_LOCK_RECOVERED");
 
-    await cp(resolve(checkout, "node_modules"), resolve(first, "node_modules"), { recursive: true });
+    await copyDependencyTree(resolve(checkout, "node_modules"), resolve(first, "node_modules"));
     const controller = await startTaskEntrypoint(first, {}, resolve(linkedRoot, "heavy-locks")).result;
     assert.equal(controller.code, 0, controller.stderr);
     assert.equal(controller.stderr, "");

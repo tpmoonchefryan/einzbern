@@ -5,6 +5,11 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+### Windows hosts and resource management
+
+- Windows host runners discover executables and batch shims, pass arguments and standard input, and use Job Objects to manage child processes and cancellation. The installer can create private NTFS artifacts and verify directory access, handle identity, junctions and portable record names.
+- Managed tasks on Windows use physical and commit headroom, process working sets and CPU availability for admission. The existing memory policy and concurrency settings govern the core and Portal test runners.
+
 ## 5.0.0
 
 Einzbern and Mana Orchestrate ship in lockstep at 5.0.0.

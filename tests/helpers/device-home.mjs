@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 if (process.env.EINZBERN_TEST_DEVICE_ROOT || process.env.EINZBERN_HOME === undefined || process.env.EINZBERN_HOME === "") {
-  const directory = mkdtempSync(join(process.env.EINZBERN_TEST_DEVICE_ROOT || tmpdir(), "einzbern-test-device-"));
+  const directory = realpathSync.native(mkdtempSync(join(process.env.EINZBERN_TEST_DEVICE_ROOT || tmpdir(), "einzbern-test-device-")));
   process.env.EINZBERN_HOME = join(directory, "einzbern");
   process.once("exit", () => rmSync(directory, { recursive: true, force: true }));
 }
@@ -22,7 +22,7 @@ export const testDeviceHome = process.env.EINZBERN_HOME;
  */
 export async function asPinnedDevice(operation, deviceId = "d".repeat(32)) {
   // Keep the active device and its explicit registry bindings in one spelling.
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), "einzbern-test-pinned-")));
+  const directory = realpathSync.native(mkdtempSync(join(tmpdir(), "einzbern-test-pinned-")));
   const home = join(directory, "einzbern");
   mkdirSync(home);
   writeFileSync(join(home, "device.json"), `${JSON.stringify({ createdAt: "2026-01-01T00:00:00Z", deviceId, displayName: "pinned", schemaVersion: "einzbern.device.v1" })}\n`);

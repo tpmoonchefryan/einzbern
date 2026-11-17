@@ -37,7 +37,7 @@
 
 import { execFileSync } from "node:child_process";
 import { lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -92,7 +92,7 @@ function git(directory, args) {
 // Whether `inner` is `outer` or lies inside it.
 function within(inner, outer) {
   const path = relative(outer, inner);
-  return path === "" || (!path.startsWith("..") && !path.startsWith(sep) && resolve(outer, path) === inner);
+  return path === "" || (!path.startsWith("..") && !isAbsolute(path) && resolve(outer, path) === inner);
 }
 
 // The source's files as forward-slash paths relative to it, sorted; dot-names are skipped.

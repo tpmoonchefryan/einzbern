@@ -1,3 +1,4 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-468 R2, R3 and STORY-469 R5, AC3: each device appends to its own stream in
 // the library, the stream manifest commits the append, and a reader trusts only the manifest.
@@ -420,6 +421,10 @@ const REFUSED_SHAPES = Object.freeze([
 for (const shape of REFUSED_SHAPES) {
   test(`512-R2: another device's ${shape.file} that ${shape.what} is still refused`, async (t) => {
     const stream = await otherStreamAboutToBeReplaced(t);
+    if ((shape.prepare === symbolicManifest || shape.make === symbolicManifest) && !(await fileSymlinksAvailable(stream.base))) {
+      t.skip("Windows file symlink creation privilege is unavailable");
+      return;
+    }
     const target = shape.file === "manifest" ? stream.manifestPath : stream.segmentPath;
     const reasonCode = shape.file === "manifest" ? "AKASHA_STREAM_MANIFEST_INVALID" : "AKASHA_SEGMENT_CORRUPT";
     const original = await readFile(target);

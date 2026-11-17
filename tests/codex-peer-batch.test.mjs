@@ -458,7 +458,7 @@ test("CLI batch record reads current workspace and device policy, writes private
   await writeFile(recordsPath, JSON.stringify([finish(f)]));
   await writeFile(capacityPath, JSON.stringify(f.input.capacity));
   const cli = fileURLToPath(new URL("../scripts/einzbern.mjs", import.meta.url));
-  const invoke = args => JSON.parse(execFileSync(process.execPath, [cli, ...args, ...(args[0] === "execution-codex-peer-record" ? ["--codex-admission", f.admissionPath] : [])], { encoding: "utf8", env: { ...process.env, EINZBERN_HOME: f.home, HOME: f.userHome, CODEX_THREAD_ID: "fixture-main" }, timeout: 30_000 }));
+  const invoke = args => JSON.parse(execFileSync(process.execPath, [cli, ...args, ...(args[0] === "execution-codex-peer-record" ? ["--codex-admission", f.admissionPath] : [])], { encoding: "utf8", env: { ...process.env, EINZBERN_HOME: f.home, HOME: f.userHome, USERPROFILE: f.userHome, CODEX_THREAD_ID: "fixture-main" }, timeout: 30_000 }));
   const before = new Date().toISOString();
   const result = invoke(["execution-codex-peer-record", "--workspace", f.workspace, "--manifest", manifestPath, "--records", recordsPath, "--capacity", capacityPath, "--output", output]);
   assert.ok(result.observationCutoff >= before && result.observationCutoff <= new Date().toISOString());
@@ -469,7 +469,10 @@ test("CLI batch record reads current workspace and device policy, writes private
   assert.throws(() => normalizeCodexPeerBatch({ ...result, reportPrefix: "tampered" }), /differs from retained/u);
   assert.equal(result.deliveryStatus, "not-attempted");
   assert.equal(result.workRevisions.find(row => row.id === f.work.id).revision, f.work.revision);
-  assert.equal((await stat(output)).mode & 0o777, 0o600);
+  if (process.platform === "win32") {
+    const { hasPrivateWindowsPermissions } = await import("../scripts/lib/windows-system.mjs");
+    assert.equal(hasPrivateWindowsPermissions(output), true);
+  } else assert.equal((await stat(output)).mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(await readFile(output, "utf8")), result);
   assert.deepEqual(invoke(["execution-codex-peer-evidence", "--from-file", output]), result);
   assert.throws(() => invoke(["execution-codex-peer-record", "--workspace", f.workspace, "--manifest", manifestPath, "--records", recordsPath, "--capacity", capacityPath, "--output", output]), /exists|EEXIST|WRITE/u);

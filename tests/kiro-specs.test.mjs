@@ -325,7 +325,7 @@ test("C.1: empty or incomplete sources and unsafe paths fail before creating a p
 
   const real = join(base, "target");
   await mkdir(real);
-  await symlink(real, join(base, "linked"));
+  await symlink(real, join(base, "linked"), process.platform === "win32" ? "junction" : "dir");
   const linked = await run(["init", "--workspace", "isolated-library", "--work-id", WORK_ID, "--spec-dir", "linked/spec"], { cwd: base, invoke });
   assert.equal(linked.reasonCode, "SPEC_PATH_SYMLINK");
   assert.deepEqual(statefulCommands(empty.state), ["work-show", "work-content-context"]);

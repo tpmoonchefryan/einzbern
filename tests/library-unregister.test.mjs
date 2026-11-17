@@ -144,7 +144,7 @@ test("541 GWT3: an entry whose project and library are gone is taken out by its 
   assert.equal(second.backupDirectory, `${first.backupDirectory}-2`, "a taken backup directory is never written into again");
   assert.deepEqual((await entries()).map((entry) => entry.projectPath), [fx.alpha]);
   // The second backup holds the registry as the first removal left it.
-  assert.deepEqual(JSON.parse(await readFile(second.backupPath, "utf8")).entries.map((entry) => entry.projectPath), [fx.alpha, fx.beta].map(path => relative(dirname(fx.registry), path)));
+  assert.deepEqual(JSON.parse(await readFile(second.backupPath, "utf8")).entries.map((entry) => entry.projectPath), [fx.alpha, fx.beta].map(path => relative(dirname(fx.registry), path).replaceAll("\\", "/")));
 });
 
 test("541 GWT3: a project path no entry has is refused with LIBRARY_NOT_REGISTERED, and --project and --at are required", async (context) => {

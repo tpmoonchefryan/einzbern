@@ -3,7 +3,7 @@
 // device boundary independent of the optional native descriptor/helper reader.
 import { constants, lstatSync, mkdirSync, realpathSync } from "node:fs";
 import { lstat, mkdir, open, realpath } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { cachePath, deviceHome, libraryDirectoryName } from "./device-home.js";
@@ -27,7 +27,7 @@ export interface VerificationBoundary {
 }
 function inside(parent: string, child: string): boolean {
   const path = relative(parent, child);
-  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith("../"));
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);

@@ -2,8 +2,9 @@
 
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
+import { spawnCommandSync } from "../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { lstat, mkdir, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, basename, dirname, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { README_NAMES, renderReadmes } from "../render-readme.mjs";
@@ -120,7 +121,8 @@ function helperReadmeVersion(content) {
 // `raw` keeps stdout as the exact bytes (committed blobs are compared byte for byte); stderr is
 // always text.
 function run(command, args, { cwd, env = process.env, raw = false } = {}) {
-  const result = spawnSync(command, args, {
+  const launch = command === "git" ? spawnSync : spawnCommandSync;
+  const result = launch(command, args, {
     cwd,
     env,
     encoding: raw ? "buffer" : "utf8",
@@ -172,8 +174,11 @@ async function assertRepository(root, expectedName, { clean = false, env = proce
 }
 
 function ensureSeparateRepositories(engineRoot, helperRoot) {
-  const common = (left, right) => left === right || left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
-  if (common(engineRoot, helperRoot)) {
+  const contains = (parent, child) => {
+    const path = relative(parent, child);
+    return !isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`);
+  };
+  if (contains(engineRoot, helperRoot) || contains(helperRoot, engineRoot)) {
     refuse("RELEASE_REPOSITORIES_OVERLAP", "engine and helper working trees must be separate repositories", { engineRoot, helperRoot });
   }
 }
@@ -228,7 +233,7 @@ export async function checkRelease({ engineRoot, helperRoot, version, env = proc
   const packageFiles = [join(engine.root, "package.json"), ...await enginePackagePaths(engine.root)];
   for (const path of packageFiles) {
     const manifest = await readJson(path);
-    const mismatch = versionMismatch(version, path.slice(engine.root.length + 1), manifest.version);
+    const mismatch = versionMismatch(version, relative(engine.root, path).split(sep).join("/"), manifest.version);
     if (mismatch) mismatches.push(mismatch);
   }
   const helperManifest = await readJson(join(helper.root, "package.json"));
@@ -270,7 +275,7 @@ export async function checkRelease({ engineRoot, helperRoot, version, env = proc
     version,
     engine: engine.root,
     helper: helper.root,
-    packageFiles: packageFiles.map((path) => path.slice(engine.root.length + 1)),
+    packageFiles: packageFiles.map((path) => relative(engine.root, path).split(sep).join("/")),
     changelog: CHANGELOG_FILE,
     readmes: README_NAMES,
     skill: `skill/${HELPER_PACKAGE_NAME}/SKILL.md`,
@@ -322,7 +327,7 @@ function releaseCli(engineRoot, args, env) {
 
 function inside(parent, candidate) {
   const path = relative(parent, candidate);
-  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !path.startsWith(sep));
+  return path === "" || (!path.startsWith(`..${sep}`) && path !== ".." && !isAbsolute(path));
 }
 
 // Absence means the library default; an explicit project is never inferred from roots or digests.
@@ -578,7 +583,7 @@ async function currentReleaseState(engineRoot) {
     if (typeof manifest.version !== "string" || !RELEASE_VERSION_SHAPE.test(manifest.version)) {
       refuse("RELEASE_VERSION_INVALID", `${path} does not contain a stable version`, { path, version: manifest.version ?? null });
     }
-    sourceVersions.push({ path: path.slice(engineRoot.length + 1), version: manifest.version });
+    sourceVersions.push({ path: relative(engineRoot, path).split(sep).join("/"), version: manifest.version });
   }
   const currentVersions = new Set(sourceVersions.map((entry) => entry.version));
   if (currentVersions.size !== 1) {

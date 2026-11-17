@@ -697,7 +697,7 @@ async function inspectBridgeSyntax(root) {
 }
 
 export async function inspectInstallWiring(platformRoot, homeRoot, manifest = INSTALL_MANIFEST) {
-  const required = manifest.items;
+  const required = manifest.items.filter(entry => entry.platforms === undefined || entry.platforms.includes(process.platform));
   const missing = [];
   const invalid = [];
   for (const entry of required) {
@@ -843,8 +843,10 @@ const NODE_HOOK_COMMAND = /^(?:if \[ -f "[^"]+" \]; then )?node\s+(?:"([^"]+)"|'
 function nodeHookTarget(command, expand = (path) => path, userHome = homedir()) {
   if (command.startsWith('node -e "/*einzbern-hook*/')) {
     const binding = /homedir\(\),'((?:\\'|[^'])*)'\)\)/u.exec(command);
-    if (!binding) return undefined;
-    const target = resolve(userHome, binding[1].replaceAll("\\'", "'"), "engine/hook.mjs");
+    const encoded = /homedir\(\),Buffer\.from\('([A-Za-z0-9+/=]+)','base64'\)\.toString\('utf8'\)\)\)/u.exec(command);
+    if (!binding && !encoded) return undefined;
+    const device = binding ? binding[1].replaceAll("\\'", "'") : Buffer.from(encoded[1], "base64").toString("utf8");
+    const target = resolve(userHome, device, "engine/hook.mjs");
     // Verify the complete generated command; never evaluate text from a settings file.
     return Object.keys({ ...HOST_HOOK_EVENTS, ...CODEX_HOOK_EVENTS, ...HOST_HOOK_POINTER_EVENTS }).some(event => hostHookCommand(target, event, userHome) === command) ? target : undefined;
   }

@@ -2,6 +2,7 @@
 // The complete offline release, real pack, multi-Story gates and done consumption share one fixture.
 
 import "./helpers/device-home.mjs";
+import { commandInvocation } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync } from "node:fs";
@@ -156,7 +157,7 @@ async function materializeReleaseDependencies(fixture) {
     // Read a static committed index snapshot without opening a shared WAL or
     // taking a writable SQLite connection. Missing cache inputs still fail the
     // real offline install below; no shared installation is used by the build.
-    const copied = JSON.parse(execFileSync("python3", ["-I", "-c", String.raw`
+    const copied = JSON.parse(execFileSync((process.platform === "win32" ? "python" : "python3"), ["-I", "-c", String.raw`
 import hashlib, json, pathlib, sqlite3, stat, sys
 source_store, target_store = map(pathlib.Path, sys.argv[1:3])
 packages = json.loads(sys.argv[3])
@@ -181,19 +182,24 @@ try:
             package_files += 1
             content = installed.read_bytes()
             digest = hashlib.sha512(content).hexdigest()
+            # Windows cannot report POSIX execute bits. pnpm's authentic index can
+            # reference either variant for identical bytes, so copy each present variant.
             suffix = "-exec" if stat.S_IMODE(installed.stat().st_mode) & 0o111 else ""
-            path = pathlib.Path("files") / digest[:2] / (digest[2:] + suffix)
-            if str(path) in copied:
-                continue
-            input_path = source_store / path
-            assert input_path.is_file(), "installed dependency store is missing CAS file " + str(path)
-            assert input_path.read_bytes() == content, str(path)
-            output = target_store / path
-            output.parent.mkdir(parents=True, exist_ok=True)
-            with output.open("xb") as stream:
-                stream.write(content)
-            output.chmod(stat.S_IMODE(input_path.stat().st_mode))
-            copied.add(str(path))
+            suffixes = ("", "-exec") if sys.platform == "win32" else (suffix,)
+            paths = [pathlib.Path("files") / digest[:2] / (digest[2:] + ending) for ending in suffixes]
+            present = [path for path in paths if (source_store / path).is_file()]
+            assert present, "installed dependency store is missing CAS file " + digest
+            for path in present:
+                if str(path) in copied:
+                    continue
+                input_path = source_store / path
+                assert input_path.read_bytes() == content, str(path)
+                output = target_store / path
+                output.parent.mkdir(parents=True, exist_ok=True)
+                with output.open("xb") as stream:
+                    stream.write(content)
+                output.chmod(stat.S_IMODE(input_path.stat().st_mode))
+                copied.add(str(path))
         assert package_files > 0, "installed dependency package is empty: " + key
         target.execute("INSERT INTO package_index (key, data) VALUES (?, ?)", (key, data))
     target.commit()
@@ -224,9 +230,10 @@ print(json.dumps({"packages": len(packages), "files": len(copied)}))
     pnpm_config_offline: "true", pnpm_config_frozen_lockfile: "true", pnpm_config_ignore_scripts: "true",
     pnpm_config_package_import_method: "copy",
   };
-  execFileSync("corepack", ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts", "--store-dir", privateStore, "--package-import-method=copy"], {
+  const install = commandInvocation("corepack", ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts", "--store-dir", privateStore, "--package-import-method=copy"], {
     env: fixture.environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
   });
+  execFileSync(install.command, install.args, install.options);
   const installed = JSON.parse(await readFile(join(fixture.engineRoot, "node_modules/.modules.yaml"), "utf8"));
   assert.equal(installed.packageManager, packageJson.packageManager);
   assert.equal(await realpath(installed.storeDir), await realpath(join(privateStore, "v11")));
@@ -278,10 +285,12 @@ test("607-R2: complete generated release readiness, native multi-Story gates, pa
       // its real run command; its implicit install would inherit controller IO.
       const install = ["pnpm@11.3.0", "--dir", fixture.engineRoot, "install", "--offline", "--frozen-lockfile", "--ignore-scripts"];
       calls.push({ command, args: install, phase: "native-offline-readiness" });
-      execFileSync(command, install, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      const invocation = commandInvocation(command, install, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+      execFileSync(invocation.command, invocation.args, invocation.options);
     }
     calls.push({ command, args });
-    return { status: 0, stdout: execFileSync(command, args, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }), stderr: "" };
+    const invocation = commandInvocation(command, args, { ...options, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+    return { status: 0, stdout: execFileSync(invocation.command, invocation.args, invocation.options), stderr: "" };
   };
   const options = { ...fixture, workIds, version: NEXT_VERSION, env: fixture.environment, runner };
   const generated = await generateRelease({ ...options, at: "2026-10-08T01:00:00Z" });

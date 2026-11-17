@@ -64,7 +64,7 @@ async function fixture(context, prefix) {
   const other = await registeredLibrary(deviceEnv, join(base, "second-project"), join(base, "second-library"), "HUMAN-ONLY-SECOND");
   const gone = await registeredLibrary(deviceEnv, join(base, "third-project"), join(base, "third-library"), "HUMAN-ONLY-THIRD");
   const { url } = await start([join(portalRoot, "portal.mjs"), "--library", first.library, "--port", "0"], {
-    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: ACTOR, ...deviceEnv, HOME: home },
+    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: ACTOR, ...deviceEnv, HOME: home, USERPROFILE: home },
   });
   const page = await (await loopback(url)).text();
   const boot = JSON.parse(page.match(/const BOOT = (\{.*\});/u)[1]);

@@ -10,6 +10,7 @@ import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 
 import {
   FRAMEWORK_VERSION,
@@ -213,6 +214,7 @@ test("478-AC5: hooks-present accepts declined-navigation pointers and reports a 
 // installer (HOST_HOOKS_FILE_UNSUPPORTED); doctor shows that reason rather than a missing hook.
 test("480-AC5: hooks-present names HOST_HOOKS_FILE_UNSUPPORTED for a hook file that is a symbolic link", async (context) => {
   const fixture = await healthy(context);
+  if (!await fileSymlinksAvailable(fixture.home)) return context.skip("File symlinks require Windows Developer Mode or elevation");
   const settings = join(fixture.home, ".claude", "settings.json");
   const dotfiles = join(fixture.base, "dotfiles");
   await mkdir(dotfiles);
@@ -267,10 +269,12 @@ test("480-AC5: managed-sections is red and lists a section the user changed, or 
   const fixture = await healthy(context);
   const agents = join(fixture.project, "AGENTS.md");
   // A CLAUDE.md linked to AGENTS.md holds no section of its own: it is skipped, not red.
-  await symlink("AGENTS.md", join(fixture.project, "CLAUDE.md"));
-  const linked = await doctor(fixture);
-  assert.deepEqual(linked.map((entry) => entry.ok), DOCTOR_CHECKS.map(() => true));
-  assert.deepEqual(byCheck(linked, "managed-sections").detail.skipped, ["CLAUDE.md"]);
+  if (await fileSymlinksAvailable(fixture.project)) {
+    await symlink("AGENTS.md", join(fixture.project, "CLAUDE.md"));
+    const linked = await doctor(fixture);
+    assert.deepEqual(linked.map((entry) => entry.ok), DOCTOR_CHECKS.map(() => true));
+    assert.deepEqual(byCheck(linked, "managed-sections").detail.skipped, ["CLAUDE.md"]);
+  }
   const original = await readFile(agents, "utf8");
   await writeFile(agents, original.replace("before a task.", "before every task."));
   const results = await doctor(fixture);

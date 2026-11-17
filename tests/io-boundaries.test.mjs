@@ -6,6 +6,8 @@ import { chmod, link, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, w
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { replaceWindowsFile } from "../scripts/lib/windows-system.mjs";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 
 import {
   assertCleanExclusiveSourceBasis,
@@ -44,7 +46,8 @@ test("descriptor-bound read detects deterministic path replacement", async (cont
       reasonCode: "INPUT_INVALID",
       hardlinkReasonCode: "INPUT_HARDLINK",
       afterOpen: async () => {
-        await rename(replacement, path);
+        if (process.platform === "win32") replaceWindowsFile(replacement, path);
+        else await rename(replacement, path);
       },
     }),
     (error) => error.reasonCode === "INPUT_PATH_CHANGED",
@@ -57,7 +60,7 @@ test("safe output rejects an ignored dist symlink and writes through a bound dir
   await mkdir(resolve(temporary, ".git"));
   const outside = resolve(temporary, "outside");
   await mkdir(outside);
-  await symlink(outside, resolve(temporary, "dist"));
+  await symlink(outside, resolve(temporary, "dist"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(
     safeWriteOutput(temporary, "dist/evidence/result.json", "unsafe\n"),
     (error) => error.reasonCode === "OUTPUT_SESSION_REQUIRED",
@@ -99,7 +102,7 @@ test("exclusive output session preserves a foreign lock whose identity is outsid
   await mkdir(resolve(gitDirectory, "einzbern-output.lock"));
   await assert.rejects(
     withExclusiveOutputSession(temporary, async () => undefined),
-    (error) => error.reasonCode === "OUTPUT_SESSION_RECOVERY_IDENTITY",
+    (error) => error.reasonCode === (process.platform === "win32" ? "OUTPUT_SESSION_OWNER_INVALID" : "OUTPUT_SESSION_RECOVERY_IDENTITY"),
   );
 });
 
@@ -144,7 +147,7 @@ test("the file-record memo is keyed on identity that a rewrite cannot reuse", as
   assert.equal(fileRecordMemoEntriesForTest(), before + 1);
 });
 
-test("source read errors fail closed", async (context) => {
+test("POSIX unreadable source files fail closed", { skip: process.platform === "win32" ? "Windows access is controlled by DACLs" : false }, async (context) => {
   const temporary = await realpath(await mkdtemp(join(tmpdir(), "tcrn-source-read-")));
   context.after(() => rm(temporary, { recursive: true, force: true }));
   const path = resolve(temporary, "unreadable.txt");
@@ -182,12 +185,14 @@ test("hardlinked bytes are readable only when a caller names the relaxation", as
 
   // A symlink is still refused with hardlinks allowed: the relaxation drops the link
   // COUNT, not the file-type guard that keeps a read from following a pointer elsewhere.
-  const pointer = resolve(temporary, "pointer.json");
-  await symlink(manifest, pointer);
-  await assert.rejects(
-    readBoundRegularFile(pointer, { reasonCode: "DEPENDENCY_MANIFEST_INVALID", allowHardlinks: true }),
-    (error) => error.reasonCode === "DEPENDENCY_MANIFEST_INVALID",
-  );
+  if (await fileSymlinksAvailable(temporary)) {
+    const pointer = resolve(temporary, "pointer.json");
+    await symlink(manifest, pointer);
+    await assert.rejects(
+      readBoundRegularFile(pointer, { reasonCode: "DEPENDENCY_MANIFEST_INVALID", allowHardlinks: true }),
+      (error) => error.reasonCode === "DEPENDENCY_MANIFEST_INVALID",
+    );
+  }
 });
 // The scope of the hardlink relaxation was, as first written, a paragraph of comment.
 // A later caller aiming this reader at a tracked source file would have dropped the guard

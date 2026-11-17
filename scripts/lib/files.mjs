@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { lstat, open, readdir, realpath } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { isAbsolute, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { compareCanonicalText } from "./canonical-order.mjs";
@@ -40,7 +40,7 @@ export function toPosixPath(value) {
 
 export function isInside(parent, candidate) {
   const relation = relative(parent, candidate);
-  return relation === "" || (!relation.startsWith("..") && !relation.startsWith(sep));
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
 }
 
 // walkFiles returns paths, never contents, so it probes each candidate for the boundary
@@ -48,15 +48,15 @@ export function isInside(parent, candidate) {
 // descriptor without reading. Reading every file only to discard it re-read the whole
 // tree on each of the walk's many call sites.
 //
-// The probe still opens with O_NOFOLLOW and still requires the guard that the pinned
-// platform exposes it: dropping the open in favour of a bare lstat would let the walk
-// silently traverse a symlink and would stop surfacing unreadable files at all.
+// The probe binds the opened descriptor to path observations on every platform and
+// uses O_NOFOLLOW where available. Windows relies on file identity and reparse-point
+// checks. Opening also surfaces unreadable files before the walk returns them.
 // Failures are BoundaryError instances so callers keep matching on `reasonCode`; the
 // previous bare `Error("SOURCE_HARDLINK:...")` carried no reasonCode and passed the
 // existing assertion only because readBoundRegularFile happened to throw first.
 async function probeSourceFile(absolute, root) {
   const label = toPosixPath(relative(root, absolute));
-  if (typeof constants.O_NOFOLLOW !== "number") {
+  if (typeof constants.O_NOFOLLOW !== "number" && process.platform !== "win32") {
     throw new BoundaryError("NOFOLLOW_UNAVAILABLE", "The pinned platform must expose O_NOFOLLOW");
   }
   const before = await lstat(absolute).catch((error) => {
@@ -81,6 +81,12 @@ async function probeSourceFile(absolute, root) {
     }
     if (opened.nlink !== 1) {
       throw new BoundaryError("SOURCE_HARDLINK", `${label} must have exactly one filesystem link`);
+    }
+    const after = await lstat(absolute).catch((error) => {
+      throw new BoundaryError("SOURCE_PATH_CHANGED", `${label}: ${error.code ?? error.message}`);
+    });
+    if (after.isSymbolicLink() || !after.isFile() || after.dev !== opened.dev || after.ino !== opened.ino) {
+      throw new BoundaryError("SOURCE_PATH_CHANGED", `${label} changed while probing`);
     }
   } finally {
     await handle.close();

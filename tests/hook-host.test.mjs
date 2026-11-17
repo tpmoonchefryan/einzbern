@@ -9,9 +9,10 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rm } from "node:fs/promises";
-import { devNull, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { pathToFileURL } from "node:url";
 
 import { createProject, createWork, initializeLibrary, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
@@ -21,7 +22,7 @@ import { registerLibrary } from "../dist/build/packages/core/src/registry.js";
 import { deriveStableId } from "../dist/build/packages/protocol/src/index.js";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_NOSYSTEM: "1" };
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 const PROMPT = "How should the zebrafish tank be filled?";
 const at = (second) => `2026-10-14T12:00:${String(second).padStart(2, "0")}Z`;
 const idOf = (key) => deriveStableId("work", key);
@@ -53,6 +54,7 @@ async function registeredProject(context) {
   const saved = Object.fromEntries(["EINZBERN_HOME", "EINZBERN_HOST", "CLAUDE_PROJECT_DIR"].map((key) => [key, process.env[key]]));
   process.env.EINZBERN_HOME = join(base, "device");
   context.after(async () => {
+    resetRecallCache();
     for (const [key, value] of Object.entries(saved)) {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;

@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { cp, lstat, readdir, readFile, writeFile } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 
 import { compareCanonicalText } from "./canonical-order.mjs";
 import { validateFrozenDependencyGraph } from "./dependency-graph.mjs";
@@ -22,7 +22,7 @@ function sha256(content) {
 
 function inside(root, candidate) {
   const relation = relative(root, candidate);
-  return relation !== "" && !relation.startsWith("..") && !relation.includes("../");
+  return relation !== "" && !isAbsolute(relation) && relation !== ".." && !relation.startsWith(`..${sep}`);
 }
 
 async function regularDirectory(path, reasonCode) {
@@ -44,7 +44,7 @@ export async function inventoryMaterializedStore(storeRoot) {
       if (metadata.isDirectory()) {
         await visit(path);
       } else if (metadata.isFile()) {
-        records.push({ path: relative(realRoot, path), size: metadata.size, sha256: sha256(await readFile(path)) });
+        records.push({ path: relative(realRoot, path).split(sep).join("/"), size: metadata.size, sha256: sha256(await readFile(path)) });
       } else {
         fail("DEPENDENCY_MATERIALIZATION_STORE_INVALID", path);
       }

@@ -52,7 +52,7 @@ async function coordinationFixture(context, register = "container") {
   await writeFile(join(container, "AGENTS.md"), OWNER_TEXT, "utf8");
   const fixture = { base, home, deviceEnv, container, library, libraryId, agents: join(container, "AGENTS.md") };
   const { url } = await start([join(portalRoot, "portal.mjs"), "--library", library, "--port", "0"], {
-    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: ACTOR, ...deviceEnv, HOME: home },
+    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: ACTOR, ...deviceEnv, HOME: home, USERPROFILE: home },
   });
   return { ...fixture, url };
 }

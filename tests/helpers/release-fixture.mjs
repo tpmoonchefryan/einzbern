@@ -7,7 +7,7 @@ import { cpSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { after } from "node:test";
 import { README_NAMES, renderReadmes } from "../../scripts/render-readme.mjs";
 import { FRAMEWORK_VERSION, initializeLibrary, materializeWorkspace } from "../../dist/build/packages/core/src/index.js";
@@ -52,6 +52,7 @@ export async function writeText(root, path, content) {
 async function initRepo(root) {
   await mkdir(root, { recursive: true });
   git(root, ["init", "--initial-branch=main"]);
+  git(root, ["config", "core.autocrlf", "false"]);
   git(root, ["config", "user.name", "Release Test"]);
   git(root, ["config", "user.email", "release-test@example.invalid"]);
 }
@@ -120,7 +121,7 @@ export async function makeWorkspace(name, repos, environment, { declarations = "
     for (const [index, [name, root]] of [["engine:fixture", repos.engineRoot], ["helper:fixture", repos.helperRoot]].entries()) {
       await setGate(workspace, {
         occurredAt: `2026-09-27T00:00:0${index + 2}Z`, name,
-        gate: { command: [process.execPath, "-e", `process.exit(process.cwd() === ${JSON.stringify(root)} ? ${red && index === 0 ? 3 : 0} : 19)`], root: root.split("/").at(-1), covers: ["**"], required: declarations === "required" && (index === 0 || helperRequired), enabled: declarations !== "disabled", releaseOnly: true },
+        gate: { command: [process.execPath, "-e", `process.exit(process.cwd() === ${JSON.stringify(root)} ? ${red && index === 0 ? 3 : 0} : 19)`], root: basename(root), covers: ["**"], required: declarations === "required" && (index === 0 || helperRequired), enabled: declarations !== "disabled", releaseOnly: true },
       });
     }
   }
@@ -178,7 +179,7 @@ export async function scopedReleaseProject(fixture, key, { required = true, help
   for (const [index, [name, root]] of [["engine:fixture", fixture.engineRoot], ["helper:fixture", fixture.helperRoot]].entries()) {
     await setGate(fixture.workspace, {
       occurredAt: `2026-10-08T00:00:0${index + 2}Z`, configurationProjectId: projectId, name,
-      gate: { command: [process.execPath, "-e", `process.exit(process.cwd() === ${JSON.stringify(root)} ? ${red ? 7 : 0} : 19)`], root: rootOverride ?? root.split("/").at(-1), covers, required: required && (index === 0 || helperRequired), enabled, releaseOnly: true },
+      gate: { command: [process.execPath, "-e", `process.exit(process.cwd() === ${JSON.stringify(root)} ? ${red ? 7 : 0} : 19)`], root: rootOverride ?? basename(root), covers, required: required && (index === 0 || helperRequired), enabled, releaseOnly: true },
     });
   }
   return projectId;

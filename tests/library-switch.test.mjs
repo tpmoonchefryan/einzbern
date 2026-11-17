@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-469 (the engine switch), STORY-468 R4, AC2, AC3 (through the CLI), STORY-466
 // R3, AC4 (old layout read-only) and STORY-467 AC3 (a changed akasha segment): every verb goes
@@ -268,7 +269,7 @@ test("466-R3, AC4 (tooling): an old-layout workspace answers every read under th
   const device = join(base, "device");
   const before = await treeDigest(root);
   const read = (args) => {
-    const run = spawnSync(process.execPath, ["--import", tripwirePath, cliPath, ...args], {
+    const run = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, cliPath, ...args], {
       encoding: "utf8",
       env: { ...process.env, EINZBERN_HOME: device, EINZBERN_TRIPWIRE_ROOT: root },
     });

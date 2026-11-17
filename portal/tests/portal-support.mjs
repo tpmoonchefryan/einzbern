@@ -66,7 +66,7 @@ async function registeredLibrary(deviceEnv, project, library, externalKey, at) {
 async function scratch(prefix, externalKey) {
   const base = await realpath(await mkdtemp(join(tmpdir(), prefix)));
   const home = await scratchHome(base);
-  const deviceEnv = { EINZBERN_HOME: join(base, "device", "einzbern"), HOME: home };
+  const deviceEnv = { EINZBERN_HOME: join(base, "device", "einzbern"), HOME: home, USERPROFILE: home };
   const proseRoot = join(base, "project");
   const workspace = join(proseRoot, ".ether");
   const second = { project: join(base, "second-project"), library: join(base, "second-library") };
@@ -92,7 +92,7 @@ async function startPortal({ workspace, home, deviceEnv = {}, env = {}, library 
   if (configBackupRoot !== undefined) args.push("--config-backup-root", configBackupRoot);
   args.push("--port", "0");
   const child = spawn(process.execPath, args, {
-    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: TEST_ACTOR, ...deviceEnv, ...env, HOME: home },
+    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: TEST_ACTOR, ...deviceEnv, ...env, HOME: home, USERPROFILE: home },
     ...(cwd === undefined ? {} : { cwd }),
     stdio: ["ignore", "pipe", "pipe"],
   });

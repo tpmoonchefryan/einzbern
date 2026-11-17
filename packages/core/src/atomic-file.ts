@@ -15,6 +15,7 @@ import { renameRetryBudget } from "./io-policy.js";
 import { randomBytes } from "node:crypto";
 import { open, rename as renameFile, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import { replaceWindowsFile } from "../../../scripts/lib/windows-system.mjs";
 
 export const ATOMIC_TEMPORARY_PREFIX = ".tmp-" as const;
 export const ATOMIC_FILE_REASON_CODES = Object.freeze([
@@ -102,6 +103,9 @@ export async function writeFileAtomic(path: string, bytes: string | Uint8Array, 
       break;
     } catch (error) {
       const code = String((error as { code?: string }).code ?? "UNKNOWN");
+      if (process.platform === "win32" && options.rename === undefined && RETRYABLE_RENAME_CODES.has(code)) {
+        try { replaceWindowsFile(temporary, path); break; } catch { /* retain bounded rename retries */ }
+      }
       if (!RETRYABLE_RENAME_CODES.has(code) || attempt >= retries) {
         await rm(temporary, { force: true });
         throw new AtomicFileError("ATOMIC_WRITE_RENAME_FAILED", `${path}: rename failed (${code}) after ${attempt + 1} attempt(s)`, {

@@ -662,7 +662,7 @@ test("coordination harness sections participate in repair and engine updates", a
   const updated = await plan(atContainer, "update", { archive: release.archive });
   assert.deepEqual(updated.blockers, []);
   assert.equal(updated.managedUpdates.find(output => output.projectPath === container)?.status, "planned");
-  assert.deepEqual(updated.writes.filter(entry => entry.path.startsWith(`${container}/`)).map(entry => entry.path).sort(), [join(container, "AGENTS.md"), join(container, "CLAUDE.md")], "only harness files are possible writes");
+  assert.deepEqual(updated.writes.filter(entry => entry.path.startsWith(container + sep)).map(entry => entry.path).sort(), [join(container, "AGENTS.md"), join(container, "CLAUDE.md")], "only harness files are possible writes");
 });
 
 

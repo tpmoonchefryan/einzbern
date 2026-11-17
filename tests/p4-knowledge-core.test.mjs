@@ -1,4 +1,6 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 
 import { testDeviceHome } from "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
@@ -189,8 +191,8 @@ async function asOlderEngineCrest(fixture) {
   await mkdir(join(fixture.store, "metadata"));
   await mkdir(join(fixture.store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(fixture.store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(fixture.store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(fixture.store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(fixture.store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(fixture.store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -204,10 +206,10 @@ async function asOlderEngineCrest(fixture) {
 // metadata/body layout, so the crest is laid down that way first (asOlderEngineCrest).
 async function retireByHand(fixture, id) {
   if (await stat(join(fixture.store, "events")).then(() => true, () => false)) await asOlderEngineCrest(fixture);
-  const path = join(fixture.store, "metadata", `${id}.json`);
+  const path = storeRecordPath(join(fixture.store, "metadata"), `${id}.json`);
   const metadata = JSON.parse(await readFile(path, "utf8"));
   await writeFile(path, canonicalJson({ ...metadata, lifecycle: "retired", revision: metadata.revision + 1 }));
-  await rm(join(fixture.store, "bodies", `${id}.body`));
+  await rm(storeRecordPath(join(fixture.store, "bodies"), `${id}.body`));
 }
 
 function deterministicPermutations(values) {
@@ -528,15 +530,17 @@ test("metadata-only surfaces never open bodies while explicit/full integrity pat
     await validateKnowledgeStore(fixture.workspace, observation);
     assert.deepEqual(observed.filter((path) => path.endsWith(".body")), [bodyPath]);
 
-    const backing = join(fixture.base, "body-backing");
-    await rename(bodyPath, backing);
-    await symlink(backing, bodyPath);
-    assert.equal((await listKnowledgeMetadata(fixture.workspace, { at: instant(12) })).records.length, 1);
-    assert.equal((await readKnowledgeSnippet(fixture.workspace, created.id)).id, created.id);
-    assert.equal((await evaluateKnowledgeFreshness(fixture.workspace, instant(12))).records.length, 1);
-    assert.equal(JSON.parse(await exportKnowledgeCheckpoint(fixture.workspace, instant(12))).records.length, 1);
-    await expectReason("KNOWLEDGE_LINK_UNSAFE", () => validateKnowledgeStore(fixture.workspace));
-    await expectReason("KNOWLEDGE_LINK_UNSAFE", () => readKnowledgeBody(fixture.workspace, created.id, { at: instant(12) }));
+    if (await fileSymlinksAvailable(fixture.base)) {
+      const backing = join(fixture.base, "body-backing");
+      await rename(bodyPath, backing);
+      await symlink(backing, bodyPath);
+      assert.equal((await listKnowledgeMetadata(fixture.workspace, { at: instant(12) })).records.length, 1);
+      assert.equal((await readKnowledgeSnippet(fixture.workspace, created.id)).id, created.id);
+      assert.equal((await evaluateKnowledgeFreshness(fixture.workspace, instant(12))).records.length, 1);
+      assert.equal(JSON.parse(await exportKnowledgeCheckpoint(fixture.workspace, instant(12))).records.length, 1);
+      await expectReason("KNOWLEDGE_LINK_UNSAFE", () => validateKnowledgeStore(fixture.workspace));
+      await expectReason("KNOWLEDGE_LINK_UNSAFE", () => readKnowledgeBody(fixture.workspace, created.id, { at: instant(12) }));
+    }
   } finally {
     await fixture.close();
   }
@@ -1077,6 +1081,7 @@ test("link, special-file, source-replacement, unknown-field, and partial-state a
     try {
       const created = await createKnowledgeUnit(fixture.workspace, unitInput(fixture, `KNOWLEDGE-${kind.toUpperCase()}`));
       const { bodyPath } = await cardEvent(fixture, created.id);
+      if (kind === "symlink" && !await fileSymlinksAvailable(fixture.base)) continue;
       const backing = join(fixture.base, `body-${kind}`);
       if (kind === "symlink") {
         await rename(bodyPath, backing);
@@ -1130,7 +1135,7 @@ test("link, special-file, source-replacement, unknown-field, and partial-state a
     try {
       const created = await createKnowledgeUnit(older.workspace, unitInput(older, `KNOWLEDGE-OLDER-${label.toUpperCase()}`));
       await asOlderEngineCrest(older);
-      const path = join(older.store, "metadata", `${created.id}.json`);
+      const path = storeRecordPath(join(older.store, "metadata"), `${created.id}.json`);
       await writeFile(path, canonicalJson(change(JSON.parse(await readFile(path, "utf8")))));
       await expectReason("KNOWLEDGE_RECORD_INVALID", () => validateKnowledgeStore(older.workspace));
     } finally {
@@ -1375,7 +1380,7 @@ test("SUB-386: dangling linked work is diagnosed without blocking reads or write
     // TCRN-CROSS-SUB-414: a record linking work its chain no longer holds is one an older engine
     // could leave; laid down in its metadata/body layout.
     await asOlderEngineCrest(fixture);
-    const metadataPath = join(fixture.store, "metadata", `${created.id}.json`);
+    const metadataPath = storeRecordPath(join(fixture.store, "metadata"), `${created.id}.json`);
     const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
     await writeFile(metadataPath, canonicalJson({ ...metadata, linkedWorkIds: [danglingId] }));
 
@@ -1404,7 +1409,7 @@ test("SUB-386: historical promotion metadata and candidate records remain readab
   try {
     const created = await createKnowledgeUnit(fixture.workspace, unitInput(fixture, "HISTORICAL-CANDIDATE"));
     await asOlderEngineCrest(fixture);
-    const metadataPath = join(fixture.store, "metadata", `${created.id}.json`);
+    const metadataPath = storeRecordPath(join(fixture.store, "metadata"), `${created.id}.json`);
     const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
     await writeFile(metadataPath, canonicalJson({ ...metadata, lifecycle: "candidate", promotionState: "candidate" }));
 
@@ -1480,7 +1485,7 @@ test("TCRN-CROSS-STORY-024: a retired record without its body keeps the store va
     // retires by hand now), and the store is still valid without it. That engine wrote the
     // metadata/body layout (TCRN-CROSS-SUB-414), which retireByHand lays down first.
     await retireByHand(fx, created.id);
-    const bodyFile = join(bodiesDir, `${created.id}.body`);
+    const bodyFile = storeRecordPath(bodiesDir, `${created.id}.body`);
     await assert.rejects(readFile(bodyFile), "retired body must be deleted");
     assert.equal((await validateKnowledgeStore(fx.workspace)).reasonCode, "KNOWLEDGE_STORE_VALID");
     // The retired record survives as a metadata-only audit entry.
@@ -1559,12 +1564,13 @@ test("knowledge sources allow dot-prefixed children without permitting parent or
     await writeFile(join(fx.workspace, "..cache/source.md"), "inside source");
     await mkdir(join(fx.base, "outside"));
     await writeFile(join(fx.base, "outside/source.md"), "outside source");
-    await symlink(join(fx.base, "outside"), join(fx.workspace, "..linked"), "dir");
-    await symlink(join(fx.base, "outside/source.md"), join(fx.workspace, "..cache/linked.md"), "file");
+    await symlink(join(fx.base, "outside"), join(fx.workspace, "..linked"), process.platform === "win32" ? "junction" : "dir");
+    const fileLinks = await fileSymlinksAvailable(fx.base);
+    if (fileLinks) await symlink(join(fx.base, "outside/source.md"), join(fx.workspace, "..cache/linked.md"), "file");
     const workspace = await materializeWorkspace(fx.workspace);
     const digest = (reference) => calculateKnowledgeSourceDigest(fx.workspace, workspace, [reference], "fallback");
     assert.equal(await digest("..cache/source.md"), createHash("sha256").update("inside source").digest("hex"));
-    for (const reference of ["../outside/source.md", "..linked/source.md", "..cache/linked.md"]) {
+    for (const reference of ["../outside/source.md", "..linked/source.md", ...(fileLinks ? ["..cache/linked.md"] : [])]) {
       assert.equal(await digest(reference), createHash("sha256").update("fallback").digest("hex"), reference);
     }
   } finally { await fx.close(); }

@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 import "./helpers/device-home.mjs";
 import test from "node:test";
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
@@ -228,8 +229,8 @@ async function legacyLibraryFixture(root, instant) {
   for (const name of await readdir(stream)) if (name.endsWith(".body")) bodies.set(name.slice(9, -5), await readFile(join(stream, name)));
   await mkdir(join(crest, "metadata")); await mkdir(join(crest, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(crest, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(crest, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(crest, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(crest, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const store = join(crest, "store.json");
   await writeFile(store, canonicalJson({ ...JSON.parse(await readFile(store, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -258,7 +259,7 @@ test("real engine keeps legacy bytes/readback intact while adding portable knowl
   const workspace = join(root, "library"), instant = "2026-10-25T00:00:00Z";
   const f = await legacyLibraryFixture(workspace, instant);
   const before = await libraryInventory(workspace);
-  const oldPaths = before.filter(item => item.path.includes(":"));
+  const oldPaths = before.filter(item => /knowledge(?::|%3A)[a-f0-9]{24}\.(?:json|body)$/u.test(item.path));
   assert.equal(oldPaths.length, 2);
   assert.equal((await validateKnowledgeStore(workspace)).records, 1);
   const oldBody = await readKnowledgeBody(workspace, f.oldCard.id, { at: instant });

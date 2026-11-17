@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -778,7 +778,8 @@ function trustedArtifactIdentity(candidate, { expectedInputs = null, gateId = nu
   try {
     if (!statSync(absolute).isFile()) return null;
     const root = resolve(storeRoot);
-    if (!(absolute === root || absolute.startsWith(`${root}/`))) return null;
+    const path = relative(root, absolute);
+    if (isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`)) return null;
     const bytes = readFileSync(absolute);
     const actual = createHash("sha256").update(bytes).digest("hex");
     if (actual !== digest || !Number.isSafeInteger(candidate.bytes) || candidate.bytes !== bytes.length) return null;
@@ -1669,7 +1670,7 @@ export async function readNativeBatchState({ workspace, engineCli, workIds = [],
       return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: String(error?.message ?? error) };
     }
   }
-  if (typeof workspace !== "string" || !workspace.startsWith("/") || workspace.includes("\u0000")) return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: "absolute workspace is required" };
+  if (typeof workspace !== "string" || !isAbsolute(workspace) || workspace.includes("\u0000")) return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: "absolute workspace is required" };
   if (!Number.isSafeInteger(readTimeoutMs) || readTimeoutMs < 1 || readTimeoutMs > RUNTIME_CAPACITY.timerMilliseconds) return { ok: false, reasonCode: "BATCH_NATIVE_READ_NOT_VERIFIABLE", error: "readTimeoutMs must be a positive integer supported by the Node timer" };
   if (!(typeof series === "string" && series.length > 0) && workIds.length === 0) return { ok: false, reasonCode: "BATCH_NATIVE_SCOPE_NOT_VERIFIABLE", error: "series or bound work ids are required for a scoped native read" };
   const cli = typeof engineCli === "string" && engineCli.length > 0 ? engineCli : resolve(repositoryRoot, "scripts/einzbern.mjs");

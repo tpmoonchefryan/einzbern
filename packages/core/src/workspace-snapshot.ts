@@ -226,7 +226,7 @@ async function boundReadFileBytes(path: string, maximumBytes: number = PROTOCOL_
   if (before.size > maximumBytes) {
     fail("SNAPSHOT_PATH_INVALID", `${path} exceeds the snapshot read limit`);
   }
-  if (typeof constants.O_NOFOLLOW !== "number") {
+  if (typeof constants.O_NOFOLLOW !== "number" && process.platform !== "win32") {
     fail("SNAPSHOT_PATH_INVALID", "O_NOFOLLOW is unavailable");
   }
   let handle;
@@ -240,6 +240,10 @@ async function boundReadFileBytes(path: string, maximumBytes: number = PROTOCOL_
     const after = await handle.stat();
     if (after.dev !== opened.dev || after.ino !== opened.ino || after.nlink !== 1 || content.length > maximumBytes) {
       fail("SNAPSHOT_PATH_INVALID", `${path} changed while reading`);
+    }
+    const pathAfter = await lstat(path);
+    if (pathAfter.isSymbolicLink() || !pathAfter.isFile() || pathAfter.dev !== opened.dev || pathAfter.ino !== opened.ino || pathAfter.nlink !== 1) {
+      fail("SNAPSHOT_PATH_INVALID", `${path} no longer names the opened file`);
     }
     return content;
   } finally {

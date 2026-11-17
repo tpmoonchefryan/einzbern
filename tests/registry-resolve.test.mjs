@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, resolve, sep } from "node:path";
 import test from "node:test";
 
 import { runCli } from "../dist/build/packages/cli/src/index.js";
@@ -270,7 +270,7 @@ test("whole-suite test processes isolate inherited device state without serialis
   });
   assert.notEqual(homes[0], homes[1]);
   for (const home of homes) {
-    assert.ok(home.startsWith(base + "/"));
+    assert.ok(home.startsWith(base + sep));
     assert.notEqual(home, environment.EINZBERN_HOME);
     await assert.rejects(readdir(home), { code: "ENOENT" }, "each child reclaims its own device home");
   }

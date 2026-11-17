@@ -210,7 +210,7 @@ export async function evaluateDelivery({ splits = ["development", "tuning", "hol
         const directory = join(output, `${split}-${size}`);
         await mkdir(directory);
         const before = await treeDigest(path);
-        const child = spawnSync(process.execPath, ["--import", resolve(root, "tests/helpers/fs-write-tripwire.mjs"), fileURLToPath(import.meta.url), "--read", path, "--split", split, "--size", size, "--out", directory], {
+        const child = spawnSync(process.execPath, ["--import", new URL("../tests/helpers/fs-write-tripwire.mjs", import.meta.url).href, fileURLToPath(import.meta.url), "--read", path, "--split", split, "--size", size, "--out", directory], {
           encoding: "utf8", env: { ...process.env, EINZBERN_TRIPWIRE_ROOT: path }, maxBuffer: 32 * 1024 * 1024,
         });
         await writeFile(join(directory, "stdout.json"), child.stdout ?? "");

@@ -111,5 +111,8 @@ exit releases leases on crash. The private `controlSourceAttestor(root, home,
 Tests compile only a disposable C actor for real writer/mmap/fork behavior.
 The independent read observer journals actual source read calls in both client
 and helper processes. Product counters include helper initial source hashes,
-separately from cache bytes and reducer replays. Fixture measurements are not
+separately from cache bytes and reducer replays. On the native verification
+path, `verificationContentBytes` reports the part of `logicalEventBytes` used
+to check the final source content. Replacing a segment with identical bytes
+also incurs a full event read of that segment. Fixture measurements are not
 current production-library or remote synchronization measurements.

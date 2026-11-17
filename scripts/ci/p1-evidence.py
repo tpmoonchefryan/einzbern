@@ -11,6 +11,7 @@ Neither mode establishes whole PF-2, dry-run, PF-3, or native acceptance.
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -55,11 +56,29 @@ def write_json(path, value):
         stream.write(json.dumps(value, indent=2, ensure_ascii=True) + "\n")
 
 
+def open_regular_file(path):
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1 or getattr(before, "st_file_attributes", 0) & 0x400:
+        raise Refusal(f"Evidence must be a singly linked regular file: {path}")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    try:
+        opened = os.fstat(fd)
+        current = os.lstat(path)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 or getattr(current, "st_file_attributes", 0) & 0x400:
+            raise Refusal(f"Evidence file changed during open: {path}")
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino) or (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+            raise Refusal(f"Evidence file identity changed during open: {path}")
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
 def file_receipt(path):
     digest = hashlib.sha256()
     size = 0
     before = os.lstat(path)
-    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    fd = open_regular_file(path)
     with os.fdopen(fd, "rb") as stream:
         opened = os.fstat(stream.fileno())
         if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1 or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
@@ -71,7 +90,9 @@ def file_receipt(path):
     current = os.lstat(path)
     def signature(value):
         return (value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
-    if signature(opened) != signature(after) or signature(after) != signature(current) or size != after.st_size:
+    # Python 3.12 on Windows can report different ctime semantics through
+    # stat and fstat. Compare each clock with its own earlier observation.
+    if signature(opened) != signature(after) or signature(before) != signature(current) or signature(after)[:-1] != signature(current)[:-1] or size != after.st_size:
         raise Refusal(f"Evidence changed while hashing: {path}")
     return {"file": Path(path).name, "bytes": size, "sha256": digest.hexdigest()}
 
@@ -107,7 +128,7 @@ def verify_retained_artifacts(evidence, meta):
         if name not in verified:
             continue
         try:
-            fd = os.open(Path(evidence) / name, os.O_RDONLY | os.O_NOFOLLOW)
+            fd = open_regular_file(Path(evidence) / name)
             with os.fdopen(fd, "r", encoding="utf-8") as stream:
                 if json.load(stream) != meta.get(key):
                     raise Refusal("retained JSON does not match its metadata record")
@@ -131,7 +152,7 @@ def fixture_location(path):
     p = Path(path)
     metadata = os.lstat(path)
     parents = [p, *p.parents]
-    links = [str(q) for q in parents if q.is_symlink()]
+    links = [str(q) for q in parents if q.is_symlink() or (os.name == "nt" and getattr(q.lstat(), "st_file_attributes", 0) & 0x400)]
     gits = [str(q) for q in parents if os.path.lexists(q / ".git")]
     probe = subprocess.run(
         ["git", "-C", path, "rev-parse", "--show-toplevel"],
@@ -141,7 +162,7 @@ def fixture_location(path):
         "realpathEqual": os.path.realpath(path) == path,
         "isDirectoryNotSymlink": stat.S_ISDIR(metadata.st_mode) and not p.is_symlink(),
         "uid": metadata.st_uid,
-        "uidMatchesProcess": metadata.st_uid == os.getuid(),
+        "uidMatchesProcess": windows_owned_path(path) if os.name == "nt" else metadata.st_uid == os.getuid(),
         "mode": oct(metadata.st_mode & 0o777),
         "symlinksOnPath": links,
         "gitAncestors": gits,
@@ -151,6 +172,17 @@ def fixture_location(path):
     }
     return {"path": path, "createdUtc": utc(), "checks": checks,
             "checksPassed": fixture_checks_pass(checks)}
+
+
+def windows_owned_path(path):
+    encoded = base64.b64encode(path.encode("utf-8")).decode("ascii")
+    executable = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    program = "$ErrorActionPreference='Stop'; $env:PSModulePath=Join-Path $PSHOME 'Modules'; "
+    program += f"$path=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}')); "
+    program += "$owner=(Get-Acl -LiteralPath $path).GetOwner([Security.Principal.SecurityIdentifier]).Value; "
+    program += "ConvertTo-Json -InputObject ($owner -eq [Security.Principal.WindowsIdentity]::GetCurrent().User.Value)"
+    result = subprocess.run([str(executable), "-NoProfile", "-NonInteractive", "-Command", program], capture_output=True, text=True, check=False)
+    return result.returncode == 0 and result.stdout.strip() == "true"
 
 
 def checked_output(argv, *, cwd=None, env=None):
@@ -193,7 +225,7 @@ def source_manifest(repo, node, env):
 
 
 class ControllerObserver:
-    """Original earliest-controller read-only FD capture; no reaper intervention."""
+    """Read-only FD capture; Windows files retire after captured handles close."""
 
     def __init__(self, tmpdir):
         self.tmpdir = str(tmpdir)
@@ -206,7 +238,7 @@ class ControllerObserver:
             with os.scandir(self.tmpdir) as scanner:
                 entries = list(scanner)
             for entry in entries:
-                if not entry.name.startswith("tcrn-test-controller-") or not entry.is_dir(follow_symlinks=False):
+                if not entry.name.startswith("tcrn-test-controller-") or not entry.is_dir(follow_symlinks=False) or getattr(entry.stat(follow_symlinks=False), "st_file_attributes", 0) & 0x400:
                     continue
                 if entry.path not in [d["path"] for d in self.observed_dirs]:
                     self.observed_dirs.append({
@@ -221,11 +253,9 @@ class ControllerObserver:
                     continue
                 source = os.path.join(first["path"], kind)
                 try:
-                    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
-                    if not stat.S_ISREG(os.fstat(fd).st_mode):
-                        os.close(fd)
-                        raise Refusal("Controller output is not a regular file")
-                    self.held[kind] = {"fd": fd, "dir": first["path"], "openedUtc": utc()}
+                    fd = open_regular_file(source)
+                    opened = os.fstat(fd)
+                    self.held[kind] = {"fd": fd, "dir": first["path"], "openedUtc": utc(), "identity": (opened.st_dev, opened.st_ino)}
                 except FileNotFoundError:
                     pass
                 except (OSError, Refusal) as error:
@@ -235,7 +265,7 @@ class ControllerObserver:
 
     def retain(self, evidence, label="p1"):
         retained = {
-            "method": "read-only descriptors on earliest top-level tcrn-test-controller-* stdout/stderr under TMPDIR; reaper deletion unchanged",
+            "method": "read-only descriptors on earliest top-level tcrn-test-controller-* stdout/stderr under TMPDIR; Windows retires captured files after closing descriptors",
             "observedTopLevelControllerDirs": self.observed_dirs,
             "files": {}, "errors": self.errors,
         }
@@ -254,6 +284,23 @@ class ControllerObserver:
                 retained["errors"].append({"kind": kind, "error": str(error)})
             finally:
                 os.close(handle["fd"])
+        if os.name == "nt":
+            # Windows controller output stays present until these read handles
+            # close. Only the exact captured files are retired here.
+            for kind, handle in self.held.items():
+                source = Path(handle["dir"]) / kind
+                try:
+                    current = source.lstat()
+                    if (current.st_dev, current.st_ino) != handle["identity"] or source.is_symlink():
+                        raise Refusal("Controller output identity changed before retirement")
+                    source.unlink()
+                except Exception as error:
+                    retained["errors"].append({"kind": kind, "error": str(error)})
+            for directory in {handle["dir"] for handle in self.held.values()}:
+                try:
+                    os.rmdir(directory)
+                except OSError as error:
+                    retained["errors"].append({"path": directory, "error": str(error)})
         self.held.clear()
         return retained
 
@@ -463,7 +510,7 @@ def main():
     # Atomic exclusive reservation. Never consume or overwrite a previous run.
     evidence.mkdir(mode=0o700)
     meta = {"schemaVersion": "einzbern.ci-p1-evidence.v1", "scope": "independent CI P1; not PF2 or PF3 closure",
-            "script": "verify:p1", "cwd": args.repo, "stdin": "/dev/null", "errors": [], "artifactFiles": {},
+            "script": "verify:p1", "cwd": args.repo, "stdin": os.devnull, "errors": [], "artifactFiles": {},
             "testTotalsScope": "individual tests in earliest top-level core controller; not core test files or Portal tests",
             "adaptation": "already acquired pinned pnpm replaces original corepack dispatch; CLI paths; fail-closed receipt and source manifests added"}
     meta.update({"mode": args.mode, "label": label, "script": config["script"]})
@@ -483,6 +530,8 @@ def main():
                     "EINZBERN_CI_EVIDENCE_DIR": str(evidence),
                     "EINZBERN_PORTAL_EVIDENCE_DIR": str(evidence / "portal"),
                     "EINZBERN_PRIVACY_HISTORY_BASE": ""})
+        if os.name == "nt":
+            env["USERPROFILE"] = env["HOME"]
         if args.mode != "ci-light":
             meta["schemaVersion"] = "einzbern.ci-shard-evidence.v1"
         meta["ciIdentity"] = {key: os.environ.get(key) for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_JOB")}
@@ -490,7 +539,7 @@ def main():
             meta["testTotalsScope"] = "Portal functional tests" if args.mode == "p1-portal" else ("core controller" if config["controller"] else "not applicable")
     meta["environment"] = {key: env[key] for key in ENVIRONMENT_KEYS if key in env}
     repo = Path(args.repo)
-    node = Path(args.node_bin) / "node"
+    node = Path(args.node_bin) / ("node.exe" if os.name == "nt" else "node")
     attempted = False
     try:
         for left in (args.repo, args.tmp, args.device, args.evidence):

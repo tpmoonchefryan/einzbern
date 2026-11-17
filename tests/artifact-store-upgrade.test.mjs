@@ -135,11 +135,14 @@ test("P1: registry defaults refuse malformed, non-file and dangling historical i
       assert.equal(projectCli(project.projectPath, [verb], 1).reasonCode, "ARTIFACT_MANIFEST_INVALID");
     }
   }
-  await rm(fx.manifest);
-  await symlink(join(fx.base, "absent-manifest"), fx.manifest);
-  for (const verb of ["artifact-list", "artifact-verify"]) {
-    assert.equal(projectCli(project.projectPath, [verb], 1).reasonCode, "ARTIFACT_MANIFEST_INVALID");
-  }
+  const { fileSymlinksAvailable } = await import("./helpers/filesystem-fixture.mjs");
+  await t.test("dangling historical index is refused", { skip: !await fileSymlinksAvailable(fx.base) }, async () => {
+    await rm(fx.manifest);
+    await symlink(join(fx.base, "absent-manifest"), fx.manifest);
+    for (const verb of ["artifact-list", "artifact-verify"]) {
+      assert.equal(projectCli(project.projectPath, [verb], 1).reasonCode, "ARTIFACT_MANIFEST_INVALID");
+    }
+  });
   await rm(fx.manifest);
   await mkdir(fx.manifest);
   assert.equal(projectCli(project.projectPath, ["artifact-verify"], 1).reasonCode, "ARTIFACT_MANIFEST_INVALID");
@@ -173,16 +176,18 @@ test("P1: registry defaults never turn an unreadable or disappearing historical 
     syncBuiltinESMExports();
     process.chdir(previousCwd);
   }
-  await chmod(fx.manifest, 0o000);
-  try {
-    for (const verb of ["artifact-list", "artifact-verify"]) {
-      const result = projectCli(fx.projects[0].projectPath, [verb], 1);
-      assert.equal(result.reasonCode, "ARTIFACT_PATH_INVALID", "retain the existing manifest-open error code");
-      assert.match(result.error, /EACCES|EPERM/u);
+  await t.test("POSIX read permissions are enforced", { skip: process.platform === "win32" }, async () => {
+    await chmod(fx.manifest, 0o000);
+    try {
+      for (const verb of ["artifact-list", "artifact-verify"]) {
+        const result = projectCli(fx.projects[0].projectPath, [verb], 1);
+        assert.equal(result.reasonCode, "ARTIFACT_PATH_INVALID", "retain the existing manifest-open error code");
+        assert.match(result.error, /EACCES|EPERM/u);
+      }
+    } finally {
+      await chmod(fx.manifest, 0o644);
     }
-  } finally {
-    await chmod(fx.manifest, 0o644);
-  }
+  });
 });
 
 test("P1: old-layout manifests remain readable at their original location without a project index", async t => {

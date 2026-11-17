@@ -159,6 +159,7 @@ test("the light online step preserves genuine caches across private HOME without
   assert.ok(offlineStep);
   const offlineInstall = stepRun(offlineStep).split("\n").find((line) => line.startsWith("pnpm --dir "));
   assert.ok(offlineInstall);
+  if (process.platform === "win32") return t.skip("Executes the Ubuntu workflow's Bash acquisition step");
 
   // Execute the actual source-install script with a recording pnpm, without
   // acquiring packages or inventing any of pnpm's genuine cache records.

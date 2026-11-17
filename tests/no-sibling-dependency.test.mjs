@@ -94,6 +94,35 @@ test("GREENS on a read of the Helper Skill template inside the repository", () =
   assert.deepEqual(findings, []);
 });
 
+test("module-relative imports and URLs are checked against their owning file", () => {
+  const ownSkill = `../skill/${BRAND.helper.id}/scripts/process-launch.mjs`;
+  for (const source of [
+    `import { spawnCommand as spawn } from "${ownSkill}";`,
+    `const helper = await import("${ownSkill}");`,
+    `await readFile(new URL("${ownSkill}", import.meta.url));`,
+  ]) assert.deepEqual(judgeSource(source, [BRAND.helper.id]), []);
+  const nested = findReachingLines({
+    repoRoot: "/repo", siblings: [BRAND.helper.id],
+    files: ["/repo/packages/core/src/storage.mjs"],
+    read: () => 'const helper = await import("../../../scripts/lib/windows-system.mjs");',
+  });
+  assert.deepEqual(nested, []);
+  for (const source of [
+    `const helper = await import("../../${BRAND.helper.id}/scripts/run.mjs");`,
+    `await readFile(new URL("../../${BRAND.helper.id}/SKILL.md", import.meta.url));`,
+    `await readFile(new URL("${ownSkill}", externalBase));`,
+    `await import("${ownSkill}"); readFileSync("../../${BRAND.helper.id}/SKILL.md");`,
+    'await import("../../../outside.mjs");',
+  ]) assert.equal(judgeSource(source, [BRAND.helper.id]).length, 1, source);
+});
+
+test("a hyphenated script name in runtime metadata is distinct from a process invocation", () => {
+  const name = BRAND.helper.id;
+  assert.deepEqual(judgeSource(`entry({ consumer: ["skill/${name}/scripts/spawn-guard.mjs"] });`, [name]), []);
+  const spawned = judgeSource(`spawn("node", [join(root, "../${name}/scripts/spawn-guard.mjs")]);`, [name]);
+  assert.equal(spawned[0]?.operation, "process-spawn");
+});
+
 test("invalid, incomplete, and ambiguous manifest inputs are not-verifiable", () => {
   const invalid = judgeNoSiblingDependency({ repoRoot: REPO_ROOT, manifest: { schemaVersion: "wrong" } });
   assert.equal(invalid.reasonCode, "SIBLING_DEPENDENCY_NOT_VERIFIABLE");

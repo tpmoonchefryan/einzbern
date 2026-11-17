@@ -52,6 +52,7 @@ const HISTORICAL_EVIDENCE = new Map([
     outputBytes: 2048,
     outputSha256: "6d5b7fe9a7e8b44981e84ea2e544b7ed104697faf2a631bf62a6642933e168ec",
     typescriptVersion: "5.9.3",
+    windowsCoverageFileWalk: true,
   }],
   // TCRN-CROSS-STORY-533. SUB-473 (dc77e6d6) added observedReasonCodes and unreconciledReasons
   // to the absent-source leg of this proof. The block records the proof as it stood before that
@@ -93,6 +94,7 @@ const CURRENT_PORTAL_PROOF_FILES = [
   "packages/core/src/doctor.ts",
   "tests/doctor.test.mjs",
   "scripts/verify-portal.mjs",
+  "scripts/lib/windows-historical-coverage.mjs",
   "scripts/verbatim-evidence-meta-proof.mjs",
   "scripts/verbatim-evidence-proof.mjs",
 ];
@@ -478,7 +480,8 @@ async function replayHistoricalBlock(block, evidence) {
     stage = "historical-archive-create";
     const archive = runGit(["archive", "--format=tar", evidence.commit], { encoding: "buffer", maxBuffer: 256 * 1024 * 1024 });
     stage = "historical-archive-extract";
-    execFileSync("tar", ["-xf", "-", "-C", historicalRoot], { cwd: repositoryRoot, input: archive, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
+    // Git Bash tar and Windows tar both inherit the native process directory.
+    execFileSync("tar", ["-xf", "-"], { cwd: historicalRoot, input: archive, encoding: "utf8", maxBuffer: 8 * 1024 * 1024 });
 
     stage = "historical-git-alternates";
     const commonDirectory = resolve(repositoryRoot, String(runGit(["rev-parse", "--git-common-dir"], { encoding: "utf8" })).trim());
@@ -522,6 +525,13 @@ async function replayHistoricalBlock(block, evidence) {
       GIT_DIR: gitDirectory,
     };
     delete env.GIT_WORK_TREE;
+    const nativeCoverage = process.platform === "win32" && evidence.windowsCoverageFileWalk === true;
+    if (nativeCoverage) {
+      // The original proof spawns its own Node processes. Keep this import within
+      // their environment so both the proof and its nested coverage runs use the archive.
+      const adapter = new URL("./lib/windows-historical-coverage.mjs", import.meta.url).href;
+      env.NODE_OPTIONS = [env.NODE_OPTIONS, `--import=${adapter}`].filter(Boolean).join(" ");
+    }
     stage = "historical-command-parse";
     const args = await parseNodeCommand(block.command, { checkoutRoot: historicalRoot, commit: evidence.commit });
     stage = "historical-command";
@@ -540,6 +550,7 @@ async function replayHistoricalBlock(block, evidence) {
     return {
       ok,
       mode: "historical-version-replay",
+      ...(nativeCoverage ? { filesystemAdapter: "windows-archive-file-walk" } : {}),
       commit: evidence.commit,
       evidenceSha256: sourceDigest,
       outputBytes: Buffer.byteLength(result.stdout, "utf8"),

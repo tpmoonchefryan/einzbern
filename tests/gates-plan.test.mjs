@@ -251,7 +251,7 @@ test("gate roots allow dot-prefixed children without permitting parent or symlin
   for (const escape of ["..", "../outside"]) {
     await assert.rejects(resolveGateRoot(root, escape), { reasonCode: "GATES_ROOT_INVALID" }, escape);
   }
-  await symlink(join(base, "outside"), join(root, "..linked"), "dir");
+  await symlink(join(base, "outside"), join(root, "..linked"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(resolveGateRoot(root, "..linked"), { reasonCode: "GATES_ROOT_INVALID" });
 });
 
@@ -285,7 +285,7 @@ test("485-R2: each root takes its own changes, relative to itself", async (conte
   assert.deepEqual(plan.gates.find((entry) => entry.name === "portal-html").matched, ["index.html"], "a subdirectory root sees paths relative to itself");
 
   await assert.rejects(planGates({ projectRoot: root, gates: [{ name: "missing", ...gate(["**"], { root: "no/such/dir" }) }], base: "baseline" }), { reasonCode: "GATES_ROOT_INVALID" });
-  await symlink(base, join(root, "outside"));
+  await symlink(base, join(root, "outside"), process.platform === "win32" ? "junction" : "dir");
   await assert.rejects(planGates({ projectRoot: root, gates: [{ name: "escape", ...gate(["**"], { root: "outside" }) }], base: "baseline" }), { reasonCode: "GATES_ROOT_INVALID" }, "a root reached through a link must stay inside the project");
 });
 

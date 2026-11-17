@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -21,10 +21,10 @@ const joinParts = (parts, separator) => parts.join(separator);
 const PRIVATE_VM_HOST = joinParts(["vm-aos", "internal"], ".");
 const PRIVATE_DNS_HOST = joinParts(["aos", "tcrn", "internal"], ".");
 
-function fixtureGit(root, arguments_, { raw = false, tolerateStderr = false } = {}) {
+function fixtureGit(root, arguments_, { raw = false, tolerateStderr = false, input } = {}) {
   const publicEmail = joinParts(["fixture", "@", "users.noreply.github.com"], "");
-  const result = spawnSync("git", arguments_, {
-    cwd: root,
+  const result = spawnSync("git", ["-c", "core.autocrlf=false", ...arguments_], {
+    cwd: root, input,
     encoding: raw ? undefined : "utf8",
     maxBuffer: fixtureMaximumBytes,
     env: {
@@ -97,8 +97,9 @@ test("adversarial object-database shapes fail closed instead of shortening the s
     // that scanned for the framing LF instead of honouring the declared size would run
     // straight into the next object's header and lose the privacy-bearing path.
     const target = joinParts(["..", "..", "Users", "local-user", "secrets.txt"], "/");
-    await symlink(target, join(root, "link"));
-    fixtureGit(root, ["add", "-A"]);
+    await writeFile(join(root, "link"), target);
+    const objectId = fixtureGit(root, ["hash-object", "-w", "link"]).trim();
+    fixtureGit(root, ["update-index", "--add", "--cacheinfo", `120000,${objectId},link`]);
     fixtureGit(root, ["commit", "-q", "-m", "symlink fixture"]);
     const stream = fixtureGit(root, batchArguments, { raw: true });
     const records = parseGitObjectBatch(stream, declaredBatchBytes(root));
@@ -1061,12 +1062,17 @@ test("recursive historical tree records preserve privacy-bearing full paths", ()
 
 test("batched tree-object walking preserves every historical commit path and order", async (context) => {
   const root = await emptyFixtureRepository(context, "tcrn-privacy-tree-walk-");
-  await mkdir(join(root, "src", "nested"), { recursive: true });
   await writeFile(join(root, "alpha.txt"), "first revision\n");
-  await writeFile(join(root, "src", "nested", "line\nbreak.txt"), "nested path\n");
   await writeFile(join(root, "src-alpha.txt"), "tree ordering\n");
   fixtureGit(root, ["add", "-A"]);
-  fixtureGit(root, ["commit", "-q", "-m", "first tree"]);
+  // Write the historical name directly to Git. NTFS cannot materialize a newline in a filename.
+  const blob = fixtureGit(root, ["hash-object", "-w", "alpha.txt"]).trim();
+  const makeTree = input => fixtureGit(root, ["mktree", "-z"], { input });
+  const nested = makeTree(`100644 blob ${blob}\tline\nbreak.txt\0`);
+  const src = makeTree(`040000 tree ${nested}\tnested\0`);
+  const ordinary = fixtureGit(root, ["ls-tree", "-z", fixtureGit(root, ["write-tree"])], { raw: true });
+  const tree = makeTree(Buffer.concat([ordinary, Buffer.from(`040000 tree ${src}\tsrc\0`)]));
+  fixtureGit(root, ["update-ref", "HEAD", fixtureGit(root, ["commit-tree", tree, "-m", "first tree"])]);
 
   await rm(join(root, "alpha.txt"));
   await writeFile(join(root, "customer-export.csv"), "second revision\n");

@@ -44,10 +44,15 @@ memory and `process.constrainedMemory()` bounds physical capacity when the OS
 reports a process/container limit. See the [Node process API](https://nodejs.org/docs/latest-v24.x/api/process.html#processavailablememory).
 Linux also reads `/proc/pressure/memory` (full stall avg10). macOS uses only the
 read-only `/usr/bin/memory_pressure -Q` query, constraining available memory with
-its system free percentage. macOS does not report a PSI stall percentage; this is
-explicitly `null`, not a fake zero. Missing, malformed, stale or future required
-observations refuse this opt-in heavy operation. Unsupported platforms refuse;
-ordinary unconfigured work is unaffected.
+its system free percentage. Windows uses local `Win32_OperatingSystem` CIM
+observations to bound available memory by both physical and virtual headroom.
+The Windows query runs the system Windows PowerShell executable without a profile
+or a visible window, uses its inbox modules, and has a five-second timeout. Windows
+and macOS report the unavailable PSI stall percentage as `null`. See Microsoft's
+[Win32_OperatingSystem properties](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-operatingsystem).
+Missing, malformed, stale or future required observations refuse this opt-in
+heavy operation. Unsupported platforms also refuse the opt-in operation.
+Ordinary unconfigured work is unaffected.
 
 The planner applies both the configured budget ceiling and current headroom after
 system reserve. It subtracts existing commitments, but subtracts from current
@@ -76,7 +81,11 @@ version does not lend a parent's active worker budget to grandchildren. Independ
 test fixtures must explicitly isolate their simulated device/domain; production
 callers cannot treat inheritance as unlimited extra capacity.
 
-A process identity includes PID and observed start time. The monitor periodically
+A process identity includes PID and observed start time. Windows obtains PID,
+parent PID, working-set bytes and UTC creation time from local `Win32_Process`
+CIM observations. Unavailable process fields remain unknown. An incomplete owned
+tree or an unidentifiable previously observed descendant retains the reservation.
+The query helper excludes itself from the observed tree. The monitor periodically
 observes the process tree and retains identities previously seen, so reparenting is
 not proof of termination. Release requires observed quiescence, no child leases,
 and no surviving previously observed descendants. Root exit, token age or a stale
@@ -128,6 +137,9 @@ nested reservations, uncertain release, and real Node worker concurrency with
 explicit synthetic platform telemetry in isolated subprocesses. Synthetic telemetry
 is not a claim of native macOS or Linux PSI availability. Real environment support
 must be reported separately; this development sandbox does not expose Linux PSI.
+Windows adapter fixtures run on every platform. Windows-only integration tests
+exercise native sampling, real worker concurrency, reservation release and ACL
+rejection in isolated temporary directories.
 
 ## Registered runtime locations and gate entry forms
 
@@ -137,6 +149,9 @@ checks that it names the registered runtime locks directory, then shares its
 canonical path between the heavy count, memory state and inherited references.
 Unregistered forwarding, linked overrides, mismatched targets and unsafe directory
 ownership or writable modes are refused.
+On Windows, the locks directory and an existing storage pointer must have a
+readable ACL owned by the current user, Local System or Administrators. Write,
+delete and permission-management grants to other identities cause refusal.
 
 The closed package-runner adapter accepts the project-pinned Corepack pnpm entry
 as well as bare pnpm, with optional silent run syntax. Existing package scripts

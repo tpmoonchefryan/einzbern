@@ -2,11 +2,12 @@ import { RUNTIME_CAPACITY } from "./runtime-capacity.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { link, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, rmdir, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { CONFIG_BACKUP_RESERVATION_FILE, CONFIG_BACKUP_RESERVED_AREAS, readConfigBackupReservation } from "./config-backup-reservation.mjs";
+import { createPrivateWindowsDirectory, hasPrivateWindowsPermissions, retireWindowsOutputSession, windowsJobState } from "./windows-system.mjs";
 
 let temporarySequence = 0;
 const outputSessionStorage = new AsyncLocalStorage();
@@ -1078,7 +1079,7 @@ function sameIdentity(left, right) {
 
 function inside(parent, candidate) {
   const relation = relative(parent, candidate);
-  return relation === "" || (!relation.startsWith("..") && !relation.startsWith(sep));
+  return relation === "" || (!relation.startsWith("..") && !isAbsolute(relation));
 }
 
 async function pathMetadata(path, reasonCode) {
@@ -1156,6 +1157,18 @@ async function assertOutputSessionBinding(session, repository) {
     }
   }
   const lock = await pathMetadata(session.lockPath, "OUTPUT_SESSION_LOST");
+  if (session.windows) {
+    if (lock.isSymbolicLink() || !lock.isDirectory() || !sameIdentity(lock, session.lockIdentity)) {
+      fail("OUTPUT_SESSION_LOST", session.lockPath);
+    }
+    const owner = await readBoundRegularFile(resolve(session.lockPath, outputLockMetadataName), {
+      reasonCode: "OUTPUT_SESSION_LOST",
+    });
+    if (!sameIdentity(owner.metadata, session.ownerIdentity) || !owner.content.equals(session.ownerBytes)) {
+      fail("OUTPUT_SESSION_LOST", session.lockPath);
+    }
+    return;
+  }
   assertOutputLockIdentity(lock, session.lockIdentity, "OUTPUT_SESSION_LOST", session.lockPath);
 }
 
@@ -1176,6 +1189,9 @@ export function activeOutputSessionLockPath() {
 }
 
 export async function bindOutputSessionProcessGroup(processGroup) {
+  if (process.platform === "win32") {
+    fail("OUTPUT_SESSION_PROCESS_GROUP_UNSUPPORTED", "Windows process groups require a native lifecycle controller");
+  }
   if (!Number.isSafeInteger(processGroup) || processGroup <= 0) {
     fail("OUTPUT_SESSION_PROCESS_GROUP_INVALID", String(processGroup));
   }
@@ -1197,6 +1213,82 @@ export async function bindOutputSessionProcessGroup(processGroup) {
   session.ownerIdentity = sealed.identity;
 }
 
+async function recoverWindowsOutputSession(lockPath) {
+  const ownerPath = resolve(lockPath, outputLockMetadataName);
+  const metadata = await lstat(lockPath);
+  if (!metadata.isDirectory() || metadata.isSymbolicLink() || !hasPrivateWindowsPermissions(lockPath)) fail("OUTPUT_SESSION_OWNER_INVALID", lockPath);
+  const owner = await readBoundRegularFile(ownerPath);
+  let record;
+  try { record = JSON.parse(owner.content); } catch { fail("OUTPUT_SESSION_OWNER_INVALID", ownerPath); }
+  let dead = false;
+  try { process.kill(record.pid, 0); } catch (error) { dead = error.code === "ESRCH"; }
+  if (!dead || !["missing", "empty"].includes(windowsJobState(record.jobName))) {
+    fail("OUTPUT_SESSION_RECOVERY_REQUIRED", `An existing Windows output session owns ${lockPath}`);
+  }
+  retireWindowsOutputSession(lockPath, owner.content, `${lockPath}.retired-${randomBytes(16).toString("hex")}`);
+}
+
+async function withWindowsOutputSession(repository, gitDirectory, gitFile, operation) {
+  const lockPath = resolve(gitDirectory, outputLockName);
+  const stagePath = `${lockPath}.stage-${randomBytes(16).toString("hex")}`;
+  const ownerBytes = Buffer.from(`${JSON.stringify({
+    schemaVersion: "einzbern.windows-output-session.v1", pid: process.pid, token: randomBytes(32).toString("hex"),
+    ...(windowsJobState(process.env.EINZBERN_WINDOWS_JOB) === "member" ? { jobName: process.env.EINZBERN_WINDOWS_JOB } : {}),
+  })}\n`);
+  if (!createPrivateWindowsDirectory(stagePath)) fail("OUTPUT_SESSION_OWNER_INVALID", stagePath);
+  const stageIdentity = await lstat(stagePath);
+  const stagedOwner = resolve(stagePath, outputLockMetadataName);
+  let published = false;
+  let ownerIdentity;
+  try {
+    const handle = await open(stagedOwner, "wx", 0o600);
+    try {
+        ownerIdentity = await handle.stat();
+      await handle.writeFile(ownerBytes);
+      await handle.sync();
+    } finally { await handle.close(); }
+    // Publish a complete ownership record atomically. A killed initializer
+    // cannot leave an ownerless fixed lock that blocks future work.
+    try { await rename(stagePath, lockPath); }
+    catch (error) {
+      if (!["EEXIST", "EPERM", "EACCES", "ENOTEMPTY"].includes(error.code)) throw error;
+      await recoverWindowsOutputSession(lockPath);
+      await rename(stagePath, lockPath);
+    }
+    published = true;
+    const lockIdentity = await pathMetadata(lockPath, "OUTPUT_SESSION_LOST");
+    if (!sameIdentity(stageIdentity, lockIdentity) || !hasPrivateWindowsPermissions(lockPath)) fail("OUTPUT_SESSION_OWNER_INVALID", lockPath);
+    const session = {
+      windows: true, repositoryReal: repository.realPath, repositoryIdentity: repository.metadata,
+      gitFile, lockPath, lockIdentity, ownerIdentity, ownerBytes,
+    };
+    try {
+      return await outputSessionStorage.run(session, async () => {
+        await requireOutputSession(repository.realPath);
+        return operation();
+      });
+    } finally {
+      await assertOutputSessionBinding(session, await resolveOutputRepository(repository.realPath));
+      if (!hasPrivateWindowsPermissions(lockPath) || (await readdir(lockPath)).join() !== outputLockMetadataName) fail("OUTPUT_SESSION_RELEASE_REPLACED", lockPath);
+      await rm(resolve(lockPath, outputLockMetadataName));
+      await rmdir(lockPath);
+    }
+  } finally {
+    const remainingStage = !published ? await lstat(stagePath).catch(error => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    }) : null;
+    if (remainingStage && sameIdentity(stageIdentity, remainingStage)) {
+      const remainingOwner = await lstat(stagedOwner).catch(error => {
+        if (error.code === "ENOENT") return null;
+        throw error;
+      });
+      if (ownerIdentity && remainingOwner && sameIdentity(ownerIdentity, remainingOwner)) await rm(stagedOwner);
+      await rmdir(stagePath);
+    }
+  }
+}
+
 export async function withExclusiveOutputSession(repositoryPath, operation) {
   if (typeof operation !== "function") {
     fail("OUTPUT_SESSION_OPERATION_REQUIRED", "An output session requires an operation callback");
@@ -1211,6 +1303,9 @@ export async function withExclusiveOutputSession(repositoryPath, operation) {
     return operation();
   }
   const { gitDirectory, gitFile } = await resolveOutputGitBinding(repository.realPath);
+  if (process.platform === "win32") {
+    return withWindowsOutputSession(repository, gitDirectory, gitFile, operation);
+  }
   const lockPath = resolve(gitDirectory, outputLockName);
   const recoveryClaim = resolve(gitDirectory, outputRecoveryClaimName);
   const acquisitionClaimPath = resolve(gitDirectory, outputAcquisitionClaimName);
@@ -1362,7 +1457,7 @@ export async function withExclusiveOutputSession(repositoryPath, operation) {
 // not own, read from a package manager's tree. pnpm's store is content-addressable and
 // hardlinks into node_modules by design, so `nlink === 1` there asserts a property of
 // someone else's storage layout rather than anything about our bytes. Every other guard
-// stays on -- symlink refusal, O_NOFOLLOW, and the dev/ino identity carried through open
+// stays on -- symlink refusal, O_NOFOLLOW where available, and the dev/ino identity carried through open
 // and read, which is what actually closes the TOCTOU window. The default is false and
 // must stay false: for a tracked source file, a second link IS the finding.
 export async function readBoundRegularFile(path, {
@@ -1382,7 +1477,7 @@ export async function readBoundRegularFile(path, {
   if (!allowHardlinks && before.nlink !== 1) {
     fail(hardlinkReason, `${lexicalPath} must have exactly one filesystem link`);
   }
-  if (typeof constants.O_NOFOLLOW !== "number") {
+  if (typeof constants.O_NOFOLLOW !== "number" && process.platform !== "win32") {
     fail("NOFOLLOW_UNAVAILABLE", "The pinned platform must expose O_NOFOLLOW");
   }
 
@@ -1400,6 +1495,12 @@ export async function readBoundRegularFile(path, {
     }
     if (!allowHardlinks && opened.nlink !== 1) {
       fail(hardlinkReason, `${lexicalPath} must have exactly one filesystem link`);
+    }
+    // Windows lacks O_NOFOLLOW. Bind the opened descriptor to both path observations
+    // before reading bytes, then revalidate that identity after the read below.
+    const beforeRead = await pathMetadata(lexicalPath, pathChangedReasonCode);
+    if (beforeRead.isSymbolicLink() || !beforeRead.isFile() || !sameIdentity(opened, beforeRead)) {
+      fail(pathChangedReasonCode, `${lexicalPath} changed before reading`);
     }
     if (afterOpen) {
       await afterOpen({ path: lexicalPath, descriptor: handle.fd });

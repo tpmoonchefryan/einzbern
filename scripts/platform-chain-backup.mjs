@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { spawn } from "node:child_process";
+import { commandInvocation } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -42,11 +43,12 @@ async function fileSha256(path) {
 
 function spawnCapture(command, args, input = null, options = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, {
+    const invocation = commandInvocation(command, args, {
       cwd: options.cwd,
       env: options.env,
-      stdio: ["pipe", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"], windowsHide: true,
     });
+    const child = spawn(invocation.command, invocation.args, invocation.options);
     const stdout = [];
     const stderr = [];
     child.stdout.on("data", (chunk) => stdout.push(Buffer.from(chunk)));

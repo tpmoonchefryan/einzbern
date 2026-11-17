@@ -138,7 +138,7 @@ test('R19 offline isolation: source remotes/config/hooks/inherited Git env do no
   await refusal(() => verifyDotExtensionSource(f.source, f.binding), 'DOT_SOURCE_BINDING_UNSUPPORTED'); await rm(promisor);
   const alternates = join(f.repo, '.git', 'objects', 'info', 'alternates'); await writeFile(alternates, `${f.base}\n`);
   await refusal(() => verifyDotExtensionSource(f.source, f.binding), 'DOT_SOURCE_BINDING_UNSUPPORTED'); await rm(alternates);
-  const linked = join(f.base, 'linked'); await symlink(f.repo, linked, 'dir');
+  const linked = join(f.base, 'linked'); await symlink(f.repo, linked, process.platform === "win32" ? "junction" : "dir");
   await refusal(() => verifyDotExtensionSource(f.source, { ...f.binding, repositories: [{ key: 'fixture-repository', root: linked }] }), 'DOT_SOURCE_BINDING_UNSUPPORTED');
   await assert.rejects(access(marker));
 });

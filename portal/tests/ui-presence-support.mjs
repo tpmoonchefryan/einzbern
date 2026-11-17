@@ -90,7 +90,7 @@ async function scratch(prefix) {
   // under HOME, so each fixture carries its own scratch HOME, removed with the fixture.
   const home = join(base, "home");
   await mkdir(home);
-  const deviceEnv = { EINZBERN_HOME: join(base, "device", "einzbern"), HOME: home };
+  const deviceEnv = { EINZBERN_HOME: join(base, "device", "einzbern"), HOME: home, USERPROFILE: home };
   const proseRoot = join(base, "project");
   const workspace = join(proseRoot, ".ether");
   // A registered key and an unregistered one in a registered namespace (the backup namespace
@@ -232,7 +232,7 @@ async function stopPortal(child, closed) {
 async function startPortal(fixture, env = {}) {
   assert.ok(fixture.home, "every portal child needs the fixture scratch HOME (TCRN-CROSS-INC-386)");
   const child = spawn(process.execPath, [join(portalRoot, "portal.mjs"), "--library", fixture.workspace, "--port", "0"], {
-    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: "agent:test-portal", ...fixture.deviceEnv, ...env, HOME: fixture.home },
+    env: { ...process.env, TCRN_WORKFLOW_CLI: CLI, TCRN_PORTAL_ACTOR: "agent:test-portal", ...fixture.deviceEnv, ...env, HOME: fixture.home, USERPROFILE: fixture.home },
     stdio: ["ignore", "pipe", "pipe"],
   });
   const closed = new Promise((resolve) => child.once("close", resolve));
@@ -526,7 +526,7 @@ function topbarFindings(document) {
 // arrived rather than with an empty-string diff. Callers wait for the *settle
 // signal* and assert content separately, so a genuine regression still surfaces as
 // an assertion difference rather than as a timeout.
-async function waitFor(predicate, label, timeoutMs = 15_000) {
+async function waitFor(predicate, label, timeoutMs = process.platform === "win32" ? 45_000 : 15_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = predicate();
@@ -576,27 +576,22 @@ async function preparePage(env = {}) {
   try {
     await seed(fixture);
     page = await loadExecutedDom(fixture, env);
+    page.workspace = fixture.workspace;
+    page.deviceEnv = fixture.deviceEnv;
+    page.fixture = fixture;
+    page.cleanup = async () => {
+      try { await page.waitForSettled(); }
+      finally { await removePage(page, fixture); }
+    };
+    page.document.querySelector('[data-page-target="settings"]')?.click();
+    page.document.querySelector('[data-setting-group="execution"]')?.click();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    return page;
   } catch (error) {
-    await rm(fixture.base, { recursive: true, force: true });
+    if (page) await removePage(page, fixture);
+    else await rm(fixture.base, { recursive: true, force: true });
     throw error;
   }
-  page.workspace = fixture.workspace;
-  page.deviceEnv = fixture.deviceEnv;
-  page.fixture = fixture;
-  page.cleanup = async () => {
-    await page.waitForSettled();
-    const exited = new Promise((resolveExit) => {
-      if (page.child.exitCode !== null || page.child.signalCode !== null) resolveExit();
-      else page.child.once("exit", resolveExit);
-    });
-    if (page.child.exitCode === null && page.child.signalCode === null) page.child.kill();
-    await exited;
-    await rm(fixture.base, { recursive: true, force: true });
-  };
-  page.document.querySelector('[data-page-target="settings"]')?.click();
-  page.document.querySelector('[data-setting-group="execution"]')?.click();
-  await new Promise((resolve) => setTimeout(resolve, 80));
-  return page;
 }
 
 function assertDomContract(document) {
@@ -742,12 +737,15 @@ async function openWorkEditor(page) {
 // fail inside the page after the case has ended.
 async function closePage(page, fixture) {
   try { await page.waitForSettled(); } catch { /* the case's own assertion already failed */ }
+  await removePage(page, fixture);
+}
+
+async function removePage(page, fixture) {
   const exited = new Promise((resolveExit) => {
     if (page.child.exitCode !== null || page.child.signalCode !== null) resolveExit();
     else page.child.once("exit", resolveExit);
   });
-  if (page.child.exitCode === null && page.child.signalCode === null) page.child.kill();
-  await exited;
+  await stopPortal(page.child, exited);
   await rm(fixture.base, { recursive: true, force: true });
 }
 

@@ -4,7 +4,7 @@
 // a later session selected nor which model that session actually used. Standalone hooks follow
 // Kiro's versioned JSON contract and are kept separate from Claude/Codex's grouped hook files.
 
-import { spawnSync } from "node:child_process";
+import { spawnCommandSync as spawnSync } from "../../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { lstat, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -60,7 +60,7 @@ export function probeKiroHost(input: {
   const observedAt = input.now ?? new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
   let cli: KiroHostIdentity["cli"] = { status: "not-detected", executable: null, version: null, versionEvidence: null };
   try {
-    const result = spawnSync(executable, ["--version"], { encoding: "utf8", timeout: 5000, maxBuffer: 16_384, env, shell: false, windowsHide: true });
+    const result = spawnSync(executable, ["--version"], { encoding: "utf8", timeout: process.platform === "win32" ? 15_000 : 5_000, maxBuffer: 16_384, env, shell: false, windowsHide: true });
     if ((result.error as NodeJS.ErrnoException | null)?.code === "ENOENT") cli = { status: "not-detected", executable: null, version: null, versionEvidence: null };
     else if (result.error || result.status !== 0) cli = { status: "unavailable", executable, version: null, versionEvidence: "kiro-cli --version did not return successfully" };
     else {
@@ -74,12 +74,28 @@ export function probeKiroHost(input: {
 
   const candidates = input.ideBundlePath !== undefined
     ? [resolve(input.ideBundlePath)]
-    : process.platform === "darwin" ? ["/Applications/Kiro.app", join(home, "Applications", "Kiro.app")] : [];
+    : process.platform === "darwin" ? ["/Applications/Kiro.app", join(home, "Applications", "Kiro.app")]
+      : process.platform === "win32" ? [
+        join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "Kiro"),
+        ...[env.ProgramFiles, env["ProgramFiles(x86)"]].filter((path): path is string => Boolean(path)).map(path => join(path, "Kiro")),
+      ] : [];
   let ide: KiroHostIdentity["ide"] = { status: "not-detected", bundlePath: null, bundleId: null, version: null };
   for (const bundlePath of candidates) {
     try {
       const stats = awaitlessLstat(bundlePath);
       if (stats !== "directory") continue;
+      if (process.platform === "win32" && !bundlePath.endsWith(".app")) {
+        const executablePath = join(bundlePath, "Kiro.exe");
+        if (!fsModule.lstatSync(executablePath).isFile() || fsModule.lstatSync(executablePath).isSymbolicLink()) continue;
+        const product: unknown = JSON.parse(awaitlessRead(join(bundlePath, "resources", "app", "product.json")) ?? "null");
+        const manifest: unknown = JSON.parse(awaitlessRead(join(bundlePath, "resources", "app", "package.json")) ?? "null");
+        if (isObject(product) && product.applicationName === "kiro" && isObject(manifest) && typeof manifest.version === "string") {
+          ide = { status: "available", bundlePath, bundleId: typeof product.win32AppUserModelId === "string" ? product.win32AppUserModelId : "kiro", version: manifest.version };
+          break;
+        }
+        ide = { status: "unknown", bundlePath, bundleId: null, version: null };
+        continue;
+      }
       const infoPath = join(bundlePath, "Contents", "Info.plist");
       const plist = awaitlessRead(infoPath);
       if (plist === null) { ide = { status: "unknown", bundlePath, bundleId: null, version: null }; break; }

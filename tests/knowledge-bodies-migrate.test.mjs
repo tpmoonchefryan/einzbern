@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 //
 // TCRN-CROSS-SUB-425 R18 (follow-up to TCRN-CROSS-STORY-341; TCRN-CROSS-STORY-514 R4): the
 // metadata/body layout an engine before event streams left in a library's crest, and the one verb
@@ -177,14 +178,14 @@ async function olderEngineLibrary(context, name) {
   const bodies = new Map();
   for (const record of all.records) {
     bodies.set(record.id, streamBodies.get(record.bodySha256));
-    await writeFile(join(store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(store, "bodies", `${record.id}.body`), streamBodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(store, "bodies"), `${record.id}.body`), streamBodies.get(record.bodySha256));
   }
   const storeJson = join(store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
   await rm(join(store, "events"), { recursive: true });
   const stored = async (id, change) => {
-    const path = join(store, "metadata", `${id}.json`);
+    const path = storeRecordPath(join(store, "metadata"), `${id}.json`);
     await writeFile(path, canonicalJson(change(JSON.parse(await readFile(path, "utf8")))));
   };
   await stored(ids.heronNew, (metadata) => ({ ...metadata, supersedes: ids.heron }));

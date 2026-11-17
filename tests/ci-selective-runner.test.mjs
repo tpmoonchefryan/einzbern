@@ -44,6 +44,10 @@ for (const coverage of ["full", "selective"]) {
     assert.deepEqual(observed.argv, ["--test", ...plan.coreTests]);
     assert.equal(observed.progress.status, "completed");
     assert.deepEqual(observed.progress.errors, []);
+    if (process.platform === "win32") {
+      assert.equal(observed.progress.diagnostics.fileEvidence.status, "observed", JSON.stringify(observed.progress.diagnostics.fileEvidence));
+      assert.equal(observed.progress.diagnostics.fileEvidence.finalSummary.success, true);
+    }
     const markers = (await readFile(fixture.env.CI_COMPONENT_OBSERVED, "utf8")).trim().split("\n").sort();
     assert.deepEqual(markers, coverage === "full" ? ["a", "b"] : ["a"]);
     assert.deepEqual(plan.sourceCoreTests, ["tests/a.test.mjs", "tests/b.test.mjs"]);
@@ -61,8 +65,13 @@ for (const coverage of ["full", "selective"]) {
 test("canonical and aliased real task entrypoints both execute unknown-command refusal", async (t) => {
   const fixture = await createCiComponentFixture(t, { production: true });
   const alias = join(fixture.directory, "alias/scripts");
-  await mkdir(alias, { recursive: true });
-  await symlink(join(fixture.repo, "scripts/task.mjs"), join(alias, "task.mjs"));
+  if (process.platform === "win32") {
+    await mkdir(join(fixture.directory, "alias"));
+    await symlink(join(fixture.repo, "scripts"), alias, "junction");
+  } else {
+    await mkdir(alias, { recursive: true });
+    await symlink(join(fixture.repo, "scripts/task.mjs"), join(alias, "task.mjs"));
+  }
   const { spawnSync } = await import("node:child_process");
   for (const entry of [join(fixture.repo, "scripts/task.mjs"), join(alias, "task.mjs")]) {
     const run = spawnSync(process.execPath, [entry, "unknown-component-command"], { cwd: fixture.repo, env: fixture.env, encoding: "utf8" });

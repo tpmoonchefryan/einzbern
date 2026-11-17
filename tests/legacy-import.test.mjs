@@ -1,4 +1,6 @@
+import { pathToFileURL } from "node:url";
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-STORY-468 R6, AC4 / STORY-466 AC3: library-import-legacy turns the frozen old-layout
 // workspace into a library whose first stream is its chain, byte for byte: the same event count
 // and head, each segment's bytes unchanged. A later event continues the stream in the new
@@ -158,8 +160,8 @@ async function restoreWithKnowledge(base, { segmented }) {
   await mkdir(join(crest, "metadata"));
   await mkdir(join(crest, "bodies"));
   for (const record of [marked(kestrelRecord), ...all.records]) {
-    await writeFile(join(crest, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(crest, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(crest, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(crest, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(crest, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -259,7 +261,7 @@ test("468-AC4, SUB-421: a dry run under the write tripwire reports the chain, th
   const { root } = await restoreWithKnowledge(base, { segmented: true });
   const before = await treeDigest(base);
   // The device directory lies under the tripwire too: a dry run needs no device.
-  const run = spawnSync(process.execPath, ["--import", tripwirePath, cliPath, "library-import-legacy", "--legacy", root, "--dry-run", "true", "--at", AT], {
+  const run = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, cliPath, "library-import-legacy", "--legacy", root, "--dry-run", "true", "--at", AT], {
     encoding: "utf8",
     env: { ...process.env, EINZBERN_TRIPWIRE_ROOT: base, EINZBERN_HOME: join(base, "unused-device") },
   });
@@ -393,13 +395,13 @@ test("SUB-421 R20: the explicit mapping omission leaves TMS-shaped corrupt bytes
     });
     await assert.rejects(stat(target), { code: "ENOENT" });
   }
-  const dry = spawnSync(process.execPath, ["--import", tripwirePath, cliPath, "library-import-legacy", "--legacy", root, "--mapping", mappingFile, "--dry-run", "true", "--at", AT], {
+  const dry = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, cliPath, "library-import-legacy", "--legacy", root, "--mapping", mappingFile, "--dry-run", "true", "--at", AT], {
     encoding: "utf8", env: { ...process.env, EINZBERN_TRIPWIRE_ROOT: [base, deviceHome].join(delimiter) },
   });
   assert.equal(dry.status, 0, dry.stderr);
   const dryReport = JSON.parse(dry.stdout);
   await assert.rejects(stat(target), { code: "ENOENT" });
-  const run = spawnSync(process.execPath, ["--import", tripwirePath, cliPath, "library-import-legacy", "--legacy", root, "--mapping", mappingFile, "--at", AT], {
+  const run = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, cliPath, "library-import-legacy", "--legacy", root, "--mapping", mappingFile, "--at", AT], {
     encoding: "utf8", env: { ...process.env, EINZBERN_TRIPWIRE_ROOT: [root, userCrest].join(delimiter) },
   });
   assert.equal(run.status, 0, run.stderr);

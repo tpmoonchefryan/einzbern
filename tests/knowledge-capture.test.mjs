@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-STORY-365 — capture and write-time conflict scoring.
 //
 // The Stop-hook write and its lesson extraction are retired with the capture hook
@@ -53,8 +54,8 @@ async function asOlderEngineCrest(workspace) {
   await mkdir(join(store, "metadata"));
   await mkdir(join(store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -220,7 +221,7 @@ test("STORY-365 the extension slot stays a closed roster of two knowledge-id key
     // A metadata file to forge is the metadata/body layout's, which an engine before event streams
     // wrote (TCRN-CROSS-SUB-414): the card is laid down that way first.
     await asOlderEngineCrest(fixture.workspace);
-    const path = join(fixture.workspace, DIRECTORY.knowledge, "metadata", `${first.id}.json`);
+    const path = storeRecordPath(join(fixture.workspace, DIRECTORY.knowledge, "metadata"), `${first.id}.json`);
     const stored = JSON.parse(await readFile(path, "utf8"));
     for (const forged of [{ unknownKey: "x" }, { supersededBy: "not-an-id" }, { supersededBy: 1 }, { supersededBy: "knowledge:" + "ａ".repeat(24) }, { coexistsWith: "knowledge:" + "a".repeat(24) }, { coexistsWith: ["knowledge:" + "a".repeat(24), "knowledge:" + "a".repeat(24)] }, { coexistsWith: [] }, { coexistsWith: ["knowledge:000000000000000000000002", "knowledge:000000000000000000000001"] }]) {
       await write(path, canonicalJson({ ...stored, extensions: forged }));

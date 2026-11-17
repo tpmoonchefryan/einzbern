@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-INC-256 — migrate existing knowledge policies through one batch.
 
 import "./helpers/device-home.mjs";
@@ -40,8 +41,8 @@ async function asOlderEngineCrest(workspace) {
   await mkdir(join(store, "metadata"));
   await mkdir(join(store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -168,10 +169,10 @@ test("INC-256 policy migration also updates retired metadata without requiring a
     const created = await createKnowledgeUnit(fx.workspace, card(fx, "CARD-RETIRED", "guide", 0));
     await asOlderEngineCrest(fx.workspace);
     const store = join(fx.workspace, DIRECTORY.knowledge);
-    const metadataPath = join(store, "metadata", `${created.id}.json`);
+    const metadataPath = storeRecordPath(join(store, "metadata"), `${created.id}.json`);
     const metadata = JSON.parse(await readFile(metadataPath, "utf8"));
     await writeFile(metadataPath, canonicalJson({ ...metadata, lifecycle: "retired", revision: created.revision + 1, updatedAt: instant(7) }));
-    await rm(join(store, "bodies", `${created.id}.body`));
+    await rm(storeRecordPath(join(store, "bodies"), `${created.id}.body`));
     const result = await applyKnowledgeBatch(fx.workspace, policyBatch([{
       verb: "knowledge-policy", id: created.id, expectedRevision: 2,
       stalenessPolicy: { maximumAgeDays: null, unknownDisposition: "fail-closed" },

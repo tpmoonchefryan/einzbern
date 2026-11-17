@@ -31,7 +31,8 @@ import { RUNTIME_CAPACITY } from "./lib/runtime-capacity.mjs";
 import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { queryWindows, windowsJobProcesses, windowsJobState } from "./lib/windows-system.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const {
@@ -41,7 +42,7 @@ const {
   parseProcessTable,
   parseRegistrationLine,
   parseRegistry,
-} = await import(`${repositoryRoot}/dist/build/packages/core/src/background-resource.js`);
+} = await import(pathToFileURL(`${repositoryRoot}/dist/build/packages/core/src/background-resource.js`).href);
 
 const REGISTRY_SUBPATH = "spawn-registry/registrations.jsonl";
 
@@ -120,7 +121,33 @@ function parseRegistryLenient(text) {
 // Read the live process table exactly as the reaper does: hard-pathed ps, scrubbed
 // PATH, headerless numeric columns plus the free-form command. Any stderr or a
 // non-zero status fails closed rather than detecting against a partial table.
-function readProcessTable() {
+export function readProcessTable(registryText = "") {
+  if (process.platform === "win32") {
+    const registrations = parseRegistry(registryText);
+    const members = new Map();
+    const registeredGroups = new Set(registrations.map(row => row.pgid));
+    let unregisteredGroup = 1;
+    while (registeredGroups.has(unregisteredGroup)) unregisteredGroup += 1;
+    for (const registration of registrations) {
+      if (!registration.windowsJobName) throw new SpawnGuardError("SPAWN_GUARD_WINDOWS_JOB_REQUIRED");
+      for (const pid of windowsJobProcesses(registration.windowsJobName).Pids) members.set(pid, registration.pgid);
+    }
+    const rows = queryWindows(`
+$cpu = @{};
+Get-CimInstance Win32_PerfFormattedData_PerfProc_Process | ForEach-Object { $cpu[[int]$_.IDProcess] = [string]$_.PercentProcessorTime };
+$rows = @(Get-CimInstance Win32_Process | Where-Object ProcessId -gt 0 | ForEach-Object {
+  [pscustomobject]@{ pid = [int]$_.ProcessId; ppid = [int]$_.ParentProcessId; cpu = $cpu[[int]$_.ProcessId]; command = $(if ($_.CommandLine) { $_.CommandLine } else { $_.Name }) }
+});
+ConvertTo-Json -Compress -InputObject $rows`, 15_000);
+    for (const pid of members.keys()) {
+      if (!rows.some(row => row.pid === pid)) throw new SpawnGuardError("SPAWN_GUARD_PROCESS_LIST_CHANGED");
+    }
+    return rows.map(row => {
+      // A reused PID outside the job must never inherit the old registration.
+      const group = members.get(row.pid) ?? (registeredGroups.has(row.pid) ? unregisteredGroup : row.pid);
+      return `${row.pid} ${group} ${row.ppid} ${row.cpu ?? "unknown"} ${row.command.replace(/[\r\n]/gu, " ")}`;
+    }).join("\n");
+  }
   const listed = spawnSync("/bin/ps", ["-axo", "pid=,pgid=,ppid=,%cpu=,command="], {
     encoding: "utf8",
     maxBuffer: RUNTIME_CAPACITY.bufferBytes,
@@ -209,11 +236,17 @@ export function verifyOwnedGroupTerminal(registryText, tableText, pgid, purpose)
 
 async function commandRegister(flags) {
   if (!flags.pgid || !flags.pattern) usage("register needs --pgid and --pattern");
+  const pgid = assertPgid(flags.pgid);
+  const windowsJobName = flags.job ?? process.env.EINZBERN_WINDOWS_JOB;
+  if (process.platform === "win32" && windowsJobState(windowsJobName, pgid) !== "member") {
+    throw new SpawnGuardError("SPAWN_GUARD_WINDOWS_JOB_REQUIRED");
+  }
   const line = await appendRegistration(registryPath(flags), {
-    pgid: assertPgid(flags.pgid),
+    pgid,
     pattern: flags.pattern,
     purpose: flags.purpose ?? "",
     spawnedAt: nowFlag(flags),
+    ...(process.platform === "win32" ? { windowsJobName } : {}),
   });
   process.stdout.write(line);
 }
@@ -222,7 +255,8 @@ async function commandDeregister(flags) {
   const pgid = assertPgid(flags.pgid);
   const path = registryPath(flags);
   if (flags.purpose !== undefined) {
-    const terminal = verifyOwnedGroupTerminal(await readRegistryText(path), readProcessTable(), pgid, flags.purpose);
+    const registryText = await readRegistryText(path);
+    const terminal = verifyOwnedGroupTerminal(registryText, readProcessTable(registryText), pgid, flags.purpose);
     if (!terminal.ok) throw new SpawnGuardError(terminal.reasonCode);
     await removeRegistration(path, pgid, flags.purpose);
   } else {
@@ -239,7 +273,7 @@ async function commandList(flags) {
 
 async function commandDetect(flags) {
   const registryText = await readRegistryText(registryPath(flags));
-  const tableText = readProcessTable();
+  const tableText = readProcessTable(registryText);
   const report = flags.purpose === undefined
     ? detectFromTable(registryText, tableText, nowFlag(flags))
     : detectOwnedFromTable(registryText, tableText, nowFlag(flags), flags.purpose);

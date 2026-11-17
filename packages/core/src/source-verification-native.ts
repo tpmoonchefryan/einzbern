@@ -6,7 +6,7 @@ import { constants, closeSync, fstatSync, lstatSync, openSync } from "node:fs";
 import type { BigIntStats } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath } from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
-import { isAbsolute, join, relative } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import type { LibraryRead, StreamManifest, StreamSegment } from "./akasha.js";
@@ -152,7 +152,7 @@ function digest(bytes: Uint8Array): string {
 }
 function inside(parent: string, child: string): boolean {
   const path = relative(parent, child);
-  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith("../"));
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
 }
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -261,7 +261,7 @@ function contentProof(file: OpenSegment, identity: DarwinIdentity | LocalFileIde
     const held = fstatSync(fd, { bigint: true });
     if (!held.isFile() || held.nlink !== 1n || held.ino.toString() !== identity.fileId || Number(held.dev) !== identity.device) return null;
     const content = observeAuthorityWork("segmentHash", () => fileContentDigest(fd));
-    observeEventRead(content.bytes, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
+    observeEventRead(content.bytes, file.binding.streamId, file.binding.archive === "" ? "live" : "archive", "content-proof");
     const named = lstatSync(file.path, { bigint: true });
     if (content.bytes !== file.segment.bytes || content.sha256 !== file.segment.sha256 || !named.isFile() || named.nlink !== 1n || named.ino !== held.ino || named.dev !== held.dev) return null;
     return { ...identity, sha256: content.sha256 };
@@ -285,11 +285,11 @@ async function contentProofAsync(file: OpenSegment, identity: DarwinIdentity | L
       if (bytesRead === 0) break;
       offset += bytesRead;
     }
+    observeEventRead(offset, file.binding.streamId, file.binding.archive === "" ? "live" : "archive", "content-proof");
     if (offset !== expectedBytes) return null;
     // The buffer is owned by this read. Hash it directly rather than copying
     // every segment again into a WebCrypto job on the same I/O worker pool.
     const sha256 = createHash("sha256").update(content).digest("hex");
-    observeEventRead(offset, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
     const named = await lstat(file.path, { bigint: true });
     if (sha256 !== file.segment.sha256 || !named.isFile() || named.nlink !== 1n || named.ino !== held.ino || named.dev !== held.dev) return null;
     return { ...identity, sha256 };

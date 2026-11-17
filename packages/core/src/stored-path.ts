@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 import { isAbsolute, relative, resolve, sep } from "node:path";
 
-/** Persistent device paths are relative to the file's directory; APIs use resolved paths. */
+/** Use relative device paths when both locations have a common filesystem root. */
 export function storePath(base: string, path: string): string {
   const stored = relative(resolve(base), resolve(path));
-  if (isAbsolute(stored)) throw new Error("PORTABLE_PATH_DIFFERENT_VOLUME");
+  // Windows cannot express a relative path between volumes or UNC shares.
+  // loadPath already accepts absolute device-local values for this case.
+  if (isAbsolute(stored)) return resolve(path).split(sep).join("/");
   return stored.split(sep).join("/") || ".";
 }
 

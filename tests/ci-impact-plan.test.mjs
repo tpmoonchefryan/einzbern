@@ -202,7 +202,7 @@ test("document reader audit includes staged additions and immutable baseline rea
 test("tracked Python document readers and their Node consumers cannot be marked N/A", async (t) => {
   const fixture = await createCiComponentFixture(t, { files: {
     "scripts/read-doc.py": 'from pathlib import Path\nassert Path("README.md").read_text().strip() == "old"\n',
-    "tests/b.test.mjs": 'import test from "node:test"; import { execFileSync } from "node:child_process"; test("Python document contract", () => execFileSync("python3", ["scripts/read-doc.py"]));\n',
+    "tests/b.test.mjs": 'import test from "node:test"; import { execFileSync } from "node:child_process"; test("Python document contract", () => execFileSync(process.platform === "win32" ? "python" : "python3", ["scripts/read-doc.py"]));\n',
   } });
   const input = sourceInput(fixture.repo, fixture.env);
   assert.deepEqual(input.records, [{ status: "M", paths: ["README.md"] }]);
@@ -259,7 +259,7 @@ test("actual input tokens exclude comments, output paths and arbitrary basename 
     ["scripts/log.mjs", "export const value = 1;\n"],
     ["tests/catalog.test.mjs", 'import { readFileSync } from "node:fs"; readFileSync("strip-catalog.mjs");\n'],
     ["scripts/real-doc.py", 'from pathlib import Path\nPath("README.md").read_text()\n'],
-    ["tests/actual.test.mjs", 'import { execFileSync } from "node:child_process"; execFileSync("python3", ["scripts/real-doc.py"]);\n'],
+    ["tests/actual.test.mjs", 'import { execFileSync } from "node:child_process"; execFileSync(process.platform === "win32" ? "python" : "python3", ["scripts/real-doc.py"]);\n'],
   ]);
   const graph = sourceDependencyGraph(texts);
   assert.deepEqual(documentReaderClosure(texts, ["README.md"], graph), ["scripts/real-doc.py", "tests/actual.test.mjs"]);
@@ -965,7 +965,7 @@ test("known category code changes retain narrow selection when the reviewed inpu
   const oldHelper = 'from pathlib import Path\ncategory_value = "old"\nassert Path("README.md").read_text().strip() == "new"\n';
   const fixture = await createCiComponentFixture(t, { rules: { privacyPaths: [reader], privacyTests: ["tests/b.test.mjs"] }, files: {
     [reader]: oldHelper,
-    "tests/b.test.mjs": 'import test from "node:test"; import { execFileSync } from "node:child_process"; test("known category document read", () => execFileSync("python3", ["scripts/privacy-reader.py"]));\n',
+    "tests/b.test.mjs": 'import test from "node:test"; import { execFileSync } from "node:child_process"; test("known category document read", () => execFileSync(process.platform === "win32" ? "python" : "python3", ["scripts/privacy-reader.py"]));\n',
   } });
   const frozenRules = readFileSync(join(fixture.repo, "scripts/ci/impact-rules.json"));
   fixture.before = fixture.head;
@@ -1015,7 +1015,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor privacy-boundary project-chain-model
     push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate release-tooling-audit-boundaries release-trust
     render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
-    story-346-pg-disabled story-378-incident-replay story-rule-conservation`);
+    story-346-pg-disabled story-378-incident-replay story-rule-conservation windows-process`);
   const ordinaryWiki = ["Atelier", "CLI-Reference", "Ether-Layout", "FAQ", "Gates", "Glossary", "Home", "Install-Wizard", "Managed-Sections-and-Command-Spell", "Migrating-from-TCRN-Workflow", "Multi-Device-and-Cloud", "Variables", "_Sidebar"].map((name) => `docs/wiki/${name}.md`);
   assert.deepEqual(Object.keys(rules.docs).sort(), ["README.md", ...ordinaryWiki].sort());
   const expectedDocuments = Object.fromEntries(ordinaryWiki.map((document) => [document, sorted([...integrity, ...names("privacy-boundary push-wiki wiki-pages")])]));
@@ -1029,7 +1029,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
     operational-audit-boundaries otel-privacy-guard output-session-lifecycle p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor
     privacy-boundary privacy-git-metadata privacy-normalization project-chain-model push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate
     release-tooling-audit-boundaries release-trust render-helper-docs retrieval-delivery-eval review-evidence runtime-input-contract skill-install-bootstrap skill-render skill-render-cli
-    staged-privacy-origin-diagnostics staged-privacy-reviewed-paths storage-defensive-maintenance story-346-pg-disabled story-378-incident-replay story-rule-conservation token-attribution`);
+    staged-privacy-origin-diagnostics staged-privacy-reviewed-paths storage-defensive-maintenance story-346-pg-disabled story-378-incident-replay story-rule-conservation token-attribution windows-process`);
   const pr33 = JSON.parse(readFileSync(new URL("./fixtures/ci-impact/pr-33.json", import.meta.url)));
   assert.deepEqual(pr33.records.flatMap((record) => record.paths), ["scripts/lib/privacy.mjs", "tests/privacy-git-metadata.test.mjs"]);
   const cases = [
@@ -1110,9 +1110,9 @@ function categoryFixtureOptions(category) {
       files: {
         [inputPath]: oldInput,
         [reader]: `from pathlib import Path\nassert Path(${JSON.stringify(inputPath)}).read_text() == ${JSON.stringify(oldInput)}\n`,
-        "tests/b.test.mjs": `import test from "node:test"; import { execFileSync } from "node:child_process"; test("${category} Python consumer", () => execFileSync("python3", [${JSON.stringify(reader)}]));\n`,
+        "tests/b.test.mjs": `import test from "node:test"; import { execFileSync } from "node:child_process"; test("${category} Python consumer", () => execFileSync(process.platform === "win32" ? "python" : "python3", [${JSON.stringify(reader)}]));\n`,
         "tests/c.test.mjs": 'import test from "node:test"; import assert from "node:assert/strict"; test("unrelated sentinel", () => assert.fail("unselected sentinel ran"));\n',
-        "portal/tests/nested/all.test.mjs": `import test from "node:test"; import { execFileSync } from "node:child_process"; test("recursive Portal consumer", () => execFileSync("python3", [${JSON.stringify(reader)}]));\n`,
+        "portal/tests/nested/all.test.mjs": `import test from "node:test"; import { execFileSync } from "node:child_process"; test("recursive Portal consumer", () => execFileSync(process.platform === "win32" ? "python" : "python3", [${JSON.stringify(reader)}]));\n`,
       },
     },
   };

@@ -1,4 +1,6 @@
+import { pathToFileURL } from "node:url";
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-STORY-489 R1, R2, R4, AC1, AC4 (TCRN-CROSS-SUB-365; MIN-235 D17, MIN-238 D4): setup
 // --mode migrate --yes true runs the plan. Two old partitions in a temporary container, one the
 // frozen old-layout fixture and one the same chain under another workspace id (as every real
@@ -91,7 +93,7 @@ async function treeDigest(root) {
     for (const entry of (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name))) {
       const path = join(directory, entry.name);
       const metadata = await stat(path);
-      rows.push(`${relative(root, path)}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : "directory"}`);
+      rows.push(`${relative(root, path).replaceAll("\\", "/")}|${metadata.size}|${metadata.mtimeMs}|${entry.isFile() ? sha256(await readFile(path)) : "directory"}`);
       if (entry.isDirectory()) await walk(path);
     }
   };
@@ -112,6 +114,7 @@ async function machine(context) {
   const deviceHome = join(base, "device");
   const legacyDevice = join(home, LEGACY_DEVICE_DIRECTORY);
   await mkdir(legacyDevice, { recursive: true });
+  if (process.platform === "win32") await mkdir(join(home, "AppData", "Roaming"), { recursive: true });
   await mkdir(container);
   const version = join(deviceHome, "engine", FRAMEWORK_VERSION);
   const files = [ENGINE_FILES.entry, ...FRESH_ENGINE_TREE.launchers.map((launcher) => launcher.from), `${FRESH_ENGINE_TREE.skill}/${FRESH_ENGINE_TREE.skillEntry}`];
@@ -239,8 +242,8 @@ async function oldCardPartition(m, name, settings = []) {
   const storedMarker = JSON.parse(await readFile(join(donor, DIRECTORY.knowledge, "store.json"), "utf8"));
   await writeFile(join(knowledge, "store.json"), canonicalJson({ ...storedMarker, version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
   for (const record of listed.records) {
-    await writeFile(join(knowledge, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(knowledge, "bodies", `${record.id}.body`), bodies.get(record.id));
+    await writeFile(storeRecordPath(join(knowledge, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(knowledge, "bodies"), `${record.id}.body`), bodies.get(record.id));
   }
   await writeFile(join(knowledge, "views", "index.json"), await readFile(join(cachePath(expected.workspaceId), "crest-views", "index.json")));
   const byKey = new Map(listed.records.map((record) => [record.externalKey, record]));
@@ -263,7 +266,7 @@ async function writeLegacySettings(m, values) {
 
 /** One CLI run through the shipped entry as this device, optionally under the write tripwire. */
 function run(m, args, { tripwire = [] } = {}) {
-  return spawnSync(process.execPath, [...(tripwire.length === 0 ? [] : ["--import", tripwirePath]), cliPath, ...args], {
+  return spawnSync(process.execPath, [...(tripwire.length === 0 ? [] : ["--import", pathToFileURL(tripwirePath).href]), cliPath, ...args], {
     encoding: "utf8",
     env: {
       ...process.env,

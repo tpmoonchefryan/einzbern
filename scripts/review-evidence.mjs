@@ -9,8 +9,9 @@
 // caller-supplied passed flag or test count as evidence.
 
 import { spawnSync } from "node:child_process";
+import { spawnCommandSync } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { createHash } from "node:crypto";
-import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, writeFileSync, rmSync, statSync } from "node:fs";
+import { closeSync, existsSync, mkdtempSync, openSync, readFileSync, readSync, writeFileSync, rmSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
@@ -73,18 +74,25 @@ function outputTail(value, maximum = REVIEW_OUTPUT_BYTES) {
 }
 
 function fullOutput(path) {
-  const bytes = readFileSync(path);
-  const digest = createHash("sha256").update(bytes).digest("hex");
-  if (bytes.length > REVIEW_OUTPUT_BYTES) {
-    return { text: "", bytes: bytes.length, sha256: digest, complete: false };
+  const fd = openSync(path, "r");
+  try {
+    const hash = createHash("sha256");
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const retained = [];
+    let bytes = 0;
+    let count;
+    while ((count = readSync(fd, buffer, 0, buffer.length, null)) > 0) {
+      const chunk = buffer.subarray(0, count);
+      bytes += count;
+      hash.update(chunk);
+      if (bytes <= REVIEW_OUTPUT_BYTES) retained.push(Buffer.from(chunk));
+      else retained.length = 0;
+    }
+    const complete = bytes <= REVIEW_OUTPUT_BYTES;
+    return { text: complete ? Buffer.concat(retained, bytes).toString("utf8") : "", bytes, sha256: hash.digest("hex"), complete };
+  } finally {
+    closeSync(fd);
   }
-  return { text: bytes.toString("utf8"), bytes: bytes.length, sha256: digest, complete: true };
-}
-
-function terminateProcessGroup(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return;
-  try { process.kill(-pid, "SIGTERM"); } catch { /* group already ended */ }
-  try { process.kill(-pid, "SIGKILL"); } catch { /* group already ended */ }
 }
 
 function resultCode(result) {
@@ -96,58 +104,62 @@ function resultCode(result) {
 
 function runShell(command, cwd, timeoutMs = REVIEW_COMMAND_TIMEOUT_MS) {
   if (typeof command !== "string" || command.trim().length === 0 || command.includes("\u0000")) {
-    return { command: command ?? null, cwd, exitCode: "INPUT_INVALID", stdout: "", stderr: "" };
+    return { command: command ?? null, cwd, exitCode: "INPUT_INVALID", stdout: "", stderr: "", outputComplete: false };
   }
   let result;
   const outputDirectory = mkdtempSync(join(tmpdir(), "tcrn-review-evidence-run-"));
   const stdoutPath = join(outputDirectory, "stdout");
   const stderrPath = join(outputDirectory, "stderr");
-  let stdoutFd;
-  let stderrFd;
   try {
-    stdoutFd = openSync(stdoutPath, "w", 0o600);
-    stderrFd = openSync(stderrPath, "w", 0o600);
-    // A detached shell owns a private process group. Node's synchronous timeout
-    // sends the kill signal to that process group on this host; regular output
-    // files keep a timed-out grandchild from holding a pipe open.
-    result = spawnSync("/bin/sh", ["-c", command], {
-      cwd,
-      detached: true,
-      shell: false,
-      timeout: timeoutMs,
-      maxBuffer: REVIEW_OUTPUT_BYTES * 2,
-      encoding: "utf8",
-      stdio: ["ignore", stdoutFd, stderrFd],
-      env: childEnvironment(),
-    });
+    if (process.platform === "win32") {
+      let stdoutFd;
+      let stderrFd;
+      try {
+        stdoutFd = openSync(stdoutPath, "wx", 0o600);
+        stderrFd = openSync(stderrPath, "wx", 0o600);
+        result = spawnCommandSync(join(process.env.SystemRoot, "System32", "cmd.exe"), ["/d", "/s", "/c", `"${command}"`], {
+          cwd, env: childEnvironment(), windowsVerbatimArguments: true, shell: false, timeout: timeoutMs,
+          encoding: "utf8", stdio: ["ignore", stdoutFd, stderrFd],
+        });
+      } finally {
+        if (stdoutFd !== undefined) closeSync(stdoutFd);
+        if (stderrFd !== undefined) closeSync(stderrFd);
+      }
+    } else {
+      const collector = fileURLToPath(new URL("./lib/review-command.mjs", import.meta.url));
+      const receipt = spawnSync(process.execPath, [collector], {
+        cwd, env: childEnvironment(), encoding: "utf8", stdio: "pipe",
+        input: JSON.stringify({ command, timeoutMs, stdoutPath, stderrPath }),
+      });
+      if (receipt.error) throw receipt.error;
+      if (receipt.status !== 0) throw new Error(receipt.stderr || "Review command collector failed");
+      result = JSON.parse(receipt.stdout);
+    }
   } catch (error) {
     rmSync(outputDirectory, { recursive: true, force: true });
-    return { command, cwd, exitCode: String(error?.code ?? "START_FAILED"), stdout: "", stderr: String(error?.message ?? error) };
-  } finally {
-    if (stdoutFd !== undefined) closeSync(stdoutFd);
-    if (stderrFd !== undefined) closeSync(stderrFd);
+    return { command, cwd, exitCode: String(error?.code ?? "START_FAILED"), stdout: "", stderr: String(error?.message ?? error), outputComplete: false };
   }
-  let stdout = { text: "", bytes: 0, sha256: createHash("sha256").digest("hex"), complete: true };
-  let stderr = { text: "", bytes: 0, sha256: createHash("sha256").digest("hex"), complete: true };
-  if (result.error || result.status !== 0) terminateProcessGroup(result.pid);
+  let stdout;
+  let stderr;
   try {
     stdout = fullOutput(stdoutPath);
     stderr = fullOutput(stderrPath);
   } finally {
     rmSync(outputDirectory, { recursive: true, force: true });
   }
-  const outputComplete = stdout.complete && stderr.complete;
+  const withinLimit = stdout.complete && stderr.complete;
+  const finished = Number.isInteger(result.status) && !result.error;
   return {
     command,
     cwd,
-    exitCode: outputComplete ? resultCode(result) : "OUTPUT_LIMIT",
+    exitCode: finished && !withinLimit ? "OUTPUT_LIMIT" : resultCode(result),
     stdout: stdout.text,
     stderr: stderr.text,
     stdoutBytes: stdout.bytes,
     stderrBytes: stderr.bytes,
     stdoutSha256: stdout.sha256,
     stderrSha256: stderr.sha256,
-    outputComplete,
+    outputComplete: finished && withinLimit,
   };
 }
 
@@ -173,7 +185,7 @@ function repositoryRelative(repositoryRoot, candidate) {
   const root = resolve(repositoryRoot);
   const absolute = resolve(root, candidate);
   const rest = relative(root, absolute);
-  if (rest === "" || rest.startsWith("..") || rest.startsWith(sep) || rest.includes("\\")) return null;
+  if (rest === "" || rest.startsWith("..") || isAbsolute(rest)) return null;
   return rest.split(sep).join("/");
 }
 
@@ -379,7 +391,7 @@ function readBoundVerify({ workspace, workId, engineCli }) {
     } catch (error) {
       reason = String(error?.message ?? error);
     }
-    if (attempt < 2) spawnSync("/bin/sleep", ["0.25"]);
+    if (attempt < 2) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 250);
   }
   if (output === undefined) {
     return { status: "unavailable", reason, command: null };

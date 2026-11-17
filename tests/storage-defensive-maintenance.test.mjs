@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp, readFile, writeFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { asPinnedDevice } from './helpers/device-home.mjs';
 import { restoreLegacyFixture } from './helpers/legacy-fixture.mjs';
 import { assertDistinctRootShape } from '../dist/build/packages/core/src/root-identity.js';
@@ -21,10 +21,10 @@ async function cli(args) { let out=''; await runCli(args,{write: s=>{out+=s;}});
 
 test('distinct roots reject a nested dot-prefix directory, not a sibling', () => {
  const kinds=['framework','workspace','transient','evidence-locator','release-trust'];
- const roots=kinds.map((kind,i)=>({kind,canonicalPath:`/fixture/root${i}`}));
- roots[1].canonicalPath='/fixture/root0/..cache';
+ const roots=kinds.map((kind,i)=>({kind,canonicalPath:resolve('/fixture', `root${i}`)}));
+ roots[1].canonicalPath=resolve('/fixture/root0/..cache');
  assert.throws(()=>assertDistinctRootShape(roots),{reasonCode:'ROOT_PATH_CONTAINMENT'});
- roots[1].canonicalPath='/fixture/..cache';
+ roots[1].canonicalPath=resolve('/fixture/..cache');
  assert.doesNotThrow(()=>assertDistinctRootShape(roots));
 });
 

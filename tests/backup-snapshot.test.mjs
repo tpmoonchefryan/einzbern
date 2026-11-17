@@ -1,3 +1,4 @@
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // SPDX-License-Identifier: Apache-2.0
 
 import { testDeviceHome } from "./helpers/device-home.mjs";
@@ -183,8 +184,8 @@ async function largeKnowledgeBodySegment(fixture) {
   for (let ordinal = 0; ordinal < 160; ordinal += 1) {
     const externalKey = `SNAPSHOT-BODY-${ordinal}`;
     const id = deriveStableId("knowledge", externalKey);
-    await writeFile(join(crest, "metadata", `${id}.json`), canonicalJson({ ...seed, id, externalKey, subject: `Snapshot body ${ordinal}` }));
-    await writeFile(join(crest, "bodies", `${id}.body`), body);
+    await writeFile(storeRecordPath(join(crest, "metadata"), `${id}.json`), canonicalJson({ ...seed, id, externalKey, subject: `Snapshot body ${ordinal}` }));
+    await writeFile(storeRecordPath(join(crest, "bodies"), `${id}.body`), body);
   }
   const markerPath = join(crest, "store.json");
   await writeFile(markerPath, canonicalJson({ ...JSON.parse(await readFile(markerPath, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));

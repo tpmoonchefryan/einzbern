@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash, randomUUID } from "node:crypto";
-import { lstat, mkdir, open, rename, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
 import { dotInstant } from "./dot-execution.js";
 import { validateEngineModelPolicyFile } from "./engine-model-policy.js";
@@ -10,7 +8,7 @@ import type { EngineModelPolicyFile } from "./engine-model-policy.js";
 import { hostObject, hostText, HostExecutionError } from "./host-capabilities.js";
 import { validateHostNativePreparation } from "./native-tool-evidence.js";
 import type { HostNativePreparation } from "./native-tool-evidence.js";
-import { runtimeHome } from "./storage-location.js";
+import { AntigravitySwarmError, stageAntigravitySwarmGuardState } from "./antigravity-swarm.js";
 
 export const ANTIGRAVITY_SWARM_MANIFEST_VERSION = "tcrn.antigravity-swarm-manifest.v1" as const;
 export const ANTIGRAVITY_SWARM_BATCH_VERSION = "tcrn.antigravity-swarm-batch.v1" as const;
@@ -537,19 +535,6 @@ export function recordAntigravitySwarmBatch(input: AntigravitySwarmBatchInput): 
   });
 }
 
-function sha256Hex(value: string): string {
-  return createHash("sha256").update(value).digest("hex");
-}
-
-async function assertNotSymlink(target: string): Promise<void> {
-  try {
-    const stat = await lstat(target);
-    if (stat.isSymbolicLink()) fail(`refusing symlink path: ${target}`);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-}
-
 /** Stage the local PreToolUse guard state derived from a validated swarm batch receipt. */
 export async function stageAntigravitySwarmGuardFromBatch(
   receipt: AntigravitySwarmBatch,
@@ -558,20 +543,6 @@ export async function stageAntigravitySwarmGuardFromBatch(
 ): Promise<string> {
   hostText(libraryId, "libraryId");
   const normalized = normalizeAntigravitySwarmBatch(receipt);
-  const resolvedHome = resolve(deviceHome);
-  await assertNotSymlink(resolvedHome);
-  const rtHome = resolve(runtimeHome(resolvedHome));
-  await assertNotSymlink(rtHome);
-  const cacheDir = join(rtHome, "cache");
-  await assertNotSymlink(cacheDir);
-  await mkdir(cacheDir, { recursive: true, mode: 0o700 });
-  const guardDir = join(cacheDir, "antigravity-swarm-guards");
-  await assertNotSymlink(guardDir);
-  await mkdir(guardDir, { recursive: true, mode: 0o700 });
-
-  const file = join(guardDir, `${sha256Hex(normalized.manifest.coordinator.conversationId)}.json`);
-  await assertNotSymlink(file);
-
   const latest = latestSnapshot(normalized.observations.statusSnapshots);
   const landings = normalized.observations.landings ?? [];
   const members: AntigravitySwarmGuardMember[] = normalized.manifest.members.map(member => {
@@ -631,17 +602,10 @@ export async function stageAntigravitySwarmGuardFromBatch(
     members,
   };
 
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  const handle = await open(temporary, "wx", 0o600);
   try {
-    await handle.writeFile(`${JSON.stringify(guardState, null, 2)}\n`, "utf8");
-    await handle.sync();
+    return await stageAntigravitySwarmGuardState(deviceHome, guardState);
   } catch (error) {
-    await handle.close().catch(() => undefined);
-    await rm(temporary, { force: true }).catch(() => undefined);
+    if (error instanceof AntigravitySwarmError) fail(error.message);
     throw error;
   }
-  await handle.close();
-  await rename(temporary, file);
-  return file;
 }

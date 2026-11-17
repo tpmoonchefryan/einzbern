@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // TCRN-CROSS-SUB-428 (TCRN-CROSS-INC-398, STORY-514): no single canonical value bounds a crest's
 // derived index or a list's digest. With the knowledge total gone (TCRN-CROSS-SUB-310 R17), the index
 // view -- every record's metadata in one canonical value -- was the last bound on a crest: the write
@@ -385,14 +386,16 @@ test("SUB-428: an old-layout store reads as its engine left it, its view compare
   const { root, control } = await restoreLegacyFixture(base);
   // The old engine bound its store to the place it wrote the workspace: here, where it is restored.
   const metadataPath = join(control, "workspace.json");
-  await writeFile(metadataPath, canonicalJson(JSON.parse((await readFile(metadataPath, "utf8")).replaceAll("<fixture>", base))));
+  const metadata = JSON.parse(await readFile(metadataPath, "utf8"), (_, value) =>
+    typeof value === "string" && value.startsWith("<fixture>/") ? join(base, value.slice("<fixture>/".length)) : value);
+  await writeFile(metadataPath, canonicalJson(metadata));
   const legacy = await validateWorkspace(root);
   // The store an engine before libraries left: marker, metadata, bodies and its whole view.
   const knowledge = join(control, "knowledge");
   for (const directory of ["metadata", "bodies", "views"]) await mkdir(join(knowledge, directory), { recursive: true });
   for (const event of events) {
-    await writeFile(join(knowledge, "metadata", `${event.metadata.id}.json`), canonicalJson(event.metadata));
-    await writeFile(join(knowledge, "bodies", `${event.metadata.id}.body`), await readFile(join(fx.stream, event.body.file)));
+    await writeFile(storeRecordPath(join(knowledge, "metadata"), `${event.metadata.id}.json`), canonicalJson(event.metadata));
+    await writeFile(storeRecordPath(join(knowledge, "bodies"), `${event.metadata.id}.body`), await readFile(join(fx.stream, event.body.file)));
   }
   const marker = { schemaVersion: "tcrn.knowledge-store.v1", workspaceId: legacy.metadata.workspaceId, eventHighWaterDigest: legacy.headEventHash, version: 2, disposable: true, authority: "metadata-index-authority-body-separate" };
   await writeFile(join(knowledge, "store.json"), canonicalJson(marker));

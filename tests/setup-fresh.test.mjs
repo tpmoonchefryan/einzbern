@@ -1,3 +1,4 @@
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-480 R1, R2, R5, R6, AC1, AC2 (TCRN-CROSS-SUB-323): setup --mode fresh. A plan
 // lists every file it would write and writes none; the apply with the default answers leaves the
@@ -181,7 +182,7 @@ function trackedWarnings(files = HOST_FILES) {
 async function planUnderTripwire(f, options) {
   const script = join(f.base, "plan-only.mjs");
   await writeFile(script, `import { planSetup } from ${JSON.stringify(setupModule)};\nprocess.stdout.write(JSON.stringify(await planSetup(JSON.parse(process.argv[2]))));\n`);
-  const run = spawnSync(process.execPath, ["--import", tripwirePath, script, JSON.stringify(options)], {
+  const run = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, script, JSON.stringify(options)], {
     encoding: "utf8",
     env: { ...process.env, HOME: f.home, EINZBERN_HOME: f.deviceHome, EINZBERN_TRIPWIRE_ROOT: [f.home, f.deviceHome, f.project].join(delimiter) },
   });
@@ -283,7 +284,7 @@ test("480-AC1: the default answers install the library, the registry entry, both
   const coordination = join(dirname(f.deviceHome), "Ether");
   const coordinationId = chainIdentity(await materializeWorkspace(join(dirname(f.deviceHome), "Ether"))).coordinationLibraryId;
   assert.deepEqual(registry.entries.map((entry) => [entry.projectPath, entry.libraryPath, entry.libraryId, entry.cloudHosted, entry.chainRole]),
-    [[relative(f.deviceHome, f.project), relative(f.deviceHome, join(dirname(f.deviceHome), "Ether")), applied.library.libraryId, false, "project"]]);
+    [[relative(f.deviceHome, f.project).replaceAll("\\", "/"), relative(f.deviceHome, join(dirname(f.deviceHome), "Ether")).replaceAll("\\", "/"), applied.library.libraryId, false, "project"]]);
   assert.deepEqual(applied.coordination, { libraryId: coordinationId, status: "registered", path: coordination });
   const state = await materializeWorkspace(join(dirname(f.deviceHome), "Ether"));
   assert.equal(state.settings.find((setting) => setting.key === "artifact.language")?.value, "en");
@@ -300,7 +301,7 @@ test("480-AC1: the default answers install the library, the registry entry, both
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "written");
   // Nothing in the project names this machine's paths, and the project's own host settings are untouched.
   for (const file of ["AGENTS.md", "CLAUDE.md"]) assert.ok(!(await readFile(join(f.project, file), "utf8")).includes(f.base), file);
-  assert.ok((await readFile(join(f.project, ".claude/settings.local.json"), "utf8")).includes(relative(f.project, applied.library.path)));
+  assert.ok((await readFile(join(f.project, ".claude/settings.local.json"), "utf8")).includes(relative(f.project, applied.library.path).replaceAll("\\", "/")));
   assert.equal(await lstat(join(f.project, ".ether")).catch(() => null), null);
   assertSelfCheckGreen(applied);
 });
@@ -398,8 +399,8 @@ test("480-R5: every host file and project file is backed up before it is replace
   assert.deepEqual(applied.backups, planned.backups);
   const copies = [];
   for (const line of await snapshot([backupDir])) {
-    const path = line.slice(0, line.indexOf(" "));
-    if (!line.includes(" dir ")) copies.push(await readFile(path, "utf8"));
+    const [, path, kind] = /^(.*) (dir|\d+) \S+$/u.exec(line);
+    if (kind !== "dir") copies.push(await readFile(path, "utf8"));
   }
   assert.deepEqual([...copies].sort(), [...originals.values()].sort(), "each original is backed up byte for byte");
   const settings = JSON.parse(await readFile(join(f.home, ".claude", "settings.json"), "utf8"));
@@ -426,8 +427,8 @@ test("480-R2: a library outside the project gets the project's host write roots;
   const applied = await applySetup(planned);
   assert.deepEqual(applied.warnings, []);
   assert.equal(applied.library.path, library);
-  assert.deepEqual(JSON.parse(await readFile(roots[0], "utf8")).permissions.additionalDirectories, [relative(f.project, library)]);
-  assert.ok((await readFile(roots[1], "utf8")).includes(JSON.stringify(relative(join(f.project, ".codex"), library))));
+  assert.deepEqual(JSON.parse(await readFile(roots[0], "utf8")).permissions.additionalDirectories, [relative(f.project, library).replaceAll("\\", "/")]);
+  assert.ok((await readFile(roots[1], "utf8")).includes(JSON.stringify(relative(join(f.project, ".codex"), library).replaceAll("\\", "/"))));
   // Device decline changes local hooks, not the shared project navigation declaration.
   assert.match(await readFile(join(f.project, "AGENTS.md"), "utf8"), /id=navigation /u);
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "declined");
@@ -438,24 +439,25 @@ test("480-R2: a library outside the project gets the project's host write roots;
 
 test("480-R5: a host file that is a symbolic link, or a library already at the chosen place, stops the plan and the apply writes nothing", async (context) => {
   const f = await fixture(context);
-  const dotfiles = join(f.base, "dotfiles");
-  await mkdir(dotfiles);
-  await writeFile(join(dotfiles, "settings.json"), "{}\n");
-  await mkdir(join(f.home, ".claude"));
-  await symlink(join(dotfiles, "settings.json"), join(f.home, ".claude", "settings.json"));
-  const planned = await plan(f);
-  assert.deepEqual(planned.blockers.map((blocker) => [blocker.step, blocker.path, blocker.reasonCode]), [
-    ["host-hooks", join(f.home, ".claude", "settings.json"), "HOST_HOOKS_FILE_UNSUPPORTED"],
-  ]);
-  const before = await snapshot([f.home, f.deviceHome, f.project]);
-  await assert.rejects(applySetup(planned), (error) => {
-    assert.equal(error.reasonCode, "SETUP_BLOCKED");
-    assert.equal(error.details.reasonCode, "HOST_HOOKS_FILE_UNSUPPORTED");
-    assert.equal(error.details.path, join(f.home, ".claude", "settings.json"));
-    return true;
-  });
-  assert.deepEqual(await snapshot([f.home, f.deviceHome, f.project]), before);
-
+  if (await fileSymlinksAvailable(f.base)) {
+    const dotfiles = join(f.base, "dotfiles");
+    await mkdir(dotfiles);
+    await writeFile(join(dotfiles, "settings.json"), "{}\n");
+    await mkdir(join(f.home, ".claude"));
+    await symlink(join(dotfiles, "settings.json"), join(f.home, ".claude", "settings.json"));
+    const planned = await plan(f);
+    assert.deepEqual(planned.blockers.map((blocker) => [blocker.step, blocker.path, blocker.reasonCode]), [
+      ["host-hooks", join(f.home, ".claude", "settings.json"), "HOST_HOOKS_FILE_UNSUPPORTED"],
+    ]);
+    const before = await snapshot([f.home, f.deviceHome, f.project]);
+    await assert.rejects(applySetup(planned), (error) => {
+      assert.equal(error.reasonCode, "SETUP_BLOCKED");
+      assert.equal(error.details.reasonCode, "HOST_HOOKS_FILE_UNSUPPORTED");
+      assert.equal(error.details.path, join(f.home, ".claude", "settings.json"));
+      return true;
+    });
+    assert.deepEqual(await snapshot([f.home, f.deviceHome, f.project]), before);
+  }
   const other = join(f.base, "other");
   await mkdir(other);
   const created = await cli(["init", "--workspace", join(other, ".ether"), "--at", at()]);
@@ -486,7 +488,7 @@ test("385-R16: with the library outside the project, fresh and repair name each 
   assert.equal(applied.reasonCode, "SETUP_APPLIED");
   assert.deepEqual(applied.warnings, trackedWarnings(), "SETUP_APPLIED names the same files");
   // The wizard warns and leaves Git alone: both files name the library, stay staged as they were, and nothing is committed.
-  for (const file of HOST_FILES) assert.ok((await readFile(join(f.project, ...file.split("/")), "utf8")).includes(relative(file.startsWith(".codex") ? join(f.project, ".codex") : f.project, library)), file);
+  for (const file of HOST_FILES) assert.ok((await readFile(join(f.project, ...file.split("/")), "utf8")).includes(relative(file.startsWith(".codex") ? join(f.project, ".codex") : f.project, library).replaceAll("\\", "/")), file);
   assert.equal(git(f.project, "status", "--porcelain", "--", ...HOST_FILES), HOST_FILES.map((file) => `AM ${file}\n`).join(""));
   assert.notEqual(spawnSync("git", ["-C", f.project, "rev-parse", "--verify", "--quiet", "HEAD"]).status, 0, "no commit was made");
   assertSelfCheckGreen(applied);
@@ -702,7 +704,11 @@ test("fresh installation is portable: no device paths persist and a moved instal
     seen.add(root);
     for (const entry of await readdir(root, { withFileTypes: true })) {
       const file = join(root, entry.name);
-      if (entry.isSymbolicLink()) assert.equal(isAbsolute(await readlink(file)), false, file);
+      if (entry.isSymbolicLink()) {
+        if (process.platform === "win32" && ["cache", "locks", "backups"].some(area => file === join(f.deviceHome, area))) {
+          assert.equal(await realpath(file), join(readStorageLocation(f.deviceHome).runtime, entry.name));
+        } else assert.equal(isAbsolute(await readlink(file)), false, file);
+      }
       else if (entry.isDirectory()) await inspect(file);
       else if (entry.isFile()) {
         const bytes = await readFile(file, "utf8");

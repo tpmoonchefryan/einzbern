@@ -109,8 +109,10 @@ function run(executable, arguments_, options = {}) {
   return runLocalCommand(executable, arguments_, { cwd: repositoryRoot, ...options });
 }
 
-function controllerTimeoutMs(p8Only = false) {
-  const maximum = p8Only ? 600_000 : 900_000;
+function controllerTimeoutMs(p8Only, fullSuite) {
+  const hostedLinuxSuite = fullSuite && process.platform === "linux" && process.env.GITHUB_ACTIONS === "true";
+  const platformMaximum = process.platform === "win32" ? 3_600_000 : hostedLinuxSuite ? 1_800_000 : 900_000;
+  const maximum = p8Only ? 600_000 : platformMaximum;
   const configured = Number(process.env.TCRN_TEST_CONTROLLER_TIMEOUT_MS ?? String(maximum));
   assertion(Number.isSafeInteger(configured) && configured > 0 && configured <= maximum, "TEST_CONTROLLER_TIMEOUT_INVALID", String(configured));
   return configured;
@@ -122,7 +124,7 @@ function terminateTestControllerGroup(processGroup) {
   }
 }
 
-async function runDetachedTestController(arguments_, extraEnvironment, tests, p8Only = false) {
+async function runDetachedTestController(arguments_, extraEnvironment, tests, timeoutMs) {
   const progressDirectory = await mkdtemp(join(tmpdir(), "tcrn-test-progress-"));
   const progressPath = join(progressDirectory, "events.ndjson");
   const reaperReadyPath = join(progressDirectory, "reaper.json");
@@ -194,7 +196,6 @@ async function runDetachedTestController(arguments_, extraEnvironment, tests, p8
     // group. The bootstrap remains a separate process group it can terminate.
     await bindOutputSessionProcessGroup(reaperProcessGroup);
 
-    const timeoutMs = controllerTimeoutMs(p8Only);
     const startedAt = Date.now();
     const resultOutcome = result.then((value) => ({ kind: "exit", value }), (error) => ({ kind: "error", error }));
     let cursor = 0;
@@ -659,6 +660,14 @@ async function build() {
   await safeWriteOutput(repositoryRoot, "dist/build/packages/core/src/source-attestor-host.mjs", sourceAttestor.code);
   const memoryBudget = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-budget.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-budget.mjs", memoryBudget);
+  const windowsSystem = await readSourceFile(resolve(repositoryRoot, "scripts/lib/windows-system.mjs"));
+  await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/windows-system.mjs", windowsSystem);
+  // Runtime imports make the built skill directory discoverable by skill-render.
+  // Keep that template complete for packaging and installed host copies.
+  for (const path of await walkFiles(resolve(repositoryRoot, "skill/mana-orchestrate"))) {
+    const target = toPosixPath(relative(repositoryRoot, path));
+    await safeWriteOutput(repositoryRoot, `dist/build/${target}`, await readSourceFile(path));
+  }
   const memoryWorkerCheck = await readSourceFile(resolve(repositoryRoot, "scripts/lib/memory-worker-check.mjs"));
   await safeWriteOutput(repositoryRoot, "dist/build/scripts/lib/memory-worker-check.mjs", memoryWorkerCheck);
   const heavyRuns = await readSourceFile(resolve(repositoryRoot, "scripts/lib/heavy-runs.mjs"));
@@ -699,13 +708,18 @@ async function runTests({ p8Only = false, extraEnvironment = {}, ciPlan } = {}) 
   const deviceDirectory = await mkdtemp(join(tmpdir(), "einzbern-test-device-"));
   let controller;
   try {
-    controller = await runDetachedTestController(coreTestArgv(tests), {
+    const environment = {
+      ...process.env,
       NODE_OPTIONS: `--import=${noNetworkImport}`,
       TCRN_OFFLINE_PROOF: "1",
       EINZBERN_HOME: join(deviceDirectory, "einzbern"),
       EINZBERN_TEST_DEVICE_ROOT: deviceDirectory,
       ...extraEnvironment,
-    }, tests, p8Only);
+    };
+    const timeoutMs = controllerTimeoutMs(p8Only, ciPlan === undefined);
+    controller = process.platform === "win32"
+      ? await (await import("./lib/windows-test-controller.mjs")).runWindowsTestController(coreTestArgv(tests), { cwd: repositoryRoot, env: environment, timeoutMs, onFailure: fail, tests })
+      : await runDetachedTestController(coreTestArgv(tests), environment, tests, timeoutMs);
   } finally {
     await rm(deviceDirectory, { recursive: true, force: true });
   }
@@ -1694,6 +1708,26 @@ async function invoke(name) {
 // and the processes a leg starts inherit it, so no leg waits for a slot its own run holds or
 // carries a waiting line on its stderr; the only waiting line is p1's own, before any leg starts.
 const HEAVY_COMMANDS = new Set(["test", "verify-p1"]);
+if (process.platform === "win32") {
+  const { windowsJobState } = await import("./lib/windows-system.mjs");
+  if (windowsJobState(process.env.EINZBERN_WINDOWS_JOB) !== "member") {
+    const { spawnCommand } = await import("../skill/mana-orchestrate/scripts/process-launch.mjs");
+    const child = spawnCommand(process.execPath, process.argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+    child.stdout.pipe(process.stdout);
+    child.stderr.pipe(process.stderr);
+    const interrupt = () => child.kill("SIGINT");
+    const terminate = () => child.kill("SIGTERM");
+    process.once("SIGINT", interrupt);
+    process.once("SIGTERM", terminate);
+    const code = await new Promise((resolveCode, reject) => {
+      child.once("error", reject);
+      child.once("close", exitCode => resolveCode(exitCode ?? 1));
+    });
+    process.removeListener("SIGINT", interrupt);
+    process.removeListener("SIGTERM", terminate);
+    process.exit(code);
+  }
+}
 let heavySlot = null;
 try {
   if (HEAVY_COMMANDS.has(command)) heavySlot = await acquireHeavySlot({ command });

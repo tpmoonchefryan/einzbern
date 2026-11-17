@@ -30,6 +30,7 @@ export interface InstallManifestItem {
   readonly pathTemplate: string;
   readonly writer: InstallManifestWriter;
   readonly acceptanceProbe: string;
+  readonly platforms?: readonly NodeJS.Platform[];
 }
 
 export interface InstallManifestProject {
@@ -68,8 +69,9 @@ function item(
   pathTemplate: string,
   writer: InstallManifestWriter,
   acceptanceProbe: string,
+  platforms?: readonly NodeJS.Platform[],
 ): InstallManifestItem {
-  return Object.freeze({ id, layer, host, pathTemplate, writer, acceptanceProbe });
+  return Object.freeze({ id, layer, host, pathTemplate, writer, acceptanceProbe, ...(platforms ? { platforms: Object.freeze(platforms) } : {}) });
 }
 
 const projects: readonly InstallManifestProject[] = Object.freeze([
@@ -127,10 +129,10 @@ export const INSTALL_MANIFEST_ITEMS: readonly InstallManifestItem[] = Object.fre
   // versions in the device directory; placed by the installer from scripts/einzbern-hook-launcher.mjs.
   item("machine.hook-launcher", "machine", "shared", `<HOME>/${DIRECTORY.device}/${DEVICE_HOME_ENTRIES.engine}/${ENGINE_HOOK_LAUNCHER}`, "user-guided", "probe:regular-file"),
   item("machine.local-snapshot-artifacts", "machine", "shared", "<PLATFORM_ROOT>/.tcrn-artifacts/chain-snapshots", "user-guided", "probe:regular-directory"),
-  item("machine.launchd-local-snapshot", "machine", "shared", "<HOME>/Library/LaunchAgents/com.tcrn.platform.local-snapshot.plist", "user-guided", "probe:launchd-duty;label=com.tcrn.platform.local-snapshot;maxAgeHours=26"),
-  item("machine.portal-launcher-command", "machine", "shared", `<PLATFORM_ROOT>/${BRAND.portal.id}.command`, "user-guided", "probe:regular-executable"),
-  item("machine.portal-launcher-sh", "machine", "shared", `<PLATFORM_ROOT>/${BRAND.portal.id}.sh`, "user-guided", "probe:regular-executable"),
-  item("machine.portal-launcher-cmd", "machine", "shared", `<PLATFORM_ROOT>/${BRAND.portal.id}.cmd`, "user-guided", "probe:regular-file"),
+  item("machine.launchd-local-snapshot", "machine", "shared", "<HOME>/Library/LaunchAgents/com.tcrn.platform.local-snapshot.plist", "user-guided", "probe:launchd-duty;label=com.tcrn.platform.local-snapshot;maxAgeHours=26", ["darwin"]),
+  item("machine.portal-launcher-command", "machine", "shared", `<PLATFORM_ROOT>/${BRAND.portal.id}.command`, "user-guided", "probe:regular-executable", ["darwin"]),
+  item("machine.portal-launcher-sh", "machine", "shared", `<PLATFORM_ROOT>/${BRAND.portal.id}.sh`, "user-guided", "probe:regular-executable", ["darwin", "linux"]),
+  item("machine.portal-launcher-cmd", "machine", "shared", `<PLATFORM_ROOT>/${BRAND.portal.id}.cmd`, "user-guided", "probe:regular-file", ["win32"]),
 ].sort((left, right) => compareCanonicalText(left.id, right.id)));
 
 // This catalog is intentionally independent from INSTALL_MANIFEST_ITEMS.  A
@@ -189,6 +191,7 @@ export function assertInstallManifestComplete(value: unknown): asserts value is 
     if (typeof candidate.pathTemplate !== "string" || !candidate.pathTemplate.includes("<PLATFORM_ROOT>") && !candidate.pathTemplate.includes("<HOME>")) invalid(`${candidate.id}: pathTemplate must use a placeholder`);
     if (!["engine-adapter", "host-self", "user-guided"].includes(candidate.writer)) invalid(`${candidate.id}: writer`);
     if (typeof candidate.acceptanceProbe !== "string" || candidate.acceptanceProbe.length === 0) invalid(`${candidate.id}: acceptanceProbe`);
+    if (candidate.platforms !== undefined && (!Array.isArray(candidate.platforms) || candidate.platforms.length === 0 || candidate.platforms.some(platform => !["darwin", "linux", "win32"].includes(platform)))) invalid(`${candidate.id}: platforms`);
   }
   for (const requiredId of INSTALL_MANIFEST_REQUIRED_ITEM_IDS) {
     if (!ids.has(requiredId)) throw new InstallManifestError("INSTALL_MANIFEST_ITEM_MISSING", requiredId);

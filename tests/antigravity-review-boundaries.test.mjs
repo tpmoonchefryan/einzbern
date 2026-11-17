@@ -78,7 +78,7 @@ test("repair A must not leave registered B with global plus local owned hooks", 
         userHome: home,
         scope: "project",
         navigation: "always",
-        platform: "darwin",
+        platform: process.platform,
       },
     ).document;
     await writeFile(join(project, ".agents/hooks.json"), JSON.stringify(doc));
@@ -96,7 +96,7 @@ test("repair A must not leave registered B with global plus local owned hooks", 
       home,
       deviceHome: device,
       projectRoot: b,
-      platform: "darwin",
+      platform: process.platform,
       env: { ...process.env, ANTIGRAVITY_CONFIG_DIR: config },
     })
   )
@@ -112,7 +112,7 @@ test("repair A must not leave registered B with global plus local owned hooks", 
   assert.equal(host.causes.includes("HOOK_DUPLICATED"), false);
 });
 
-test("unchanged POSIX hook generated under a device path containing % stays owned", async (t) => {
+test("unchanged native hook generated under a device path containing % stays owned", async (t) => {
   const { root, home, device } = await fixture(t);
   const config = join(root, "config");
   await mkdir(config, { recursive: true });
@@ -122,7 +122,7 @@ test("unchanged POSIX hook generated under a device path containing % stays owne
     deviceHome: join(root, "device-20%"),
     scope: "user",
     navigation: "always",
-    platform: "darwin",
+    platform: process.platform,
   };
   const first = await planAntigravityHooks(request);
   await applyAntigravityHookPlan(first, { at: "2026-11-12T00:02:00Z", deviceHome: device });
@@ -131,9 +131,9 @@ test("unchanged POSIX hook generated under a device path containing % stays owne
   assert.equal(second.changed, false);
 
   const writtenDoc = JSON.parse(await readFile(join(config, "hooks.json"), "utf8"));
-  assert.equal(isOwnedAntigravityHookGroup(writtenDoc.einzbern, "darwin"), true);
-  assert.equal(isOwnedAntigravityHookGroup(writtenDoc.einzbern, "linux"), true);
-  assert.equal(isOwnedAntigravityHookGroup(writtenDoc.einzbern, "win32"), false);
+  assert.equal(isOwnedAntigravityHookGroup(writtenDoc.einzbern, "darwin"), process.platform !== "win32");
+  assert.equal(isOwnedAntigravityHookGroup(writtenDoc.einzbern, "linux"), process.platform !== "win32");
+  assert.equal(isOwnedAntigravityHookGroup(writtenDoc.einzbern, "win32"), process.platform === "win32");
 });
 
 test("sibling registered project preserves unmanaged groups on retirement and blocks before global write when edited", async (t) => {
@@ -197,7 +197,7 @@ test("sibling registered project preserves unmanaged groups on retirement and bl
       userHome: home,
       scope: "project",
       navigation: "always",
-      platform: "darwin",
+      platform: process.platform,
     }).document;
     if (name === "B") {
       doc.einzbern.PreInvocation[0].command = doc.einzbern.PreInvocation[0].command.replace(
@@ -232,7 +232,7 @@ test("sibling registered project preserves unmanaged groups on retirement and bl
   // Case 2: once sibling B's local einzbern group is unedited, migrating A retires B's einzbern group while keeping b-custom.
   const bClean = mergeAntigravityHookDocument(
     { "b-custom": { PostToolUse: [{ matcher: "write_file", hooks: [{ type: "command", command: "echo b", timeout: 10 }] }] } },
-    { root: b, deviceHome: device, userHome: home, scope: "project", navigation: "always", platform: "darwin" },
+    { root: b, deviceHome: device, userHome: home, scope: "project", navigation: "always", platform: process.platform },
   ).document;
   await writeFile(bHookPath, `${JSON.stringify(bClean, null, 2)}\n`);
   await applyHooks(new SetupRecorder(device, "2026-11-12T00:01:20Z"), {

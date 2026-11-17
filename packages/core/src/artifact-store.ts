@@ -1,3 +1,4 @@
+import { assertWritableWindowsDirectory } from "../../../scripts/lib/windows-system.mjs";
 import { scopedWorkspaceState } from "./project-scope.js";
 import { pathIsInside } from "./path-containment.js";
 import { resolvePortablePath } from "./portable-path.js";
@@ -248,7 +249,10 @@ export async function assertGeneratedArtifactsRoot(
   const directory = await boundDirectory(root);
   if (pathIsInside(device, directory) || pathIsInside(workspace, directory)) fail("ARTIFACT_PATH_INVALID", "artifact directory resolves inside a control tree");
   if (writable) {
-    try { await access(directory, constants.W_OK); }
+    try {
+      if (process.platform === "win32") assertWritableWindowsDirectory(directory);
+      else await access(directory, constants.W_OK);
+    }
     catch (error) { fail("ARTIFACT_PATH_INVALID", `${directory}: ${String((error as NodeJS.ErrnoException).code ?? error)}`); }
   }
   return directory;

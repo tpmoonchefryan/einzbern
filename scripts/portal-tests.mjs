@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // SPDX-License-Identifier: Apache-2.0
 import { acquireHeavySlot } from "./lib/heavy-runs.mjs";
-import { memoryTestArguments } from "./lib/memory-budget.mjs";
-import { spawn } from "node:child_process";
+import { suiteTestArguments } from "./lib/memory-budget.mjs";
+import { spawnCommand as spawn } from "../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
@@ -18,10 +18,10 @@ export async function runPortalTestFiles(tests, environment = process.env, { std
   try {
     deviceDirectory = await mkdtemp(join(tmpdir(), "einzbern-portal-device-"));
     return await new Promise((resolveResult, reject) => {
-      const child = spawn(process.execPath, memoryTestArguments(["--test", ...tests]), {
+      const child = spawn(process.execPath, suiteTestArguments(["--test", ...tests], environment), {
         cwd: repositoryRoot,
         env: { ...environment, EINZBERN_HOME: join(deviceDirectory, "einzbern"), EINZBERN_TEST_DEVICE_ROOT: deviceDirectory },
-        stdio,
+        stdio: process.platform === "win32" ? ["ignore", "pipe", "pipe"] : stdio,
       });
       // Callers under the Core controller pass pipes explicitly. Drain them so
       // a failed Portal fixture cannot fill a pipe and stall cleanup.

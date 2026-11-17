@@ -189,6 +189,7 @@ test("486-R2: generating twice writes the same bytes and lists nothing on a clea
   assert.deepEqual(first.files, [
     ...README_NAMES,
     "package.json",
+    ".gitattributes",
     ".github/workflows/ci.yml",
     ".github/engine-source.json",
     ...first.files.filter((path) => path.startsWith(`${SKILL}/`)),

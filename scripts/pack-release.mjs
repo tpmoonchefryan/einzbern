@@ -172,7 +172,7 @@ async function bundleAtelier(stage, coreBuild) {
   await writeStaged(root, "portal/portal.mjs", portal.replace(BUNDLED_CLI_DECLARATION, `const BUNDLED_CLI = join(portalRoot, ${JSON.stringify(ATELIER_CLI)});`));
   await copyStaged(root, "portal/locale-contract.mjs", join(repositoryRoot, "portal", "locale-contract.mjs"));
   await copyStaged(root, "scripts/lib/runtime-capacity.mjs", join(repositoryRoot, "scripts", "lib", "runtime-capacity.mjs"));
-  for (const name of ["memory-budget.mjs", "memory-worker-check.mjs", "storage-location.mjs"]) await copyStaged(root, `scripts/lib/${name}`, join(repositoryRoot, "scripts", "lib", name));
+  for (const name of ["memory-budget.mjs", "memory-worker-check.mjs", "storage-location.mjs", "windows-system.mjs"]) await copyStaged(root, `scripts/lib/${name}`, join(repositoryRoot, "scripts", "lib", name));
   await writeStaged(root, "scripts/lib/memory-executors.json", `${JSON.stringify(createMemoryExecutorContract(repositoryRoot))}\n`);
   await writeStaged(root, "scripts/lib/names.mjs", names.replace(NAMES_SOURCE_SPECIFIER, NAMES_BUILD_SPECIFIER));
   await writeStaged(root, "scripts/lib/registry-lock.mjs", stagedRegistryLock);
@@ -244,7 +244,7 @@ async function packRelease({ version: requested, out }) {
     await copyStaged(tree, "scripts/source-attestor-host.mjs", join(repositoryRoot, "dist/build/packages/core/src/source-attestor-host.mjs"));
     await copyStaged(tree, "scripts/build-source-lease.mjs", join(repositoryRoot, "scripts/build-source-lease.mjs"));
     await copyStaged(tree, "native/linux-source-lease.c", join(repositoryRoot, "native/linux-source-lease.c"));
-    for (const name of ["memory-budget.mjs", "memory-worker-check.mjs", "storage-location.mjs"]) await copyStaged(tree, `scripts/lib/${name}`, join(repositoryRoot, "scripts", "lib", name));
+    for (const name of ["memory-budget.mjs", "memory-worker-check.mjs", "storage-location.mjs", "windows-system.mjs"]) await copyStaged(tree, `scripts/lib/${name}`, join(repositoryRoot, "scripts", "lib", name));
     await writeStaged(tree, "scripts/lib/memory-executors.json", `${JSON.stringify(createMemoryExecutorContract(repositoryRoot))}\n`);
     await copyStaged(tree, "launchers/einzbern.mjs", join(repositoryRoot, "scripts", "einzbern-launcher.mjs"));
     await copyStaged(tree, "launchers/hook.mjs", join(repositoryRoot, "scripts", "einzbern-hook-launcher.mjs"));

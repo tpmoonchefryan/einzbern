@@ -15,6 +15,7 @@ import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } f
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
 
 import {
   CODEX_CONFIG_FILE,
@@ -316,12 +317,16 @@ test("477-R5: portable commands resolve the home binding at runtime on each supp
     ["/srv/`id`/device", "linux"],
     ['/srv/"quoted"/device', "darwin"],
     ["/srv/back\\slash", "darwin"],
-    ["D:\\%USERPROFILE%\\device", "win32"],
-    ["\\\\server\\share\\device", "win32"],
     ["device", "win32"],
   ];
   for (const [deviceHome, platform] of refused) {
     assert.throws(() => hookLauncherPath(deviceHome, platform), (error) => error?.reasonCode === "HOST_HOOKS_PATH_UNSUPPORTED", `${platform}: ${deviceHome}`);
+  }
+
+  for (const deviceHome of ["D:/%USERPROFILE%/device", "//server/share/device"]) {
+    const command = hostHookCommand(hookLauncherPath(deviceHome, "win32"), "UserPromptSubmit", "C:/Users/fixture", "win32");
+    assert.ok(command.includes("Buffer.from("));
+    assert.equal(isEinzbernHookCommand(command), true);
   }
 
   // On this machine the line runs as written, through the shell a host hands it to, even with a
@@ -468,9 +473,11 @@ test("477: a file this cannot follow is refused before anything is written, and 
   }
   await rm(settings);
   await writeFile(join(home, "elsewhere.json"), "{}\n");
-  await symlink(join(home, "elsewhere.json"), settings);
-  await assert.rejects(readHostHooks(expected, { root: home, home }), (error) => error?.reasonCode === "HOST_HOOKS_FILE_UNSUPPORTED");
-  await rm(settings);
+  if (await fileSymlinksAvailable(home)) {
+    await symlink(join(home, "elsewhere.json"), settings);
+    await assert.rejects(readHostHooks(expected, { root: home, home }), (error) => error?.reasonCode === "HOST_HOOKS_FILE_UNSUPPORTED");
+    await rm(settings);
+  }
 
   // Changed between reading and writing: refused, the file as the other writer left it, no backup.
   await writeJson(settings, { env: { A: "1" } });

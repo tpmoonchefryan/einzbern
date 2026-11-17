@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { storeRecordPath } from "../dist/build/packages/core/src/store-backend.js";
 // STORY-341: knowledge bodies are disposable and can move to segmented local storage.
 
 import "./helpers/device-home.mjs";
@@ -38,8 +39,8 @@ async function asOlderEngineCrest(workspace) {
   await mkdir(join(store, "metadata"));
   await mkdir(join(store, "bodies"));
   for (const record of all.records) {
-    await writeFile(join(store, "metadata", `${record.id}.json`), canonicalJson(record));
-    await writeFile(join(store, "bodies", `${record.id}.body`), bodies.get(record.bodySha256));
+    await writeFile(storeRecordPath(join(store, "metadata"), `${record.id}.json`), canonicalJson(record));
+    await writeFile(storeRecordPath(join(store, "bodies"), `${record.id}.body`), bodies.get(record.bodySha256));
   }
   const storeJson = join(store, "store.json");
   await writeFile(storeJson, canonicalJson({ ...JSON.parse(await readFile(storeJson, "utf8")), version: marker.version, eventHighWaterDigest: marker.eventHighWaterDigest }));
@@ -90,13 +91,14 @@ test("STORY-341 knowledge body migration is explicit and keeps metadata outside 
   await mkdir(join(root, "metadata"), { recursive: true });
   const file = new FileStoreBackend(root, profile);
   const segmented = new SegmentedKnowledgeStoreBackend(file);
-  const metadata = Buffer.from("{\"id\":\"knowledge:metadata\"}\n", "utf8");
-  await file.writeKnowledgeMetadata("knowledge:metadata", metadata);
-  await file.writeKnowledgeBody("knowledge:metadata", Buffer.from("body", "utf8"));
+  const id = `knowledge:${"a".repeat(24)}`;
+  const metadata = Buffer.from(canonicalJson({ id }), "utf8");
+  await file.writeKnowledgeMetadata(id, metadata);
+  await file.writeKnowledgeBody(id, Buffer.from("body", "utf8"));
   await segmented.migrateKnowledgeBodies(4096);
-  assert.deepEqual(await segmented.readKnowledgeMetadata("knowledge:metadata"), metadata);
-  assert.deepEqual(await segmented.readKnowledgeBody("knowledge:metadata"), Buffer.from("body", "utf8"));
-  assert.equal((await readdir(join(root, "metadata"))).includes("knowledge:metadata.json"), true);
+  assert.deepEqual(await segmented.readKnowledgeMetadata(id), metadata);
+  assert.deepEqual(await segmented.readKnowledgeBody(id), Buffer.from("body", "utf8"));
+  assert.deepEqual(await readFile(storeRecordPath(join(root, "metadata"), `${id}.json`)), metadata);
   assert.equal((await readdir(join(root, "bodies"))).some((name) => name.endsWith(".body")), false);
 });
 

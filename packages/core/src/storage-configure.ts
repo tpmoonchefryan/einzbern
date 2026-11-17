@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { loadPath, storePath } from "./stored-path.js";
 import { lstat, mkdir, readFile, readdir, readlink, realpath, rename, symlink, unlink } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { assertStrictInstant, canonicalJson } from "../../protocol/src/index.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { withFileLock } from "./file-lock.js";
@@ -15,7 +15,8 @@ import type { WritableRootsPlan } from "./host-writable-roots.js";
 /** Device identity, credentials, registry and host policies remain local. Only derived runtime and backups move. */
 export async function configureStorageLocation(home: string, library: string, runtime: string, at: string, decidedIn: string, yes = false, transportOptions: RuntimeTransportOptions = {}): Promise<Record<string, unknown>> {
   assertStrictInstant(at);
-  if (!isAbsolute(library) || !isAbsolute(runtime) || resolve(runtime) === resolve(home) || resolve(runtime).startsWith(`${resolve(home)}/`)) throw new Error("STORAGE_LOCATION_INVALID");
+  const withinHome = relative(resolve(home), resolve(runtime));
+  if (!isAbsolute(library) || !isAbsolute(runtime) || withinHome === "" || (!isAbsolute(withinHome) && withinHome !== ".." && !withinHome.startsWith(`..${sep}`))) throw new Error("STORAGE_LOCATION_INVALID");
   const libraryPath = resolve(library);
   const target = resolve(runtime);
   const areas = ["cache", "locks", "backups"] as const;
@@ -103,14 +104,14 @@ export async function configureStorageLocation(home: string, library: string, ru
           }
           const occupied = await lstat(destination).then(stat => { if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("STORAGE_UNSAFE_PATH"); return true; }, error => { if (error.code === "ENOENT") return false; throw error; });
           if (sourceStat === null) {
-            if (occupied) await symlink(relative(dirname(source), destination), source, "dir");
+            if (occupied) await createRuntimeForwarding(source, destination);
           } else {
             if (!sourceStat.isDirectory()) throw new Error("STORAGE_UNSAFE_PATH");
             const pendingCopy = await lstat(transportReceipt).then(() => true, error => { if (error.code === "ENOENT") return false; throw error; });
             if (occupied && !pendingCopy) throw new Error(`STORAGE_TARGET_NOT_EMPTY: ${destination}`);
             await transportRuntimeArea(home, source, destination, relocationAt, transportOptions);
             // Historical evidence paths keep resolving, without keeping a second data copy.
-            await symlink(relative(dirname(source), destination), source, "dir");
+            await createRuntimeForwarding(source, destination);
           }
           completedAreas.push(area);
           activeArea = null;
@@ -128,6 +129,8 @@ export async function configureStorageLocation(home: string, library: string, ru
       // Refresh only engine forwarding links that still resolve to this configured runtime.
       // A temporary sibling plus rename avoids an interval with no forwarding link.
       for (const area of areas) {
+        // Windows junctions use absolute targets and do not require symlink privileges.
+        if (process.platform === "win32") continue;
         const source = join(home, area), destination = join(target, area);
         const stat = await lstat(source).catch(error => { if (error.code === "ENOENT") return null; throw error; });
         if (!stat?.isSymbolicLink() || !isAbsolute(await readlink(source)) || await realpath(source) !== destination) continue;
@@ -168,6 +171,12 @@ export async function configureStorageLocation(home: string, library: string, ru
       throw error;
     }
   });
+}
+
+function createRuntimeForwarding(source: string, destination: string): Promise<void> {
+  return process.platform === "win32"
+    ? symlink(destination, source, "junction")
+    : symlink(relative(dirname(source), destination), source, "dir");
 }
 
 type StoredRelocation = {

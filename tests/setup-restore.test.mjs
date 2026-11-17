@@ -176,7 +176,7 @@ async function planUnderTripwire(f, device, options, roots) {
     "}",
     "",
   ].join("\n"));
-  const run = spawnSync(process.execPath, ["--import", tripwirePath, script, JSON.stringify(options)], {
+  const run = spawnSync(process.execPath, ["--import", pathToFileURL(tripwirePath).href, script, JSON.stringify(options)], {
     encoding: "utf8",
     env: { ...process.env, HOME: device.home, EINZBERN_HOME: device.deviceHome, EINZBERN_TRIPWIRE_ROOT: roots.join(delimiter) },
   });
@@ -453,7 +453,7 @@ test("480-R3 (U04): a second device recognizes the restored coordination identit
   const digestOnA = (await computeInstallTreeDigest(coordinationOnA)).sha256;
   use(f.b);
   // The plan runs through the shipped entry with every network call refused: restore stays offline.
-  const offline = spawnSync(process.execPath, ["--import", join(repositoryRoot, "scripts/no-network.mjs"), join(repositoryRoot, "scripts/einzbern.mjs"),
+  const offline = spawnSync(process.execPath, ["--import", pathToFileURL(join(repositoryRoot, "scripts/no-network.mjs")).href, join(repositoryRoot, "scripts/einzbern.mjs"),
     "setup", "--mode", "restore", "--project", f.project, "--at", at(), "--restore", f.library], {
     encoding: "utf8",
     env: { ...process.env, EINZBERN_HOME: f.b.deviceHome, HOME: f.b.home, USERPROFILE: f.b.home },

@@ -9,7 +9,7 @@
 // directed, dated, cannot silently widen).
 
 import { readFileSync, readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, sep } from "node:path";
 import { selectTestFiles } from "./test-roster.mjs";
 
 
@@ -24,8 +24,8 @@ function walkTestFiles(dir, out = [], root = dir) {
     if (entry.name === "node_modules" || entry.name === ".git") continue;
     const full = join(dir, entry.name);
     if (entry.isDirectory()) walkTestFiles(full, out, root);
-    else if (entry.isFile() && (entry.name.endsWith(".test.mjs") || (full.split("/").includes("test") && entry.name.endsWith(".mjs")))) {
-      out.push(relative(root, full));
+    else if (entry.isFile() && (entry.name.endsWith(".test.mjs") || (full.split(sep).includes("test") && entry.name.endsWith(".mjs")))) {
+      out.push(relative(root, full).split(sep).join("/"));
     }
   }
   return out;

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-414 — bounded, cursor-based progress evidence.
 
+import { isAbsolute } from "node:path";
 import { constants } from "node:fs";
 import { appendFile, open, stat } from "node:fs/promises";
 
@@ -14,7 +15,7 @@ function progressError(reasonCode, detail) {
 }
 
 function assertProgressPath(path) {
-  if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0")) {
+  if (typeof path !== "string" || !isAbsolute(path) || path.includes("\0")) {
     throw progressError("PROGRESS_PATH_INVALID", String(path));
   }
 }

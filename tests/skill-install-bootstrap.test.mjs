@@ -67,7 +67,7 @@ function install(args, { home, preload = noFetch, env = {} }) {
   return spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, installScript, ...args], {
     cwd: base,
     encoding: "utf8",
-    env: { ...process.env, HOME: home, EINZBERN_HOME: "", ...env },
+    env: { ...process.env, HOME: home, USERPROFILE: home, EINZBERN_HOME: "", ...env },
   });
 }
 

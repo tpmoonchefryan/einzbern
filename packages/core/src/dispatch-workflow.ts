@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { open, realpath } from "node:fs/promises";
+import { openPrivateWindowsFile } from "../../../scripts/lib/windows-system.mjs";
 import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { parseStrictInstant } from "../../protocol/src/index.js";
@@ -104,7 +105,8 @@ async function openDispatchArtifact(path: string, forbiddenRoots: readonly strin
     try { actual = await realpath(root); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     if (pathIsInside(actual, destination)) throw new DispatchWorkflowError("output must be a private local artifact outside device and library roots");
   }
-  return { destination, file: await open(destination, "wx", 0o600) };
+  const file = process.platform === "win32" ? await openPrivateWindowsFile(destination) : await open(destination, "wx", 0o600);
+  return { destination, file };
 }
 
 /** Reserve a private create-new destination using the same guard as dispatch artifacts. */

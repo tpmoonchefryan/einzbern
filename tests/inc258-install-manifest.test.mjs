@@ -29,7 +29,7 @@ async function createInstallFixture(context, { skipItems = [] } = {}) {
 
   // Create all manifest items except the skipped ones
   for (const entry of INSTALL_MANIFEST.items) {
-    if (skipItems.includes(entry.id)) continue;
+    if (skipItems.includes(entry.id) || entry.platforms && !entry.platforms.includes(process.platform)) continue;
 
     const path = entry.pathTemplate.replaceAll("<PLATFORM_ROOT>", root).replaceAll("<HOME>", home);
 
@@ -136,7 +136,7 @@ test("SUB-376: the container AGENTS.md is no longer an install obligation", asyn
   await assert.rejects(stat(join(fixture.root, "AGENTS.md")), { code: "ENOENT" });
   const green = await inspectInstallWiring(fixture.root, fixture.home);
   assert.equal(green.ok, true, JSON.stringify(green));
-  assert.equal(green.itemCount, 17);
+  assert.equal(green.itemCount, INSTALL_MANIFEST.items.filter(entry => entry.platforms === undefined || entry.platforms.includes(process.platform)).length);
   const restored = {
     ...INSTALL_MANIFEST,
     items: [...INSTALL_MANIFEST.items, { id: "container.platform-agents", layer: "container", host: "shared", pathTemplate: "<PLATFORM_ROOT>/AGENTS.md", writer: "engine-adapter", acceptanceProbe: "probe:regular-file" }],

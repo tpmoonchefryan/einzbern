@@ -5,12 +5,14 @@
 // local release commit per repository, with every refusal they add.
 
 import "./helpers/device-home.mjs";
+import { compileWindowsHelper } from "../skill/mana-orchestrate/scripts/windows-system.mjs";
+import { writeNodeExecutable } from "./helpers/executable-fixture.mjs";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, mkdir, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { dirname, join } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import test from "node:test";
 import {
@@ -149,7 +151,7 @@ async function controlledPrepareRunner({ engineRoot, helperRoot, projectRoot, en
       }
       return pnpmBuildResult(engineRoot);
     }
-    const scriptName = args[0]?.split("/").at(-1);
+    const scriptName = args[0] && basename(args[0]);
     if (scriptName === "render-readme.mjs") {
       const version = args[args.indexOf("--version") + 1];
       const result = await renderReadmes({ root: engineRoot, version });
@@ -338,7 +340,7 @@ test("488-R4: a red release gate stops preparation before the archive step", asy
   const calls = [];
   const runner = async (command, args, options) => {
     calls.push({ command, args });
-    const scriptName = args[0]?.split("/").at(-1);
+    const scriptName = args[0] && basename(args[0]);
     if (command === "corepack") {
       assert.deepEqual(args, pinnedBuildArguments(repos.engineRoot));
       const source = await readFile(join(repos.engineRoot, "packages/core/src/framework-version.ts"), "utf8");
@@ -390,9 +392,20 @@ test("488-AC1/AC2: the publish plan is inert; tag, push and GitHub release each 
   await mkdir(bin, { recursive: true });
   const capture = join(base, "fake-gh-args.json");
   const fakeGh = join(bin, "gh");
-  await writeFile(fakeGh, "#!/usr/bin/env node\nimport { appendFileSync } from 'node:fs';\nappendFileSync(process.env.GH_CAPTURE, JSON.stringify(process.argv.slice(2)) + '\\n');\n");
-  await chmod(fakeGh, 0o755);
-  const releaseEnvironment = { ...environment, HOME: home, EINZBERN_HOME: join(home, ".einzbern"), GH_CAPTURE: capture, PATH: `${bin}:${process.env.PATH ?? ""}` };
+  if (process.platform === "win32") {
+    // gh.exe receives multiline release notes as a native argument.
+    const executable = compileWindowsHelper("capture-release.exe", `using System; using System.IO; using System.Text;
+public class CaptureRelease {
+  public static void Main(string[] args) {
+    File.AppendAllText(Environment.GetEnvironmentVariable("GH_CAPTURE"), string.Join("\\t", Array.ConvertAll(args,
+      value => Convert.ToBase64String(Encoding.UTF8.GetBytes(value)))) + Environment.NewLine);
+  }
+}`);
+    await copyFile(executable, fakeGh + ".exe");
+  } else {
+    await writeNodeExecutable(fakeGh, "import { appendFileSync } from 'node:fs';\nappendFileSync(process.env.GH_CAPTURE, JSON.stringify(process.argv.slice(2)) + '\\n');\n");
+  }
+  const releaseEnvironment = { ...environment, HOME: home, EINZBERN_HOME: join(home, ".einzbern"), GH_CAPTURE: capture, PATH: `${bin}${delimiter}${process.env.PATH ?? ""}` };
   await mkdir(releaseEnvironment.EINZBERN_HOME, { recursive: true });
 
   // STORY-520 GWT2: without the version's Wiki page the plan is refused, the CLI prints no command,
@@ -463,7 +476,8 @@ test("488-AC1/AC2: the publish plan is inert; tag, push and GitHub release each 
 
   const released = await executeReleaseAction({ action: "release", ...repos, version: NEXT_VERSION, env: releaseEnvironment });
   assert.equal(released.reasonCode, "RELEASE_PUBLISHED");
-  const ghCalls = (await readFile(capture, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+  const ghCalls = (await readFile(capture, "utf8")).trim().split(/\r?\n/u).map(line => process.platform === "win32"
+    ? line.split("\t").map(value => Buffer.from(value, "base64").toString("utf8")) : JSON.parse(line));
   assert.equal(ghCalls.length, 2, "gh runs once for the engine and once for the helper");
   const [ghArgs, helperArgs] = ghCalls;
   // MIN-277 D4: the helper's Release follows the engine's, on the same tag, with no attachments.
@@ -563,7 +577,7 @@ function releaseRunner(engineRoot, calls) {
       await writeText(engineRoot, "dist/build/packages/core/src/framework-version.js", stripTypesWithScopedExperimentalWarning(source, { mode: "transform", sourceMap: false }));
       return pnpmBuildResult(engineRoot);
     }
-    const scriptName = args[0]?.split("/").at(-1);
+    const scriptName = args[0] && basename(args[0]);
     if (scriptName === "render-readme.mjs") {
       const result = await renderReadmes({ root: engineRoot, version: args[args.indexOf("--version") + 1] });
       return { status: 0, stdout: `${JSON.stringify(result)}\n`, stderr: "" };

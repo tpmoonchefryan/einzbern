@@ -10,9 +10,10 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFile, cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { devNull, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 import { pathToFileURL } from "node:url";
 
 import { FRAMEWORK_VERSION, createProject, createWork, initializeLibrary, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
@@ -32,7 +33,7 @@ const STORY_LINE = `[Story planned] Zebrafish tank · HOOK-STORY · ${idOf("HOOK
 const RECALL_KEYS = ["schemaVersion", "at", "event", "cwd", "reasonCode", "host"];
 // What a v1 reader written before the host field takes from each line.
 const V1_KEYS = ["schemaVersion", "at", "event", "cwd", "reasonCode"];
-const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: devNull, GIT_CONFIG_NOSYSTEM: "1" };
+const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
 
 async function scratch(context) {
   const base = await realpath(await mkdtemp(join(tmpdir(), "einzbern-hook-recall-log-")));
@@ -40,6 +41,7 @@ async function scratch(context) {
   const home = join(base, "device");
   process.env.EINZBERN_HOME = home;
   context.after(async () => {
+    resetRecallCache();
     process.env.EINZBERN_HOME = previous;
     await rm(base, { recursive: true, force: true });
   });

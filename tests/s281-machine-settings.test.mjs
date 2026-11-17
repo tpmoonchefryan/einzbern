@@ -173,7 +173,7 @@ test("S281 / 476-R5: crest.userPath is a device-level absolute path, stored as i
     await assert.rejects(stat(path), { code: "ENOENT" }, "a refused value writes nothing");
 
     await mkdir(join(base, "cloud"));
-    await symlink(join(base, "cloud"), join(base, "Cloud Drive"));
+    await symlink(join(base, "cloud"), join(base, "Cloud Drive"), process.platform === "win32" ? "junction" : "dir");
     const place = await applyMachineSettingSet({ key: "crest.userPath", value: join(base, "Cloud Drive", "crest"), occurredAt: at, path });
     assert.equal(place.values["crest.userPath"], join(base, "cloud", "crest"), "a place not made yet is stored under its folder's real path");
     const folder = await applyMachineSettingSet({ key: "crest.userPath", value: join(base, "Cloud Drive"), occurredAt: at, path });

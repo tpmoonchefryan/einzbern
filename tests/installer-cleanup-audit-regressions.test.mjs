@@ -36,3 +36,22 @@ test('installer staging preservation failure retains primary engine refusal and 
  assert.ok(result.temporary.startsWith(join(home, 'tmp-'))); await readFile(join(result.temporary, 'einzbern-1.0.0/scripts/einzbern.mjs'));
  assert.equal(await readFile(join(home, 'trash'), 'utf8'), 'occupied, preserve me');
 });
+
+test('Windows installer refuses device names, streams and case collisions before writing', { skip: process.platform !== 'win32' }, async t => {
+ const base = await mkdtemp(join(tmpdir(), 'installer-windows-paths-'));
+ t.after(() => rm(base, { recursive: true, force: true }));
+ const script = resolve('skill/mana-orchestrate/scripts/install.mjs');
+ for (const entries of [
+  { 'NUL.txt': 'device' }, { 'file:stream': 'stream' }, { 'trailing.': 'alias' },
+  { 'trailing ': 'alias' }, { 'Case.txt': 'first', 'case.txt': 'second' },
+ ]) {
+  const bytes = archive(entries);
+  const path = join(base, 'invalid.tar.gz');
+  const home = join(base, 'untouched');
+  await writeFile(path, bytes);
+  const run = spawnSync(process.execPath, [script, '--archive', path, '--sha256', createHash('sha256').update(bytes).digest('hex'), '--home', home], { encoding: 'utf8', windowsHide: true });
+  assert.equal(run.status, 1, run.stdout);
+  assert.equal(JSON.parse(run.stderr.trim()).reasonCode, 'INSTALL_ARCHIVE_INVALID');
+  await assert.rejects(readFile(join(home, 'engine', 'current')), { code: 'ENOENT' });
+ }
+});

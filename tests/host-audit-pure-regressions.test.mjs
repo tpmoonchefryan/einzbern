@@ -2,10 +2,11 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { join, relative } from 'node:path';
+import { join, relative, win32 } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import test from 'node:test';
 import ts from 'typescript';
+import { HOST_HOOK_EVENTS, CODEX_HOOK_EVENTS, HOST_HOOK_POINTER_EVENTS, hostHookCommand } from '../dist/build/packages/core/src/host-hooks.js';
 const legacy = await readFile(new URL('../scripts/platform-doctor.mjs',import.meta.url),'utf8');
 function declarations(source,names) {
  const tree=ts.createSourceFile('source.ts',source,ts.ScriptTarget.Latest,true);const found=[];
@@ -29,7 +30,7 @@ test('legacy validator refuses malformed or explicitly refused zero-exit output'
  }
 });
 test('legacy storage missing metadata cannot erase preceding failed partition',async()=>{
- const inspect=helper('inspectWorkspaceStorageShape',{check,join,WORKFLOW_DIRECTORY:'.control',WORKSPACE_STORAGE_MIGRATION_SEGMENT_BYTES:4194304,readdir:async()=>['a','b'].map(name=>({name,isDirectory:()=>true})),existingPath:async()=>({isDirectory:()=>true}),readFile:async path=>{if(path.includes('/a/'))return JSON.stringify({storageVersion:1});throw Object.assign(new Error('missing'),{code:'ENOENT'});}});
+ const inspect=helper('inspectWorkspaceStorageShape',{check,join,WORKFLOW_DIRECTORY:'.control',WORKSPACE_STORAGE_MIGRATION_SEGMENT_BYTES:4194304,readdir:async()=>['a','b'].map(name=>({name,isDirectory:()=>true})),existingPath:async()=>({isDirectory:()=>true}),readFile:async path=>{if(path.split('\\').join('/').includes('/a/'))return JSON.stringify({storageVersion:1});throw Object.assign(new Error('missing'),{code:'ENOENT'});}});
  for(const options of [{},{acceptanceHeadCommit:'synthetic'}]) {const result=await inspect('/fixture',options);assert.equal(result.ok,false);assert.equal(result.partitions.length,2);assert.equal(result.partitions[0].ok,false);}
 });
 test('legacy capability comparison reports command attribute differences',()=>{
@@ -46,4 +47,18 @@ test('cleanup verifies regular retained snapshot before any removal (source orde
  const apply=declarations(source,['applyArchiveCleanup']);
  assert.ok(apply.indexOf('retained?.isFile()')<apply.indexOf('await rm('));assert.match(apply,/directory\.isSymbolicLink/);assert.match(apply,/retained\.isSymbolicLink/);
  // Deliberately no invocation of destructive cleanup.
+});
+
+test('legacy doctor resolves canonical encoded Windows hook bindings', () => {
+ const home = 'C:\\profiles\\fixture';
+ const detect = helper('nodeHookTarget', {
+  resolve: win32.resolve, homedir: () => home,
+  HOST_HOOK_EVENTS, CODEX_HOOK_EVENTS, HOST_HOOK_POINTER_EVENTS,
+  hostHookCommand: (target, event, userHome) => hostHookCommand(target, event, userHome, 'win32'),
+ });
+ for (const target of ['D:\\device\\engine\\hook.mjs', `${home}\\%PATH% & device\\engine\\hook.mjs`]) {
+  const command = hostHookCommand(target, 'UserPromptSubmit', home, 'win32');
+  assert.equal(detect(command, undefined, home), target);
+  assert.equal(detect(command.replace('user-prompt-submit', 'unrecognized'), undefined, home), undefined);
+ }
 });

@@ -5,7 +5,7 @@ import { StringDecoder } from "node:string_decoder";
 
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 
-import { spawn } from "node:child_process";
+import { spawnCommand as spawn } from "../../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import { accessSync, constants as fsConstants, statSync } from "node:fs";
 
 export const HOST_PROBE_HOSTS = Object.freeze(["claude-code", "codex"] as const);
@@ -76,7 +76,7 @@ function argumentsFor(selectedHost: HostProbeHost, model: string): readonly stri
 function defaultExecutable(selectedHost: HostProbeHost, env: NodeJS.ProcessEnv): string {
   if (selectedHost === "codex") return "codex";
   const hostExecutable = env.CLAUDE_CODE_EXECPATH ?? "";
-  if (hostExecutable.length > 0) {
+  if (hostExecutable.length > 0 && (process.platform !== "win32" || /\.(?:exe|com|cmd|bat)$/iu.test(hostExecutable))) {
     try {
       accessSync(hostExecutable, fsConstants.X_OK);
       if (statSync(hostExecutable).isFile()) return hostExecutable;
@@ -193,10 +193,12 @@ export async function probeHost(input: {
       finish(null, null, error.code === "ENOENT" ? "unavailable" : "available", error.code === "ENOENT");
     });
     child.once("close", (exitCode, signal) => finish(exitCode, signal, "available"));
-    timer = setTimeout(() => {
-      timedOut = true;
-      terminate(child, "SIGTERM");
-      setTimeout(() => terminate(child, "SIGKILL"), 250).unref();
-    }, timeoutMs);
+    child.once("spawn", () => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        terminate(child, "SIGTERM");
+        setTimeout(() => terminate(child, "SIGKILL"), 250).unref();
+      }, timeoutMs);
+    });
   });
 }
