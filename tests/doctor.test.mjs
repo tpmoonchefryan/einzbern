@@ -176,7 +176,7 @@ test("480-AC5: hooks-present is red for a host without its hook", async (context
   const results = await doctor(fixture);
   assertOnlyRed(results, "hooks-present", "HOOK_MISSING");
   const hosts = byCheck(results, "hooks-present").detail.hosts;
-  assert.deepEqual(hosts.map((host) => [host.host, host.causes]), [["claude-code", ["HOOK_MISSING"]], ["codex", []], ["kiro", []], ["antigravity", []]]);
+  assert.deepEqual(hosts.map((host) => [host.host, host.causes]), [["claude-code", ["HOOK_MISSING"]], ["codex", []], ["kiro", []], ["antigravity", []], ["devin", []]]);
 });
 
 test("480-AC5: hooks-present is red for a host whose hook is in both scopes", async (context) => {
@@ -444,7 +444,7 @@ test("548-AC4: no DSH profiles, no dsh entry", async (context) => {
   const results = await doctor(fixture);
   assert.ok(results.every((entry) => entry.ok));
   assert.equal(dshEntry(results), undefined);
-  assert.deepEqual(byCheck(results, "hooks-present").detail.hosts.map((host) => host.host), ["claude-code", "codex", "kiro", "antigravity"]);
+  assert.deepEqual(byCheck(results, "hooks-present").detail.hosts.map((host) => host.host), ["claude-code", "codex", "kiro", "antigravity", "devin"]);
 });
 
 test("548-AC4: a profile whose plugin runs this device directory's launcher is green, and doctor writes nothing under .dsh", async (context) => {

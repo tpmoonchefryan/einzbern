@@ -33,7 +33,7 @@ This governs approved decomposition, implementation, gates, testing, acceptance,
 
 ### Codex independent peer-conversation contract (not other hosts or dot)
 
-Only explicitly selected Codex multi-subagent orchestration uses an independent main-category decision conversation and economy-category coordinator conversation, not a parent/collector pair. The main conversation owns batch goals, stage boundaries, judgment and next-batch authorization. The economy coordinator directly dispatches fresh workers according to task categories and existing rejection-escalation thresholds, waits for them and reads their native results. Workers do not proactively message their parent; retain native final and use supported result/interruption paths for safety and hard blockers. The coordinator is not a read-only collector and dispatches no collector. Claude Code and DSH retain single-conversation coordination and native completion notifications; dot policy is unchanged.
+Only explicitly selected Codex multi-subagent orchestration uses an independent main-category decision conversation and economy-category coordinator conversation, not a parent/collector pair. The main conversation owns batch goals, stage boundaries, judgment and next-batch authorization. The economy coordinator directly dispatches fresh workers according to task categories and existing rejection-escalation thresholds, waits for them and reads their native results. Workers do not proactively message their parent; retain native final and use supported result/interruption paths for safety and hard blockers. The coordinator is not a read-only collector and dispatches no collector. Claude Code, DSH and Devin retain single-conversation coordination and native completion notifications; dot policy is unchanged.
 
 Roles use main, economy and optional flagship categories, never concrete model bindings. Installation guidance offers all three stable categories. This mode requires usable main and economy model groups in the selected device-host policy; the flagship model group may remain unconfigured. Empty groups are neither usable models nor escalation ceilings. Never invent a model, effort, decision provenance or host support. Update/repair supplements missing defaults idempotently while preserving user models, custom categories and other hosts. Resolve the actual policy revision and retain dispatch receipts.
 
@@ -75,7 +75,7 @@ Record source/automated regression separately from native-host acceptance. The c
 
 ### Codex 独立双对话契约（其他宿主与 dot 不适用）
 
-仅在明确选定 Codex 宿主的多子代理编排中使用独立的主力主决策对话与经济协调对话；不是父子收集代理。主决策对话负责批目标、阶段边界、判断及下一批授权；经济协调对话直接派出全新工作子代理，按任务类型的类别与既有退回阈值升档，直接等待并读取其原生结果。工作子代理不主动向父对话发消息，保留原生 final；安全和硬阻塞通过宿主支持的结果/中断路径处理。协调者不是只读收集者，也不另派收集者。Claude Code、DSH 仍由单主对话协调子代理并使用原生完成通知；dot 策略不变。
+仅在明确选定 Codex 宿主的多子代理编排中使用独立的主力主决策对话与经济协调对话；不是父子收集代理。主决策对话负责批目标、阶段边界、判断及下一批授权；经济协调对话直接派出全新工作子代理，按任务类型的类别与既有退回阈值升档，直接等待并读取其原生结果。工作子代理不主动向父对话发消息，保留原生 final；安全和硬阻塞通过宿主支持的结果/中断路径处理。协调者不是只读收集者，也不另派收集者。Claude Code、DSH 与 Devin 仍由单主对话协调子代理并使用原生完成通知；dot 策略不变。
 
 角色只使用 main（主力）、economy（经济）与可选 flagship（旗舰）类别，不绑定具体模型。安装引导提供这三个稳定分类；所选设备宿主策略必须配置可解析的 main 与 economy 模型组才可启用本模式，flagship 模型组可跳过。空组不是可用模型或升档上限，不编造模型、effort、决定来源或宿主支持；更新/修复幂等补缺，保留用户模型、自定义分类及其他宿主。按实际策略版本解析并保留派工回执。
 

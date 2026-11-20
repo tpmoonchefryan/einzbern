@@ -9,7 +9,7 @@ old SubagentStop/collector-wait design is superseded history, not an alternate
 mode. Historical work records, commits and failure evidence remain intact.
 
 Only an explicitly selected **Codex** host uses this contract. Unknown host is
-not Codex admission. Claude Code and DSH keep their existing single main
+not Codex admission. Claude Code, DSH and Devin keep a single main
 conversation coordinating workers with native completion notifications. Dot
 policy and generic collection/conference behavior are unchanged.
 

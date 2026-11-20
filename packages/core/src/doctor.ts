@@ -68,6 +68,7 @@ import { HOST_HOOK_FILES, HOST_HOOK_FILE_HOSTS, hookLauncherPath, isEinzbernHook
 import type { HostHookFileHost, HostHookScope, HostHooksPlan } from "./host-hooks.js";
 import { managedSectionRecordKey, managedSectionRecordsFor, planManagedWrite } from "./managed-sections.js";
 import { readAgentsNavigation } from "./machine-settings.js";
+import { readEngineModelPolicyFile } from "./engine-model-policy.js";
 import { listRules } from "./rules.js";
 import { DIRECTORY } from "./names.js";
 import { NODE_FLOOR, meetsNodeFloor } from "./node-floor.js";
@@ -463,6 +464,49 @@ async function hooksPresentCheck(context: DoctorContext): Promise<DoctorCheck> {
     hooks: antigravityCount,
     files: antigravityFiles,
     causes: [...unique(antigravityCauses)],
+  });
+  // Devin: its own configuration's hooks and the profiles of the device policy. The Claude Code
+  // registration Devin imports is that host's file and is judged there.
+  const { devinHookCount, devinHooksFile, devinSelectionStatus, planDevinHooks, planDevinProfiles, probeDevinHost } = await import("./devin-host.js");
+  const devinEnv = { ...context.cloud.env } as NodeJS.ProcessEnv;
+  const devinIdentity = probeDevinHost({ home: context.home, env: devinEnv });
+  const devinSelection = devinSelectionStatus({ home: context.home, env: devinEnv, platform: context.platform });
+  const devinCauses: string[] = [];
+  let devinCount = 0;
+  let devinProfiles: JsonValue = [];
+  if (devinSelection === "selected") {
+    needsLauncher = true;
+    try {
+      const navigation = await readAgentsNavigation(context.deviceHome);
+      const plan = await planDevinHooks({ home: context.home, env: devinEnv, platform: context.platform, deviceHome: context.deviceHome, navigation });
+      devinCount = devinHookCount(plan?.files[0]?.before ?? null);
+      if (devinCount === 0) devinCauses.push("HOOK_MISSING");
+      else if (devinCount > 1) devinCauses.push("HOOK_DUPLICATED");
+      else if (plan !== null && plan.files.some(file => file.changed)) devinCauses.push("HOOK_NOT_AS_EXPECTED");
+    } catch (error) {
+      devinCauses.push(causeOf(error));
+    }
+    try {
+      const policy = await readEngineModelPolicyFile(context.deviceHome);
+      const plan = await planDevinProfiles({ home: context.home, env: devinEnv, platform: context.platform, tiers: Object.hasOwn(policy.hosts, "devin") ? policy.hosts["devin"]!.tiers : null });
+      devinProfiles = (plan?.files ?? []).map(file => ({ name: file.name, state: file.action }));
+      if (plan !== null && (plan.changed || plan.conflicts.length > 0)) devinCauses.push("DEVIN_PROFILE_NOT_AS_EXPECTED");
+    } catch (error) {
+      devinCauses.push(causeOf(error));
+    }
+  }
+  causes.push(...devinCauses);
+  hosts.push({
+    host: "devin",
+    applicability: devinSelection === "selected" ? "selected" : devinSelection === "not-selected" ? "not-selected" : "selection-unknown",
+    selection: devinSelection,
+    cliVersion: devinIdentity.cli.version,
+    cliStatus: devinIdentity.cli.status,
+    desktopVersion: devinIdentity.desktop.version,
+    hooks: devinCount,
+    files: [{ path: devinHooksFile({ home: context.home, env: devinEnv, platform: context.platform }), hooks: devinCount }],
+    profiles: devinProfiles,
+    causes: [...unique(devinCauses)],
   });
   // TCRN-CROSS-STORY-548 R4: DSH keeps no hook file; when this home has DSH profiles, its entry says
   // what each profile's plugin would run. A launcher other than this device directory's is red; a
