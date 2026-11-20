@@ -9,6 +9,12 @@ installed hooks with that same plan. SessionStart remains the navigation fallbac
 when agents.navigation is declined. SSH and control-tree hooks remain retired.
 DSH's existing contract is unchanged.
 
+Devin has its own registration in its user configuration: UserPromptSubmit, a
+PreToolUse group matched to its `read` tool, and SessionStart when navigation is
+declined. Devin has no subagent-start event. It also runs the Claude Code
+registration it imports; the launcher lets that run answer nothing while Devin's
+own registration is installed. See `specs/devin-host-v1.md`.
+
 ## Subagent first-work context (BL-34)
 
 The native SubagentStart envelope provides agent_type and agent_id, not the
@@ -38,13 +44,16 @@ not parsed or executed, and they are never refused by this guard. Unknown input,
 missing paths, directories and filesystem exceptions fail open. The engine records
 an observed/denied outcome without recording command text or file contents. Hosts
 without a dedicated Read surface do not acquire shell enforcement through aliases.
+Devin's dedicated reader is named `read` and takes the same path, offset and limit;
+under Devin that tool is held to the same window and a refusal uses Devin's
+`decision: block` answer.
 
 ## Codex peer coordination and retired collector hooks
 
 The current Codex contract is `docs/codex-native-controller.md`: independent main
 and economy conversations, with the economy coordinator directly dispatching and
 reading worker results. It is selected only for an explicit Codex host, never by
-an unknown-host fallback. Claude Code and DSH retain single-conversation
+an unknown-host fallback. Claude Code, DSH and Devin retain single-conversation
 coordination and native completion notifications; dot remains independent.
 
 A successful native SEND is retained as an unbound handoff observation even before

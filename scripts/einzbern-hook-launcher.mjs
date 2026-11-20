@@ -462,13 +462,69 @@ async function readInput() {
   return payload;
 }
 
+// Held equal to packages/core/src/devin-host.ts (devinConfigRoot) and host-hooks.ts (the devin
+// binding hostHookCommand writes). The stable launcher imports nothing from a versioned engine.
+const DEVIN_HOST_BINDING = "process.env.EINZBERN_HOST='devin'";
+
+function devinConfigFile(env, home = homedir()) {
+  const inside = (path) => {
+    if (typeof path !== "string" || !isAbsolute(path)) return false;
+    const absolute = resolve(path);
+    return absolute !== resolve(home) && within(absolute, resolve(home));
+  };
+  if (process.platform === "win32") return join(inside(env.APPDATA) ? resolve(env.APPDATA) : join(home, "AppData", "Roaming"), "devin", "config.json");
+  return join(inside(env.XDG_CONFIG_HOME) ? resolve(env.XDG_CONFIG_HOME) : join(home, ".config"), "devin", "config.json");
+}
+
+/** Whether Devin's own configuration holds an Einzbern hook command bound to devin. */
+export function devinRegistrationInstalled(env = process.env, home = homedir()) {
+  let text;
+  try {
+    text = readFileSync(devinConfigFile(env, home), "utf8");
+  } catch {
+    return false;
+  }
+  try {
+    const hooks = JSON.parse(text)?.hooks;
+    if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) return false;
+    return Object.values(hooks).some((groups) => Array.isArray(groups) && groups.some((group) => Array.isArray(group?.hooks)
+      && group.hooks.some((hook) => typeof hook?.command === "string" && hook.command.includes("/*einzbern-hook*/") && hook.command.includes(DEVIN_HOST_BINDING))));
+  } catch {
+    // Setup writes only strict JSON. A file edited into JSON with comments afterwards is searched
+    // as text, so the two registrations still do not both answer.
+    return text.includes("/*einzbern-hook*/") && text.includes(DEVIN_HOST_BINDING);
+  }
+}
+
+function noteDevinYield(device, event, payload) {
+  try {
+    const logDirectory = join(device, LOG_DIRECTORY);
+    try {
+      mkdirSync(logDirectory, { mode: 0o700 });
+    } catch (error) {
+      if (error?.code !== "EEXIST") return;
+    }
+    const line = { schemaVersion: LOG_SCHEMA_VERSION, at: new Date().toISOString(), event, cwd: promptDirectory(payload), reasonCode: "HOOK_DEVIN_IMPORT_YIELDED", host: "devin" };
+    appendFileSync(join(logDirectory, LOG_FILE), `${JSON.stringify(line)}\n`, { mode: 0o600 });
+  } catch {
+    // A line that cannot be written changes nothing the hook answers.
+  }
+}
+
 export async function launch(argv, env) {
   if (!meetsNodeFloor(process.versions.node)) return null;
   const event = argv[0];
   if (typeof event !== "string" || event.length === 0) throw new HookLaunchError("HOOK_EVENT_MISSING", "the hook command names no event");
   const payload = await readInput();
   const device = deviceDirectory(env);
-  const codex = env.EINZBERN_HOST === "codex" || (!env.EINZBERN_HOST && !env.CLAUDE_PROJECT_DIR);
+  // Devin runs two registrations of this launcher: its own, bound to devin, and the Claude Code
+  // one it imports. When its own is installed the imported run answers nothing, so one prompt is
+  // recalled once. Without its own, the imported run goes on and is recorded as devin.
+  if (!env.EINZBERN_HOST && env.DEVIN_PROJECT_DIR && devinRegistrationInstalled(env)) {
+    if (event === "user-prompt-submit") noteDevinYield(device, event, payload);
+    return null;
+  }
+  const codex = env.EINZBERN_HOST === "codex" || (!env.EINZBERN_HOST && !env.CLAUDE_PROJECT_DIR && !env.DEVIN_PROJECT_DIR);
   const workerTool = typeof payload.tool_name === "string" && (/(?:^|__|\.)(?:create_thread|fork_thread)$/u.test(payload.tool_name) || ["collaboration.spawn_agent", "collaboration__spawn_agent", "multi_agent_v1.spawn_agent", "spawn_agent"].includes(payload.tool_name));
   const queryTool = ["mcp__codex_app__read_thread", "mcp__codex_app__wait_threads"].includes(payload.tool_name);
   const peerTool = workerTool || queryTool || payload.tool_name === "mcp__codex_app__send_message_to_thread";

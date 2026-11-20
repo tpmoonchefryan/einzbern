@@ -121,7 +121,7 @@ test("fresh mode removes explicitly declined shared navigation, preserving user 
   assert.equal(await readFile(agentsPath, "utf8"), beforeDecline.replace(`${navigation.raw}\n`, ""));
   assertSelfCheck(declined, true);
   const hooksCheck = check(declined, "hooks-present");
-  const traditionalHosts = hooksCheck.detail.hosts.filter((host) => host.host !== "kiro" && host.host !== "antigravity");
+  const traditionalHosts = hooksCheck.detail.hosts.filter((host) => host.host !== "kiro" && host.host !== "antigravity" && host.host !== "devin");
   assert.ok(traditionalHosts.every((host) => host.hooks === 1));
   const optionalKiro = hooksCheck.detail.hosts.find((host) => host.host === "kiro");
   assert.equal(optionalKiro.selection, "not-selected");

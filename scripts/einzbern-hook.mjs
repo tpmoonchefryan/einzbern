@@ -135,6 +135,12 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
         }
         return `${JSON.stringify({ decision: "allow" })}\n`;
       }
+      if (host === "devin") {
+        const reason = devinReadGuardReason(body, directory);
+        noteRecall(deviceHome(process.env), event, directory, reason === null ? "HOOK_READ_GUARD_OBSERVED" : "HOOK_READ_GUARD_DENIED", host);
+        // Devin documents the top-level decision for a blocked tool call.
+        return reason === null ? null : `${JSON.stringify({ decision: "block", reason })}\n`;
+      }
       if (host === "codex" && !peerGuardObserved) {
         const { runCodexPeerHook } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
         const result = await runCodexPeerHook(name, body, deviceHome(process.env));
@@ -271,6 +277,18 @@ function readGuardReason(payload, cwd) {
     // An unreadable path, invalid input or filesystem exception must never block a tool.
     return null;
   }
+}
+
+/**
+ * Devin names its file reader `read`, with the same file_path, one-based offset and limit as the
+ * guarded Read. An image is shown, not read as a text window, and is left to the host.
+ */
+function devinReadGuardReason(payload, cwd) {
+  if (payload?.tool_name !== "read") return null;
+  const input = payload.tool_input;
+  if (input === null || typeof input !== "object" || Array.isArray(input) || typeof input.file_path !== "string") return null;
+  if (/\.(?:png|jpe?g|gif|webp|bmp)$/iu.test(input.file_path)) return null;
+  return readGuardReason({ ...payload, tool_name: "Read" }, cwd);
 }
 
 /** Launcher-only role check before project resolution. No library recall or project access. */

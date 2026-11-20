@@ -51,7 +51,7 @@ function fail(reasonCode: SkillRenderReasonCode, message: string, details: Reado
 }
 
 /** Description A, extended with coding-task discovery for Einzbern-managed projects. */
-export const SKILL_DESCRIPTION = "The Grail grants wishes; Mana Orchestrate makes the mana flow to the right place at the right moment. It brings Einzbern, project memory, into Claude Code, Codex, Kiro, Antigravity and DeepSeek Harness: recall before you start, write results back to the work item, record decisions as minutes, keep lessons as cards. Where Einzbern is not installed yet, it is the wizard: install, restore, update, migrate, uninstall, health check. Use for Einzbern-managed coding, work items, knowledge cards, minutes, .ether, Atelier, installation or updates." as const;
+export const SKILL_DESCRIPTION = "The Grail grants wishes; Mana Orchestrate makes the mana flow to the right place at the right moment. It brings Einzbern, project memory, into Claude Code, Codex, Kiro, Antigravity, Devin and DeepSeek Harness: recall before you start, write results back to the work item, record decisions as minutes, keep lessons as cards. Where Einzbern is not installed yet, it is the wizard: install, restore, update, migrate, uninstall, health check. Use for Einzbern-managed coding, work items, knowledge cards, minutes, .ether, Atelier, installation or updates." as const;
 
 /** One row of the navigation table: at this moment, run these verbs, like this. */
 export interface SkillNavigationEntry {
@@ -79,9 +79,9 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
     action: "Read `work-show --id <id>` or `minutes-show --id <id>`. Use each target's `handoff` for dispatch/gates (`EINZBERN_PROJECT_CONTEXT`). Unresolved targets block dependent work. `--execution-request` requires `dispatchAdmitted=true` and the selected runner/model/effort. Keep that selection. Validate the association with `execution-evidence --from-file <json>`. Retain raw stdout/stderr/exit code. Evidence validation grants no execution permission. `specs/context-v1.md`, `specs/dispatch-admission-evidence-v1.md`.",
   },
   {
-    moment: "Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity)",
+    moment: "Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity, Devin)",
     verbs: ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"],
-    action: "Resolve policy and Class fallback/hard limits. Use normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports, attempt association (`--binding`/`--prior`), unknown/cancel/finality/review: `specs/host-fallback-v1.md`. Dot model selection is host-managed. Host Integrations/controller details: `docs/codex-native-controller.md`, `specs/kiro-host-v1.md`, `docs/antigravity-swarm-controller.md`.",
+    action: "Resolve policy and Class fallback/hard limits. Use normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports, attempt association (`--binding`/`--prior`), unknown/cancel/finality/review: `specs/host-fallback-v1.md`. Dot model selection is host-managed. Host Integrations/controller details: `docs/codex-native-controller.md`, `specs/kiro-host-v1.md`, `docs/antigravity-swarm-controller.md`, `specs/devin-host-v1.md`.",
   },
   {
     moment: "Shared submission",
