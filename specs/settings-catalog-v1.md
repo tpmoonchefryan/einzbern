@@ -42,7 +42,7 @@ Catalog `layer` and `scope` describe three ownership levels:
   ten in all. There `settings-catalog` lists exactly these ten, each with `scope` and
   `layer` `library`; they are read and written for the whole library (a write naming a
   `projectId` refuses as above) and never inherited as development configuration.
-- **device**: `portal.*`, `crest.userPath`, `agents.navigation` and
+- **device**: `portal.*`, `crest.userPath`, `agents.navigation`, `agents.projectRoot` and
   `execution.maxConcurrentHeavyRuns` are kept in this device's `machine-settings.json`, never in
   the library. Project setting verbs refuse
   them with the existing device-level remedy.
@@ -104,6 +104,7 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `general` | `design.buildService` | project | scalar | 7 |
 | `general` | `design.buildProject` | project | scalar | 8 |
 | `general` | `design.consumedVersion` | project | scalar | 9 |
+| `general` | `agents.projectRoot` | device | scalar | 10 |
 | `general` | `agents.generation` | project | scalar | 20 |
 | `general` | `agents.sharedNavigation` | project | scalar | 21 |
 | `general` | `work.contentPolicy` | project | scalar | 22 |
@@ -667,6 +668,32 @@ is read from the file and the records. Any other root, or one within a library, 
 (`MANAGED_SECTION_OUTPUT_UNREGISTERED`, `MANAGED_SECTION_OUTPUT_INSIDE_LIBRARY`).
 A coordination library this device registered no such root for has none: a rule change
 there records the rule alone, with `outputBindingStatus: "unconfigured"` in its receipt.
+
+The device setting `agents.projectRoot` is the device's project root. Harness files live in
+the user's home; AGENTS.md is the only managed file that lives with a project, so the setting
+names the directory that keeps it. It speaks for the library that directory is registered to on
+the device, a project library and a coordination library alike: every entry point that writes
+that library's managed sections writes the project root and refuses any other of its roots with
+`MANAGED_SECTION_OUTPUT_UNREGISTERED` (remedy `machine-settings-set`), one managed AGENTS.md per
+library on a device. A variable write for a project registered at another root of the library
+stays a library-only operation, setup plans no managed sections for such a project, and doctor's
+`managed-sections` check passes it, naming the project root. The setting is one value for the
+device: a library it does not speak for follows the rules above, unchanged, as every library
+does while it is unset or names a directory the registry does not hold (after the root's own
+project is unregistered, say). The registry still resolves a directory to its library and
+project; the setting only says which of a library's registered roots keeps the managed file. It
+is an absolute path stored as its real path, kept on the device and never written into a library
+or into AGENTS.md, because the same project sits at a different path on another device.
+
+`setup --mode fresh` asks for it (`--project-root <dir>`; the other modes refuse the flag and
+leave the stored root as it is). The plan suggests the root the device holds, else the project
+being set up when it is its library's first root on the device. A library with other roots
+registered here on a device that holds no root has no suggestion and the plan carries
+`SETUP_ANSWER_REQUIRED`: taking the new project silently would stop the engine managing the
+AGENTS.md of the others. An answer is the project being set up or a project root the device
+registered (`SETUP_ANSWER_INVALID` otherwise), and the apply stores it. Setting it creates no
+file; AGENTS.md is created by the next explicit write of a managed section there
+(`agents-render`, a rule change, setup).
 
 System and custom variable values are queried on demand through `settings-catalog` and
 `variable-list` for the actual target, with scope and source; they are no longer copied

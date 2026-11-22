@@ -1546,7 +1546,16 @@ function configurationOptions(values: Readonly<Record<string, string>>, boundPro
 async function registeredProjectRootForWorkspace(workspace: string, projectId?: string): Promise<string | null> {
   const state = await materializeWorkspace(workspace);
   const entries = (await readRegistry()).entries.filter((entry) => entry.libraryId === state.metadata.workspaceId && entry.projectId === projectId);
-  if (chainIdentity(state)?.role !== "coordination") return entries.length === 1 ? entries[0]!.projectPath : null;
+  if (chainIdentity(state)?.role !== "coordination") {
+    if (entries.length !== 1) return null;
+    // When another root of the library is this device's project root (agents.projectRoot), this
+    // project has no managed file here, so its variable write is a library-only operation too.
+    const root = entries[0]!.projectPath;
+    return managedOutputBinding(workspace, root, state).then(() => root, (error: unknown) => {
+      if ((error as { reasonCode?: string }).reasonCode === "MANAGED_SECTION_OUTPUT_UNREGISTERED") return null;
+      throw error;
+    });
+  }
   // TCRN-CROSS-STORY-540 GWT2 (TCRN-CROSS-SUB-506): a coordination library's variable sections follow a
   // write into the one root this device registered for it outside every library (managedOutputBinding),
   // and into none while it has no such root, so the write stays a library-only operation.
@@ -1821,7 +1830,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // --yes true it answers SETUP_PLAN_READY and writes nothing; with it, SETUP_APPLIED, whose
   // traditional self-check is doctor's eight checks and the hook run once. The dot target returns
   // only its independent file receipt; it never invokes a legacy hook.
-  { name: "setup", availability: "cli", mutates: true, flags: [{ name: "codex-admission", required: false, valueKind: "string", valueShape: "JSON path to the owning Codex client's observed Codex hook admission; no trust or feature override" }, { name: "execution-target", required: false, valueKind: "string", valueShape: "traditional | chatgpt-dot" }, { name: "dot-input", required: false, valueKind: "string", valueShape: "path to JSON dot target options; required for chatgpt-dot" }, { name: "approved-plan-digest", required: false, valueKind: "string", valueShape: "saved preview dot.planDigest; required for dot apply" }, { name: "mode", required: true, valueKind: "string" }, { name: "project", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "artifacts", required: false, valueKind: "string" }, { name: "cloud", required: false, valueKind: "boolean" }, { name: "restore", required: false, valueKind: "string" }, { name: "language", required: false, valueKind: "string" }, { name: "navigation", required: false, valueKind: "boolean" }, { name: "archive", required: false, valueKind: "string" }, { name: "rollback", required: false, valueKind: "boolean" }, { name: "managed-sections", required: false, valueKind: "string" }, { name: "mapping", required: false, valueKind: "string" }, { name: "yes", required: false, valueKind: "boolean" }] },
+  { name: "setup", availability: "cli", mutates: true, flags: [{ name: "codex-admission", required: false, valueKind: "string", valueShape: "JSON path to the owning Codex client's observed Codex hook admission; no trust or feature override" }, { name: "execution-target", required: false, valueKind: "string", valueShape: "traditional | chatgpt-dot" }, { name: "dot-input", required: false, valueKind: "string", valueShape: "path to JSON dot target options; required for chatgpt-dot" }, { name: "approved-plan-digest", required: false, valueKind: "string", valueShape: "saved preview dot.planDigest; required for dot apply" }, { name: "mode", required: true, valueKind: "string" }, { name: "project", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "artifacts", required: false, valueKind: "string" }, { name: "cloud", required: false, valueKind: "boolean" }, { name: "restore", required: false, valueKind: "string" }, { name: "language", required: false, valueKind: "string" }, { name: "navigation", required: false, valueKind: "boolean" }, { name: "project-root", required: false, valueKind: "string" }, { name: "archive", required: false, valueKind: "string" }, { name: "rollback", required: false, valueKind: "boolean" }, { name: "managed-sections", required: false, valueKind: "string" }, { name: "mapping", required: false, valueKind: "string" }, { name: "yes", required: false, valueKind: "boolean" }] },
   // TCRN-CROSS-STORY-479 R1: the skill directory this engine generates for its version, written
   // into a missing or empty --out; it runs only where the skill template sits beside the engine.
   { name: "skill-render", availability: "cli", mutates: true, flags: [{ name: "out", required: true, valueKind: "string" }, { name: "version", required: false, valueKind: "string" }] },
@@ -2339,6 +2348,7 @@ function setupOptions(values: Readonly<Record<string, string>>): SetupOptions {
       ...(cloud === undefined ? {} : { cloud }),
       ...(values.language === undefined ? {} : { language: values.language }),
       ...(navigation === undefined ? {} : { navigation }),
+      ...(values["project-root"] === undefined ? {} : { projectRoot: values["project-root"] }),
     },
     ...(values.restore === undefined ? {} : { restore: values.restore }),
     ...(values.archive === undefined ? {} : { archive: values.archive }),
@@ -2988,7 +2998,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // TCRN-CROSS-STORY-480 (setup.ts): plan in the chosen mode; apply the plan only with --yes true. The
   // device directory is this process's (EINZBERN_HOME), the one the library records go through.
   if (command === "setup") {
-    const values = parseArguments(rest, ["codex-admission", "execution-target", "dot-input", "approved-plan-digest", "mode", "project", "at", "artifacts", "cloud", "restore", "language", "navigation", "archive", "rollback", "managed-sections", "mapping", "yes"]);
+    const values = parseArguments(rest, ["codex-admission", "execution-target", "dot-input", "approved-plan-digest", "mode", "project", "at", "artifacts", "cloud", "restore", "language", "navigation", "project-root", "archive", "rollback", "managed-sections", "mapping", "yes"]);
     required(values, ["mode", "project", "at"]);
     let options = setupOptions(values);
     if (values["codex-admission"] !== undefined) {

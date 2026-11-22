@@ -171,8 +171,8 @@ export function setupFail(reasonCode: SetupReasonCode, message: string, details:
 
 // ---- Answers, questions, writes ----
 
-/** The four questions of a first installation, on one screen (R5), each with its flag. */
-export const SETUP_QUESTIONS = Object.freeze(["artifacts", "cloud", "language", "navigation"] as const);
+/** The five questions of a first installation, on one screen (R5), each with its flag. */
+export const SETUP_QUESTIONS = Object.freeze(["artifacts", "cloud", "language", "navigation", "projectRoot"] as const);
 export type SetupQuestionId = typeof SETUP_QUESTIONS[number];
 // The questions of the other modes: the library restore reads, the release update installs, what
 // uninstall does with the managed sections, and which library each old workspace migrate finds
@@ -188,6 +188,10 @@ export interface SetupAnswers {
   // Device host-navigation preference (legacy written/declined labels); shared AGENTS
   // content is independently owned by agents.sharedNavigation on its project/library target.
   readonly navigation?: boolean;
+  // This device's project root: the one directory whose AGENTS.md the engine manages
+  // (agents.projectRoot). Not the project being set up (SetupOptions.projectRoot, --project), though
+  // on a device with one project they are the same directory; a relative path is taken from it.
+  readonly projectRoot?: string;
 }
 
 export interface ResolvedSetupAnswers {
@@ -195,6 +199,8 @@ export interface ResolvedSetupAnswers {
   readonly cloud: boolean;
   readonly language: string;
   readonly navigation: boolean;
+  // Asked by a first installation only; the other modes leave the device's project root as it is.
+  readonly projectRoot?: string;
 }
 
 export interface SetupQuestion {
@@ -210,7 +216,7 @@ export interface SetupQuestion {
 }
 
 // The options every mode may be given besides the answers; each belongs to the modes that list it.
-export const SETUP_OPTIONS = Object.freeze(["artifacts", "cloud", "language", "navigation", "restore", "archive", "rollback", "managedSections", "mapping"] as const);
+export const SETUP_OPTIONS = Object.freeze(["artifacts", "cloud", "language", "navigation", "projectRoot", "restore", "archive", "rollback", "managedSections", "mapping"] as const);
 export type SetupOptionName = typeof SETUP_OPTIONS[number];
 
 /** The options of the modes other than fresh, as given (C7 of INIT-053); each belongs to the modes that list it. */
@@ -919,7 +925,7 @@ async function applyMigrateSetup(plan: SetupPlan): Promise<SetupApplied> {
 // call into their modules lazily, so the order the modules load in never matters.
 const MODE_TABLE: Readonly<Record<SetupMode, SetupModeEntry>> = Object.freeze({
   fresh: {
-    options: ["artifacts", "cloud", "language", "navigation"],
+    options: ["artifacts", "cloud", "language", "navigation", "projectRoot"],
     plan: (input: SetupModeInput): Promise<SetupModePlan> => planFreshSetup(input),
     apply: (plan: SetupPlan): Promise<SetupApplied> => applyFreshSetup(plan),
   },
@@ -975,11 +981,16 @@ function checkedAnswers(answers: SetupAnswers): SetupAnswers {
   if (answers.cloud !== undefined && typeof answers.cloud !== "boolean") invalid("cloud", "cloud is true or false");
   if (answers.language !== undefined && (typeof answers.language !== "string" || answers.language.trim() === "")) invalid("language", "the language is a language tag");
   if (answers.navigation !== undefined && typeof answers.navigation !== "boolean") invalid("navigation", "navigation is true or false");
+  if (answers.projectRoot !== undefined &&
+    (typeof answers.projectRoot !== "string" || answers.projectRoot.trim() === "" || answers.projectRoot.includes("\u0000"))) {
+    invalid("projectRoot", "the project root must be a path");
+  }
   return {
     ...(answers.artifacts === undefined ? {} : { artifacts: answers.artifacts }),
     ...(answers.cloud === undefined ? {} : { cloud: answers.cloud }),
     ...(answers.language === undefined ? {} : { language: answers.language }),
     ...(answers.navigation === undefined ? {} : { navigation: answers.navigation }),
+    ...(answers.projectRoot === undefined ? {} : { projectRoot: answers.projectRoot }),
   };
 }
 

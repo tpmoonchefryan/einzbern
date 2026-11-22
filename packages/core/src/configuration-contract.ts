@@ -79,6 +79,7 @@ const CONSUMERS = Object.freeze({
   "paths.knowledgeArticles": "portable-path.ts local knowledge article binding resolution",
   "execution.maxConcurrentAgents": "execution-policy.ts device agent concurrency cap",
   "agents.navigation": "host-render.ts; host-hooks.ts local navigation installation",
+  "agents.projectRoot": "agents-sections.ts managed AGENTS.md output root",
   "crest.userPath": "device-home.ts user crest path resolution",
   "execution.memoryPolicy": "scripts/lib/memory-budget.mjs device safety policy and heavy-run admission",
   "execution.maxConcurrentHeavyRuns": "scripts/lib/heavy-runs.mjs slot acquisition",
@@ -139,7 +140,9 @@ function settingContracts(): readonly ConfigurationContractEntry[] {
     storageSource: "device machine-settings.json",
     inheritance: entry.key.startsWith("portal.default") ? "browser/explicit startup choice before device preference; consumer fallback last" : "device declaration then consumer default",
     sharing: "device-local; not library synced",
-    export: entry.key === "agents.navigation" ? "local host integration; shared navigation follows project generation contract" : "local runtime only; no shared project export",
+    export: entry.key === "agents.navigation" ? "local host integration; shared navigation follows project generation contract"
+      : entry.key === "agents.projectRoot" ? "selects which registered root keeps its library's managed AGENTS.md on this device; never written into a library or into AGENTS.md"
+      : "local runtime only; no shared project export",
     consumer: CONSUMERS[entry.key],
     effect: entry.key === "execution.maxConcurrentHeavyRuns" ? "next slot acquisition" : entry.appliesOn,
     compatibility: "catalog default may differ from consumer fallback; no global precedence chain",

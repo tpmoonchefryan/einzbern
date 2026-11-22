@@ -29,6 +29,10 @@ AGENTS.md 与 CLAUDE.md 是你的文件。Einzbern 只写它自己标记出来�
 | `variables-custom` | AGENTS.md | 自定义变量，见「变量」页。 |
 | `rule:<规则 id>` | AGENTS.md | 一条已启用的 Command Spell 原则的正文。 |
 
+本机设置 `agents.projectRoot`（项目根目录）指定这台设备上保管受管 AGENTS.md 的那个目录。技能和钩子装在用户目录里，只有 AGENTS.md 跟着项目，所以要告诉 Einzbern 它在哪。它对「这个目录在本机登记到的那个库」生效：这个库的受管段只写进项目根目录，写这个库的其他登记目录会被拒绝并报 `MANAGED_SECTION_OUTPUT_UNREGISTERED`，一个库在一台设备上只管一份。没设时，或者它指向的目录没有登记时，各个登记的项目根目录各写各的，和以前一样；本机其他库也不受影响。它只保存在这台设备，不写进库，也不写进 AGENTS.md。
+
+全新安装时向导会问这个目录（`--project-root <目录>`）：本机已经有项目根目录就建议沿用；没有、而这个库在本机还没有别的登记目录，就建议正在安装的项目；没有、但这个库在本机已经登记了别的目录，则必须由你指定，否则计划带 `SETUP_ANSWER_REQUIRED`。回答只能是正在安装的项目，或本机已经登记的项目根目录。之后用 `machine-settings-set --key agents.projectRoot --value <目录> --at <时刻>` 修改。设置它不会新建文件，下一次明确写入受管段（`agents-render`、规则变更或安装）时才会创建 AGENTS.md。
+
 `agents-render [--project <目录>] --at <时刻>` 按库里的记录把上表各段渲染进本机注册表解析出的项目。`--project` 可以是项目里的任何目录，省略时取当前目录。回执 `AGENTS_RENDERED` 列出每一段的 `{id, file, result, state}`、等待你处置的段和备份目录。
 
 ## 你改过的段：三种处置

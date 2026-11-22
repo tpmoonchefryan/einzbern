@@ -1505,6 +1505,7 @@
 | `--restore` | 可选 | `string` |  |
 | `--language` | 可选 | `string` |  |
 | `--navigation` | 可选 | `boolean` |  |
+| `--project-root` | 可选 | `string` |  |
 | `--archive` | 可选 | `string` |  |
 | `--rollback` | 可选 | `boolean` |  |
 | `--managed-sections` | 可选 | `string` |  |

@@ -5,6 +5,12 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+### Managed AGENTS.md
+
+- The device setting `agents.projectRoot` names the device's project root: the registered directory that alone keeps its library's managed AGENTS.md. For that library, managed sections are written there only, a write into another of its roots is refused with `MANAGED_SECTION_OUTPUT_UNREGISTERED`, a variable write for a project registered elsewhere stays in the library, and `doctor` passes such a project's `managed-sections` check. Other libraries on the device, and every library while the setting is unset or names an unregistered directory, keep one managed AGENTS.md per registered root as before. The value stays on the device.
+- `setup --mode fresh` asks for the project root with `--project-root <dir>` and stores the answer. The plan suggests the root the device already holds, or the project being set up when it is its library's first on the device. On a device that holds no root while the library already has other projects registered, the plan requires the answer (`SETUP_ANSWER_REQUIRED`). After such an installation, another project installed into the same library takes no managed sections of its own. The other modes leave the stored root as it is and refuse the flag.
+- Unregistering or uninstalling the project that is the device's project root leaves the setting naming an unregistered directory, so the library's remaining projects answer for their own managed sections again; `doctor` reports `MANAGED_FILE_MISSING` for one that never had them until it is repaired or the setting is pointed at it.
+
 ## 5.0.1
 
 Einzbern and Mana Orchestrate ship in lockstep at 5.0.1.

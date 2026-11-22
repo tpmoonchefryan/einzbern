@@ -71,6 +71,7 @@ import type {
   ParsedManagedFile,
   ParsedSection,
 } from "./managed-sections.js";
+import { AGENTS_PROJECT_ROOT_SETTING, readAgentsProjectRoot } from "./machine-settings.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
 import { gitTopLevel, readRegistry, resolveLibrary } from "./registry.js";
 import type { ResolutionPath } from "./registry.js";
@@ -538,6 +539,23 @@ function insideLibrary(path: string, libraries: readonly string[]): boolean {
 }
 
 /**
+ * The one directory that takes a library's managed sections on this device, or null when the device
+ * declares none for it (Owner decision minutes:3fd5f6bdbc889992e2db015a#D1-D2): the device setting
+ * agents.projectRoot, while this device's registry holds that directory as a project root of the
+ * library. The setting is one value for the device, so it speaks for the library its directory is
+ * registered to and for no other; a directory the registry does not hold speaks for none. The
+ * registry still resolves a directory to its library and project (resolveAgentsProject); this only
+ * says which of a library's registered roots keeps the managed AGENTS.md. `home` as
+ * managedOutputBinding takes it.
+ */
+export async function declaredManagedRoot(libraryId: string, home?: string): Promise<string | null> {
+  const declared = await readAgentsProjectRoot(home);
+  if (declared === null) return null;
+  const registered = (await readRegistry(home)).entries.some((entry) => entry.libraryId === libraryId && entry.projectPath === declared);
+  return registered ? declared : null;
+}
+
+/**
  * Where a library's managed sections may be written, checked by every entry point that writes them
  * (agents-render, rule-resolve, rule-enable, rule-disable and the variable sections), even for a direct
  * caller. A project root is never the library or a directory within it
@@ -554,6 +572,11 @@ function insideLibrary(path: string, libraries: readonly string[]): boolean {
  * entry point refuses (assertManagedOutputRoot). A project library is bound wherever it is not refused.
  * `home` is the device directory whose registry is read: this process's by default, setup's own
  * when setup plans (TCRN-CROSS-SUB-507, setup-fresh.ts).
+ *
+ * The device's project root comes first (declaredManagedRoot): a library it is declared for takes
+ * managed sections in that directory and in no other, a project library and a coordination
+ * library alike, and any other directory is refused with MANAGED_SECTION_OUTPUT_UNREGISTERED.
+ * A library the device declares no root for follows the rules above, unchanged.
  */
 export async function managedOutputBinding(libraryRoot: string, projectRoot: string, state: Pick<WorkspaceState, "configRecords" | "metadata">, home?: string): Promise<ManagedOutputBinding> {
   const library = await realpath(libraryRoot);
@@ -562,6 +585,18 @@ export async function managedOutputBinding(libraryRoot: string, projectRoot: str
     library,
     project,
   });
+  const declaredRoot = await declaredManagedRoot(state.metadata.workspaceId, home);
+  if (declaredRoot !== null) {
+    if (insideLibrary(project, [library])) insideRefusal();
+    if (declaredRoot !== project) {
+      fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `this device writes the library's managed sections only into its project root ${declaredRoot} (${AGENTS_PROJECT_ROOT_SETTING}), not ${project}`, {
+        library,
+        project,
+        remedy: "machine-settings-set",
+      });
+    }
+    return "bound";
+  }
   if (chainIdentity(state)?.role !== "coordination") {
     if (insideLibrary(project, [library])) insideRefusal();
     return "bound";

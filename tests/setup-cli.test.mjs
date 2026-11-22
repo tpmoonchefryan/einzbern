@@ -20,7 +20,7 @@ import test from "node:test";
 
 import { renderWritableRoots } from "../scripts/host-render.mjs";
 import { libraryTreeDigests } from "../dist/build/packages/core/src/workspace-snapshot.js";
-import { runCli } from "../dist/build/packages/cli/src/index.js";
+import { ATELIER_SURFACE, SURFACE_ENVIRONMENT_VARIABLE, runCli } from "../dist/build/packages/cli/src/index.js";
 import {
   DOCTOR_CHECKS,
   FRAMEWORK_VERSION,
@@ -188,7 +188,7 @@ test("480-AC1, AC2 through the CLI: setup plans without --yes and writes nothing
   assert.equal(planned.reasonCode, "SETUP_PLAN_READY");
   assert.equal(planned.mode, "fresh");
   assert.deepEqual(planned.blockers, []);
-  assert.deepEqual(planned.questions.map((question) => question.flag), ["--artifacts", "--cloud", "--language", "--navigation"]);
+  assert.deepEqual(planned.questions.map((question) => question.flag), ["--artifacts", "--cloud", "--language", "--navigation", "--project-root"]);
   // The shared library serves as coordination too; setup creates no second library.
   const coordination = f.library;
   assert.deepEqual(planned.writes.filter((entry) => entry.path === coordination).map((entry) => [entry.step, entry.action]), [["library", "create"]]);
@@ -307,7 +307,11 @@ test("project disconnect keeps the other project's registration and shared wirin
   await assert.rejects(cli(["library-resolve", "--cwd", f.project]), { reasonCode: "LIBRARY_NOT_REGISTERED" });
   assert.deepEqual(await snapshot(roots), filesBefore, "both projects and the user-level wiring stay in place");
   assert.deepEqual(await libraryTreeDigests(f.library), libraryBefore);
-  assertChecksGreen((await cli(["doctor", "--project", second.project])).checks);
+  // The unregistered project was this device's project root (agents.projectRoot), the one that kept
+  // the library's managed AGENTS.md. The declaration names no registered root any more, so the
+  // remaining project is expected to hold the sections itself and has none until it is repaired.
+  const remaining = (await cli(["doctor", "--project", second.project])).checks;
+  assert.deepEqual(remaining.filter(({ ok }) => !ok).map(({ check, detail }) => [check, detail.causes]), [["managed-sections", ["MANAGED_FILE_MISSING"]]]);
 });
 
 test("480-AC4, AC5 through the CLI: device uninstall reports both projects' shared impact, backs up the wiring and removes the selected registration", async (context) => {
@@ -380,7 +384,9 @@ test("480-AC4, AC5 through the CLI: device uninstall reports both projects' shar
     ["registry", "DOCTOR_REGISTRY_UNRESOLVED"],
   ]);
   const secondAfter = await cli(["doctor", "--project", second.project]);
-  assert.deepEqual(secondAfter.checks.filter(({ ok }) => !ok).map(({ check }) => check), ["hooks-present", "skill-copies"]);
+  // managed-sections: the uninstalled project was this device's project root, so the remaining
+  // project now answers for the library's managed sections and has none until it is repaired.
+  assert.deepEqual(secondAfter.checks.filter(({ ok }) => !ok).map(({ check }) => check), ["hooks-present", "skill-copies", "managed-sections"]);
 
   const repeated = await setup(f, "uninstall", "--managed-sections", "keep");
   assert.deepEqual(repeated.writes, []);
@@ -522,4 +528,89 @@ test("setup self-check retains the actual failure detail of an unbundled launche
   const applied = await setup(f, "repair", "--yes", "true");
   assert.equal(applied.selfCheck.hookReasonCode, "HOOK_LAUNCH_FAILED");
   assert.match(applied.selfCheck.hookError, /einzbern-hook/u);
+});
+
+// The device's project root (agents.projectRoot; minutes:3fd5f6bdbc889992e2db015a D1-D2 and
+// minutes:24db819f2cd96135fc100288 D1): the first installation asks for it and stores it, and from
+// then on that root alone takes its library's managed sections on the device.
+
+/** Run `operation` as Atelier does, for the verbs a model's shell may not write through. */
+async function asAtelier(operation) {
+  const previous = process.env[SURFACE_ENVIRONMENT_VARIABLE];
+  process.env[SURFACE_ENVIRONMENT_VARIABLE] = ATELIER_SURFACE;
+  try {
+    return await operation();
+  } finally {
+    restoreEnv(SURFACE_ENVIRONMENT_VARIABLE, previous);
+  }
+}
+
+const deviceProjectRoot = async () => (await cli(["machine-settings-catalog"])).settings.find((setting) => setting.key === "agents.projectRoot").currentValue;
+const hasManagedSection = async (project) => (await readFile(join(project, "AGENTS.md"), "utf8")).includes("einzbern:section");
+
+test("project root: the first installation stores it, and another project of the library takes no managed sections until the root moves", async (context) => {
+  const f = await fixture(context);
+  const planned = await setup(f, "fresh");
+  assert.deepEqual(planned.questions.find((question) => question.id === "projectRoot"), { id: "projectRoot", flag: "--project-root", default: f.project, choices: null });
+  const applied = await setup(f, "fresh", "--project-root", f.project, "--yes", "true");
+  assert.equal(applied.answers.projectRoot, f.project);
+  assert.equal(await deviceProjectRoot(), f.project);
+  assert.equal(await hasManagedSection(f.project), true);
+
+  const second = { ...f, project: join(f.base, "second-project") };
+  await mkdir(second.project);
+  const later = await setup(second, "fresh");
+  assert.deepEqual(later.blockers, []);
+  assert.equal(later.questions.find((question) => question.id === "projectRoot").default, f.project, "the plan suggests the root the device holds");
+  assert.deepEqual(later.writes.filter((entry) => entry.step === "managed-sections"), [], "another root of the library plans no managed sections");
+  await setup(second, "fresh", "--yes", "true");
+  await assert.rejects(lstat(join(second.project, "AGENTS.md")), { code: "ENOENT" });
+  assert.equal(await deviceProjectRoot(), f.project, "the device's root stays");
+  const checks = (await cli(["doctor", "--project", second.project])).checks;
+  assertChecksGreen(checks);
+  assert.equal(checks.find((entry) => entry.check === "managed-sections").detail.projectRoot, f.project);
+
+  // Only the device's project root is written; a variable of the other project stays in the library.
+  await assert.rejects(cli(["agents-render", "--project", second.project, "--at", at()]), { reasonCode: "MANAGED_SECTION_OUTPUT_UNREGISTERED" });
+  assert.equal((await cli(["agents-render", "--project", f.project, "--at", at()])).reasonCode, "AGENTS_RENDERED");
+  const secondId = (await cli(["library-list"])).entries.find((entry) => entry.projectPath === second.project).projectId;
+  await asAtelier(() => cli(["variable-set", "--workspace", f.library, "--project-id", secondId, "--name", "task.category", "--type", "string", "--value", "main", "--exports", "agents", "--at", at()]));
+  assert.deepEqual((await cli(["variable-list", "--workspace", f.library, "--project-id", secondId])).variables.map((variable) => variable.name), ["task.category"]);
+  await assert.rejects(lstat(join(second.project, "AGENTS.md")), { code: "ENOENT" });
+
+  // Moving the root is one device setting: the second project takes the sections, the first is refused.
+  assert.equal((await cli(["machine-settings-set", "--key", "agents.projectRoot", "--value", second.project, "--at", at()])).reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
+  assert.equal((await cli(["agents-render", "--project", second.project, "--at", at()])).reasonCode, "AGENTS_RENDERED");
+  assert.equal(await hasManagedSection(second.project), true);
+  await assert.rejects(cli(["agents-render", "--project", f.project, "--at", at()]), { reasonCode: "MANAGED_SECTION_OUTPUT_UNREGISTERED" });
+});
+
+test("project root: setup takes a registered root in fresh mode only, and asks when a library's roots predate the setting", async (context) => {
+  const [f, second] = await twoProjectFixture(context);
+  const third = { ...f, project: join(f.base, "third-project") };
+  const stray = join(f.base, "not-registered");
+  for (const directory of [third.project, stray]) await mkdir(directory);
+
+  const refused = await setup(third, "fresh", "--project-root", stray);
+  assert.deepEqual(refused.blockers.map((blocker) => [blocker.step, blocker.reasonCode, blocker.path]), [["machine-settings", "SETUP_ANSWER_INVALID", stray]]);
+  await assert.rejects(setup(third, "fresh", "--project-root", stray, "--yes", "true"), { reasonCode: "SETUP_BLOCKED" });
+  await assert.rejects(setup(f, "repair", "--project-root", f.project), { reasonCode: "SETUP_OPTION_NOT_APPLICABLE" });
+
+  // A root this device registered is an answer.
+  const named = await setup(third, "fresh", "--project-root", second.project);
+  assert.deepEqual(named.blockers, []);
+  assert.equal(named.resolved.projectRoot, second.project);
+  assert.deepEqual(named.questions.filter((question) => question.id === "projectRoot"), []);
+
+  // A device set up before the setting existed: its library has roots here and it holds none.
+  // Taking the new project would stop the engine managing the others, so the plan has no default.
+  await cli(["machine-settings-remove", "--key", "agents.projectRoot", "--at", at()]);
+  const unanswered = await setup(third, "fresh");
+  assert.deepEqual(unanswered.questions.find((question) => question.id === "projectRoot"), { id: "projectRoot", flag: "--project-root", default: null, choices: null });
+  assert.equal(Object.hasOwn(unanswered.resolved, "projectRoot"), false);
+  assert.deepEqual(unanswered.blockers.map((blocker) => [blocker.step, blocker.reasonCode]), [["machine-settings", "SETUP_ANSWER_REQUIRED"]]);
+  const answered = await setup(third, "fresh", "--project-root", third.project, "--yes", "true");
+  assert.equal(answered.answers.projectRoot, third.project);
+  assert.equal(await deviceProjectRoot(), third.project);
+  assert.equal(await hasManagedSection(third.project), true);
 });

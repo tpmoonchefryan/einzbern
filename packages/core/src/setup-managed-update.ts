@@ -57,7 +57,8 @@ export async function planSetupManagedUpdates(recorder: SetupRecorder, deviceHom
       outputs.push({ ...target, status: "planned", pending });
     } catch (error) {
       const reasonCode = reasonOf(error) ?? "MANAGED_OUTPUT_UNAVAILABLE";
-      const skipped = reasonCode === "DOT_INDEPENDENT_TARGET" || reasonCode === "MANAGED_SECTION_OUTPUT_INSIDE_LIBRARY";
+      // MANAGED_SECTION_OUTPUT_UNREGISTERED: another root of the library is this device's project root (agents.projectRoot).
+      const skipped = reasonCode === "DOT_INDEPENDENT_TARGET" || reasonCode === "MANAGED_SECTION_OUTPUT_INSIDE_LIBRARY" || reasonCode === "MANAGED_SECTION_OUTPUT_UNREGISTERED";
       outputs.push({ ...target, status: skipped ? "skipped" : "unavailable", reasonCode });
     }
   }

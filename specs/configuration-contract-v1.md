@@ -88,6 +88,9 @@ on machine-settings/device-clean remains the user home, not the device directory
 `agents.generation=none` stops future managed output creation/updates; it never
 silently deletes existing files. `agents.sharedNavigation` controls the portable
 navigation declaration; device `agents.navigation` only selects host integration.
+Device `agents.projectRoot` names the registered root that alone keeps its library's
+managed AGENTS.md on the device; it selects where managed output goes and is never
+exported with a library.
 New general-group display orders are 20 and 21, after existing design fields.
 Other existing managed sections are preserved according to the normal user-edit
 and explicit-removal rules. Re-render affected targets explicitly after changing

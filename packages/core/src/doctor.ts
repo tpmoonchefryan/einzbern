@@ -36,7 +36,7 @@ import type { CodexHookAdmission } from "./host-hooks.js";
 // this engine may not open is never locked or probed (format-version.ts).
 
 import { createHash, randomBytes } from "node:crypto";
-import { agentsFileSections } from "./agents-sections.js";
+import { agentsFileSections, declaredManagedRoot } from "./agents-sections.js";
 import { isSharedLibrary } from "./chain-identity.js";
 import { scopedWorkspaceState } from "./project-scope.js";
 import { effectiveProjectState } from "./project-chain.js";
@@ -752,6 +752,12 @@ async function managedSectionsCheck(context: DoctorContext, located: ProjectLibr
   if (located.libraryPath === null) return result("managed-sections", ["LIBRARY_NOT_FOUND"], { libraryPath: null });
   // Replayed from the streams, read-only: neither the device cache nor the projection is trusted.
   const native = await materializeWorkspaceFromGenesis(located.libraryPath);
+  // This device keeps the library's managed AGENTS.md in another directory (agents.projectRoot):
+  // the engine writes no section into this project, so no file here can disagree with the library.
+  const declaredRoot = await declaredManagedRoot(native.metadata.workspaceId, context.deviceHome);
+  if (declaredRoot !== null && declaredRoot !== context.projectRoot) {
+    return result("managed-sections", [], { libraryPath: located.libraryPath, files: [], fileReadbacks: [], sections: [], pending: [], removed: [], outdated: [], problems: [], skipped: [], projectRoot: declaredRoot });
+  }
   const state = isSharedLibrary(native) ? scopedWorkspaceState(native, located.entry?.projectId) : native;
   const effective = await effectiveProjectState(native, located.entry?.projectId);
   const recorded = state.configRecords.filter((record) => record.collection === MANAGED_SECTION_COLLECTION);

@@ -47,9 +47,20 @@ export const AGENTS_NAVIGATION_SETTING = "agents.navigation" as const;
 export const AGENTS_NAVIGATION_CHOICES = Object.freeze(["written", "declined"] as const);
 export type AgentsNavigationChoice = typeof AGENTS_NAVIGATION_CHOICES[number];
 
+// This device's project root (Owner decision minutes:3fd5f6bdbc889992e2db015a#D1-D2). Harness
+// files live in the user's home; AGENTS.md is the only managed file that lives with a project, so
+// this names the directory that keeps it. It speaks for the library that directory is registered
+// to on this device: that library's managed sections are written there and into no other of its
+// roots, one file per library (agents-sections.ts, declaredManagedRoot). A library it does not
+// speak for, and every library while it is unset, follows its registered roots as before. A
+// device preference: it is never written into a library or into AGENTS.md, because the same
+// project sits at a different path on another device.
+export const AGENTS_PROJECT_ROOT_SETTING = "agents.projectRoot" as const;
+
 export const MACHINE_SETTING_KEYS = Object.freeze([
   MEMORY_POLICY_SETTING,
   AGENTS_NAVIGATION_SETTING,
+  AGENTS_PROJECT_ROOT_SETTING,
   "paths.artifacts",
   "paths.knowledgeArticles",
   "execution.maxConcurrentAgents",
@@ -131,6 +142,21 @@ export const MACHINE_SETTINGS_CATALOG: readonly MachineSettingsCatalogEntry[] = 
     group: "general",
     order: 3,
     allowedValues: Object.freeze([...AGENTS_NAVIGATION_CHOICES]),
+    appliesOn: "next-open",
+    valueSource: "settings-catalog",
+  }),
+  // The root that keeps its library's managed AGENTS.md on this device
+  // (AGENTS_PROJECT_ROOT_SETTING). An absolute path, stored as its real path like every path key.
+  Object.freeze({
+    key: AGENTS_PROJECT_ROOT_SETTING,
+    type: "path",
+    controlType: "text",
+    layer: "device",
+    layerKind: MACHINE_SETTINGS_LAYER_KIND,
+    defaultValue: null,
+    shape: "scalar",
+    group: "general",
+    order: 10,
     appliesOn: "next-open",
     valueSource: "settings-catalog",
   }),
@@ -397,6 +423,14 @@ export async function readUserCrestPath(device: string = deviceHome()): Promise<
 export async function readAgentsNavigation(device: string = deviceHome()): Promise<AgentsNavigationChoice | null> {
   const value = (await readMachineSettings(join(device, MACHINE_SETTINGS_FILE_NAME))).values[AGENTS_NAVIGATION_SETTING];
   return AGENTS_NAVIGATION_CHOICES.find((choice) => choice === value) ?? null;
+}
+
+/**
+ * This device's project root (agents.projectRoot) as the settings in `device` (the device
+ * directory) state it, or null while none is set.
+ */
+export async function readAgentsProjectRoot(device: string = deviceHome()): Promise<string | null> {
+  return (await readMachineSettings(join(device, MACHINE_SETTINGS_FILE_NAME))).values[AGENTS_PROJECT_ROOT_SETTING] ?? null;
 }
 
 async function write(path: string, file: MachineSettingsFile): Promise<MachineSettingsFile> {
