@@ -90,8 +90,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/portal-configuration.test.mjs",
-      "bytes": 57916,
-      "sha256": "163e07a5f8ea7208887d937e0c4f4dbb325ec83fde2057d217a451e211596e84"
+      "bytes": 58467,
+      "sha256": "010159848e464587ad3a18306f9ac34c63481fc7794e8a682e82b6d417e98d8b"
     },
     {
       "path": "portal/tests/portal-library.test.mjs",
@@ -234,7 +234,7 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
         "leg": "translation-reality",
         "ok": true,
         "reasonCode": "TRANSLATIONS_DIFFER_FROM_ENGLISH",
-        "addedKeyCount": 1,
+        "addedKeyCount": 0,
         "gaps": []
       },
       {
