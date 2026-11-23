@@ -152,7 +152,7 @@ test('R1/R4: project article consumers use their own folders and stable identiti
  const previous=process.env.EINZBERN_RENAME_RETRY_BUDGET;try{process.env.EINZBERN_RENAME_RETRY_BUDGET='19';assert.equal(renameRetryBudget(),19);assert.equal(renameRetryBudget(21),21);process.env.EINZBERN_RENAME_RETRY_BUDGET='-1';assert.throws(()=>renameRetryBudget(),/INVALID/);}finally{if(previous===undefined)delete process.env.EINZBERN_RENAME_RETRY_BUDGET;else process.env.EINZBERN_RENAME_RETRY_BUDGET=previous;}
 });
 
-test('R6: exact generic v1 ZH/EN bodies, design-authority among the built-in presets, explicit update, user edits preserved',async ctx=>{
+test('R6: exact generic v1 bodies and compact principles, design-authority among the built-in presets, explicit update, user edits preserved',async ctx=>{
  const {workspace,projectId:p,base}=await workspaceFixture(ctx,{externalKey:'R27-PRESET'});const root=join(base,'project');await mkdir(root);await writeFile(join(root,'AGENTS.md'),'# Local notes\n');
  // Which presets ship, and in what order, tests/rules-catalog.test.mjs pins once; R6 needs design-authority among them.
  assert.ok(BUILT_IN_RULE_IDS.includes('design-authority'));
@@ -161,8 +161,8 @@ test('R6: exact generic v1 ZH/EN bodies, design-authority among the built-in pre
  assert.equal(ruleBody('design-authority','zh-CN'),rule.body.zh);assert.equal(ruleBody('design-authority','fr'),rule.body.en);
  assert.ok(!/https?:\/\//u.test(rule.body.en));
  await enableRule({libraryRoot:workspace,projectRoot:root,configurationProjectId:p,id:'design-authority',occurredAt:at()});
- let text=await readFile(join(root,'AGENTS.md'),'utf8');assert.ok(text.includes('Design Authority and Consistency Principle v1'));
- const newer=[...((await import('../dist/build/packages/core/src/rules-catalog.js')).BUILT_IN_RULES)].map(x=>x.id===rule.id?{...x,version:2,body:{en:x.body.en+'\nRevision two.\n',zh:x.body.zh+'\n第二版。\n'}}:x);
+  let text=await readFile(join(root,'AGENTS.md'),'utf8');assert.ok(text.includes(rule.principle.en));
+  const newer=[...((await import('../dist/build/packages/core/src/rules-catalog.js')).BUILT_IN_RULES)].map(x=>x.id===rule.id?{...x,version:2,body:{en:x.body.en+'\nRevision two.\n',zh:x.body.zh+'\n第二版。\n'},principle:{en:x.principle.en+' Revision two.',zh:x.principle.zh+' 第二版。'}}:x);
  assert.equal((await listRules({libraryRoot:workspace,projectRoot:root,configurationProjectId:p,catalog:newer})).find(x=>x.id===rule.id).state,'update-available');
  assert.equal(await readFile(join(root,'AGENTS.md'),'utf8'),text,'reading a newer catalog never auto-upgrades');
  await enableRule({libraryRoot:workspace,projectRoot:root,configurationProjectId:p,id:rule.id,catalog:newer,occurredAt:at()});

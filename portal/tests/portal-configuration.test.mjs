@@ -270,7 +270,14 @@ test("rules routes expose state, enable a rule, judge a saved edit as user-modif
   assert.equal(batchOf(enabled.body).state, "enabled");
   const original = await readFile(agentsPath, "utf8");
   assert.match(original, /id=agents/u);
-  const edited = original.replace("approved batch", "Approved batch");
+  const batchLine = original.split(/\r?\n/u).find((line) => line.startsWith("- **"));
+  assert.ok(batchLine, "the enabled batch principle is rendered in the managed block");
+  const labelEnd = batchLine.indexOf("**", 3) + 2;
+  const body = batchLine.slice(labelEnd);
+  const firstUppercase = body.search(/[A-Z]/u);
+  assert.notEqual(firstUppercase, -1, "the principle has editable prose after its label");
+  const editedLine = `${batchLine.slice(0, labelEnd)}${body.slice(0, firstUppercase)}${body[firstUppercase].toLowerCase()}${body.slice(firstUppercase + 1)}`;
+  const edited = original.replace(batchLine, editedLine);
   assert.equal([...edited].filter((character, index) => character !== [...original][index]).length, 1, "one character of the rule's text");
 
   // AC2: the save is judged: user-modified, the file is the bytes saved, and nothing is pending
