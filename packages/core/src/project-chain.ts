@@ -7,6 +7,7 @@ import { validateHostExecutionRequest, resolveHostExecution } from "./execution-
 import type { HostExecutionRequest, HostExecutionDecision } from "./execution-fallback.js";
 import { readConsolidationIndex } from "./consolidation-format.js";
 // SPDX-License-Identifier: Apache-2.0
+import { validationDispatchProblem } from "./work-validation.js";
 import { DOT_EXECUTION_MODE, dotDigest, resolveDotExecutionAdmission, validateDotExecutionRequest } from "./dot-execution.js";
 import { assessExecutionContextRead } from "./dot-agents.js";
 import type { DotExecutionRequest, DotCheck, DotAdmission } from "./dot-execution.js";
@@ -257,6 +258,8 @@ export async function workProjectContexts(state: WorkspaceState, workId: string,
         effectiveContext = { ...context, readiness: { ...readiness, model, development: { ready: developmentMissing.length === 0, missing: developmentMissing } }, modelCapabilityVerification: "dot-native-capability-evidence-not-self-model-policy", modelApplicability: dotAdmission.applicability };
       }
     }
+    const validationProblem = executionRequest && validationDispatchProblem(state.work, work, executionRequest.action);
+    if (validationProblem) executionAdmission = { ...(executionAdmission as Record<string, unknown>), status: "refused", reasons: [validationProblem] };
     if (executionRequest !== undefined && executionRequest.action !== "research" && executionRequest.action !== "coordination" && contentAdmissionProblems.length > 0) {
       const contentReason = executionRequest.action === undefined ? "work-content-action-required" : "work-content-incomplete";
       executionAdmission = { ...(executionAdmission as Record<string, unknown>), status: "refused", contentAdmissionProblems, contentReason };
@@ -305,6 +308,8 @@ async function hostWorkProjectContexts(state: WorkspaceState, workId: string, re
     // a new telemetry gate. Explicit user guarantees belong in request.hardLimits.
   };
   const constraintReasons: string[] = request.action === "implementation" ? contentAdmissionProblems.map(problem => `work-content:${problem}`) : [];
+  const validationProblem = validationDispatchProblem(state.work, work, request.action);
+  if (validationProblem) constraintReasons.push(validationProblem);
   if (deviceCap !== undefined) enforceCap(Number(deviceCap), "total");
   if (projectCap !== undefined) enforceCap(Number(projectCap), "children");
   if (["blocked", "pending-owner-acceptance", "done", "cancelled"].includes(work.status)) constraintReasons.push("current-work-state-does-not-allow-new-dispatch");

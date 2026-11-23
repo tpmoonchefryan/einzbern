@@ -114,19 +114,19 @@ test("478-AC1 via agents-render: a section changed by one character stays as it 
   const first = await render(project);
   assert.equal(first.reasonCode, "AGENTS_RENDERED");
   assert.deepEqual(first.sections, [
-    { id: "navigation", file: "AGENTS.md", result: "create", state: "managed" },
+    { id: "agents", file: "AGENTS.md", result: "create", state: "managed" },
     { id: "claude-import", file: "CLAUDE.md", result: "create", state: "managed" },
   ]);
   assert.deepEqual([first.pending, first.recorded, first.projectPath, first.libraryPath], [[], 2, project, library]);
   assert.deepEqual(first.navigation, { key: "agents.navigation", value: "written" });
-  assert.deepEqual([...first.ids].sort(), [`managed-section:${projectId}:AGENTS.md#navigation`, `managed-section:${projectId}:CLAUDE.md#claude-import`]);
+  assert.deepEqual([...first.ids].sort(), [`managed-section:${projectId}:AGENTS.md#agents`, `managed-section:${projectId}:CLAUDE.md#claude-import`]);
   assert.deepEqual(first.files.map((file) => [file.file, file.written, file.backupPath === null]), [["AGENTS.md", true, false], ["CLAUDE.md", true, true]]);
   assert.equal(first.backupDir.startsWith(join(device, "backups")), true, "the backup is in the device directory");
   assert.equal(await readFile(join(first.backupDir, "AGENTS.md"), "utf8"), USER_TEXT, "AGENTS.md was backed up before it was replaced");
   await seedLegacyVariableSections({ libraryRoot: library, projectRoot: project, projectId, occurredAt: at(), ids: ["variables-custom"] });
   const written = await readFile(agents, "utf8");
   assert.equal(written.startsWith(`${USER_TEXT}\n`), true, "the user's text stays where it was");
-  assert.equal(sectionOf(written, "navigation").body, `${NAVIGATION_LINES.join("\n")}\n`);
+  assert.equal(sectionOf(written, "agents").body, `${NAVIGATION_LINES.join("\n")}\n`);
   assert.equal(await readFile(claude, "utf8"), renderSection({ id: "claude-import", rev: 1, body: "@AGENTS.md\n" }), "a new CLAUDE.md holds the import section alone");
 
   // The user changes one character of the navigation section; the system variables change in the library.
@@ -142,13 +142,13 @@ test("478-AC1 via agents-render: a section changed by one character stays as it 
   assert.equal(settings.reasonCode, "SETTINGS_WRITE_COMMITTED");
   const next = await render(project);
   assert.deepEqual(next.sections, [
-    { id: "navigation", file: "AGENTS.md", result: "refused-user-modified", state: "pending" },
+    { id: "agents", file: "AGENTS.md", result: "refused-user-modified", state: "pending" },
     { id: "variables-custom", file: "AGENTS.md", result: "removed", state: "removed" },
     { id: "claude-import", file: "CLAUDE.md", result: "unchanged", state: "managed" },
   ]);
-  assert.deepEqual(next.pending, [{ id: "navigation", file: "AGENTS.md" }]);
+  assert.deepEqual(next.pending, [{ id: "agents", file: "AGENTS.md" }]);
   const after = await readFile(agents, "utf8");
-  assert.equal(sectionOf(after, "navigation").raw, sectionOf(edited, "navigation").raw, "the changed section is byte for byte what the user left");
+  assert.equal(sectionOf(after, "agents").raw, sectionOf(edited, "agents").raw, "the changed section is byte for byte what the user left");
   assert.equal(sectionOf(after, "variables-system"), null);
   assert.equal(sectionOf(after, "variables-custom"), null);
   const catalog = await cli(["settings-catalog", "--workspace", library, "--project-id", projectId]);
@@ -164,13 +164,13 @@ test("478-AC2 via agents-render: a section deleted with its markers is not put b
   const { project, projectId, agents } = await scratch(context);
   await render(project);
   const written = await readFile(agents, "utf8");
-  await writeFile(agents, written.replace(sectionOf(written, "navigation").raw, ""));
+  await writeFile(agents, written.replace(sectionOf(written, "agents").raw, ""));
   const next = await render(project);
-  assert.deepEqual(next.sections.find((section) => section.id === "navigation"), { id: "navigation", file: "AGENTS.md", result: "removed", state: "removed" });
-  assert.deepEqual([next.recorded, next.ids, next.files.some((file) => file.written)], [1, [`managed-section:${projectId}:AGENTS.md#navigation`], false]);
+  assert.deepEqual(next.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "removed", state: "removed" });
+  assert.deepEqual([next.recorded, next.ids, next.files.some((file) => file.written)], [1, [`managed-section:${projectId}:AGENTS.md#agents`], false]);
   assert.equal((await readFile(agents, "utf8")).includes("id=navigation"), false, "the removed section is not put back");
   const third = await render(project);
-  assert.deepEqual(third.sections.find((section) => section.id === "navigation"), { id: "navigation", file: "AGENTS.md", result: "removed", state: "removed" });
+  assert.deepEqual(third.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "removed", state: "removed" });
   assert.deepEqual([third.recorded, third.backupDir, third.files.some((file) => file.written)], [0, null, false]);
 });
 
@@ -190,7 +190,7 @@ test("478-AC3 via the shipped entry: markers that do not parse refuse the whole 
   const fromInside = shipped(["agents-render", "--at", at()], { device, cwd: join(project, "src") });
   assert.equal(fromInside.status, 0, JSON.stringify(fromInside.refusal));
   assert.equal(JSON.parse(fromInside.stdout).projectPath, project);
-  assert.equal(sectionOf(await readFile(agents, "utf8"), "navigation") !== null, true);
+  assert.equal(sectionOf(await readFile(agents, "utf8"), "agents") !== null, true);
 });
 
 test("478-R3 via rule-resolve: after keep, agents-render never writes that section; overwrite then needs --force; unmanage leaves the text", async (context) => {
@@ -198,37 +198,37 @@ test("478-R3 via rule-resolve: after keep, agents-render never writes that secti
   await render(project);
   const edited = (await readFile(agents, "utf8")).replace("Load and follow", "Load and folow");
   await writeFile(agents, edited);
-  assert.deepEqual((await render(project)).pending, [{ id: "navigation", file: "AGENTS.md" }]);
+  assert.deepEqual((await render(project)).pending, [{ id: "agents", file: "AGENTS.md" }]);
 
-  const kept = await cli(["rule-resolve", "--project", project, "--section", "navigation", "--action", "keep", "--at", at()]);
+  const kept = await cli(["rule-resolve", "--project", project, "--section", "agents", "--action", "keep", "--at", at()]);
   assert.deepEqual(
     [kept.reasonCode, kept.section, kept.file, kept.action, kept.result, kept.state, kept.written, kept.backupDir, kept.ids],
-    ["MANAGED_SECTION_RESOLVED", "navigation", "AGENTS.md", "keep", "kept", "user-owned", false, null, [`managed-section:${projectId}:AGENTS.md#navigation`]],
+    ["MANAGED_SECTION_RESOLVED", "agents", "AGENTS.md", "keep", "kept", "user-owned", false, null, [`managed-section:${projectId}:AGENTS.md#agents`]],
   );
   const again = await render(project);
-  assert.deepEqual(again.sections.find((section) => section.id === "navigation"), { id: "navigation", file: "AGENTS.md", result: "unchanged", state: "user-owned" });
+  assert.deepEqual(again.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "user-owned" });
   assert.deepEqual([again.pending, again.recorded, again.files.some((file) => file.written)], [[], 0, false]);
   assert.equal(await readFile(agents, "utf8"), edited, "the kept section is not written");
 
   // Overwriting a section the user kept needs --force true, and the refusal names the section.
-  const refused = shipped(["rule-resolve", "--project", project, "--section", "navigation", "--action", "overwrite", "--at", at()], { device });
+  const refused = shipped(["rule-resolve", "--project", project, "--section", "agents", "--action", "overwrite", "--at", at()], { device });
   assert.equal(refused.status, 1);
-  assert.deepEqual([refused.refusal.reasonCode, refused.refusal.file, refused.refusal.section], ["MANAGED_SECTION_FORCE_REQUIRED", "AGENTS.md", "navigation"]);
+  assert.deepEqual([refused.refusal.reasonCode, refused.refusal.file, refused.refusal.section], ["MANAGED_SECTION_FORCE_REQUIRED", "AGENTS.md", "agents"]);
   assert.equal(await readFile(agents, "utf8"), edited);
-  const forced = await cli(["rule-resolve", "--project", project, "--section", "navigation", "--action", "overwrite", "--force", "true", "--at", at()]);
+  const forced = await cli(["rule-resolve", "--project", project, "--section", "agents", "--action", "overwrite", "--force", "true", "--at", at()]);
   assert.deepEqual([forced.result, forced.state, forced.written], ["overwritten", "managed", true]);
   assert.equal(await readFile(join(forced.backupDir, "AGENTS.md"), "utf8"), edited, "the user's version is backed up first");
   assert.equal(forced.backupPath, join(forced.backupDir, "AGENTS.md"));
-  const overwritten = sectionOf(await readFile(agents, "utf8"), "navigation");
+  const overwritten = sectionOf(await readFile(agents, "utf8"), "agents");
   assert.deepEqual([overwritten.body, overwritten.rev], [`${NAVIGATION_LINES.join("\n")}\n`, 2]);
 
   // unmanage: the markers go, the text stays, and the section is never managed again.
-  const unmanaged = await cli(["rule-resolve", "--project", project, "--section", "navigation", "--action", "unmanage", "--at", at()]);
+  const unmanaged = await cli(["rule-resolve", "--project", project, "--section", "agents", "--action", "unmanage", "--at", at()]);
   assert.deepEqual([unmanaged.result, unmanaged.state, unmanaged.written], ["unmanaged", "unmanaged", true]);
   const text = await readFile(agents, "utf8");
   assert.deepEqual([text.includes("id=navigation"), text.includes(NAVIGATION_LINES[0])], [false, true]);
   const last = await render(project);
-  assert.deepEqual(last.sections.find((section) => section.id === "navigation"), { id: "navigation", file: "AGENTS.md", result: "unchanged", state: "unmanaged" });
+  assert.deepEqual(last.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "unmanaged" });
   assert.equal(last.files.some((file) => file.written), false);
 });
 
@@ -238,7 +238,7 @@ test("478-R3, R4: the refusals of rule-resolve and agents-render, and a device t
   assert.deepEqual(unset.navigation, { key: "agents.navigation", value: null });
   assert.equal(unset.projectPath, project, "--project names any directory of the project");
   assert.deepEqual(unset.sections.map((section) => section.id), ["claude-import"]);
-  assert.equal(sectionOf(await readFile(agents, "utf8"), "navigation"), null);
+  assert.equal(sectionOf(await readFile(agents, "utf8"), "agents"), null);
 
   const action = await refusal(["rule-resolve", "--project", project, "--section", "variables-system", "--action", "replace", "--at", at()]);
   assert.deepEqual([action.reasonCode, action.details.section], ["MANAGED_SECTION_ACTION_INVALID", "variables-system"]);
@@ -246,24 +246,24 @@ test("478-R3, R4: the refusals of rule-resolve and agents-render, and a device t
   assert.deepEqual([missing.reasonCode, missing.details.file, missing.details.section], ["MANAGED_SECTION_NOT_FOUND", "AGENTS.md", "rule:autonomy"]);
   const invalid = await refusal(["rule-resolve", "--project", project, "--section", "Not an id", "--action", "keep", "--at", at()]);
   assert.deepEqual([invalid.reasonCode, invalid.details.section], ["MANAGED_SECTION_INPUT_INVALID", "Not an id"]);
-  assert.equal((await refusal(["rule-resolve", "--project", project, "--section", "navigation", "--action", "keep", "--force", "maybe", "--at", at()])).reasonCode, "CLI_ARGUMENT_MALFORMED");
+  assert.equal((await refusal(["rule-resolve", "--project", project, "--section", "agents", "--action", "keep", "--force", "maybe", "--at", at()])).reasonCode, "CLI_ARGUMENT_MALFORMED");
   const elsewhere = join(base, "elsewhere");
   await mkdir(elsewhere);
   assert.equal((await refusal(["agents-render", "--project", elsewhere, "--at", at()])).reasonCode, "LIBRARY_NOT_REGISTERED");
   assert.equal((await refusal(["agents-render"])).reasonCode, "CLI_ARGUMENT_MISSING");
-  assert.equal((await refusal(["rule-resolve", "--section", "navigation", "--at", at()])).reasonCode, "CLI_ARGUMENT_MISSING");
+  assert.equal((await refusal(["rule-resolve", "--section", "agents", "--at", at()])).reasonCode, "CLI_ARGUMENT_MISSING");
 });
 
 test("671: a missing whole AGENTS file is restored from enabled sections and explicit generation disablement is retained", async (context) => {
   const { project, projectId, library, agents } = await scratch(context);
   const first = await render(project);
-  const original = sectionOf(await readFile(agents, "utf8"), "navigation");
+  const original = sectionOf(await readFile(agents, "utf8"), "agents");
   await rm(agents);
   const restored = await render(project);
   const file = restored.files.find((entry) => entry.file === "AGENTS.md");
   assert.deepEqual([file.written, file.exists, file.hostLoad], [true, true, "unverified"]);
   assert.equal(file.sha256, (await import("node:crypto")).createHash("sha256").update(await readFile(agents)).digest("hex"));
-  assert.equal(sectionOf(await readFile(agents, "utf8"), "navigation").raw, original.raw);
+  assert.equal(sectionOf(await readFile(agents, "utf8"), "agents").raw, original.raw);
   assert.equal(restored.recorded, 0, "restoring bytes keeps the existing shared section revision");
   assert.equal(first.files.find((entry) => entry.file === "AGENTS.md").exists, true);
   assert.equal((await render(project)).files.some((entry) => entry.written), false);

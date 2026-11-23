@@ -50,6 +50,14 @@ review compares original source, actual behavior and assertions. Source extracti
 claims and decision meaning still require that review; the engine cannot certify
 their truth merely from a boolean, hash, summary or matching identifier.
 
+## Initiative acceptance
+
+New Initiative drafts set `details.acceptanceScope` to `initiative`. Each child retains its criteria and implementation allocation. The independent verifier works from the INIT checklist after all Epic implementations are ready. Earlier drafts keep their recorded allocation contract.
+
+Use `work-transition --status pending-validate` for an implemented item, including an Epic with its implementation children ready. Mark the INIT pending when its Epics are ready. The coordinator requests a fresh independent worker with the native action `validation`. Record the independent result and candidate evidence before Main uses `--status validated`. A failed item returns to `active` for repair. Older clients can replay the existing active, blocked and done events with workflow labels. Current show, list and transition commands expose the distinct validation statuses. A historical done stays done.
+
+When a failed hard predecessor prevents every criterion of a pending item, set its existing `blockedBy` relation (dependent → predecessor) and transition to `blocked` in one work batch. Include the concrete cause in `summary` and list every typed criterion ID in `blockedCriteria` (single command: `--blocked-criteria AC1,AC2`). Keep a partially executable item pending and save its available results. When the hard predecessor passes, return the dependent item to pending. If the hard link itself stops applying, record that change and its evidence before unblocking.
+
 ## Changes and history
 
 `workContentChangeImpact` derives affected live work and acceptance ids. Changed
@@ -185,3 +193,28 @@ CORE07 correction: an explicitly supplied evidence.meaningDigest is preserved,
 including reintroduced evidence or changed candidate/reference labels; it is never
 automatically replaced with the current binding. An absent digest on a genuinely
 new observation may be derived. Reusing a stable locator/result is not forbidden.
+
+## Implementation queue reconciliation
+
+An empty `execution-batch-plan` result directs Main to `execution-queue-reconcile --workspace <library> --scope <grants.json> [--assessments <observations.json>]`. Keep the scope with the original authorization. Supply every implementation grant still owned by Main. A numbered decision expands to all directly linked Initiatives. An explicit user or host grant can bind an Initiative by stable ID and source reference. Run once per authorized library and combine the results before ending. An active Initiative outside those grants confers no permission.
+
+```json
+{"decisions":["minutes:0123456789abcdef01234567#D1"]}
+```
+
+Alternatively supply `{"initiatives":[{"id":"work:0123456789abcdef01234567","authority":"<original Owner message reference>"}]}`. The command reads complete work trees from the live library. Its first read can omit assessments. Inspect each outstanding scope, candidate and actual prior result. Existing typed verification allocations go to INIT acceptance. An older summary containing “Pending Validate” is a reason to inspect the implementation evidence. Only full coverage of the applicable work justifies an `implemented` finding. Identify the uncovered scope separately after a partial delivery. Existing independent results may be reused on equivalent inputs.
+
+```json
+{
+  "items": [
+    {"workId":"work:111111111111111111111111","revision":3,"finding":"implemented","reason":"Both applicable interfaces exercised on candidate abc123","evidence":"report.md#interfaces"},
+    {"workId":"work:222222222222222222222222","revision":2,"finding":"condition-not-triggered","basis":"AC01 applies after public release","reason":"Release has not occurred","evidence":"release-observation.json","resumeWhen":"An authorized release is published"},
+    {"workId":"work:333333333333333333333333","revision":4,"finding":"blocked","reason":"The required receiver is offline and local work is complete","evidence":"receiver-readback.json","resumeWhen":"The named receiver is reachable"}
+  ],
+  "execution":{"scopeDigest":"<inventory scopeDigest>","observedAt":"<UTC receipt time>","evidence":"current-native-roster-and-inbox.json","inFlight":[],"unreceived":[]}
+}
+```
+
+A `ready` finding identifies an actionable implementation remainder. An `in-flight` finding identifies its existing attempt. Every finding names the current work revision, reviewed scope and actual evidence. Reconcile stale rows individually. Check all applicable work in a parent and its children. When a source condition covers only part of a work item, carry out the applicable remainder. For a wholly dormant Story or Subtask the proposed batch records its criterion, observation and trigger. Its original workflow state and evidence remain accessible. Each implementation child must be accounted for before the parent can be marked dormant. A new revision invalidates the observation. When a trigger occurs the next review removes the marker and returns the work to scheduling. An implementation blocker is a scheduling finding. Formal validation `blocked` retains the failed-hard-predecessor contract.
+
+Apply nonempty `batch` output through the existing `work-batch` command with the actual actor, then read back and run reconciliation on the new revisions. The batch uses optimistic revision checks and writes atomically. The audit itself makes no changes. Main dispatches ready packages through the existing coordinator and resumes the same audit after new receipts. `canStop` requires the current scope digest and a host observation taken after its latest work update, accounting for attempts and undelivered results, a complete authorized inventory, and either terminal Initiatives or evidence that every remaining applicable route is blocked. Pending implementation roll-ups and available INIT validation are work to do. Record genuine release conditions for the Owner and resume when they occur.

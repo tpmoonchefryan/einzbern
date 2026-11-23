@@ -16,7 +16,7 @@ Separate `hostKind` (codex/claude/dot), `invocationKind` (native-tool), and `sel
 
 ## Request and action applicability
 
-A request identifies current work/revision, action (decomposition/research/coordination/implementation), phase (dispatch/work), category, quality rejection count, requested child count, tool capabilities, requested selection, existing authorization report and context readiness. The report is not authentication or newly minted permission.
+A request identifies current work/revision, action (decomposition/research/coordination/implementation/validation), phase (dispatch/work), category, quality rejection count, requested child count, tool capabilities, requested selection, existing authorization report and context readiness. The report is not authentication or newly minted permission.
 
 - Parent reads its required context before dispatch. A child may be created with child=`not-created`; that child must read its own required context before phase=`work`. No pre-creation child receipt exists or is required.
 - INIT064 regression retains coordination-only `targets=[]`. Authorized decomposition/research/coordination requires no development target or synthetic binding.

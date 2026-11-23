@@ -99,7 +99,7 @@ async function pendingProject(context) {
   assert.notEqual(edited, written);
   await writeFile(path, edited);
   const again = await renderAgentsSections(project.root, { projectRoot: project.project, navigation: "written", backupRoot: project.backups, occurredAt: at() });
-  assert.deepEqual(again.pending, [{ id: "navigation", file: AGENTS_FILE }]);
+  assert.deepEqual(again.pending, [{ id: "agents", file: AGENTS_FILE }]);
   assert.equal(await readFile(path, "utf8"), edited, "the changed section is left as it is");
   return { ...project, path, edited };
 }
@@ -146,7 +146,7 @@ test("478-R5: an import in a code block or a code span, or of another file, is n
   assert.equal(importsAgents("@AGENTS.md.bak\n@docs/AGENTS.md\nuser@AGENTS.md\n"), false);
   assert.equal(importsAgents("```\ncode\n```\n@AGENTS.md\n"), true);
   assert.equal(managedSectionFile("claude-import"), CLAUDE_FILE);
-  for (const id of ["navigation", "rule:autonomy", "variables-system", "variables-custom"]) assert.equal(managedSectionFile(id), AGENTS_FILE, id);
+  for (const id of ["agents", "rule:autonomy", "variables-system", "variables-custom"]) assert.equal(managedSectionFile(id), AGENTS_FILE, id);
 });
 
 test("478-R4: the navigation section holds one Skill entry and follows the shared project choice", async (context) => {
@@ -170,10 +170,10 @@ test("478-R4: the navigation section holds one Skill entry and follows the share
   await setWorkspaceSetting(root, { key: "agents.sharedNavigation", value: "written", occurredAt: at() });
   const written = await renderAgentsSections(root, { projectRoot: project, navigation: "written", backupRoot: backups, occurredAt: at() });
   assert.deepEqual(written.sections.map((section) => [section.id, section.result]), [
-    ["navigation", "create"],
+    ["agents", "create"],
   ]);
   assert.equal(written.recorded, 1);
-  const navigation = sectionOf(await readFile(join(project, AGENTS_FILE), "utf8"), "navigation");
+  const navigation = sectionOf(await readFile(join(project, AGENTS_FILE), "utf8"), "agents");
   assert.equal(navigation.body, NAVIGATION_SECTION.body);
   assert.equal(written.files.find(file => file.file === AGENTS_FILE).backupPath, null, "a newly created AGENTS file has no previous bytes to back up");
 
@@ -181,7 +181,7 @@ test("478-R4: the navigation section holds one Skill entry and follows the share
   const other = await renderAgentsSections(root, { projectRoot: project, navigation: "declined", backupRoot: backups, occurredAt: at() });
   assert.equal(other.files.some((file) => file.written), false);
   assert.equal(other.recorded, 0);
-  assert.deepEqual(other.sections.find((section) => section.id === "navigation"), { id: "navigation", file: AGENTS_FILE, result: "unchanged", state: "managed", line: navigation.startLine });
+  assert.deepEqual(other.sections.find((section) => section.id === "agents"), { id: "agents", file: AGENTS_FILE, result: "unchanged", state: "managed", line: navigation.startLine });
 });
 
 test("478-AC5: declined adds SessionStart; prompt, subagent and read-guard hooks remain installed", async (context) => {
@@ -227,18 +227,18 @@ test("478-AC5: declined adds SessionStart; prompt, subagent and read-guard hooks
 
 test("478-R3: overwrite puts the engine's text back and records it as the new baseline", async (context) => {
   const { root, project, backups, path, edited } = await pendingProject(context);
-  const before = (await records(root)).find((record) => record.id === "navigation");
+  const before = (await records(root)).find((record) => record.id === "agents");
   assert.deepEqual([before.state, before.rev, before.digest], ["pending", 1, sectionDigest(NAVIGATION_SECTION.body)]);
 
-  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "overwrite", backupRoot: backups, occurredAt: at() });
+  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "overwrite", backupRoot: backups, occurredAt: at() });
   assert.deepEqual([change.result, change.written, change.recordChanged], ["overwritten", true, true]);
-  assert.deepEqual(change.record, { file: AGENTS_FILE, id: "navigation", rev: 2, digest: sectionDigest(NAVIGATION_SECTION.body), state: "managed" });
+  assert.deepEqual(change.record, { file: AGENTS_FILE, id: "agents", rev: 2, digest: sectionDigest(NAVIGATION_SECTION.body), state: "managed" });
   assert.equal(await readFile(change.backupPath, "utf8"), edited, "the user's version is backed up before it is replaced");
   const after = await readFile(path, "utf8");
-  const navigation = sectionOf(after, "navigation");
+  const navigation = sectionOf(after, "agents");
   assert.deepEqual([navigation.body, navigation.rev, navigation.digest], [NAVIGATION_SECTION.body, 2, sectionDigest(NAVIGATION_SECTION.body)]);
   assert.deepEqual(parseManagedFile(after).outside, parseManagedFile(edited).outside, "nothing outside the section changed");
-  assert.deepEqual((await records(root)).find((record) => record.id === "navigation"), change.record);
+  assert.deepEqual((await records(root)).find((record) => record.id === "agents"), change.record);
 
   const again = await renderAgentsSections(root, { projectRoot: project, navigation: "written", backupRoot: backups, occurredAt: at() });
   assert.deepEqual([again.pending, again.recorded, again.files.some((file) => file.written)], [[], 0, false]);
@@ -273,55 +273,55 @@ test("T15: a changed variable section stays pending until explicitly kept; obsol
 
 test("478-R3: keep records the user's text as theirs, and the engine never writes that section again", async (context) => {
   const { root, project, backups, path, edited } = await pendingProject(context);
-  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "keep", backupRoot: backups, occurredAt: at() });
-  const kept = sectionOf(edited, "navigation");
+  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "keep", backupRoot: backups, occurredAt: at() });
+  const kept = sectionOf(edited, "agents");
   assert.deepEqual([change.result, change.written, change.backupPath], ["kept", false, null]);
-  assert.deepEqual(change.record, { file: AGENTS_FILE, id: "navigation", rev: 1, digest: kept.bodyDigest, state: "user-owned" });
+  assert.deepEqual(change.record, { file: AGENTS_FILE, id: "agents", rev: 1, digest: kept.bodyDigest, state: "user-owned" });
   assert.equal(await readFile(path, "utf8"), edited, "keep writes nothing");
 
   const again = await renderAgentsSections(root, { projectRoot: project, navigation: "written", backupRoot: backups, occurredAt: at() });
-  assert.deepEqual(again.sections.find((section) => section.id === "navigation"), { id: "navigation", file: AGENTS_FILE, result: "unchanged", state: "user-owned", line: kept.startLine });
+  assert.deepEqual(again.sections.find((section) => section.id === "agents"), { id: "agents", file: AGENTS_FILE, result: "unchanged", state: "user-owned", line: kept.startLine });
   assert.deepEqual([again.pending, again.recorded], [[], 0]);
   assert.equal(await readFile(path, "utf8"), edited);
 
   // Only force overwrites a section the user kept.
-  const error = await refusal(() => resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "overwrite", backupRoot: backups, occurredAt: at() }));
-  assert.deepEqual([error.reasonCode, error.details.file, error.details.section, error.details.state], ["MANAGED_SECTION_FORCE_REQUIRED", AGENTS_FILE, "navigation", "user-owned"]);
+  const error = await refusal(() => resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "overwrite", backupRoot: backups, occurredAt: at() }));
+  assert.deepEqual([error.reasonCode, error.details.file, error.details.section, error.details.state], ["MANAGED_SECTION_FORCE_REQUIRED", AGENTS_FILE, "agents", "user-owned"]);
   assert.equal(await readFile(path, "utf8"), edited);
-  const forced = await resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "overwrite", force: true, backupRoot: backups, occurredAt: at() });
+  const forced = await resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "overwrite", force: true, backupRoot: backups, occurredAt: at() });
   assert.deepEqual([forced.change.result, forced.change.record.state, forced.change.record.rev], ["overwritten", "managed", 2]);
-  assert.equal(sectionOf(await readFile(path, "utf8"), "navigation").body, NAVIGATION_SECTION.body);
+  assert.equal(sectionOf(await readFile(path, "utf8"), "agents").body, NAVIGATION_SECTION.body);
 });
 
 test("478-R3: unmanage takes the markers out and leaves the text, which is never managed again", async (context) => {
   const { root, project, backups, path, edited } = await pendingProject(context);
-  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "unmanage", backupRoot: backups, occurredAt: at() });
+  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "unmanage", backupRoot: backups, occurredAt: at() });
   assert.deepEqual([change.result, change.written], ["unmanaged", true]);
-  assert.deepEqual(change.record, { file: AGENTS_FILE, id: "navigation", rev: 1, digest: sectionDigest(NAVIGATION_SECTION.body), state: "unmanaged" });
+  assert.deepEqual(change.record, { file: AGENTS_FILE, id: "agents", rev: 1, digest: sectionDigest(NAVIGATION_SECTION.body), state: "unmanaged" });
   const after = await readFile(path, "utf8");
-  const section = sectionOf(edited, "navigation");
+  const section = sectionOf(edited, "agents");
   assert.equal(after, edited.replace(section.raw, section.body), "the two marker lines go and the text between them stays");
   assert.equal(after.includes("id=navigation"), false);
   assert.equal(after.includes(EDITED_LINE), true);
 
   const again = await renderAgentsSections(root, { projectRoot: project, navigation: "written", backupRoot: backups, occurredAt: at() });
-  assert.deepEqual(again.sections.find((entry) => entry.id === "navigation"), { id: "navigation", file: AGENTS_FILE, result: "unchanged", state: "unmanaged", line: null });
+  assert.deepEqual(again.sections.find((entry) => entry.id === "agents"), { id: "agents", file: AGENTS_FILE, result: "unchanged", state: "unmanaged", line: null });
   assert.equal(await readFile(path, "utf8"), after, "the section is not put back");
-  const missing = await refusal(() => resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "keep", occurredAt: at() }));
-  assert.deepEqual([missing.reasonCode, missing.details.section], ["MANAGED_SECTION_NOT_FOUND", "navigation"]);
+  const missing = await refusal(() => resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "keep", occurredAt: at() }));
+  assert.deepEqual([missing.reasonCode, missing.details.section], ["MANAGED_SECTION_NOT_FOUND", "agents"]);
 });
 
 test("478-R3: a section the user changed is disabled only with force, and an unchanged one takes its blank line with it", async (context) => {
   const { root, project, backups, path, edited } = await pendingProject(context);
-  const error = await refusal(() => disableAgentsSection(root, { projectRoot: project, id: "navigation", backupRoot: backups, occurredAt: at() }));
-  assert.deepEqual([error.reasonCode, error.details.section, error.details.state], ["MANAGED_SECTION_FORCE_REQUIRED", "navigation", "pending"]);
+  const error = await refusal(() => disableAgentsSection(root, { projectRoot: project, id: "agents", backupRoot: backups, occurredAt: at() }));
+  assert.deepEqual([error.reasonCode, error.details.section, error.details.state], ["MANAGED_SECTION_FORCE_REQUIRED", "agents", "pending"]);
   assert.equal(await readFile(path, "utf8"), edited, "a refused disable writes nothing");
 
-  const { change, state } = await disableAgentsSection(root, { projectRoot: project, id: "navigation", force: true, backupRoot: backups, occurredAt: at() });
+  const { change, state } = await disableAgentsSection(root, { projectRoot: project, id: "agents", force: true, backupRoot: backups, occurredAt: at() });
   assert.deepEqual([change.result, change.written, change.record, change.recordChanged], ["disabled", true, null, true]);
   assert.equal(await readFile(change.backupPath, "utf8"), edited);
   assert.equal(await readFile(path, "utf8"), USER_TEXT, "disabling the sole section restores the original Owner text");
-  assert.equal(managedSectionRecordsFor(state, AGENTS_FILE).some((record) => record.id === "navigation"), false, "the record is removed");
+  assert.equal(managedSectionRecordsFor(state, AGENTS_FILE).some((record) => record.id === "agents"), false, "the record is removed");
 
   // The core, file by file: an unchanged section needs no force, and the file is as it was before the section came.
   const { project: other, backups: otherBackups } = await scratch(context);
@@ -329,18 +329,18 @@ test("478-R3: a section the user changed is disabled only with force, and an unc
   await writeFile(otherPath, USER_TEXT);
   const recorded = [];
   const created = await writeNavigation(other, otherBackups, recorded);
-  assert.equal(created, `${USER_TEXT}\n${renderSection({ id: "navigation", rev: 1, body: NAVIGATION_SECTION.body })}`);
-  const disabled = await disableSection({ projectRoot: other, id: "navigation", records: recorded, at: at(), backupRoot: otherBackups });
+  assert.equal(created, `${USER_TEXT}\n${renderSection({ id: "agents", rev: 1, body: NAVIGATION_SECTION.body })}`);
+  const disabled = await disableSection({ projectRoot: other, id: "agents", records: recorded, at: at(), backupRoot: otherBackups });
   assert.deepEqual([disabled.result, disabled.record], ["disabled", null]);
   assert.equal(await readFile(otherPath, "utf8"), USER_TEXT);
-  const nothing = await disableSection({ projectRoot: other, id: "navigation", records: [], at: at(), backupRoot: otherBackups });
+  const nothing = await disableSection({ projectRoot: other, id: "agents", records: [], at: at(), backupRoot: otherBackups });
   assert.deepEqual([nothing.result, nothing.written, nothing.recordChanged], ["unchanged", false, false]);
 });
 
 /** Put the navigation section into AGENTS.md through the managed-section writer, as a render would. */
 async function writeNavigation(projectRoot, backupRoot, recorded) {
   const { planManagedWrite, applyManagedWrite } = await import("../dist/build/packages/core/src/managed-sections.js");
-  const plan = await planManagedWrite({ filePath: join(projectRoot, AGENTS_FILE), desired: [{ id: "navigation", body: NAVIGATION_SECTION.body }], records: [] });
+  const plan = await planManagedWrite({ filePath: join(projectRoot, AGENTS_FILE), desired: [{ id: "agents", body: NAVIGATION_SECTION.body }], records: [] });
   await applyManagedWrite(plan, { now: at(), backupRoot });
   recorded.push(...plan.sections.map((decision) => decision.record));
   return readFile(join(projectRoot, AGENTS_FILE), "utf8");
@@ -350,13 +350,13 @@ test("478-R3: a disposition names its action and needs the engine's text to over
   const { root, project, backups, rendered } = await renderedProject(context);
   // A project without a CLAUDE.md got one holding the import section, recorded with the others.
   assert.deepEqual(rendered.sections.map((section) => [section.file, section.id, section.result]), [
-    [AGENTS_FILE, "navigation", "create"],
+    [AGENTS_FILE, "agents", "create"],
     [CLAUDE_FILE, "claude-import", "create"],
   ]);
   assert.equal(await readFile(join(project, CLAUDE_FILE), "utf8"), renderSection({ id: "claude-import", rev: 1, body: "@AGENTS.md\n" }));
   assert.deepEqual((await records(root, CLAUDE_FILE)).map((record) => [record.id, record.state]), [["claude-import", "managed"]]);
   const state = await materializeWorkspace(root);
-  assert.equal(engineSectionBody(state, "navigation"), NAVIGATION_SECTION.body);
+  assert.equal(engineSectionBody(state, "agents").trimEnd(), NAVIGATION_SECTION.body.trimEnd());
   assert.equal(engineSectionBody(state, "claude-import"), CLAUDE_IMPORT_SECTION.body);
   assert.match(engineSectionBody(state, "rule:autonomy"), /^## Autonomous Operation Principle v1\n/u);
   assert.equal(engineSectionBody(state, "rule:nothing"), null);
@@ -364,11 +364,11 @@ test("478-R3: a disposition names its action and needs the engine's text to over
   assert.equal(engineSectionBody(state, "variables-system"), null);
   assert.equal(engineSectionBody(state, "variables-custom"), null);
 
-  const invalid = await refusal(() => resolveSection({ projectRoot: project, id: "navigation", action: "replace", records: [], at: at(), backupRoot: backups }));
+  const invalid = await refusal(() => resolveSection({ projectRoot: project, id: "agents", action: "replace", records: [], at: at(), backupRoot: backups }));
   assert.equal(invalid.reasonCode, "MANAGED_SECTION_ACTION_INVALID");
-  const bodiless = await refusal(() => resolveSection({ projectRoot: project, id: "navigation", action: "overwrite", records: [], at: at(), backupRoot: backups }));
+  const bodiless = await refusal(() => resolveSection({ projectRoot: project, id: "agents", action: "overwrite", records: [], at: at(), backupRoot: backups }));
   assert.equal(bodiless.reasonCode, "MANAGED_SECTION_ACTION_INVALID");
-  const absolute = await refusal(() => resolveSection({ projectRoot: project, id: "navigation", action: "overwrite", body: "Run /opt/tools/bin/check.\n", records: [], at: at(), backupRoot: backups }));
+  const absolute = await refusal(() => resolveSection({ projectRoot: project, id: "agents", action: "overwrite", body: "Run /opt/tools/bin/check.\n", records: [], at: at(), backupRoot: backups }));
   assert.equal(absolute.reasonCode, "MANAGED_SECTION_ABSOLUTE_PATH");
   const unknown = await refusal(() => resolveAgentsSection(root, { projectRoot: project, id: "rule:nothing", action: "overwrite", occurredAt: at() }));
   assert.equal(unknown.reasonCode, "MANAGED_SECTION_ACTION_INVALID");
@@ -376,47 +376,34 @@ test("478-R3: a disposition names its action and needs the engine's text to over
   assert.deepEqual([absent.reasonCode, absent.details.file, absent.details.section], ["MANAGED_SECTION_NOT_FOUND", AGENTS_FILE, "rule:autonomy"]);
 
   // Overwriting a section that still reads as the engine wrote it changes nothing.
-  const same = await resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "overwrite", backupRoot: backups, occurredAt: at() });
+  const same = await resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "overwrite", backupRoot: backups, occurredAt: at() });
   assert.deepEqual([same.change.result, same.change.written, same.change.recordChanged], ["unchanged", false, false]);
 });
 
 // TCRN-CROSS-STORY-508 R7 (MIN-236 D7; TCRN-CROSS-SUB-408): the rule sections of AGENTS.md stand in
 // the rules' order. They are arranged across the places rule sections already hold, so the text
 // around them never moves.
-const ruleSectionIds = (text) => parseManagedFile(text).sections.map((section) => section.id).filter((id) => id.startsWith("rule:"));
-
-test("508-R7: agents-render arranges the rule sections by order across the places they hold, and moves no byte around them", async (context) => {
+test("508-R7: changing rule order only changes the contents of the shared block", async context => {
   const paths = await scratch(context);
   const agents = join(paths.project, AGENTS_FILE);
-  await writeFile(agents, USER_TEXT);
   const root = await library(paths.base);
-  const record = (key, value) => setConfigRecord(root, { collection: "rule", key, value, occurredAt: at() });
+  const record = (key, order) => setConfigRecord(root, { collection: "rule", key,
+    value: { enabled: true, version: builtInRule(key).version, order }, occurredAt: at() });
   const render = () => renderAgentsSections(root, { projectRoot: paths.project, navigation: null, backupRoot: paths.backups, occurredAt: at() });
-  // Each rule is recorded at the version this engine ships: the case is about order, not version
-  // (a rule recorded at a lower version reads update-available, and agents-render does not write it).
-  const shipped = (key) => builtInRule(key).version;
-  await record("autonomy", { enabled: true, version: shipped("autonomy"), order: 3 });
-  await record("batch", { enabled: true, version: shipped("batch"), order: 1 });
-  await record("unattended-commands", { enabled: true, version: shipped("unattended-commands") });
+  await writeFile(agents, USER_TEXT);
+  await record("batch", 1);
+  await record("autonomy", 2);
   await render();
-  const created = await readFile(agents, "utf8");
-  assert.deepEqual(ruleSectionIds(created), ["rule:batch", "rule:autonomy", "rule:unattended-commands"], "by order, then the rule without one");
-
-  // The user writes between two rule sections, and the orders change.
-  const endOfBatch = "<!-- einzbern:section-end id=rule:batch -->\n";
-  const withNotes = created.replace(endOfBatch, `${endOfBatch}\n## Between\n\nNotes the engine never moves.\n`);
-  assert.notEqual(withNotes, created);
-  await writeFile(agents, withNotes);
-  await record("autonomy", { enabled: true, version: shipped("autonomy"), order: 1 });
-  await record("batch", { enabled: true, version: shipped("batch"), order: 2 });
-  const result = await render();
-  assert.equal(result.files.find((file) => file.file === AGENTS_FILE).written, true);
-  assert.deepEqual(result.sections.filter((section) => section.id.startsWith("rule:")).map((section) => section.result), ["unchanged", "unchanged", "unchanged"], "no section's text is rewritten");
-  const arranged = await readFile(agents, "utf8");
-  assert.deepEqual(ruleSectionIds(arranged), ["rule:autonomy", "rule:batch", "rule:unattended-commands"]);
-  assert.deepEqual(parseManagedFile(arranged).outside, parseManagedFile(withNotes).outside, "the text around the sections is where it was, byte for byte");
-  for (const id of ruleSectionIds(created)) assert.equal(sectionOf(arranged, id).raw, sectionOf(withNotes, id).raw, `${id} moved whole`);
-  assert.equal((await render()).files.find((file) => file.file === AGENTS_FILE).written, false, "a second render finds them in order");
+  const initial = await readFile(agents, "utf8");
+  const notes = initial + "\n## Owner notes\n";
+  await writeFile(agents, notes);
+  await record("batch", 3);
+  await render();
+  const after = await readFile(agents, "utf8");
+  const body = sectionOf(after, "agents").body;
+  assert.ok(body.indexOf(builtInRule("autonomy").principle.en) < body.indexOf(builtInRule("batch").principle.en));
+  assert.deepEqual(parseManagedFile(after).outside, parseManagedFile(notes).outside);
+  assert.equal((await render()).files.find(file => file.file === AGENTS_FILE).written, false);
 });
 
 test("508-R7: orderRuleSections leaves a plan alone while no rule holds an order, and gives a section moved off the last line its line ending", () => {
@@ -443,7 +430,7 @@ test("508-AC7 via the render: native historical model settings survive without a
   })), { occurredAt });
   const rendered = await renderAgentsSections(root, { projectRoot: project, navigation: "declined", backupRoot: backups, occurredAt: at() });
   assert.deepEqual(rendered.withheld, []);
-  assert.deepEqual(parseManagedFile(await readFile(join(project, AGENTS_FILE), "utf8")).sections.map(section => section.id), ["navigation"], "only navigation is generated, without a configuration projection");
+  assert.deepEqual(parseManagedFile(await readFile(join(project, AGENTS_FILE), "utf8")).sections.map(section => section.id), ["agents"], "only navigation is generated, without a configuration projection");
   assert.equal(engineSectionBody(rendered.state, "variables-system"), null);
   assert.deepEqual(rendered.state.settings.filter(entry => entry.key.startsWith("models.")).map(entry => entry.value), ["flagship", "2"], "historical declarations remain readable");
 
@@ -489,7 +476,7 @@ test("489: a render whose records cannot be committed puts both files back as th
   // The normal path is as it was: the same render, committed, creates navigation and import and records them.
   const created = await render();
   assert.deepEqual(created.sections.map((section) => [section.id, section.result]), [
-    ["navigation", "create"],
+    ["agents", "create"],
     ["claude-import", "create"],
   ]);
   assert.equal(created.recorded, 2);
@@ -516,14 +503,14 @@ test("489: a disposition whose record cannot be committed leaves the section as 
   const waiting = await records(root);
   const head = await libraryHead(root);
   for (const action of ["overwrite", "unmanage"]) {
-    const error = await refusal(() => resolveAgentsSection(root, { projectRoot: project, id: "navigation", action, backupRoot: backups, occurredAt: at(), ...OVER_BUDGET }));
+    const error = await refusal(() => resolveAgentsSection(root, { projectRoot: project, id: "agents", action, backupRoot: backups, occurredAt: at(), ...OVER_BUDGET }));
     assert.equal(error.reasonCode, "WORKSPACE_VIEW_BUDGET_EXCEEDED", action);
     assert.equal(await readFile(path, "utf8"), edited, `${action}: the file is as the user left it`);
     assert.deepEqual([await records(root), await libraryHead(root)], [waiting, head], `${action}: the section still waits, and the library holds no new event`);
   }
-  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "navigation", action: "overwrite", backupRoot: backups, occurredAt: at() });
+  const { change } = await resolveAgentsSection(root, { projectRoot: project, id: "agents", action: "overwrite", backupRoot: backups, occurredAt: at() });
   assert.deepEqual([change.result, change.written, change.record.rev, change.record.state], ["overwritten", true, 2, "managed"]);
-  assert.equal(sectionOf(await readFile(path, "utf8"), "navigation").body, NAVIGATION_SECTION.body);
+  assert.equal(sectionOf(await readFile(path, "utf8"), "agents").body, NAVIGATION_SECTION.body);
 });
 
 test("489: a disable whose record cannot be removed puts the section back, and the next disable takes it out", async (context) => {
@@ -532,13 +519,13 @@ test("489: a disable whose record cannot be removed puts the section back, and t
   const written = await readFile(path, "utf8");
   const recorded = await records(root);
   const head = await libraryHead(root);
-  const error = await refusal(() => disableAgentsSection(root, { projectRoot: project, id: "navigation", backupRoot: backups, occurredAt: at(), ...OVER_BUDGET }));
+  const error = await refusal(() => disableAgentsSection(root, { projectRoot: project, id: "agents", backupRoot: backups, occurredAt: at(), ...OVER_BUDGET }));
   assert.equal(error.reasonCode, "WORKSPACE_VIEW_BUDGET_EXCEEDED");
   assert.equal(await readFile(path, "utf8"), written, "the section is back in the file, markers and all");
   assert.deepEqual([await records(root), await libraryHead(root)], [recorded, head], "its record stays, and the library holds no new event");
-  const { change } = await disableAgentsSection(root, { projectRoot: project, id: "navigation", backupRoot: backups, occurredAt: at() });
+  const { change } = await disableAgentsSection(root, { projectRoot: project, id: "agents", backupRoot: backups, occurredAt: at() });
   assert.deepEqual([change.result, change.written, change.record], ["disabled", true, null]);
-  assert.equal(sectionOf(await readFile(path, "utf8"), "navigation"), null);
+  assert.equal(sectionOf(await readFile(path, "utf8"), "agents"), null);
 });
 
 test("489: records that went in before the failure (a crash after the event commit) keep the files as written", async (context) => {
@@ -551,7 +538,7 @@ test("489: records that went in before the failure (a crash after the event comm
   const error = await refusal(() => render({ crashAt: "after-event-commit" }));
   assert.equal(error.reasonCode, "WORKSPACE_FAULT_INJECTED");
   assert.notDeepEqual(await libraryHead(root), head, "the records went in");
-  assert.deepEqual((await records(root)).map((record) => record.id).sort(), ["navigation"]);
+  assert.deepEqual((await records(root)).map((record) => record.id).sort(), ["agents"]);
   assert.notEqual(await readFile(agentsPath, "utf8"), USER_TEXT, "so the sections stay where they were written");
   assert.notEqual(await textOrNull(join(paths.project, CLAUDE_FILE)), null);
   const again = await render();
@@ -598,7 +585,7 @@ test("DOT-I03/R02: generic render/import/section changes refuse independent dot 
   for (const operation of [
     () => renderAgentsSections(root, { projectRoot: f.project, navigation: "written", backupRoot: f.backups, occurredAt: at() }),
     () => ensureClaudeImport(f.project, { at: at() }),
-    () => resolveSection({ projectRoot: f.project, id: "navigation", action: "keep", records: [], at: at() }),
+    () => resolveSection({ projectRoot: f.project, id: "agents", action: "keep", records: [], at: at() }),
   ]) assert.equal((await refusal(operation)).reasonCode, "DOT_INDEPENDENT_TARGET");
   assert.equal(await readFile(join(f.project, "AGENTS.md"), "utf8"), body);
   assert.equal((await readdir(f.project)).includes("CLAUDE.md"), false);

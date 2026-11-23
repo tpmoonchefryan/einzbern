@@ -5640,20 +5640,24 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
     .filter(source => source.manifest.libraryId !== place.workspace.metadata.workspaceId && source.inventory.some(file => file.path === "crest/store.json"))
     .map(source => join(place.workspaceRoot, source.archive, "crest"))];
   const proof = await crestProjectionProof(library, place.workspace, roots, KNOWLEDGE_PROJECTION_VERSION);
-  const boundary = async (): Promise<string | null> => {
-    if (proof !== null) return proof.binding;
-    const trees = await Promise.all(roots.map(root => localTreeIdentity(root)));
-    if (trees.some(tree => tree === null)) return null;
+  const localBoundary = async (trees?: Promise<readonly (string | null)[]>): Promise<string | null> => {
+    const values = await (trees ?? Promise.all(roots.map(root => localTreeIdentity(root))));
+    if (values.some(tree => tree === null)) return null;
     const heads = await Promise.all(roots.map(root => currentCrestHeads(root)));
     return createHash("sha256")
-      .update(`7\0${KNOWLEDGE_PROJECTION_VERSION}\0${place.workspace.headEventHash}\0${roots.join("\0")}\0${trees.join("\0")}\0${heads.join("\0")}`)
+      .update(`7\0${KNOWLEDGE_PROJECTION_VERSION}\0${place.workspace.headEventHash}\0${roots.join("\0")}\0${values.join("\0")}\0${heads.join("\0")}`)
       .digest("hex");
   };
+  const initialTrees = proof === null ? Promise.all(roots.map(root => localTreeIdentity(root))) : undefined;
+  const boundary = async (): Promise<string | null> => {
+    if (proof !== null) return proof.binding;
+    return localBoundary(initialTrees);
+  };
   try {
-    const saved = await readProtectedProjection<CachedLibraryCrest>(library, "crest", boundary);
-    const view = saved === null || skipViewRepair ? null : await readProtectedProjection<CachedLibraryCrestView>(library, "crest-view", boundary);
+    const binding = await boundary();
+    const saved = binding === null ? null : await readProtectedProjection<CachedLibraryCrest>(library, "crest", binding);
+    const view = saved === null || skipViewRepair ? null : await readProtectedProjection<CachedLibraryCrestView>(library, "crest-view", binding!);
     if (saved !== null && (skipViewRepair || view !== null)) {
-      if (proof !== null && !await proof.finish()) return full();
       const restore = (stored: CachedCrestUnit): CrestUnit => {
         const { archiveScope, canonicalText, ...fields } = stored;
         const unit = { ...fields, body: null, streamBody: null } as unknown as CrestUnit;
@@ -5673,15 +5677,36 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
         readonly units: readonly CachedCrestUnit[];
         readonly duplicates: readonly { readonly id: string; readonly externalKey: string; readonly versions: readonly CachedCrestUnit[] }[];
       };
-      return { ...rest, index, workspace: place.workspace, units: decoded.units.map(restore),
+      const scan: KnowledgeStoreScan = { ...rest, index, workspace: place.workspace, units: decoded.units.map(restore),
         duplicates: decoded.duplicates.map(duplicate => ({ ...duplicate, versions: duplicate.versions.map(restore) })) };
+      if (crestSourceDigest(scan) !== saved.sourceDigest) return full();
+      const metaModule = await import("./knowledge-read.js");
+      const metaBinding = await metaModule.crestMetaBoundary(roots, place.workspace.headEventHash, initialTrees, proof?.binding)();
+      if (metaBinding !== null) {
+        const meta = await readProtectedProjection<import("./knowledge-read.js").CachedCrestMeta>(library, "crest-meta", metaBinding);
+        if (meta === null || meta.sourceDigest !== saved.sourceDigest) {
+          await writeProtectedProjection(library, "crest-meta", metaBinding, cachedCrestMeta(scan, saved.sourceDigest));
+        }
+      }
+      const sourceStillMatches = proof !== null
+        ? await proof.finish()
+        : binding !== null && binding === await localBoundary();
+      if (!sourceStillMatches) return full();
+      if (view !== null) {
+        // Disposable local views still receive ordinary repair, including paged
+        // indexes and surplus-page cleanup. They are outside the source set.
+        await projectKnowledgeView(libraryKnowledgeView(place.storePath, query), view.index, view.viewFiles);
+      }
+      observeCacheReason("crest-projection-hit");
+      return scan;
     }
     const scan = await full();
     if (scan === null) return null;
     if (proof !== null && !await proof.finish()) return full();
-    const binding = await boundary();
+    const writeBinding = proof?.binding ?? await localBoundary();
     const metaBinding = await (await import("./knowledge-read.js")).crestMetaBoundary(roots, place.workspace.headEventHash, undefined, proof?.binding)();
-    if (binding !== null && binding === await boundary()) {
+    const sourceStillMatches = proof !== null || (writeBinding !== null && writeBinding === await localBoundary());
+    if (writeBinding !== null && sourceStillMatches) {
       const save = (unit: CrestUnit): CachedCrestUnit => {
         const { streamBody: _sb, ...doc } = snapshotUnitDocument(unit);
         return { ...doc, streamBody: null, archiveScope: archivedKnowledgeScope(unit.metadata),
@@ -5694,33 +5719,10 @@ async function cachedKnowledgeListScan(place: KnowledgeStorePlace, query: Knowle
       }));
       const sourceDigest = crestSourceDigest(scan);
       if (metaBinding !== null) {
-        await writeProtectedProjection(library, "crest-meta", metaBinding, {
-        layout: scan.layout,
-        marker: scan.marker,
-        sourceDigest,
-        units: units.map(unit => ({
-          metadata: unit.metadata,
-          canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue),
-          archiveScope: archivedKnowledgeScope(unit.metadata),
-        })),
-        removedIds: [...scan.removals.keys()],
-        unresolvedConflicts: scan.unresolvedConflicts,
-        duplicates: duplicates.map(duplicate => ({
-          id: duplicate.id,
-          externalKey: duplicate.externalKey,
-          versions: duplicate.versions.map(version => ({
-            ...recordIdentity(version),
-            metadata: version.metadata,
-            canonicalText: canonicalEntryText(version.metadata as unknown as JsonValue),
-            archiveScope: archivedKnowledgeScope(version.metadata),
-          })),
-        })),
-        awaitingChain: scan.awaitingChain,
-        unresolvedScopes: scan.unresolvedScopes,
-      } satisfies import("./knowledge-read.js").CachedCrestMeta);
+        await writeProtectedProjection(library, "crest-meta", metaBinding, cachedCrestMeta(scan, sourceDigest));
       }
-      await writeProtectedProjection(library, "crest-view", binding, { index, viewFiles: knowledgeViewFiles(index) } satisfies CachedLibraryCrestView);
-      await writeProtectedProjection(library, "crest", binding, { ...fields, sourceDigest, packedUnits } satisfies CachedLibraryCrest);
+      await writeProtectedProjection(library, "crest-view", writeBinding, { index, viewFiles: knowledgeViewFiles(index) } satisfies CachedLibraryCrestView);
+      await writeProtectedProjection(library, "crest", writeBinding, { ...fields, sourceDigest, packedUnits } satisfies CachedLibraryCrest);
       observeCacheReason("crest-projection-build");
     }
     return scan;
@@ -5733,6 +5735,36 @@ function crestSourceDigest(scan: CrestScan | null): string {
     ...(scan === null ? [] : crestRecords(scan)).map(unit => canonicalJson({ digest: unit.storedDigest, scope: resolveIntrinsicKnowledgeScope(unit.metadata) })),
     canonicalJson(scan === null ? [] : [...scan.removals]), canonicalJson(scan?.unresolvedConflicts ?? []),
   ]);
+}
+
+function cachedCrestMeta(
+  scan: KnowledgeStoreScan,
+  sourceDigest = crestSourceDigest(scan),
+): import("./knowledge-read.js").CachedCrestMeta {
+  return {
+    layout: scan.layout,
+    marker: scan.marker,
+    sourceDigest,
+    units: scan.units.map(unit => ({
+      metadata: unit.metadata,
+      canonicalText: canonicalEntryText(unit.metadata as unknown as JsonValue),
+      archiveScope: archivedKnowledgeScope(unit.metadata),
+    })),
+    removedIds: [...scan.removals.keys()],
+    unresolvedConflicts: scan.unresolvedConflicts,
+    duplicates: scan.duplicates.map(duplicate => ({
+      id: duplicate.id,
+      externalKey: duplicate.externalKey,
+      versions: duplicate.versions.map(version => ({
+        ...recordIdentity(version),
+        metadata: version.metadata,
+        canonicalText: canonicalEntryText(version.metadata as unknown as JsonValue),
+        archiveScope: archivedKnowledgeScope(version.metadata),
+      })),
+    })),
+    awaitingChain: scan.awaitingChain,
+    unresolvedScopes: scan.unresolvedScopes,
+  };
 }
 
 /** Counts use the scoped active records before search/pagination, independently of selection.

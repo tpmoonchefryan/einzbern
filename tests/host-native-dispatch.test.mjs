@@ -10,7 +10,7 @@ import { workProjectContexts } from "../dist/build/packages/core/src/project-cha
 import { applyMachineSettingSet } from "../dist/build/packages/core/src/machine-settings.js";
 import { setWorkspaceSetting } from "../dist/build/packages/core/src/workspace.js";
 import { runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
-import { nativeFixture, selection } from "./helpers/host-native-fixture.mjs";
+import { nativeFixture, selection, codexGuardFixture } from "./helpers/host-native-fixture.mjs";
 
 test("native preparation enforces persisted string device and project concurrency caps", async t => {
   for (const scope of ["device", "project"]) {
@@ -98,6 +98,58 @@ test("T15 real CLI handler routes general context/prepare/record/evidence withou
   const evidence = await runNativeToolCommand("execution-host-evidence", { "from-file": output }, context);
   assert.equal(evidence.digest, recorded.digest); assert.equal(JSON.parse(await readFile(binding, "utf8")).context.involvedProjects.targets.length, 0);
 });
+
+test("STORY-711 real CLI gates first Economy worker readiness on a same-ID Full Access readback", async t => {
+  const f = await nativeFixture(t);
+  const guard = await codexGuardFixture(f);
+  const { spawnSync } = await import("node:child_process");
+  const { access, writeFile } = await import("node:fs/promises");
+  const { fileURLToPath } = await import("node:url");
+  const cli = fileURLToPath(new URL("../scripts/einzbern.mjs", import.meta.url));
+  const economyId = "fixture-new-economy";
+  const request = { ...f.request, capabilities: { ...f.request.capabilities, toolName: "collaboration.spawn_agent" } };
+  const requestPath = join(f.root, "story-711-request.json");
+  const argumentsPath = join(f.root, "story-711-arguments.json");
+  const startupPath = join(f.root, "story-711-startup.json");
+  await writeFile(requestPath, JSON.stringify(request));
+  await writeFile(argumentsPath, JSON.stringify({ selection, argumentsValue: { prompt: "Synthetic gate fixture; do not dispatch" } }));
+  const startup = (conversationId = economyId, permission = "dangerFullAccess", returnedId = conversationId) => ({
+    conversationId, sourceRef: "fixture:native-thread-start-response",
+    raw: { id: 1, result: { thread: { id: returnedId }, ...(permission === null ? {} : { sandbox: { type: permission } }) } },
+    conversationPointer: "/result/thread/id",
+  });
+  const env = { ...process.env, EINZBERN_HOME: f.home, HOME: guard.userHome, CODEX_THREAD_ID: economyId };
+  const run = output => spawnSync(process.execPath, [cli, "execution-host-prepare", "--workspace", f.workspace,
+    "--request", requestPath, "--arguments", argumentsPath, "--codex-peer-worker", "true",
+    "--codex-startup-evidence", startupPath, "--codex-admission", guard.admissionPath, "--output", output], { env, encoding: "utf8" });
+  let handoffs = 0;
+  let workerDispatches = 0;
+  for (const [name, proof, expected] of [
+    ["restricted", startup(economyId, "workspaceWrite"), /restricted \(workspaceWrite\)/u],
+    ["missing-permission", startup(economyId, null), /permission is unknown/u],
+    ["session-id-mismatch", startup("fixture-other-economy"), /differs from the actual native session/u],
+    ["response-id-mismatch", startup(economyId, "dangerFullAccess", "fixture-other-economy"), /differs from the retained thread\/start response/u],
+  ]) {
+    await writeFile(startupPath, JSON.stringify(proof));
+    const output = join(f.root, `${name}-preparation.json`);
+    const result = run(output);
+    assert.notEqual(result.status, 0, `${name}: ${result.stdout}\n${result.stderr}`);
+    assert.match(`${result.stdout}\n${result.stderr}`, expected);
+    await assert.rejects(access(output), { code: "ENOENT" });
+    assert.equal(handoffs, 0);
+    assert.equal(workerDispatches, 0);
+  }
+  await writeFile(startupPath, JSON.stringify(startup()));
+  const output = join(f.root, "valid-startup-preparation.json");
+  const ready = run(output);
+  assert.equal(ready.status, 0, `${ready.stdout}\n${ready.stderr}`);
+  const result = JSON.parse(ready.stdout);
+  assert.equal(result.reasonCode, "HOST_PREPARATION_READY");
+  assert.deepEqual(result.codexPeerWorker, { coordinatorId: economyId });
+  assert.equal(handoffs, 0, "preparation performs no native handoff");
+  assert.equal(workerDispatches, 0, "preparation performs no native worker dispatch");
+});
+
 test("Codex, Claude and dot use general path without dot impersonation; dot ignores unrelated model policy", async t => {
   const f = await nativeFixture(t);
   for (const hostKind of ["claude", "dot"]) {

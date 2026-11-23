@@ -50,6 +50,14 @@ async function treeBytes(root) {
   return files;
 }
 
+async function ownStreamSequence(workspace) {
+  const home = process.env.EINZBERN_HOME;
+  assert.ok(home, "the test uses an isolated device home");
+  const device = JSON.parse(await readFile(join(home, "device.json"), "utf8"));
+  const manifestPath = join(workspace, "akasha", device.deviceId, "manifest.json");
+  return JSON.parse(await readFile(manifestPath, "utf8")).sequence;
+}
+
 test("STORY-475 AC1: one minutes-record writes once and echoes the minutes id with D1 to D3", async (context) => {
   const fixture = await library(context);
   const before = (await cli(["project-list", "--workspace", fixture.workspace])).version;
@@ -109,6 +117,82 @@ test("STORY-475 R1: minutes-record and minutes-show refuse what they cannot read
   await assert.rejects(cli(["minutes-show", "--workspace", fixture.workspace]), refusedWith("CLI_ARGUMENT_MALFORMED"));
   await assert.rejects(cli(["minutes-show", "--workspace", fixture.workspace, "--id", "minutes:000000000000000000000000", "--external-key", "MC-MIN-1"]), refusedWith("CLI_ARGUMENT_MALFORMED"));
   await assert.rejects(cli(["minutes-show", "--workspace", fixture.workspace, "--id", "minutes:000000000000000000000000"]), refusedWith("MINUTES_NOT_FOUND"));
+});
+
+test("STORY-689 R01: array-shaped decisions fail before writing while list and file inputs round-trip", async (context) => {
+  const fixture = await library(context);
+  const record = (externalKey, second, extra) => cli([
+    "minutes-record", "--workspace", fixture.workspace, "--at", at(second), "--project-id", fixture.projectId,
+    "--external-key", externalKey, "--title", "Decision input boundary", "--summary", "Isolated CLI regression",
+    ...extra,
+  ]);
+  const before = await ownStreamSequence(fixture.workspace);
+
+  const balancedArrays = [
+    ["NUMBER", "[2]"],
+    ["STRING", '["quoted"]'],
+    ["NESTED", "[[2]]"],
+    ["MISSING-COMMA", "[2 3]"],
+    ["MALFORMED-NESTED", "[[2 3]]"],
+  ];
+  for (const [externalKey, arrayInput] of [
+    ...balancedArrays.flatMap(([key, input]) => [
+      [`MC-ARRAY-${key}`, input],
+      [`MC-ARRAY-SUFFIX-${key}`, `[1]${input}`],
+      [`MC-ARRAY-SUFFIX-EXTRA-CLOSE-${key}`, `[1]${input} ]`],
+    ]),
+    ["MC-ARRAY-VALID", '["one","two"]'],
+    ["MC-ARRAY-VALID-NUMBER", "[1]"],
+    ["MC-ARRAY-NUMBER-NO-TEXT", "[1] ,继续观察"],
+    ["MC-ARRAY-EXTRA-CLOSE", "[1]]"],
+    ["MC-ARRAY-SPACED-CLOSE", "[1] ]"],
+    ["MC-ARRAY-ADJACENT-TRUNCATED", "[12][34, 56"],
+    ["MC-ARRAY-TRUNCATED-STRING", '["unfinished'],
+    ["MC-ARRAY-TRAILING-COMMA", '["one", "two",]'],
+    ["MC-ARRAY-MISSING-FIRST", '[, "继续观察"]'],
+    ["MC-ARRAY-TRUNCATED-NUMBER", "[1, 2"],
+  ]) {
+    await assert.rejects(record(externalKey, 5, ["--decisions", arrayInput]), (error) => {
+      assert.equal(error?.reasonCode, "CLI_ARGUMENT_MALFORMED");
+      assert.match(error?.message ?? "", /--decisions-file/u);
+      return true;
+    });
+    assert.equal(await ownStreamSequence(fixture.workspace), before, "an invalid array appends no device event");
+  }
+
+  const listed = ["[复核] 已完成", "继续观察"];
+  const listReceipt = await record("MC-LIST-ROUNDTRIP", 6, ["--decisions", listed.join(",")]);
+  assert.deepEqual(listReceipt.decisions, listed.map((text, index) => ({ number: index + 1, text })));
+  assert.deepEqual((await cli(["minutes-show", "--workspace", fixture.workspace, "--id", listReceipt.id])).record.decisions, listReceipt.decisions);
+
+  const exactDecision = "已核验 1,392 个文件";
+  const decisionsFile = join(fixture.base, "decisions.json");
+  await writeFile(decisionsFile, JSON.stringify([exactDecision]), "utf8");
+  const fileReceipt = await record("MC-FILE-EXACT-D1", 7, ["--decisions-file", decisionsFile]);
+  const exactReadback = [{ number: 1, text: exactDecision }];
+  assert.deepEqual(fileReceipt.decisions, exactReadback, "the example file produces only D1 verbatim");
+  assert.deepEqual((await cli(["minutes-show", "--workspace", fixture.workspace, "--id", fileReceipt.id])).record.decisions, exactReadback);
+
+  const fileDecisions = ['English "quoted", text', '中文“引号”，逗号, and English'];
+  await writeFile(decisionsFile, JSON.stringify(fileDecisions), "utf8");
+  const richFileReceipt = await record("MC-FILE-ORDER-ROUNDTRIP", 8, ["--decisions-file", decisionsFile]);
+  const orderedReadback = fileDecisions.map((text, index) => ({ number: index + 1, text }));
+  assert.deepEqual(richFileReceipt.decisions, orderedReadback, "file entries retain their original text, order, and count");
+  assert.deepEqual((await cli(["minutes-show", "--workspace", fixture.workspace, "--id", richFileReceipt.id])).record.decisions, orderedReadback);
+});
+
+test("STORY-689 R01: numeric bracket labels with decision text remain explicit lists", async (context) => {
+  for (const first of ["[1] 已完成", "[12] 数字标签", "[12][34] 已完成", "[12] [复核] 已完成", "[1][2 3] 已完成"]) {
+    const fixture = await library(context);
+    const receipt = await cli([
+      "minutes-record", "--workspace", fixture.workspace, "--at", at(5), "--project-id", fixture.projectId,
+      "--external-key", "MC-NUMERIC-LABEL", "--title", "Numeric label", "--summary", "Isolated CLI regression",
+      "--decisions", `${first},继续观察`,
+    ]);
+    const expected = [{ number: 1, text: first }, { number: 2, text: "继续观察" }];
+    assert.deepEqual(receipt.decisions, expected);
+    assert.deepEqual((await cli(["minutes-show", "--workspace", fixture.workspace, "--id", receipt.id])).record.decisions, expected);
+  }
 });
 
 test("STORY-475 R2: decided-in on work-create names new minutes, and minutes-list and minutes-show read the relation from both ends", async (context) => {

@@ -225,3 +225,72 @@ test("agent CLI binds each explicit clause to its full key, unique fragment or n
     assert.ok(!lines[0].includes("D8 现行有效"));
   });
 });
+
+test("agent CLI delivers the applicable release, historical review and file budget first", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "recall-scope-cues-"));
+  t.after(async () => { resetRecallCache(); await rm(root, { recursive: true, force: true }); });
+  await initializeLibrary({ root, createdAt: at });
+  let state = await createProject(root, { occurredAt: at, externalKey: "SCOPE-CUES-EM", name: "E and M release evidence" });
+  const emProjectId = state.projects.find((project) => project.externalKey === "SCOPE-CUES-EM").id;
+  state = await createProject(root, { occurredAt: at, externalKey: "SCOPE-CUES-DSH-JOI", name: "dsh-joi-channel-theme release" });
+  const dshProjectId = state.projects.find((project) => project.externalKey === "SCOPE-CUES-DSH-JOI").id;
+  const addMinutes = (projectId, externalKey, title, decisions) => recordMinutes(root, {
+    occurredAt: at, projectId, externalKey, title, summary: title, decisions, decidedBy: [], linkedWorkIds: [],
+  });
+  await addMinutes(emProjectId, "TCRN-CROSS-MIN-20261116-EM-500-RELEASED", "v5.0.0 release evidence", [
+    "Einzbern and Mana Orchestrate officially released v5.0.0; this records the release basis for both repositories.",
+  ]);
+  await addMinutes(emProjectId, "TCRN-CROSS-MIN-20261117-EM-500-LOCAL-UPDATE", "Local E and M update", [
+    "By the Owner's one-time instruction to update the local versions, update the local Einzbern engine and four host Skill copies from 4.6.0 to the latest formal version 5.0.0.",
+  ]);
+  await addMinutes(emProjectId, "TCRN-CROSS-MIN-282", "Einzbern PR #17 independent code review and merge recommendation", [
+    "Codex independent technical review recommended merging Einzbern PR #17 at head 3a7cfc6b7013f30d0703df8ad5e6aaf572129d53; this historical reviewer opinion is not Owner merge authorization.",
+  ]);
+  await addMinutes(emProjectId, "TCRN-CROSS-MIN-20261113-EM-PHASED-PLAN", "E and M phased evolution plan", [
+    "Keep the released interfaces stable.",
+    "Record the cross project work boundary.",
+    "Put host specific guidance in host reference documents.",
+    "Mana Orchestrate SKILL.md has a long term capacity budget of 6000 字节 and carries only general navigation and high frequency one line command templates; before implementing STORY-667, read the latest STORY-652 closeout baseline.",
+  ]);
+  await addMinutes(dshProjectId, "DSH-JOI-MIN-20261116-RELEASE021", "0.2.1 visual acceptance and release authorization", [
+    "Keep the channel theme reproducible.",
+    "Owner explicitly authorized publishing dsh-joi-channel-theme 0.2.1.",
+  ]);
+
+  const read = async (query, projectId) => {
+    let raw = "";
+    const args = ["recall", "--workspace", root, "--at", at, "--query", query, "--view", "agent"];
+    if (projectId !== undefined) args.push("--project-id", projectId);
+    await runCli(args, { write(value) { raw += value; } });
+    return JSON.parse(raw);
+  };
+  const release = await read("E 和 M 5.0.0 有哪些发布依据？", emProjectId);
+  assert.ok(release.context[0].includes("TCRN-CROSS-MIN-20261116-EM-500-RELEASED"), release.context[0]);
+  assert.ok(release.context[0].includes("D1 现行有效"), release.context[0]);
+  assert.ok(release.context[0].includes(`minutes-show --id ${deriveStableId("minutes", "TCRN-CROSS-MIN-20261116-EM-500-RELEASED")}#D1`), release.context[0]);
+  const localAction = release.context.findIndex((line) => line.includes("TCRN-CROSS-MIN-20261117-EM-500-LOCAL-UPDATE"));
+  if (localAction >= 0) assert.ok(localAction > 0, "the one-time local update is not the first release basis");
+
+  const historical = await read("Einzbern PR #17 当时为什么建议合并？", emProjectId);
+  assert.ok(historical.context[0].includes("TCRN-CROSS-MIN-282"), historical.context[0]);
+  assert.ok(historical.context[0].includes("D1 历史问题；非现行行动"), historical.context[0]);
+  assert.ok(historical.context[0].includes(`${deriveStableId("minutes", "TCRN-CROSS-MIN-282")}#D1`), historical.context[0]);
+
+  const synonym = await read("Einzbern PR #17 当初为何获得合并建议？", emProjectId);
+  assert.ok(synonym.context[0].includes("TCRN-CROSS-MIN-282"), synonym.context[0]);
+  assert.ok(synonym.context[0].includes("D1 历史问题；非现行行动"), synonym.context[0]);
+
+  const budget = await read("Mana Orchestrate 的 SKILL.md 字节预算是多少？", emProjectId);
+  assert.ok(budget.context[0].includes("TCRN-CROSS-MIN-20261113-EM-PHASED-PLAN"), budget.context[0]);
+  assert.ok(budget.context[0].includes("D4 现行有效"), budget.context[0]);
+  assert.ok(budget.context[0].includes("6000 字节"), budget.context[0]);
+  assert.ok(budget.context[0].includes(`${deriveStableId("minutes", "TCRN-CROSS-MIN-20261113-EM-PHASED-PLAN")}#D4`), budget.context[0]);
+
+  const negativeQuery = "DSH-JOI-MIN-20261116-RELEASE021#D2 的发布授权是什么？";
+  const scopedNegative = await read(negativeQuery, emProjectId);
+  assert.equal(scopedNegative.context.length, 0);
+  const unscopedNegative = await read(negativeQuery);
+  assert.ok(unscopedNegative.context[0].includes("DSH-JOI-MIN-20261116-RELEASE021"), unscopedNegative.context[0]);
+  assert.ok(unscopedNegative.context[0].includes(`${deriveStableId("minutes", "DSH-JOI-MIN-20261116-RELEASE021")}#D2`), unscopedNegative.context[0]);
+  assert.ok(Buffer.byteLength([...release.context, ...historical.context, ...budget.context].join("\n")) <= 4800);
+});

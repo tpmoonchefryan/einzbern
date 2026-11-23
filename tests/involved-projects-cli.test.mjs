@@ -198,8 +198,8 @@ test("U10: output, rules and AGENTS consumers follow each target's own configura
   // The AGENTS consumer: agents-render on each handoff's registered repository renders that target's
   // own rule sections; the unavailable target's repository is refused on its own.
   for (const handoff of [alpha, beta]) assert.equal((await cli(["agents-render", "--project", handoff.repositories[0].projectPath, "--at", at])).reasonCode, "AGENTS_RENDERED");
-  assert.match(await readFile(join(targets.alpha.repo, "AGENTS.md"), "utf8"), /einzbern:section id=rule:autonomy /u);
-  assert.doesNotMatch(await readFile(join(targets.beta.repo, "AGENTS.md"), "utf8"), /id=rule:autonomy/u);
+  assert.match(await readFile(join(targets.alpha.repo, "AGENTS.md"), "utf8"), /\*\*(?:Autonomy|自主运行)\*\*/u);
+  assert.doesNotMatch(await readFile(join(targets.beta.repo, "AGENTS.md"), "utf8"), /\*\*(?:Autonomy|自主运行)\*\*/u);
   await assert.rejects(cli(["agents-render", "--project", targets.gamma.repo, "--at", at]), error => typeof error.reasonCode === "string");
-  assert.match(await readFile(join(targets.alpha.repo, "AGENTS.md"), "utf8"), /einzbern:section id=rule:autonomy /u, "the refusal left the other target's output as it was");
+  assert.match(await readFile(join(targets.alpha.repo, "AGENTS.md"), "utf8"), /\*\*(?:Autonomy|自主运行)\*\*/u, "the refusal left the other target's output as it was");
 });

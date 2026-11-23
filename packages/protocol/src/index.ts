@@ -53,8 +53,10 @@ export type ProtocolReasonCode = typeof PROTOCOL_REASON_CODES[number];
 export type JsonPrimitive = boolean | null | number | string;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 export type PlannedDeliveryKind = "Initiative" | "Epic" | "Story" | "Subtask";
+/** A separately numbered, parentless execution batch; it never enters the four-level delivery tree. */
+export type PackWorkKind = "Pack";
 export type ExtensionWorkKind = "Review" | "Incident" | "Release" | "Knowledge";
-export type WorkKind = PlannedDeliveryKind | ExtensionWorkKind;
+export type WorkKind = PlannedDeliveryKind | PackWorkKind | ExtensionWorkKind;
 export const WORK_STATUSES = Object.freeze([
   "planned",
   "ready",
@@ -68,6 +70,73 @@ export type WorkStatus = typeof WORK_STATUSES[number];
 
 export function isWorkStatus(value: unknown): value is WorkStatus {
   return typeof value === "string" && (WORK_STATUSES as readonly string[]).includes(value);
+}
+
+export const PACK_PLAN_SCHEMA_VERSION = "tcrn.pack-plan.v1" as const;
+
+/** A source work item pinned to its identity, revision and original parent link. */
+export interface PackWorkReference {
+  readonly id: string;
+  readonly externalKey: string;
+  readonly kind: WorkKind;
+  readonly revision: number;
+  readonly parentId: string | null;
+}
+
+export interface PackAcceptanceReference {
+  readonly acceptanceOwner: PackWorkReference;
+  readonly acceptanceId: string;
+  readonly acceptanceVersion: number;
+  readonly requirementOwner: PackWorkReference;
+  readonly requirementId: string;
+  readonly requirementVersion: number;
+}
+
+export interface PackFileScope {
+  readonly repository: string;
+  readonly path: string;
+  readonly access: "read" | "modify" | "conditional";
+  readonly condition?: string;
+  readonly resolution?: string;
+}
+
+export type PackPrerequisite =
+  | { readonly kind: "blocked-by"; readonly work: PackWorkReference; readonly blocker: PackWorkReference; readonly requiredStatus: WorkStatus }
+  | { readonly kind: "assignment-result"; readonly assignmentId: string };
+
+export interface PackResultSource {
+  readonly source: PackWorkReference;
+  readonly locator: "completion.result" | "advisory:result";
+}
+
+export interface PackVerificationTrigger {
+  readonly trigger: "after-results-recorded";
+  readonly afterAssignmentIds: readonly string[];
+  readonly verifiers: readonly PackWorkReference[];
+}
+
+export interface PackAssignment {
+  readonly id: string;
+  /** One-based execution order. The order is part of the plan and is never inferred from IDs. */
+  readonly order: number;
+  readonly role: "implementation" | "evidence" | "verification";
+  readonly status: WorkStatus;
+  /** Rows sharing a group may run concurrently when maxConcurrency allows. */
+  readonly parallelGroup: string | null;
+  readonly sourceWorks: readonly PackWorkReference[];
+  readonly criteria: readonly PackAcceptanceReference[];
+  readonly files: readonly PackFileScope[];
+  readonly prerequisites: readonly PackPrerequisite[];
+  readonly resultSources: readonly PackResultSource[];
+  readonly verification: PackVerificationTrigger | null;
+}
+
+/** Persisted inside typed WorkContent. WorkRecord.externalKey/revision/status remain PACK number/version/state. */
+export interface PackPlan {
+  readonly schemaVersion: typeof PACK_PLAN_SCHEMA_VERSION;
+  readonly initiative: PackWorkReference;
+  readonly maxConcurrency: number;
+  readonly assignments: readonly PackAssignment[];
 }
 
 export interface ProtocolBootstrapStatus {
@@ -506,7 +575,7 @@ function assertWorkRecordShape(record: WorkRecord): void {
   if (record.parentId !== null) {
     assertProtocolId(record.parentId);
   }
-  if (typeof record.kind !== "string" || !["Initiative", "Epic", "Story", "Subtask", "Review", "Incident", "Release", "Knowledge"].includes(record.kind)) {
+  if (typeof record.kind !== "string" || !["Initiative", "Epic", "Story", "Subtask", "Pack", "Review", "Incident", "Release", "Knowledge"].includes(record.kind)) {
     fail("RECORD_MALFORMED", String(record.id));
   }
   if (!isWorkStatus(record.status)) {
@@ -791,6 +860,9 @@ export function validateWorkGraph(records: readonly WorkRecord[], registry: read
     ["Epic", "Initiative"],
     ["Story", "Epic"],
     ["Subtask", "Story"],
+    // PACK is an independently numbered execution container, parallel to the Initiative and
+    // deliberately outside the four-level Initiative → Epic → Story → Subtask parent chain.
+    ["Pack", null],
     // A Release (a sprint / release-train batch) is a top-level container, structurally
     // parallel to an Initiative: it owns no parent, and its members attach by the
     // member-side advisory:sprint annotation rather than parentage. Enforce parentless so

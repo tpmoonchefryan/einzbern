@@ -1,3 +1,4 @@
+import { blockBody, configuredPrinciples, planPrinciples, PRINCIPLES_ID } from "./agents-principles.js";
 import { chainIdentity } from "./chain-identity.js";
 import { effectiveProjectState } from "./project-chain.js";
 // SPDX-License-Identifier: Apache-2.0
@@ -8,14 +9,9 @@ import { effectiveProjectState } from "./project-chain.js";
 //
 // CLAUDE.md gets one section, claude-import, which holds the line `@AGENTS.md`, and only while the
 // file does not import AGENTS.md already: a CLAUDE.md that imports it keeps every byte, and a
-// project without a CLAUDE.md gets one that holds that section alone. AGENTS.md may get the
-// navigation section, three lines telling an agent that Einzbern manages the project, to load
-// Mana Orchestrate and to recall first. Whether it is written is asked once, when Einzbern is
-// installed, and kept on the device (agents.navigation, machine-settings.ts). A device that
-// declined it gets two pointer hooks instead, on SessionStart and SubagentStart, which hand the
-// agent the same three lines (host-hooks.ts, hook-recall.ts). Only enabled Command Spell principles
-// follow them. Configuration values are queried from the engine; old variable sections retire
-// through the same protected writer.
+// project without a CLAUDE.md gets one that holds that section alone. AGENTS.md collects the
+// optional Mana Orchestrate navigation and enabled principles in one managed section. Separate
+// managed sections from older versions migrate through the same protected writer.
 //
 // A section the user changed waits (pending) until the user decides what becomes of it:
 // overwrite puts the engine's text back and records it as the new baseline; keep records the text
@@ -58,6 +54,7 @@ import {
   parseManagedFile,
   planManagedWrite,
   renderSection,
+  replaceSection,
   revertManagedWrite,
   sectionDigest,
 } from "./managed-sections.js";
@@ -75,9 +72,6 @@ import type { AgentsNavigationChoice } from "./machine-settings.js";
 import { gitTopLevel, readRegistry, resolveLibrary } from "./registry.js";
 import type { ResolutionPath } from "./registry.js";
 import { BUILT_IN_RULES, builtInRule, ruleBody } from "./rules-catalog.js";
-import {
-  RETIRED_VARIABLE_SECTION_IDS,
-} from "./variables-sections.js";
 import type { WithheldEntry } from "./variables-sections.js";
 import { compareRecordOrder } from "./variables.js";
 import { appendPlannedWrite, materializeWorkspace, projectConfiguration } from "./workspace.js";
@@ -129,7 +123,7 @@ export const CLAUDE_IMPORT_SECTION: AgentsSection = Object.freeze({ id: "claude-
 import { NAVIGATION_LINES } from "./navigation-lines.js";
 export { NAVIGATION_LINES };
 
-/** AGENTS.md's navigation section, written only on a device whose agents.navigation is written. */
+/** Legacy AGENTS.md navigation body used when resolving an existing standalone section. */
 export const NAVIGATION_SECTION: AgentsSection = Object.freeze({ id: "navigation", file: AGENTS_FILE, body: `${NAVIGATION_LINES.join("\n")}\n` });
 
 /** The file a section lives in: claude-import is CLAUDE.md's, every other section AGENTS.md's. */
@@ -280,30 +274,6 @@ function userModified(section: ParsedSection, record: ManagedSectionRecord | und
   if (section.digest !== section.bodyDigest) return true;
   if (record === undefined) return false;
   return record.digest !== section.digest || record.state === "pending" || record.state === "user-owned" || record.state === "unmanaged";
-}
-
-// The file with one section's bytes replaced by `replacement`. A section taken out altogether
-// takes one blank line with it, the one the writer put beside it: the one after it, or, at the end
-// of the file, the one before it.
-function replaceSection(parsed: ParsedManagedFile, index: number, replacement: string): string {
-  const outside = [...parsed.outside];
-  if (replacement === "") {
-    const blank = `${parsed.eol}${parsed.eol}`;
-    const before = outside[index] ?? "";
-    const after = outside[index + 1] ?? "";
-    if ((before === "" || before.endsWith(blank)) && after.startsWith(parsed.eol)) {
-      outside[index + 1] = after.slice(parsed.eol.length);
-    } else if (after === "" && index === parsed.sections.length - 1 && before.endsWith(blank)) {
-      outside[index] = before.slice(0, -parsed.eol.length);
-    }
-  }
-  const parts: string[] = [];
-  for (const [position, section] of parsed.sections.entries()) {
-    parts.push(outside[position] ?? "");
-    parts.push(position === index ? replacement : section.raw);
-  }
-  parts.push(outside[parsed.sections.length] ?? "");
-  return parts.join("");
 }
 
 // A section file written as `after`: what the write did, and the plan it wrote, which is what an
@@ -620,10 +590,10 @@ function artifactLanguage(state: Pick<WorkspaceState, "settings">): string | nul
 
 /**
  * The engine's text for a section as the library now stands, or null when the engine writes no
- * section by that id: the import and navigation sections and a
- * built-in rule's section in the project's artifact language.
+ * section by that id. Legacy navigation and rule sections keep their original resolution text.
  */
 export function engineSectionBody(state: Pick<WorkspaceState, "settings" | "configRecords">, id: string): string | null {
+  if (id === PRINCIPLES_ID) return blockBody(configuredPrinciples(state));
   if (id === CLAUDE_IMPORT_SECTION.id) return CLAUDE_IMPORT_SECTION.body;
   if (id === NAVIGATION_SECTION.id) return NAVIGATION_SECTION.body;
   if (id.startsWith(RULE_SECTION_PREFIX)) {
@@ -778,46 +748,20 @@ export function orderRuleSections(plan: ManagedWritePlan, orders: ReadonlyMap<st
   return { ...plan, after, write: true };
 }
 
-// The sections of the Command Spell rules the library has enabled (TCRN-CROSS-STORY-483, rules.ts),
-// in the rules' order (compareRules: catalog order while no rule holds an order) and in the
-// target's artifact language. Enabled built-ins follow the engine catalog; the section writer
-// preserves Owner text, local modifications, removed markers and unmanaged sections. An engine
-// too old to understand the version originally enabled still leaves that rule alone.
-function enabledRuleSections(state: Pick<WorkspaceState, "settings" | "configRecords">): readonly AgentsSection[] {
-  const language = artifactLanguage(state);
-  const compare = compareRules(ruleOrders(state));
-  return BUILT_IN_RULES.flatMap((rule) => {
-    const record = state.configRecords.find((entry) => entry.collection === "rule" && entry.key === rule.id)?.value;
-    if (record?.enabled !== true || typeof record.version !== "number" || record.version > rule.version) return [];
-    return [{ id: `${RULE_SECTION_PREFIX}${rule.id}`, file: AGENTS_FILE, body: ruleBody(rule.id, language) }];
-  }).sort((left, right) => compare(left.id.slice(RULE_SECTION_PREFIX.length), right.id.slice(RULE_SECTION_PREFIX.length)));
-}
-
-/**
- * The sections the engine writes into AGENTS.md for a device whose navigation choice is
- * `navigation`: the navigation section on a device that chose written and the section of every
- * enabled rule supported by this engine. Project details and configuration values are read on demand.
- */
+/** The configured resident output before local ownership and migration are considered. */
 export function agentsFileSections(state: Pick<WorkspaceState, "settings" | "configRecords">, _navigation: AgentsNavigationChoice | null): {
   readonly sections: readonly AgentsSection[];
   readonly withheld: readonly WithheldEntry[];
 } {
-  if (state.settings.find(entry => entry.key === "agents.generation")?.value === "none") return { sections: [], withheld: [] };
-  return {
-    sections: [
-      ...((state.settings.find(entry => entry.key === "agents.sharedNavigation")?.value ?? "written") === "written" ? [NAVIGATION_SECTION] : []),
-      ...enabledRuleSections(state),
-    ],
-    withheld: [],
-  };
+  const body = blockBody(configuredPrinciples(state));
+  return { sections: body ? [{ id: PRINCIPLES_ID, file: AGENTS_FILE, body }] : [], withheld: [] };
 }
 
 /**
  * Render the engine's sections into a project's AGENTS.md and CLAUDE.md against the library's
- * records, and record each section record the render changed (R2, R4, R5). AGENTS.md gets the
- * sections of the rules the library has enabled and the navigation
- * section when this device's choice is written; CLAUDE.md
- * gets its import section unless it imports AGENTS.md already. Both files are planned before
+ * records, and record each section record the render changed (R2, R4, R5). AGENTS.md gets a
+ * single section for its navigation and enabled principles. CLAUDE.md gets its import section
+ * unless it imports AGENTS.md already. Both files are planned before
  * either is written, so a file whose markers do not parse refuses the whole render. A section the
  * user changed is left as it is and goes pending; one the user removed is not put back; a section
  * the engine does not render (a navigation section another device wrote) is left alone. A render
@@ -844,19 +788,11 @@ export async function renderAgentsSections(workspaceRoot: string, input: {
       }
       const agents = agentsFileSections(state, input.navigation);
       const plans = [
-        // TCRN-CROSS-STORY-508 R7: with the rule sections in the rules' order.
-        orderRuleSections(await planManagedWrite({
-          filePath: join(input.projectRoot, AGENTS_FILE),
-          file: AGENTS_FILE,
-          desired: agents.sections.map((section) => ({ id: section.id, body: section.body })),
-          records: managedSectionRecordsFor(state, AGENTS_FILE),
-          retired: RETIRED_VARIABLE_SECTION_IDS,
-          restoreMissingFile: true,
-        }), ruleOrders(state)),
+        await planPrinciples(input.projectRoot, state),
         await planClaudeImport(input.projectRoot, managedSectionRecordsFor(state, CLAUDE_FILE)),
       ];
       const decisions = plans.flatMap((plan) => plan.sections.map((decision) => ({ plan, decision })));
-      const deltas = recordDeltas(decisions.map(({ plan, decision }) => ({ file: plan.file, id: decision.id, record: decision.record, recordChanged: decision.recordChanged, hadRecord: true })), input.configurationProjectId);
+      const deltas = recordDeltas(decisions.map(({ plan, decision }) => ({ file: plan.file, id: decision.id, record: decision.forgetRecord ? null : decision.record, recordChanged: decision.recordChanged, hadRecord: true })), input.configurationProjectId);
       return { deltas, plan: { withheld: agents.withheld, plans, decisions, recorded: deltas.length } };
     },
     unchanged: ({ plans }) => filesAsPlanned(plans),
@@ -949,7 +885,7 @@ export async function resolveAgentsSection(workspaceRoot: string, input: {
   return changeAgentsSection(workspaceRoot, input, async (state, records, file) => {
     let body: string | undefined;
     if (input.action === "overwrite") {
-      body = engineSectionBody(state, input.id) ?? fail("MANAGED_SECTION_ACTION_INVALID", `the engine writes no section ${input.id}, so there is no text to overwrite it with`, {
+      body = (input.id === PRINCIPLES_ID ? (await planPrinciples(input.projectRoot, state)).desiredBody : engineSectionBody(state, input.id)) ?? fail("MANAGED_SECTION_ACTION_INVALID", `the engine writes no section ${input.id}, so there is no text to overwrite it with`, {
         file,
         section: input.id,
         action: "overwrite",

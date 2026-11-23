@@ -1,0 +1,452 @@
+{
+  "schemaVersion": "tcrn.pack-candidate-input.v1",
+  "fixtureIdentity": "TCRN-CROSS-PACK-CANDIDATE-FIXTURE",
+  "sourceContent": "Synthetic candidate fixture. Work IDs, external keys, revisions, parent links, and acceptance references are copied from the separate historical evidence bundle; candidate runtime work content is synthetic.",
+  "historicalEvidence": {
+    "cliImplementation": "../../../../evidence/historical/cli-initial/",
+    "sub780ReadOnlyEvidence": "../../../../evidence/historical/sub780/",
+    "sub781VerifierWorkReadback": "../../../../evidence/historical/sub780/sub-781-live-work-show.json"
+  },
+  "works": [
+    {
+      "id": "work:a29da6e9cb5cb5fc8d5986c7",
+      "externalKey": "TCRN-CROSS-INIT-108",
+      "kind": "Initiative",
+      "revision": 3,
+      "parentId": null,
+      "status": "active"
+    },
+    {
+      "id": "work:6f333a33a77e5ec08a03f747",
+      "externalKey": "TCRN-CROSS-EPIC-216",
+      "kind": "Epic",
+      "revision": 3,
+      "parentId": "work:a29da6e9cb5cb5fc8d5986c7",
+      "status": "active"
+    },
+    {
+      "id": "work:4be3c1df47f39a608582b372",
+      "externalKey": "TCRN-CROSS-STORY-689",
+      "kind": "Story",
+      "revision": 6,
+      "parentId": "work:6f333a33a77e5ec08a03f747",
+      "status": "active"
+    },
+    {
+      "id": "work:8e8d67728916dfdd6492308d",
+      "externalKey": "TCRN-CROSS-SUB-748",
+      "kind": "Subtask",
+      "revision": 5,
+      "parentId": "work:4be3c1df47f39a608582b372",
+      "status": "done"
+    },
+    {
+      "id": "work:1fb894ac7adde4daee3eadba",
+      "externalKey": "TCRN-CROSS-STORY-690",
+      "kind": "Story",
+      "revision": 1,
+      "parentId": "work:6f333a33a77e5ec08a03f747",
+      "status": "planned"
+    },
+    {
+      "id": "work:359cd763ffc00b103f5dd634",
+      "externalKey": "TCRN-CROSS-SUB-750",
+      "kind": "Subtask",
+      "revision": 1,
+      "parentId": "work:1fb894ac7adde4daee3eadba",
+      "status": "planned"
+    },
+    {
+      "id": "work:2eaf63426f7853be58efafd5",
+      "externalKey": "TCRN-CROSS-STORY-691",
+      "kind": "Story",
+      "revision": 1,
+      "parentId": "work:6f333a33a77e5ec08a03f747",
+      "status": "planned"
+    },
+    {
+      "id": "work:cb679ad937f9f152564a6dfd",
+      "externalKey": "TCRN-CROSS-SUB-752",
+      "kind": "Subtask",
+      "revision": 1,
+      "parentId": "work:2eaf63426f7853be58efafd5",
+      "status": "planned"
+    },
+    {
+      "id": "work:7fec80b133d9d841d88e5525",
+      "externalKey": "TCRN-CROSS-EPIC-223",
+      "kind": "Epic",
+      "revision": 1,
+      "parentId": "work:a29da6e9cb5cb5fc8d5986c7",
+      "status": "active"
+    },
+    {
+      "id": "work:818f8ce331a8184fd59e49d0",
+      "externalKey": "TCRN-CROSS-STORY-705",
+      "kind": "Story",
+      "revision": 1,
+      "parentId": "work:7fec80b133d9d841d88e5525",
+      "status": "active"
+    },
+    {
+      "id": "work:ac69221954f370ee1353f465",
+      "externalKey": "TCRN-CROSS-SUB-780",
+      "kind": "Subtask",
+      "revision": 1,
+      "parentId": "work:818f8ce331a8184fd59e49d0",
+      "status": "planned"
+    },
+    {
+      "id": "work:8b4954093364ae1d5a03cd5a",
+      "externalKey": "TCRN-CROSS-SUB-781",
+      "kind": "Subtask",
+      "revision": 5,
+      "parentId": "work:818f8ce331a8184fd59e49d0",
+      "status": "done"
+    }
+  ],
+  "dispatch": {
+    "batchId": "candidate-batch",
+    "batchAttemptId": "candidate-attempt",
+    "assignmentIds": [
+      "cli-common-sequential",
+      "linux-six-sample-read-only"
+    ],
+    "capacity": {
+      "limit": 2,
+      "active": 0
+    }
+  },
+  "plan": {
+    "schemaVersion": "tcrn.pack-plan.v1",
+    "initiative": {
+      "id": "work:a29da6e9cb5cb5fc8d5986c7",
+      "externalKey": "TCRN-CROSS-INIT-108",
+      "kind": "Initiative",
+      "revision": 3,
+      "parentId": null
+    },
+    "maxConcurrency": 2,
+    "assignments": [
+      {
+        "id": "cli-common-sequential",
+        "order": 1,
+        "role": "implementation",
+        "status": "planned",
+        "parallelGroup": "parallel-wave-01",
+        "sourceWorks": [
+          {
+            "id": "work:a29da6e9cb5cb5fc8d5986c7",
+            "externalKey": "TCRN-CROSS-INIT-108",
+            "kind": "Initiative",
+            "revision": 3,
+            "parentId": null
+          },
+          {
+            "id": "work:6f333a33a77e5ec08a03f747",
+            "externalKey": "TCRN-CROSS-EPIC-216",
+            "kind": "Epic",
+            "revision": 3,
+            "parentId": "work:a29da6e9cb5cb5fc8d5986c7"
+          },
+          {
+            "id": "work:4be3c1df47f39a608582b372",
+            "externalKey": "TCRN-CROSS-STORY-689",
+            "kind": "Story",
+            "revision": 6,
+            "parentId": "work:6f333a33a77e5ec08a03f747"
+          },
+          {
+            "id": "work:8e8d67728916dfdd6492308d",
+            "externalKey": "TCRN-CROSS-SUB-748",
+            "kind": "Subtask",
+            "revision": 5,
+            "parentId": "work:4be3c1df47f39a608582b372"
+          },
+          {
+            "id": "work:1fb894ac7adde4daee3eadba",
+            "externalKey": "TCRN-CROSS-STORY-690",
+            "kind": "Story",
+            "revision": 1,
+            "parentId": "work:6f333a33a77e5ec08a03f747"
+          },
+          {
+            "id": "work:359cd763ffc00b103f5dd634",
+            "externalKey": "TCRN-CROSS-SUB-750",
+            "kind": "Subtask",
+            "revision": 1,
+            "parentId": "work:1fb894ac7adde4daee3eadba"
+          },
+          {
+            "id": "work:2eaf63426f7853be58efafd5",
+            "externalKey": "TCRN-CROSS-STORY-691",
+            "kind": "Story",
+            "revision": 1,
+            "parentId": "work:6f333a33a77e5ec08a03f747"
+          },
+          {
+            "id": "work:cb679ad937f9f152564a6dfd",
+            "externalKey": "TCRN-CROSS-SUB-752",
+            "kind": "Subtask",
+            "revision": 1,
+            "parentId": "work:2eaf63426f7853be58efafd5"
+          }
+        ],
+        "criteria": [
+          {
+            "acceptanceOwner": {
+              "id": "work:8e8d67728916dfdd6492308d",
+              "externalKey": "TCRN-CROSS-SUB-748",
+              "kind": "Subtask",
+              "revision": 5,
+              "parentId": "work:4be3c1df47f39a608582b372"
+            },
+            "acceptanceId": "AC01",
+            "acceptanceVersion": 1,
+            "requirementOwner": {
+              "id": "work:8e8d67728916dfdd6492308d",
+              "externalKey": "TCRN-CROSS-SUB-748",
+              "kind": "Subtask",
+              "revision": 5,
+              "parentId": "work:4be3c1df47f39a608582b372"
+            },
+            "requirementId": "R01",
+            "requirementVersion": 1
+          },
+          {
+            "acceptanceOwner": {
+              "id": "work:359cd763ffc00b103f5dd634",
+              "externalKey": "TCRN-CROSS-SUB-750",
+              "kind": "Subtask",
+              "revision": 1,
+              "parentId": "work:1fb894ac7adde4daee3eadba"
+            },
+            "acceptanceId": "AC01",
+            "acceptanceVersion": 1,
+            "requirementOwner": {
+              "id": "work:359cd763ffc00b103f5dd634",
+              "externalKey": "TCRN-CROSS-SUB-750",
+              "kind": "Subtask",
+              "revision": 1,
+              "parentId": "work:1fb894ac7adde4daee3eadba"
+            },
+            "requirementId": "R01",
+            "requirementVersion": 1
+          },
+          {
+            "acceptanceOwner": {
+              "id": "work:cb679ad937f9f152564a6dfd",
+              "externalKey": "TCRN-CROSS-SUB-752",
+              "kind": "Subtask",
+              "revision": 1,
+              "parentId": "work:2eaf63426f7853be58efafd5"
+            },
+            "acceptanceId": "AC01",
+            "acceptanceVersion": 1,
+            "requirementOwner": {
+              "id": "work:cb679ad937f9f152564a6dfd",
+              "externalKey": "TCRN-CROSS-SUB-752",
+              "kind": "Subtask",
+              "revision": 1,
+              "parentId": "work:2eaf63426f7853be58efafd5"
+            },
+            "requirementId": "R01",
+            "requirementVersion": 1
+          }
+        ],
+        "files": [
+          {
+            "repository": "Einzbern",
+            "path": "packages/cli/src/index.ts",
+            "access": "modify"
+          },
+          {
+            "repository": "Einzbern",
+            "path": "tests/minutes-cli.test.mjs",
+            "access": "modify"
+          },
+          {
+            "repository": "Einzbern",
+            "path": "tests/doctor.test.mjs",
+            "access": "modify"
+          },
+          {
+            "repository": "Einzbern",
+            "path": "tests/p3-cli-read-surface.test.mjs",
+            "access": "modify"
+          }
+        ],
+        "prerequisites": [],
+        "resultSources": [],
+        "verification": null
+      },
+      {
+        "id": "linux-six-sample-read-only",
+        "order": 2,
+        "role": "evidence",
+        "status": "planned",
+        "parallelGroup": "parallel-wave-01",
+        "sourceWorks": [
+          {
+            "id": "work:a29da6e9cb5cb5fc8d5986c7",
+            "externalKey": "TCRN-CROSS-INIT-108",
+            "kind": "Initiative",
+            "revision": 3,
+            "parentId": null
+          },
+          {
+            "id": "work:7fec80b133d9d841d88e5525",
+            "externalKey": "TCRN-CROSS-EPIC-223",
+            "kind": "Epic",
+            "revision": 1,
+            "parentId": "work:a29da6e9cb5cb5fc8d5986c7"
+          },
+          {
+            "id": "work:818f8ce331a8184fd59e49d0",
+            "externalKey": "TCRN-CROSS-STORY-705",
+            "kind": "Story",
+            "revision": 1,
+            "parentId": "work:7fec80b133d9d841d88e5525"
+          },
+          {
+            "id": "work:ac69221954f370ee1353f465",
+            "externalKey": "TCRN-CROSS-SUB-780",
+            "kind": "Subtask",
+            "revision": 1,
+            "parentId": "work:818f8ce331a8184fd59e49d0"
+          }
+        ],
+        "criteria": [
+          {
+            "acceptanceOwner": {
+              "id": "work:ac69221954f370ee1353f465",
+              "externalKey": "TCRN-CROSS-SUB-780",
+              "kind": "Subtask",
+              "revision": 1,
+              "parentId": "work:818f8ce331a8184fd59e49d0"
+            },
+            "acceptanceId": "AC01",
+            "acceptanceVersion": 1,
+            "requirementOwner": {
+              "id": "work:ac69221954f370ee1353f465",
+              "externalKey": "TCRN-CROSS-SUB-780",
+              "kind": "Subtask",
+              "revision": 1,
+              "parentId": "work:818f8ce331a8184fd59e49d0"
+            },
+            "requirementId": "R01",
+            "requirementVersion": 1
+          }
+        ],
+        "files": [
+          {
+            "repository": "Code",
+            "path": ".tcrn-artifacts/init-108-codex.FrKBDy/parallel-stage.UrXCj1/linux-samples-evidence/sub-780-six-sample-identity-table.md",
+            "access": "read"
+          },
+          {
+            "repository": "Code",
+            "path": ".tcrn-artifacts/init-108-codex.FrKBDy/parallel-stage.UrXCj1/linux-samples-evidence/sub-780-linux-six-samples-evidence.json",
+            "access": "read"
+          }
+        ],
+        "prerequisites": [],
+        "resultSources": [],
+        "verification": null
+      },
+      {
+        "id": "linux-independent-verification",
+        "order": 3,
+        "role": "verification",
+        "status": "planned",
+        "parallelGroup": "verification-wave-02",
+        "sourceWorks": [
+          {
+            "id": "work:a29da6e9cb5cb5fc8d5986c7",
+            "externalKey": "TCRN-CROSS-INIT-108",
+            "kind": "Initiative",
+            "revision": 3,
+            "parentId": null
+          },
+          {
+            "id": "work:7fec80b133d9d841d88e5525",
+            "externalKey": "TCRN-CROSS-EPIC-223",
+            "kind": "Epic",
+            "revision": 1,
+            "parentId": "work:a29da6e9cb5cb5fc8d5986c7"
+          },
+          {
+            "id": "work:818f8ce331a8184fd59e49d0",
+            "externalKey": "TCRN-CROSS-STORY-705",
+            "kind": "Story",
+            "revision": 1,
+            "parentId": "work:7fec80b133d9d841d88e5525"
+          },
+          {
+            "id": "work:8b4954093364ae1d5a03cd5a",
+            "externalKey": "TCRN-CROSS-SUB-781",
+            "kind": "Subtask",
+            "revision": 5,
+            "parentId": "work:818f8ce331a8184fd59e49d0"
+          }
+        ],
+        "criteria": [
+          {
+            "acceptanceOwner": {
+              "id": "work:8b4954093364ae1d5a03cd5a",
+              "externalKey": "TCRN-CROSS-SUB-781",
+              "kind": "Subtask",
+              "revision": 5,
+              "parentId": "work:818f8ce331a8184fd59e49d0"
+            },
+            "acceptanceId": "AC01",
+            "acceptanceVersion": 1,
+            "requirementOwner": {
+              "id": "work:8b4954093364ae1d5a03cd5a",
+              "externalKey": "TCRN-CROSS-SUB-781",
+              "kind": "Subtask",
+              "revision": 5,
+              "parentId": "work:818f8ce331a8184fd59e49d0"
+            },
+            "requirementId": "R01",
+            "requirementVersion": 1
+          }
+        ],
+        "files": [
+          {
+            "repository": "Code",
+            "path": ".tcrn-artifacts/init-108-codex.FrKBDy/parallel-stage.UrXCj1/linux-samples-evidence/sub-780-six-sample-identity-table.md",
+            "access": "read"
+          },
+          {
+            "repository": "Code",
+            "path": ".tcrn-artifacts/init-108-codex.FrKBDy/parallel-stage.UrXCj1/linux-samples-evidence/sub-780-linux-six-samples-evidence.json",
+            "access": "read"
+          }
+        ],
+        "prerequisites": [
+          {
+            "kind": "assignment-result",
+            "assignmentId": "linux-six-sample-read-only"
+          }
+        ],
+        "resultSources": [],
+        "verification": {
+          "trigger": "after-results-recorded",
+          "afterAssignmentIds": [
+            "linux-six-sample-read-only"
+          ],
+          "verifiers": [
+            {
+              "id": "work:8b4954093364ae1d5a03cd5a",
+              "externalKey": "TCRN-CROSS-SUB-781",
+              "kind": "Subtask",
+              "revision": 5,
+              "parentId": "work:818f8ce331a8184fd59e49d0"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

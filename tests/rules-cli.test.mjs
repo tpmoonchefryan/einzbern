@@ -82,6 +82,7 @@ async function scratch(context, language = "zh-CN") {
   const created = await cli(["project-create", "--workspace", library, "--external-key", "rules-project", "--name", "Rules project", "--at", at()]);
   await cli(["library-register", "--library", library, "--project", project, "--project-id", created.record.id, "--at", at()]);
   // The setting is written as Atelier writes it; a model's settings-set is refused (STORY-484 R4).
+  await setWorkspaceSetting(library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at() });
   if (language !== null) await setWorkspaceSetting(library, { key: "artifact.language", value: language, occurredAt: at() });
   return { base, device, project, library, agents: join(project, "AGENTS.md") };
 }
@@ -106,41 +107,41 @@ test("483-AC1 via rule-enable: batch processing's v3 text goes into AGENTS.md, t
   const { source: enabledSource, ...enabledRule } = enabled.rule;
   const enabledRead = await list(project);
   assert.equal(enabledRead.rules.find(rule=>rule.id==="batch").source.projectId, enabledRead.projectId);
-  assert.deepEqual(enabledRule, { id: "batch", version: 3, recordedVersion: 3, fileVersion: 1, section: "rule:batch", state: "enabled" });
-  assert.deepEqual([enabled.section, enabled.file, enabled.action, enabled.result, enabled.written, enabled.recorded], ["rule:batch", "AGENTS.md", "enable", "create", true, 2]);
+  assert.deepEqual(enabledRule, { id: "batch", version: 3, recordedVersion: 3, fileVersion: 1, section: "agents", state: "enabled" });
+  assert.deepEqual([enabled.section, enabled.file, enabled.action, enabled.result, enabled.written, enabled.recorded], ["agents", "AGENTS.md", "enable", "create", true, 2]);
   // STORY-467 receipts name global records; `section` above remains the local section id.
   const projectId = (await list(project)).projectId;
-  assert.deepEqual([...enabled.ids].sort(), [`managed-section:${projectId}:AGENTS.md#rule:batch`, `rule:${projectId}:batch`]);
+  assert.deepEqual([...enabled.ids].sort(), [`managed-section:${projectId}:AGENTS.md#agents`, `rule:${projectId}:batch`]);
   assert.equal(enabled.backupDir.startsWith(join(device, "backups")), true, "the backup is in the device directory");
   assert.equal(enabled.backupPath, join(enabled.backupDir, "AGENTS.md"));
   assert.equal(await readFile(enabled.backupPath, "utf8"), USER_TEXT, "AGENTS.md was backed up before it was replaced");
   const text = await readFile(agents, "utf8");
   assert.equal(text.startsWith(`${USER_TEXT}\n`), true, "the user's text stays where it was");
-  assert.equal(sectionOf(text, "rule:batch").body, builtInRule("batch").body.zh, "the section holds the v3 text");
+  assert.equal(sectionOf(text, "agents").body, builtInRule("batch").principle.zh + "\n", "the section holds the v3 text");
   assert.deepEqual(await ruleOf(project, "batch"), enabledRule);
 
   // agents-render renders the enabled rule's section with the others and leaves it as it is.
   const rendered = await render(project);
-  assert.deepEqual(rendered.sections.find((section) => section.id === "rule:batch"), { id: "rule:batch", file: "AGENTS.md", result: "unchanged", state: "managed" });
-  assert.equal(sectionOf(await readFile(agents, "utf8"), "rule:batch").raw, sectionOf(text, "rule:batch").raw);
+  assert.deepEqual(rendered.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "managed" });
+  assert.equal(sectionOf(await readFile(agents, "utf8"), "agents").raw, sectionOf(text, "agents").raw);
 
   // In another artifact language agents-render writes the rule's text in that language.
   await setWorkspaceSetting(library, { key: "artifact.language", value: "en", occurredAt: at() });
   const english = await render(project);
-  assert.deepEqual(english.sections.find((section) => section.id === "rule:batch"), { id: "rule:batch", file: "AGENTS.md", result: "replace", state: "managed" });
-  const section = sectionOf(await readFile(agents, "utf8"), "rule:batch");
-  assert.deepEqual([section.body, section.rev], [builtInRule("batch").body.en, 2]);
-  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 3, fileVersion: 2, section: "rule:batch", state: "enabled" });
+  assert.deepEqual(english.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "replace", state: "managed" });
+  const section = sectionOf(await readFile(agents, "utf8"), "agents");
+  assert.deepEqual([section.body, section.rev], [builtInRule("batch").principle.en + "\n", 2]);
+  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 3, fileVersion: 2, section: "agents", state: "enabled" });
 });
 
 test("483-AC2 via rule-list: a section changed by one character reads user-modified, and listing writes nothing", async (context) => {
   const { device, project, agents } = await scratch(context);
   await enable(project, "batch");
   const written = await readFile(agents, "utf8");
-  const edited = written.replace("批量处理原则", "批量处理准则");
+  const edited = written.replace("按依赖分包", "按目标分包");
   assert.equal(edited.length, written.length);
   await writeFile(agents, edited);
-  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 3, fileVersion: 1, section: "rule:batch", state: "user-modified" });
+  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 3, fileVersion: 1, section: "agents", state: "user-modified" });
   assert.equal(await readFile(agents, "utf8"), edited);
 
   // Run from inside the project without --project, the registry finds it all the same.
@@ -155,25 +156,25 @@ test("483-AC2 via rule-list: a section changed by one character reads user-modif
 test("483-AC4 via rule-enable and rule-resolve: a refused write reads pending; after keep, neither rule-enable nor agents-render writes the section", async (context) => {
   const { project, agents } = await scratch(context);
   await enable(project, "batch");
-  const edited = (await readFile(agents, "utf8")).replace("批量处理原则", "批量处理准则");
+  const edited = (await readFile(agents, "utf8")).replace("按依赖分包", "按目标分包");
   await writeFile(agents, edited);
 
   const refused = await enable(project, "batch");
   assert.deepEqual([refused.reasonCode, refused.result, refused.written, refused.backupDir, refused.rule.state], ["RULE_ENABLED", "refused-user-modified", false, null, "pending"]);
-  assert.deepEqual(refused.ids, [`managed-section:${(await list(project)).projectId}:AGENTS.md#rule:batch`]);
+  assert.deepEqual(refused.ids, [`managed-section:${(await list(project)).projectId}:AGENTS.md#agents`]);
   assert.equal((await ruleOf(project, "batch")).state, "pending");
-  assert.deepEqual((await render(project)).pending, [{ id: "rule:batch", file: "AGENTS.md" }]);
+  assert.deepEqual((await render(project)).pending, [{ id: "agents", file: "AGENTS.md" }]);
   const afterRender = await readFile(agents, "utf8");
-  assert.equal(sectionOf(afterRender, "rule:batch").raw, sectionOf(edited, "rule:batch").raw, "the changed section is byte for byte what the user left");
+  assert.equal(sectionOf(afterRender, "agents").raw, sectionOf(edited, "agents").raw, "the changed section is byte for byte what the user left");
 
-  const kept = await cli(["rule-resolve", "--project", project, "--section", "rule:batch", "--action", "keep", "--at", at()]);
+  const kept = await cli(["rule-resolve", "--project", project, "--section", "agents", "--action", "keep", "--at", at()]);
   assert.deepEqual([kept.reasonCode, kept.result, kept.state, kept.written], ["MANAGED_SECTION_RESOLVED", "kept", "user-owned", false]);
   assert.equal((await ruleOf(project, "batch")).state, "user-modified", "the kept text is the user's");
 
   const again = await enable(project, "batch");
   assert.deepEqual([again.result, again.written, again.recorded, again.rule.state], ["unchanged", false, 0, "user-modified"]);
   const rendered = await render(project);
-  assert.deepEqual(rendered.sections.find((section) => section.id === "rule:batch"), { id: "rule:batch", file: "AGENTS.md", result: "unchanged", state: "user-owned" });
+  assert.deepEqual(rendered.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "user-owned" });
   assert.deepEqual([rendered.pending, rendered.recorded, rendered.files.some((file) => file.written)], [[], 0, false]);
   assert.equal(await readFile(agents, "utf8"), afterRender, "the kept section is never written again");
 });
@@ -181,24 +182,24 @@ test("483-AC4 via rule-enable and rule-resolve: a refused write reads pending; a
 test("483-R2 via rule-disable: a changed section goes only with --force true, and the refusal names the file and the section", async (context) => {
   const { device, project, agents } = await scratch(context);
   await enable(project, "batch");
-  const edited = (await readFile(agents, "utf8")).replace("批量处理原则", "批量处理准则");
+  const edited = (await readFile(agents, "utf8")).replace("按依赖分包", "按目标分包");
   await writeFile(agents, edited);
 
   const refused = shipped(["rule-disable", "--project", project, "--id", "batch", "--at", at()], { device });
   assert.equal(refused.status, 1);
   assert.equal(refused.stdout, "");
-  assert.deepEqual([refused.refusal.reasonCode, refused.refusal.file, refused.refusal.section], ["MANAGED_SECTION_FORCE_REQUIRED", "AGENTS.md", "rule:batch"]);
+  assert.deepEqual([refused.refusal.reasonCode, refused.refusal.file, refused.refusal.section], ["MANAGED_SECTION_FORCE_REQUIRED", "AGENTS.md", "agents"]);
   assert.equal(await readFile(agents, "utf8"), edited, "a refused disable writes nothing");
   assert.equal((await ruleOf(project, "batch")).state, "user-modified");
 
   const forced = await cli(["rule-disable", "--project", project, "--id", "batch", "--force", "true", "--at", at()]);
   assert.deepEqual([forced.reasonCode, forced.action, forced.result, forced.written, forced.recorded], ["RULE_DISABLED", "disable", "disabled", true, 2]);
-  assert.deepEqual(forced.rule, { id: "batch", version: 3, recordedVersion: 3, fileVersion: null, section: "rule:batch", state: "disabled" });
+  assert.deepEqual(forced.rule, { id: "batch", version: 3, recordedVersion: 3, fileVersion: null, section: "agents", state: "disabled" });
   assert.equal(await readFile(join(forced.backupDir, "AGENTS.md"), "utf8"), edited, "the user's version is backed up first");
   assert.equal(await readFile(agents, "utf8"), USER_TEXT);
 
   // A disabled rule is not rendered, and disabling it again changes nothing.
-  assert.equal((await render(project)).sections.some((section) => section.id === "rule:batch"), false);
+  assert.equal((await render(project)).sections.some((section) => section.id === "agents"), false);
   const again = await cli(["rule-disable", "--project", project, "--id", "batch", "--at", at()]);
   assert.deepEqual([again.result, again.written, again.recorded, again.backupDir], ["unchanged", false, 0, null]);
 });
@@ -220,25 +221,25 @@ test("483-R2, R3: the rule verbs' refusals, and a rule recorded at another versi
   // the rule reads update-available, and agents-render refreshes the enabled built-in
   // without changing its activation record.
   const v1 = await readFile(join(fixtures, "batch-v1.zh.md"), "utf8");
-  const older = BUILT_IN_RULES.map((rule) => rule.id !== "batch" ? rule : { ...rule, version: 1, body: { zh: v1, en: v1 } });
+  const older = BUILT_IN_RULES.map((rule) => rule.id !== "batch" ? rule : { ...rule, version: 1, body: { zh: v1, en: v1 }, principle: { zh: "- **批量处理** 旧稿。", en: "- **Batch processing** Earlier version." } });
   await enableRule({ libraryRoot: library, projectRoot: project, id: "batch", occurredAt: at(), catalog: older, configurationProjectId: (await list(project)).projectId });
   const first = await render(project);
-  assert.deepEqual(first.sections.find((section) => section.id === "rule:batch"), { id: "rule:batch", file: "AGENTS.md", result: "replace", state: "managed" });
+  assert.deepEqual(first.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "replace", state: "managed" });
   const settled = await readFile(agents, "utf8");
-  assert.equal(sectionOf(settled, "rule:batch").body, builtInRule("batch").body.zh, "the selected catalog text is rendered");
-  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 1, fileVersion: 2, section: "rule:batch", state: "enabled" });
+  assert.equal(sectionOf(settled, "agents").body, builtInRule("batch").principle.zh + "\n", "the selected catalog text is rendered");
+  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 1, fileVersion: 2, section: "agents", state: "enabled" });
   const rendered = await render(project);
   assert.deepEqual([rendered.recorded, rendered.files.some((file) => file.written)], [0, false]);
   assert.equal(await readFile(agents, "utf8"), settled, "the file is byte for byte what it was");
   const updated = await enable(project, "batch");
   assert.deepEqual([updated.result, updated.recorded, updated.rule.state, updated.rule.recordedVersion, updated.rule.fileVersion], ["unchanged", 1, "enabled", 3, 2]);
-  assert.equal(sectionOf(await readFile(agents, "utf8"), "rule:batch").body, builtInRule("batch").body.zh);
+  assert.equal(sectionOf(await readFile(agents, "utf8"), "agents").body, builtInRule("batch").principle.zh + "\n");
   const current = await readFile(agents, "utf8");
 
   // Recorded at a newer version by a newer engine: this one refuses to write its older text.
   await setConfigRecord(library, { collection: "rule", key: "batch", value: { enabled: true, version: 4 }, projectId: (await list(project)).projectId, occurredAt: at() });
   assert.equal((await refusal(["rule-enable", "--project", project, "--id", "batch", "--at", at()])).reasonCode, "RULE_VERSION_NEWER");
-  assert.deepEqual((await render(project)).sections.find((section) => section.id === "rule:batch"), { id: "rule:batch", file: "AGENTS.md", result: "unchanged", state: "managed" });
+  assert.deepEqual((await render(project)).sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "managed" });
   assert.equal(await readFile(agents, "utf8"), current);
 });
 
@@ -259,25 +260,25 @@ test("INIT-053 AC2: v2 through CLI: the rule verbs' refusals, and a rule recorde
   // the rule reads update-available, and agents-render refreshes the enabled built-in
   // without changing its activation record.
   const v2 = await readFile(join(fixtures, "batch-v2.zh.md"), "utf8");
-  const older = BUILT_IN_RULES.map((rule) => rule.id !== "batch" ? rule : { ...rule, version: 2, body: { zh: v2, en: v2 } });
+  const older = BUILT_IN_RULES.map((rule) => rule.id !== "batch" ? rule : { ...rule, version: 2, body: { zh: v2, en: v2 }, principle: { zh: "- **批量处理** 旧稿。", en: "- **Batch processing** Earlier version." } });
   await enableRule({ libraryRoot: library, projectRoot: project, id: "batch", occurredAt: at(), catalog: older, configurationProjectId: (await list(project)).projectId });
   const first = await render(project);
-  assert.deepEqual(first.sections.find((section) => section.id === "rule:batch"), { id: "rule:batch", file: "AGENTS.md", result: "replace", state: "managed" });
+  assert.deepEqual(first.sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "replace", state: "managed" });
   const settled = await readFile(agents, "utf8");
-  assert.equal(sectionOf(settled, "rule:batch").body, builtInRule("batch").body.zh, "the selected catalog text is rendered");
-  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 2, fileVersion: 2, section: "rule:batch", state: "enabled" });
+  assert.equal(sectionOf(settled, "agents").body, builtInRule("batch").principle.zh + "\n", "the selected catalog text is rendered");
+  assert.deepEqual(await ruleOf(project, "batch"), { id: "batch", version: 3, recordedVersion: 2, fileVersion: 2, section: "agents", state: "enabled" });
   const rendered = await render(project);
   assert.deepEqual([rendered.recorded, rendered.files.some((file) => file.written)], [0, false]);
   assert.equal(await readFile(agents, "utf8"), settled, "the file is byte for byte what it was");
   const updated = await enable(project, "batch");
   assert.deepEqual([updated.result, updated.recorded, updated.rule.state, updated.rule.recordedVersion, updated.rule.fileVersion], ["unchanged", 1, "enabled", 3, 2]);
-  assert.equal(sectionOf(await readFile(agents, "utf8"), "rule:batch").body, builtInRule("batch").body.zh);
+  assert.equal(sectionOf(await readFile(agents, "utf8"), "agents").body, builtInRule("batch").principle.zh + "\n");
   const current = await readFile(agents, "utf8");
 
   // Recorded at a newer version by a newer engine: this one refuses to write its older text.
   await setConfigRecord(library, { collection: "rule", key: "batch", value: { enabled: true, version: 4 }, projectId: (await list(project)).projectId, occurredAt: at() });
   assert.equal((await refusal(["rule-enable", "--project", project, "--id", "batch", "--at", at()])).reasonCode, "RULE_VERSION_NEWER");
-  assert.deepEqual((await render(project)).sections.find((section) => section.id === "rule:batch"), { id: "rule:batch", file: "AGENTS.md", result: "unchanged", state: "managed" });
+  assert.deepEqual((await render(project)).sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "managed" });
   assert.equal(await readFile(agents, "utf8"), current);
 });
 
@@ -285,22 +286,24 @@ test("INIT-053 AC2: v2 through CLI: the rule verbs' refusals, and a rule recorde
 test("508-R7 via rule-enable --order: the rule's section takes its place, rule-list shows the order, and a malformed order is refused", async (context) => {
   const { project, agents } = await scratch(context);
   assert.deepEqual(COMMAND_CATALOG.find((entry) => entry.name === "rule-enable").flags.find((flag) => flag.name === "order"), { name: "order", required: false, valueKind: "integer" });
-  const ruleSections = async () => parseManagedFile(await readFile(agents, "utf8")).sections.map((section) => section.id).filter((id) => id.startsWith("rule:"));
+  const ruleSections = async () => sectionOf(await readFile(agents, "utf8"), "agents").body.trimEnd().split("\n");
+  const autonomy = builtInRule("autonomy").principle.zh;
+  const batch = builtInRule("batch").principle.zh;
   await enable(project, "batch");
   await enable(project, "autonomy");
-  assert.deepEqual(await ruleSections(), ["rule:batch", "rule:autonomy"]);
+  assert.deepEqual(await ruleSections(), [autonomy, batch]);
 
   const ordered = await cli(["rule-enable", "--project", project, "--id", "autonomy", "--order", "1", "--at", at()]);
-  assert.deepEqual(ordered.rule, { id: "autonomy", version: 1, recordedVersion: 1, fileVersion: 1, section: "rule:autonomy", state: "enabled", order: 1 });
-  assert.deepEqual([ordered.result, ordered.written, ordered.recorded], ["unchanged", true, 1]);
-  assert.deepEqual(await ruleSections(), ["rule:autonomy", "rule:batch"]);
+  assert.deepEqual(ordered.rule, { id: "autonomy", version: 1, recordedVersion: 1, fileVersion: 2, section: "agents", state: "enabled", order: 1 });
+  assert.deepEqual([ordered.result, ordered.written, ordered.recorded], ["unchanged", false, 1]);
+  assert.deepEqual(await ruleSections(), [autonomy, batch]);
   const listed = await list(project);
   // Every rule the engine ships, in catalog order; only autonomy holds an order.
   assert.deepEqual(listed.rules.map((rule) => [rule.id, rule.order ?? null]), BUILT_IN_RULES.map((rule) => [rule.id, rule.id === "autonomy" ? 1 : null]));
 
   // agents-render keeps the arrangement.
   await render(project);
-  assert.deepEqual(await ruleSections(), ["rule:autonomy", "rule:batch"]);
+  assert.deepEqual(await ruleSections(), [autonomy, batch]);
 
   const before = await readFile(agents, "utf8");
   for (const order of ["0", "1.5", "first"]) {
@@ -370,7 +373,7 @@ test("513-AC1 via rule-enable and rule-disable: a model's run is refused with th
 
   // agents-render and rule-resolve settle and render sections; they answer a model.
   assert.equal((await asModel(() => render(project))).reasonCode, "AGENTS_RENDERED");
-  const kept = await asModel(() => cli(["rule-resolve", "--project", project, "--section", "rule:autonomy", "--action", "keep", "--at", at()]));
+  const kept = await asModel(() => cli(["rule-resolve", "--project", project, "--section", "agents", "--action", "keep", "--at", at()]));
   assert.deepEqual([kept.reasonCode, kept.result, kept.state], ["MANAGED_SECTION_RESOLVED", "kept", "user-owned"]);
 });
 
@@ -387,22 +390,22 @@ test("INIT-062 universal autonomy and branch contracts reach ordinary host files
     }
     await render(project);
     const text = await readFile(agents, "utf8");
-    for (const id of ["autonomy", "residue-cleanup"]) assert.equal(sectionOf(text, `rule:${id}`).body, builtInRule(id).body[suffix]);
-    assert.ok((await readFile(join(project, "CLAUDE.md"), "utf8")).includes("@AGENTS.md"), "Claude consumes the same ordinary-host rules");
-    assert.equal(text.startsWith(USER_TEXT), true);
+    const block = sectionOf(text, "agents");
+    assert.deepEqual(block.body.trimEnd().split("\n"), ["autonomy", "residue-cleanup"].map(id => builtInRule(id).principle[suffix]));
+    assert.equal(block.digest, block.bodyDigest);
   });
 });
 
 test("MIN358 normal rule controls select the built-in principle and disable without resurrecting its body", async context => {
   const { project, agents } = await scratch(context, "en");
   assert.equal((await ruleOf(project, "autonomy")).state, "disabled");
-  assert.equal((await readFile(agents, "utf8")).includes(AUTONOMY_RESTRICTION_SCOPE_BODY.en), false);
+  assert.equal((await readFile(agents, "utf8")).includes(builtInRule("autonomy").principle.en), false);
   await enable(project, "autonomy"); await enable(project, "residue-cleanup");
   assert.equal((await ruleOf(project, "autonomy")).state, "enabled");
-  assert.ok((await readFile(agents, "utf8")).includes(AUTONOMY_RESTRICTION_SCOPE_BODY.en));
+  assert.ok((await readFile(agents, "utf8")).includes(builtInRule("autonomy").principle.en));
   await cli(["rule-disable", "--project", project, "--id", "autonomy", "--at", at()]); await render(project);
   assert.equal((await ruleOf(project, "autonomy")).state, "disabled");
-  assert.equal((await readFile(agents, "utf8")).includes(AUTONOMY_RESTRICTION_SCOPE_BODY.en), false);
+  assert.equal((await readFile(agents, "utf8")).includes(builtInRule("autonomy").principle.en), false);
   assert.equal((await ruleOf(project, "residue-cleanup")).state, "enabled");
   const denied = await withSurface(undefined, () => refusal(["rule-enable", "--project", project, "--id", "autonomy", "--at", at()]));
   assert.equal(denied.reasonCode, "MODEL_WRITE_REFUSED", "a selectable principle does not bypass actual configuration authority");

@@ -38,7 +38,7 @@ const at = () => {
 
 const USER_TEXT = "# My project\n\nMy own notes, which the engine never rewrites.\n";
 // An end marker without its start: every planned write of this file refuses (MANAGED_SECTION_MALFORMED).
-const MALFORMED_TEXT = `${USER_TEXT}\n<!-- einzbern:section-end id="navigation" -->\n`;
+const MALFORMED_TEXT = `${USER_TEXT}\n<!-- einzbern:section-end id="agents" -->\n`;
 const RULE = "batch";
 
 async function scratch(context) {
@@ -132,7 +132,7 @@ function writers(paths) {
     "agents-render": (extra = {}) => renderAgentsSections(paths.root, { projectRoot: paths.project, navigation: "written", ...shared(extra) }),
     "rule-enable": (extra = {}) => enableRule({ libraryRoot: paths.root, projectRoot: paths.project, id: RULE, ...shared(extra) }),
     "rule-disable": (extra = {}) => disableRule({ libraryRoot: paths.root, projectRoot: paths.project, id: RULE, ...shared(extra) }),
-    "rule-resolve": (extra = {}) => resolveAgentsSection(paths.root, { projectRoot: paths.project, id: "navigation", action: "overwrite", ...shared(extra) }),
+    "rule-resolve": (extra = {}) => resolveAgentsSection(paths.root, { projectRoot: paths.project, id: "agents", action: "overwrite", ...shared(extra) }),
     "variable sections": (extra = {}) => writeVariablesSections(paths.root, { projectRoot: paths.project, ...shared(extra) }),
   };
 }
@@ -160,7 +160,7 @@ test("538 GWT3: while another process holds the library write lock for 3 seconds
   assert.ok(renderedAt >= locked[0]);
 
   assert.deepEqual(rendered.sections.map((section) => [section.id, section.result]), [
-    ["navigation", "create"],
+    ["agents", "create"],
     ["claude-import", "create"],
   ]);
   assert.equal(rendered.recorded, 2);
@@ -170,7 +170,7 @@ test("538 GWT3: while another process holds the library write lock for 3 seconds
   assert.notEqual(await textOrNull(paths.claude), null);
   assert.equal((await libraryHead(paths.root)).version, before.version + 2, "navigation and import were recorded once");
   assert.deepEqual((await records(paths.root)).map((record) => [record.id, record.state]).sort(), [
-    ["navigation", "managed"],
+    ["agents", "managed"],
   ]);
 });
 
@@ -202,16 +202,16 @@ test("538 GWT3: while another process holds the lock, rule-enable, rule-disable,
   };
   const steps = [
     ["rule-enable", null, async (change) => {
-      assert.deepEqual([change.result, change.written, change.status.state], ["create", true, "enabled"]);
-      assert.notEqual(sectionOf(await readFile(paths.agents, "utf8"), `rule:${RULE}`), null);
+      assert.deepEqual([change.result, change.written, change.status.state], ["replace", true, "enabled"]);
+      assert.notEqual(sectionOf(await readFile(paths.agents, "utf8"), "agents")?.body.match(/\*\*Batch processing\*\*/u) ?? null, null);
     }],
     ["rule-disable", null, async (change) => {
       assert.deepEqual([change.result, change.written, change.status.state], ["disabled", true, "disabled"]);
-      assert.equal(sectionOf(await readFile(paths.agents, "utf8"), `rule:${RULE}`), null);
+      assert.equal(sectionOf(await readFile(paths.agents, "utf8"), "agents")?.body.match(/\*\*Batch processing\*\*/u) ?? null, null);
     }],
     ["rule-resolve", userChange, async ({ change }) => {
       assert.deepEqual([change.result, change.written, change.record.state], ["overwritten", true, "managed"]);
-      assert.equal(sectionOf(await readFile(paths.agents, "utf8"), "navigation").body.includes(NAVIGATION_LINES[0]), true);
+      assert.equal(sectionOf(await readFile(paths.agents, "utf8"), "agents").body.includes(NAVIGATION_LINES[0]), true);
     }],
     ["variable sections", () => seedLegacyVariableSections({ libraryRoot: paths.root, projectRoot: paths.project, occurredAt: at(), ids: ["variables-custom"] }), async (result) => {
       assert.equal(result.written, true);
@@ -275,8 +275,8 @@ test("538 GWT3: a record another writer appended after the plan sends the render
   const text = await readFile(paths.agents, "utf8");
   assert.equal(sectionOf(text, "variables-custom"), null);
   assert.equal((await libraryHead(paths.root)).version, head.version + 1, "only the other writer appends; configuration no longer changes AGENTS");
-  const recorded = (await records(paths.root)).find((record) => record.id === "navigation");
-  assert.equal(recorded.digest, sectionOf(text, "navigation").digest, "the record holds the section the file holds");
+  const recorded = (await records(paths.root)).find((record) => record.id === "agents");
+  assert.equal(recorded.digest, sectionOf(text, "agents").digest, "the record holds the section the file holds");
   const again = await write["agents-render"]();
   assert.deepEqual([again.recorded, again.files.some((file) => file.written), again.pending], [0, false, []], "the file and the records agree");
 });
@@ -306,7 +306,7 @@ test("538 GWT3, 489: a write whose append fails after it wrote puts the files ba
   await unchanged("rule-enable", () => write["rule-enable"](failing));
   await write["rule-enable"]();
   await unchanged("rule-disable", () => write["rule-disable"](failing));
-  assert.notEqual(sectionOf(await readFile(paths.agents, "utf8"), `rule:${RULE}`), null, "the rule's section is back in the file");
+  assert.notEqual(sectionOf(await readFile(paths.agents, "utf8"), "agents")?.body.match(/\*\*Batch processing\*\*/u) ?? null, null, "the rule's section is back in the file");
   const text = await readFile(paths.agents, "utf8");
   await writeFile(paths.agents, text.replace(NAVIGATION_LINES[0], "Recall first, always."));
   await write["agents-render"]();

@@ -71,7 +71,7 @@
 // Historical fixtures remain historical; current fixtures carry the merged wording.
 
 /** The ids of the built-in rules, in the order they are listed. */
-export const BUILT_IN_RULE_IDS = Object.freeze(["autonomy", "batch", "unattended-commands", "silent-reporting", "design-authority", "residue-cleanup", "goal-writing", "incremental-update", "privacy-publication"] as const);
+export const BUILT_IN_RULE_IDS = Object.freeze(["autonomy", "batch", "unattended-commands", "silent-reporting", "discussion-style", "design-authority", "residue-cleanup", "goal-writing", "incremental-update", "privacy-publication"] as const);
 export type BuiltInRuleId = typeof BUILT_IN_RULE_IDS[number];
 
 /** A rule's text in each language the engine ships it in. */
@@ -85,6 +85,7 @@ export interface BuiltInRule {
   readonly version: number;
   readonly title: RuleText;
   readonly body: RuleText;
+  readonly principle: RuleText;
 }
 
 // INIT-062 Owner supplements (2026-10-21): same-version clarifications of authorization
@@ -131,12 +132,12 @@ ${AUTONOMY_AUTHORIZATION_BODY.en}
 ${AUTONOMY_RESTRICTION_SCOPE_BODY.en}
 `;
 
-const BATCH_ZH = "## 批量处理原则 v3\n\n批量工作以已批准的目标、范围、角色、依赖、门和判据为准；普通任务不因此新增 INIT、代理或验收阶段。相关问题和正式验收结果集中处置，实施者仍可实测并修复本次改动。\n\n验收以实际行为和当前契约为依据。可运行的问题优先实测，静态证明须有确定触发与影响；假设、风格偏好和未来需求不自动成为返工理由。成功证据在相关输入等价时复用，变更只使受影响证据失效；不省略尚未执行的必需检查，也不反复执行已有效的检查。\n\n没有实质性发现是有效结论。没有新增证据的重复分析不构成进展；验收已满足时结束，仍有已批准且可推进的工作时接续。知识与汇报聚合且不重复，通信以解除实际阻塞和必要交接为限。具体批次、派工、验收与记录方法遵循 Mana Orchestrate Skill 的适用流程。\n";
+const BATCH_ZH = "## 批量处理原则 v3\n\n批量工作以已批准的目标、范围、角色、依赖、门和判据为准；普通任务不因此新增 INIT、代理或验收阶段。就绪独立包有空槽即派，空队列核对全部获准 INIT 的完整工单树，按证据衔接旧状态，分别记录尚未触发的条件和有证据的阻塞。实施者验证受合并影响的接口；全部 EPIC 实施就绪后由协调者新派独立验收者，主对话据报告集中裁定。\n\n验收以实际行为和当前契约为依据。可运行的问题优先实测，静态证明须有确定触发与影响；假设、风格偏好和未来需求不自动成为返工理由。成功证据在相关输入等价时复用，变更只使受影响证据失效；不省略尚未执行的必需检查，也不反复执行已有效的检查。\n\n没有实质性发现是有效结论。没有新增证据的重复分析不构成进展；验收已满足时结束，仍有已批准且可推进的工作时接续。知识与汇报聚合且不重复，通信以解除实际阻塞和必要交接为限。具体批次、派工、验收与记录方法遵循 Mana Orchestrate Skill 的适用流程。\n";
 
 // Translated when this module was written, clause 7 with the Owner's revision (INIT-053 R40),
 // clause 8 with the Owner's fifth round (INIT-053 R48, MIN-242 D10), and the end of clause 6 and
 // clause 9 with MIN-246 D11 (INIT-053 R52); awaits the Owner's correction.
-const BATCH_EN = "## Batch Processing Principle v3\n\nBatch work follows the approved goal, scope, roles, dependencies, gates and criteria; it adds no INIT, agents or acceptance stages to ordinary tasks. Aggregate related findings and formal acceptance results while allowing implementers to test and repair their changes.\n\nAcceptance rests on observed behavior and current contracts. Test runnable questions first; static proof needs a definite trigger and impact. Hypotheses, style preferences and future requirements do not automatically justify rework. Reuse successful evidence when relevant inputs are equivalent; changes invalidate affected evidence only. Never omit required checks that have not run or repeat checks whose evidence remains valid.\n\nNo substantive finding is a valid result. Repeated analysis without new evidence is not progress. End when acceptance is satisfied, and continue authorized work that can advance. Aggregate knowledge and reports without duplication; communicate for necessary coordination and real blockers. Follow the Mana Orchestrate Skill for applicable batch, dispatch, acceptance and recording procedures.\n";
+const BATCH_EN = "## Batch Processing Principle v3\n\nBatch work follows the approved goal, scope, roles, dependencies, gates and criteria; it adds no INIT, agents or acceptance stages to ordinary tasks. Aggregate related findings and formal acceptance results while allowing implementers to test and repair their changes. Fill free slots with ready independent packages. When the queue empties, reconcile every authorized Initiative, its legacy evidence, untriggered conditions and actual blockers before ending. Implementers test affected merge interfaces. Once all Epics are implementation-ready, the coordinator dispatches fresh independent validators and Main adjudicates their reports.\n\nAcceptance rests on observed behavior and current contracts. Test runnable questions first; static proof needs a definite trigger and impact. Hypotheses, style preferences and future requirements do not automatically justify rework. Reuse successful evidence when relevant inputs are equivalent; changes invalidate affected evidence only. Never omit required checks that have not run or repeat checks whose evidence remains valid.\n\nNo substantive finding is a valid result. Repeated analysis without new evidence is not progress. End when acceptance is satisfied, and continue authorized work that can advance. Aggregate knowledge and reports without duplication; communicate for necessary coordination and real blockers. Follow the Mana Orchestrate Skill for applicable batch, dispatch, acceptance and recording procedures.\n";
 
 const UNATTENDED_COMMANDS_ZH = "## 无人值守指令原则 v2\n\n已获授权且权限允许的动作使用等价、可预测的非交互方式。实际权限拒绝、必需用户确认和不明确的执行结果只阻塞依赖它们的路径；不得用更换写法绕过边界或盲目重试。\n\n执行基准必须明确，安装产物与持久文本使用可解析的相对路径，不固化设备位置。具体命令与清理方法遵循 Mana Orchestrate Skill 及实际宿主能力。\n";
 
@@ -252,8 +253,52 @@ export const PRIVACY_PUBLICATION_BODY = Object.freeze({
 `,
 });
 
+// Short resident instructions. The full contracts remain available to the Skill and other consumers.
+const PRINCIPLE_LINES: Readonly<Record<BuiltInRuleId, RuleText>> = {
+  autonomy: {
+    zh: "- **自主运行** 在用户授权内以最小改动推进，不自设限制，只暂停受阻或需新授权的工作。",
+    en: "- **Autonomy** Make the smallest change within the user's authorization, avoid self-imposed restrictions, and pause only work that is blocked or needs new authorization.",
+  },
+  batch: {
+    zh: "- **批量处理** 按依赖分包，就绪独立包有槽即派，空队列核对全部获准 INIT、按证据衔接旧单并区分条件与阻塞，由合并者自测，全部 EPIC 就绪后在 INIT 独立验收并复用证据。",
+    en: "- **Batch processing** Fill slots with independent packages, reconcile all authorized INITs and legacy evidence when the queue empties, distinguish unmet conditions from blockers, have implementers test merges and reuse evidence in independent INIT validation once all Epics are ready.",
+  },
+  "unattended-commands": {
+    zh: "- **无人值守** 已授权操作采用可预测的非交互命令，遇权限拒绝停下该操作，结果不明先核实。",
+    en: "- **Unattended commands** Use predictable noninteractive commands for authorized work, stop the affected action on a permission denial, and verify uncertain outcomes before retrying.",
+  },
+  "silent-reporting": {
+    zh: "- **静默汇报** 完工或剩余工作全部受阻时汇报，安全告知、权限拒绝、Owner 决策或询问及宿主强制通信除外。",
+    en: "- **Silent reporting** Report when work is complete or all remaining work is blocked, and speak sooner for safety, permission denials, Owner questions or decisions, or required host communication.",
+  },
+  "discussion-style": {
+    zh: "- **讨论表达** 先回答问题，用对方熟悉的词说清理由和关键条件，解释必要的术语，省去客套和重复。",
+    en: "- **Discussion** Answer the question first, explain your reasoning and key conditions in familiar words, define necessary terms, and leave out pleasantries and repetition.",
+  },
+  "design-authority": {
+    zh: "- **设计权威** 依据项目配置，复用设计权威已发布的契约和组件。",
+    en: "- **Design authority** Follow the project's configuration and reuse the design authority's published contracts and components.",
+  },
+  "residue-cleanup": {
+    zh: "- **残余收尾** 创建者或接手者只清理归属明确、已停用、无待办依赖且无独有价值的临时资源。",
+    en: "- **Cleanup** The creator or successor cleans up temporary resources only when ownership is clear, use has ended, no pending work depends on them, and they hold nothing unique.",
+  },
+  "goal-writing": {
+    zh: "- **目标书写** 仅按请求创建目标，只写可验证的终态和“仅待 Owner 决定且已说明阻点”的退出条件。",
+    en: "- **Goal writing** Create goals only on request and state a verifiable outcome with an exit for a documented blocker that only the Owner can resolve.",
+  },
+  "incremental-update": {
+    zh: "- **增量更新** 复用有效成果，按依赖刷新受影响的输出，串行提交共享变更并读回核实。",
+    en: "- **Incremental updates** Reuse valid results, refresh affected outputs in dependency order, and serialize shared submissions and verify them at the destination.",
+  },
+  "privacy-publication": {
+    zh: "- **隐私与发布** 在授权范围内以指定身份发布最少必要信息，遇权限拒绝停止相关操作。",
+    en: "- **Privacy and publication** Publish only the information authorized and needed, use the approved identity, and stop the affected action on a permission denial.",
+  },
+};
+
 function builtIn(id: BuiltInRuleId, version: number, title: RuleText, body: RuleText): BuiltInRule {
-  return Object.freeze({ id, version, title: Object.freeze({ ...title }), body: Object.freeze({ ...body }) });
+  return Object.freeze({ id, version, title: Object.freeze({ ...title }), body: Object.freeze({ ...body }), principle: Object.freeze(PRINCIPLE_LINES[id]) });
 }
 
 /** The built-in rules, in the order of BUILT_IN_RULE_IDS. */
@@ -267,6 +312,10 @@ export const BUILT_IN_RULES: readonly BuiltInRule[] = Object.freeze([
     { zh: UNATTENDED_COMMANDS_ZH, en: UNATTENDED_COMMANDS_EN },
   ),
   builtIn("silent-reporting", 1, { zh: "静默汇报原则", en: "Silent Reporting Principle" }, { zh: SILENT_REPORTING_ZH, en: SILENT_REPORTING_EN }),
+  builtIn("discussion-style", 1, { zh: "讨论表达", en: "Discussion" }, {
+    zh: `## 讨论表达 v1\n\n${PRINCIPLE_LINES["discussion-style"].zh}\n`,
+    en: `## Discussion v1\n\n${PRINCIPLE_LINES["discussion-style"].en}\n`,
+  }),
   builtIn("design-authority", 1, { zh: "\u8bbe\u8ba1\u6743\u5a01\u4e0e\u4e00\u81f4\u6027\u539f\u5219", en: "Design Authority and Consistency Principle" }, { zh: DESIGN_AUTHORITY_ZH, en: DESIGN_AUTHORITY_EN }),
   builtIn("residue-cleanup", 1, { zh: "无效残余收尾原则", en: "Residue Cleanup Principle" }, { zh: RESIDUE_CLEANUP_ZH, en: RESIDUE_CLEANUP_EN }),
   builtIn("goal-writing", 1, { zh: "目标书写契约", en: "Goal Writing Contract" }, { zh: GOAL_WRITING_ZH, en: GOAL_WRITING_EN }),

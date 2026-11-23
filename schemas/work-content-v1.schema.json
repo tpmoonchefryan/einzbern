@@ -28,7 +28,8 @@
         "Initiative",
         "Epic",
         "Story",
-        "Subtask"
+        "Subtask",
+        "Pack"
       ]
     },
     "variant": {
@@ -316,6 +317,9 @@
       "additionalProperties": {
         "type": "string"
       }
+    },
+    "packPlan": {
+      "$ref": "./pack-plan-v1.schema.json"
     },
     "completion": {
       "type": "object",

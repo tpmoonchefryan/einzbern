@@ -580,10 +580,14 @@ async function rulesProjection() {
   const [result, proposals] = await Promise.all([ruleListing(), proposalsProjection(["rule-list", "--workspace", currentLibrary().libraryPath, ...scopeArguments()])]);
   if (!result.ok) return { ...result.body, ok: false };
   const rules = Array.isArray(result.body?.rules) ? result.body.rules : [];
+  const pending = new Map();
+  for (const rule of rules) {
+    if (rule.state === "pending") pending.set(rule.section, { id: rule.section, file: "AGENTS.md", ruleId: rule.section === "agents" ? null : rule.id });
+  }
   return {
     ...result.body,
     ok: true,
-    pending: rules.filter((rule) => rule.state === "pending").map((rule) => ({ id: rule.section, file: "AGENTS.md", ruleId: rule.id })),
+    pending: [...pending.values()],
     proposals,
   };
 }

@@ -322,7 +322,7 @@ test("480-R3: each of the other seven checks stops the restore with its own reas
   const original = await readFile(agents, "utf8");
   await writeFile(agents, original.replace("This workspace uses Einzbern. Load and follow the Mana Orchestrate skill for applicable work.", "This project is managed by hand."));
   const diverged = await refusedWithoutWrites({ restore: f.library }, "sections", "MANAGED_SECTION_PENDING");
-  assert.equal(diverged.details.section, "AGENTS.md#navigation");
+  assert.equal(diverged.details.section, "AGENTS.md#agents");
   await writeFile(agents, original);
 
   // 6 registry: this device already binds the project to another library.

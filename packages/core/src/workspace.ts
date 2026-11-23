@@ -15,10 +15,12 @@ import { verifyWriteAuthorization } from "./write-authorization.js";
 import { consolidateStates } from "./consolidation-state.js";
 import { ConsolidationError } from "./consolidation-format.js";
 import { FormatVersionError, isEngineVersion, compareSemver } from "./format-version.js";
-import type { InvolvedProjects } from "../../protocol/src/index.js";
+import type { InvolvedProjects, PackAcceptanceReference, PackPlan, PackWorkReference } from "../../protocol/src/index.js";
 import { normalizeInvolvedProjects, involvedProjectsOf, assertStoredInvolvedProjects, assertInvolvedProjectScope, storedInvolvedProjects } from "./involved-projects.js";
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // SPDX-License-Identifier: Apache-2.0
+import { conditionLabel, conditionUntriggered, implementationChildren, isConditionLabel, isValidationLabel, validationTransition, verificationOnly, workflowStatus } from "./work-validation.js";
+import type { WorkflowStatus } from "./work-validation.js";
 
 import { types as utilTypes } from "node:util";
 import { compareWorkOrder } from "../../protocol/src/work-order.js";
@@ -1606,6 +1608,79 @@ function assertStoryFields(record: Pick<WorkRecord, "id" | "kind" | "extensions"
     `Story ${record.id} has no ${field}: ${STORY_FIELD_REMEDY[field]}`,
     { field, remedy: STORY_FIELD_REMEDY[field] },
   );
+}
+
+function packReferenceRecord(work: readonly WorkRecord[], projectId: string, reference: PackWorkReference): WorkRecord {
+  const record = work.find(candidate => candidate.id === reference.id && !candidate.tombstone);
+  if (!record || record.projectId !== projectId || record.externalKey !== reference.externalKey || record.kind !== reference.kind ||
+    record.revision !== reference.revision || record.parentId !== reference.parentId) {
+    fail("WORKSPACE_INPUT_INVALID", `Pack source reference ${reference.id} must match its live project, external key, kind, revision and parent`);
+  }
+  return record;
+}
+
+function assertPackReferenceLineage(work: readonly WorkRecord[], projectId: string, reference: PackWorkReference, initiativeId: string): WorkRecord {
+  let current = packReferenceRecord(work, projectId, reference);
+  const visited = new Set<string>();
+  while (current.parentId !== null && !visited.has(current.id)) {
+    visited.add(current.id);
+    const parent = work.find(candidate => candidate.id === current.parentId && !candidate.tombstone);
+    if (!parent || parent.projectId !== projectId) fail("WORKSPACE_INPUT_INVALID", `Pack source reference ${reference.id} has an incomplete parent chain`);
+    current = parent;
+  }
+  if (current.id !== initiativeId || current.kind !== "Initiative" || current.parentId !== null) fail("WORKSPACE_INPUT_INVALID", `Pack source reference ${reference.id} is outside Initiative ${initiativeId}`);
+  return packReferenceRecord(work, projectId, reference);
+}
+
+/** A Pack snapshots ordinary work references; writes must prove each snapshot against current state. */
+export function assertPackPlanReferences(work: readonly WorkRecord[], projectId: string, plan: PackPlan | undefined): void {
+  if (!plan) fail("WORKSPACE_INPUT_INVALID", "Pack requires a typed packPlan");
+  const initiative = packReferenceRecord(work, projectId, plan.initiative);
+  if (initiative.kind !== "Initiative" || initiative.parentId !== null) fail("WORKSPACE_INPUT_INVALID", "Pack initiative must be the live root Initiative");
+  for (const assignment of plan.assignments) {
+    const sourceIds = new Set(assignment.sourceWorks.map(reference => reference.id));
+    const sourceRecords = new Map(assignment.sourceWorks.map(reference => [reference.id, assertPackReferenceLineage(work, projectId, reference, initiative.id)]));
+    for (const source of sourceRecords.values()) {
+      if (source.kind === "Subtask") {
+        const parent = source.parentId === null ? undefined : sourceRecords.get(source.parentId);
+        if (!parent || parent.kind !== "Story") fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} must include ${source.id}'s original Story`);
+      }
+    }
+    for (const criterion of assignment.criteria as readonly PackAcceptanceReference[]) {
+      if (!sourceIds.has(criterion.acceptanceOwner.id)) fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} criterion owner must be one of its source works`);
+      const acceptanceOwner = assertPackReferenceLineage(work, projectId, criterion.acceptanceOwner, initiative.id);
+      const requirementOwner = assertPackReferenceLineage(work, projectId, criterion.requirementOwner, initiative.id);
+      const acceptance = workContent(acceptanceOwner)?.acceptance.find(candidate => candidate.id === criterion.acceptanceId && candidate.version === criterion.acceptanceVersion);
+      const requirement = workContent(requirementOwner)?.requirements.find(candidate => candidate.id === criterion.requirementId && candidate.version === criterion.requirementVersion);
+      if (!acceptance || acceptance.requirement.workId !== requirementOwner.id || acceptance.requirement.requirementId !== criterion.requirementId || acceptance.requirement.version !== criterion.requirementVersion || !requirement) {
+        fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} criterion ${criterion.acceptanceOwner.id}/${criterion.acceptanceId}@${criterion.acceptanceVersion} must match its original acceptance and requirement owner`);
+      }
+    }
+    for (const result of assignment.resultSources) {
+      if (!sourceIds.has(result.source.id)) fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} result source must be one of its source works`);
+      const source = assertPackReferenceLineage(work, projectId, result.source, initiative.id);
+      const resultValue = result.locator === "completion.result"
+        ? workContent(source)?.completion?.result
+        : source.extensions["advisory:result"]?.value;
+      if (resultValue === undefined || resultValue === null || resultValue === "") fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} result locator is unavailable on ${result.source.id}`);
+    }
+    for (const prerequisite of assignment.prerequisites) {
+      if (prerequisite.kind === "blocked-by") {
+        if (!sourceIds.has(prerequisite.work.id)) fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} blocked work must be one of its source works`);
+        const blockedWork = assertPackReferenceLineage(work, projectId, prerequisite.work, initiative.id);
+        assertPackReferenceLineage(work, projectId, prerequisite.blocker, initiative.id);
+        if (!(storedRelationsOf(blockedWork.extensions["advisory:relations"]?.value).blockedBy ?? []).includes(prerequisite.blocker.id)) {
+          fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} must preserve the recorded blocked-by relation from ${blockedWork.id} to ${prerequisite.blocker.id}`);
+        }
+      }
+    }
+    if (assignment.verification !== null) {
+      for (const verifier of assignment.verification.verifiers) {
+        if (!sourceIds.has(verifier.id)) fail("WORKSPACE_INPUT_INVALID", `Pack row ${assignment.id} verifier must be one of its source works`);
+        assertPackReferenceLineage(work, projectId, verifier, initiative.id);
+      }
+    }
+  }
 }
 
 function isStoryFieldText(value: unknown): boolean {
@@ -4708,10 +4783,19 @@ function createWorkReducerDelta(state: WorkspaceState, input: {
       }
     }
     validateWorkAdvisoryInput(input, id, "WORKSPACE_INPUT_INVALID");
+    if (input.kind === "Pack") {
+      if (input.parentId !== null) fail("WORKSPACE_INPUT_INVALID", "Pack records are parentless and remain outside the four-level work tree");
+      const content = input.content === undefined ? null : validateWorkContent(input.content);
+      if (content?.kind !== "Pack") fail("WORKSPACE_INPUT_INVALID", "Pack requires typed Pack content");
+      assertPackPlanReferences(state.work, input.projectId, content.packPlan);
+    } else if (input.content !== undefined && validateWorkContent(input.content).kind === "Pack") {
+      fail("WORKSPACE_INPUT_INVALID", "Pack content can only be stored on a Pack record");
+    }
     assertWorkGatesKind(input.kind, id, input.gates);
     const relations = workRelationsForWrite(state, id, input);
     const title = normalizeWorkTitle(input.title);
     const labels = normalizeWorkLabels(input.labels ?? []);
+    if (labels.some(label => isValidationLabel(label) || isConditionLabel(label))) fail("WORKSPACE_INPUT_INVALID", "set validation status through work-transition or record applicability through work-batch");
     // TCRN-CROSS-STORY-363, STORY-473. An explicit --summary wins; otherwise the first
     // sentence of the goal -- the goal field, or the Goal block of the scope -- which is
     // where the author already wrote the one-line answer. A record with neither carries
@@ -4775,6 +4859,10 @@ function createWorkReducerDelta(state: WorkspaceState, input: {
     assertWorkContentAdmission(state, record, record.status === "planned" ? "draft" : record.status === "done" ? "done" : "start");
     validateBoundTemplateWork(record, state.templates);
     assertStoryCompletionAdmission(record, record.status);
+    if (record.status === "done") {
+      const problem = validationTransition(state.work, record, "done").problem;
+      if (problem) fail("WORKSPACE_INPUT_INVALID", problem);
+    }
     const work = validateCreatedWork(state, record, createContext);
     return { payload: { operation: "work.created", record: workJsonFields(record) }, projects: state.projects, work };
   }
@@ -4788,12 +4876,14 @@ function createWorkReducerDelta(state: WorkspaceState, input: {
  * work and is skipped. Lives here (not in the protocol graph validator) so the
  * check fires on a live mutation, never on replay.
  */
-function hasLiveNonTerminalDescendant(work: readonly WorkRecord[], recordId: string): boolean {
+function hasLiveNonTerminalDescendant(work: readonly WorkRecord[], recordId: string, allowUntriggered = false): boolean {
+  const parent = allowUntriggered ? work.find(row => row.id === recordId) : undefined;
   for (const candidate of work) {
     if (candidate.parentId !== recordId) continue;
     if (candidate.tombstone) continue;
-    if (candidate.status !== "done" && candidate.status !== "cancelled") return true;
-    if (hasLiveNonTerminalDescendant(work, candidate.id)) return true;
+    if (parent && conditionUntriggered(work, parent) && verificationOnly(parent, candidate)) continue;
+    if (candidate.status !== "done" && candidate.status !== "cancelled" && !(allowUntriggered && conditionUntriggered(work, candidate))) return true;
+    if (hasLiveNonTerminalDescendant(work, candidate.id, allowUntriggered)) return true;
   }
   return false;
 }
@@ -4816,7 +4906,7 @@ function hasLiveNonTerminalDescendant(work: readonly WorkRecord[], recordId: str
 // exactly what the WSA-3 comment below was warning about. A rule placed there would refuse
 // a chain that legitimately closed an Initiative before 0.10.0 while descendants were open.
 // A rule placed here fires on live mutations only, which is what it always did.
-function assertTransitionAdmission(state: WorkspaceState, input: { readonly id: string; readonly status: WorkStatus }): void {
+function assertTransitionAdmission(state: WorkspaceState, input: { readonly id: string; readonly status: WorkStatus }, validating = false): void {
   // A live write-path admission rule; historical chains remain replayable. Before a Story
   // enters an execution or completion state it has a goal and an acceptance (TCRN-CROSS-STORY-473:
   // fields, or the blocks of its scope); a record bound to a template is checked against it.
@@ -4836,7 +4926,7 @@ function assertTransitionAdmission(state: WorkspaceState, input: { readonly id: 
   if (input.status === "done") {
     const current = state.work.find((entry) => entry.id === input.id);
     if (current && current.kind === "Initiative" && !current.tombstone
-      && hasLiveNonTerminalDescendant(state.work, current.id)) {
+      && hasLiveNonTerminalDescendant(state.work, current.id, validating)) {
       fail("WORKSPACE_INPUT_INVALID",
         `cannot close Initiative ${input.id} to done: it still holds live non-terminal work`);
     }
@@ -4848,30 +4938,43 @@ function assertTransitionAdmission(state: WorkspaceState, input: { readonly id: 
 // it -- the write is refused with WORK_LEASED, judged at the write's own instant (work-lease.ts). A
 // write that names no actor is another actor's. Like the admission rules above, this is write-path
 // only: replay never asks about leases.
-export function transitionWorkDelta(input: { readonly id: string; readonly status: WorkStatus; readonly summary?: string | null; readonly occurredAt: string; readonly actorId?: string }): (state: WorkspaceState) => MutationDelta {
+interface WorkTransitionInput {
+  readonly expectedRevision?: number;
+  readonly id: string;
+  readonly status: WorkflowStatus;
+  readonly summary?: string | null;
+  readonly blockedCriteria?: readonly string[];
+  readonly occurredAt: string;
+  readonly actorId?: string;
+}
+
+export function transitionWorkDelta(input: WorkTransitionInput): (state: WorkspaceState) => MutationDelta {
   return (state) => {
     assertWorkLeaseAdmits(state, input.id, input.actorId, input.occurredAt);
-    assertTransitionAdmission(state, input);
-    return transitionWorkReducerDelta(state, input);
+    const current = workById(state, input.id);
+    if (input.expectedRevision !== undefined && input.expectedRevision !== current.revision) fail("WORKSPACE_INPUT_INVALID", "work revision changed; reload before saving");
+    const next = validationTransition(state.work, current, input.status, input.summary, input.blockedCriteria);
+    if (next.problem) fail("WORKSPACE_INPUT_INVALID", next.problem);
+    const physical = { ...input, status: next.status };
+    assertTransitionAdmission(state, physical, input.status === "validated");
+    const labels = (current.labels ?? []).filter(label => !isValidationLabel(label));
+    if (next.marker) labels.push(next.marker);
+    const changedMarker = next.marker !== (current.labels ?? []).find(isValidationLabel);
+    if (changedMarker && next.status === current.status) {
+      return annotateWorkReducerDelta(state, { id: input.id, occurredAt: input.occurredAt, labels, ...(input.summary === undefined ? {} : { summary: input.summary }) }, true);
+    }
+    return transitionWorkReducerDelta(state, physical, changedMarker ? normalizeWorkLabels(labels) : undefined);
   };
 }
 
 // TCRN-CROSS-STORY-467 R3: a transition no longer cites a telemetry record as evidence --
 // the telemetry it named is neither written nor read any more. A record that already
 // carries advisory:evidence and its snapshot keeps both, and replay still checks them.
-export async function transitionWork(workspaceRoot: string, input: {
-  readonly id: string;
-  readonly status: WorkStatus;
-  readonly summary?: string | null;
-} & WorkspaceMutationOptions): Promise<WorkspaceState> {
-  return appendEvent(workspaceRoot, (state) => {
-    assertWorkLeaseAdmits(state, input.id, input.actorId, input.occurredAt);
-    assertTransitionAdmission(state, input);
-    return transitionWorkReducerDelta(state, input);
-  }, input);
+export async function transitionWork(workspaceRoot: string, input: WorkTransitionInput & WorkspaceMutationOptions): Promise<WorkspaceState> {
+  return appendEvent(workspaceRoot, transitionWorkDelta(input), input);
 }
 
-function transitionWorkReducerDelta(state: WorkspaceState, input: { readonly id: string; readonly status: WorkStatus; readonly summary?: string | null; readonly occurredAt: string }): MutationDelta {
+function transitionWorkReducerDelta(state: WorkspaceState, input: { readonly id: string; readonly status: WorkStatus; readonly summary?: string | null; readonly occurredAt: string }, labels?: readonly string[]): MutationDelta {
   {
     const current = workById(state, input.id);
     assertWorkTransition(current.status, input.status);
@@ -4890,7 +4993,7 @@ function transitionWorkReducerDelta(state: WorkspaceState, input: { readonly id:
     // A transition carries no advisory input since the telemetry evidence id went
     // (TCRN-CROSS-STORY-467 R3); the record keeps the extensions it has.
     const extensions = summarised.extensions;
-    const record: WorkRecord = { ...summarised, extensions: extensions as WorkRecord["extensions"], scopeDigest: workExtensionsDigest(extensions), status: input.status, revision: current.revision + 1, updatedAt: input.occurredAt };
+    const record: WorkRecord = { ...summarised, ...(labels === undefined ? {} : { labels }), extensions: extensions as WorkRecord["extensions"], scopeDigest: workExtensionsDigest(extensions), status: input.status, revision: current.revision + 1, updatedAt: input.occurredAt };
     assertWorkTransitionEvidence(current, record, "WORKSPACE_INPUT_INVALID");
     validateBoundTemplateWork(record, state.templates);
     const work = validateWorkGraph(state.work.map((entry) => entry.id === record.id ? record : entry), templateRegistry(state.templates));
@@ -4965,6 +5068,26 @@ function releaseGateDelta(state: WorkspaceState, input: ReleaseGateInput & { rea
 // closure, so nothing moves across the replay boundary here.
 // TCRN-CROSS-STORY-528 (SUB-457): an annotation is refused under another actor's lease like a
 // transition (see transitionWorkDelta).
+export function implementationConditionDelta(input: { id: string; expectedRevision: number; condition: { basis: string; evidence: string; resumeWhen: string } | null; occurredAt: string; actorId?: string }): (state: WorkspaceState) => MutationDelta {
+  return state => {
+    assertWorkLeaseAdmits(state, input.id, input.actorId, input.occurredAt);
+    const item = workById(state, input.id);
+    if (item.revision !== input.expectedRevision) fail("WORKSPACE_INPUT_INVALID", "work revision changed; reload before saving");
+    const labels = (item.labels ?? []).filter(label => !isConditionLabel(label));
+    const note = input.condition;
+    let summary = item.summary;
+    if (note) {
+      if (!["Story", "Subtask"].includes(item.kind) || !["planned", "ready", "active"].includes(workflowStatus(item))) fail("WORKSPACE_INPUT_INVALID", "only open Story or Subtask implementation can be conditionally inapplicable");
+      if (implementationChildren(state.work, item).some(child => child.status !== "cancelled" && !conditionUntriggered(state.work, child))) fail("WORKSPACE_INPUT_INVALID", "reconcile each implementation child before deferring the whole conditional scope");
+      labels.push(conditionLabel(item.revision + 1));
+      summary = [summary, `Condition not triggered. Basis: ${note.basis}. Observation: ${note.evidence}. Resume when: ${note.resumeWhen}.`].filter(Boolean).join("\n");
+    } else if (labels.length === (item.labels ?? []).length) {
+      fail("WORKSPACE_INPUT_INVALID", "no recorded implementation condition to clear");
+    }
+    return annotateWorkReducerDelta(state, { id: item.id, expectedRevision: input.expectedRevision, labels, ...(summary === undefined ? {} : { summary }), occurredAt: input.occurredAt }, true);
+  };
+}
+
 export function annotateWorkDelta(input: WorkAnnotationInput & { readonly actorId?: string }): (state: WorkspaceState) => MutationDelta {
   return (state) => {
     assertWorkLeaseAdmits(state, input.id, input.actorId, input.occurredAt);
@@ -4979,7 +5102,7 @@ export async function annotateWork(workspaceRoot: string, input: WorkAnnotationI
   }, input);
 }
 
-function annotateWorkReducerDelta(state: WorkspaceState, input: WorkAnnotationInput): MutationDelta {
+function annotateWorkReducerDelta(state: WorkspaceState, input: WorkAnnotationInput, transitionLabels = false): MutationDelta {
   const current = workById(state, input.id);
   if (input.expectedRevision !== undefined && input.expectedRevision !== current.revision) fail("WORKSPACE_INPUT_INVALID", "work revision changed; reload before saving");
   if (current.tombstone) {
@@ -4993,7 +5116,13 @@ function annotateWorkReducerDelta(state: WorkspaceState, input: WorkAnnotationIn
   // TCRN-CROSS-STORY-472: each relation list an annotation names is replaced whole.
   const relations = workRelationsForWrite(state, input.id, input);
   const title = input.title === undefined ? current.title ?? null : normalizeWorkTitle(input.title);
-  const labels = input.labels === undefined ? current.labels ?? [] : normalizeWorkLabels(input.labels);
+  let labels = input.labels === undefined ? current.labels ?? [] : normalizeWorkLabels(input.labels);
+  if (input.labels !== undefined && !transitionLabels) {
+    const reservedStatus = (label: string) => isValidationLabel(label) || isConditionLabel(label);
+    const reserved = (current.labels ?? []).filter(reservedStatus);
+    if (labels.some(label => reservedStatus(label) && !reserved.includes(label))) fail("WORKSPACE_INPUT_INVALID", "set validation status through work-transition or record applicability through work-batch");
+    labels = normalizeWorkLabels([...labels.filter(label => !reservedStatus(label)), ...reserved]);
+  }
   // TCRN-CROSS-STORY-363. This is the door the historical backfill goes through:
   // an annotation may set the summary of a record that has no summary field, and
   // that is the only way a pre-363 record acquires one -- by an event that says
@@ -5002,7 +5131,12 @@ function annotateWorkReducerDelta(state: WorkspaceState, input: WorkAnnotationIn
   const involvedProjects = input.involvedProjects === undefined ? involvedProjectsOf(current) : normalizeInvolvedProjects(input.involvedProjects);
   if (workContent(current) === null && input.content === undefined && [input.goal, input.acceptance, input.body, input.scope].some(v => v !== undefined) && workContentPolicyApplies(readWorkContentPolicy(state, current.projectId), current, state.work)) contentFail("WORK_CONTENT_REQUIRED", "related in-flight content changes require typed content adoption");
   if (workContent(current) !== null && [input.goal, input.acceptance, input.body, input.scope].some(v => v !== undefined)) contentFail("WORK_CONTENT_SINGLE_SOURCE", "edit canonical content, not projected fields");
-  if (input.content !== undefined) assertWorkContentChange(state.work, current, validateWorkContent(input.content));
+  if (input.content !== undefined) {
+    const nextContent = validateWorkContent(input.content);
+    if ((current.kind === "Pack") !== (nextContent.kind === "Pack")) fail("WORKSPACE_INPUT_INVALID", "Pack content must remain bound to a Pack record");
+    if (current.kind === "Pack") assertPackPlanReferences(state.work, current.projectId, nextContent.packPlan);
+    assertWorkContentChange(state.work, current, nextContent);
+  }
   const extensions: Record<string, unknown> = { ...workAdvisoryExtensions(current.extensions, input, relations) };
   if (input.content !== undefined && workContent(current) === null) {
     if (current.status === "done" || current.status === "cancelled") contentFail("WORK_CONTENT_TERMINAL", "historical terminal work is not migrated");

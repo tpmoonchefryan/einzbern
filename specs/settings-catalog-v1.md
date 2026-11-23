@@ -596,9 +596,14 @@ execution policies and from representation or protocol bounds.
 
 ## Built-in rule catalog (TCRN-CROSS-STORY-540, MIN-259 D1)
 
-The engine ships seven system rules, in this order. Each is disabled until it is
-enabled and follows the same enable/read/render,
-keep/overwrite/unmanage and user-modified protection.
+Each built-in rule is selectable. Ordinary host AGENTS.md files contain the
+configured navigation and one sentence per enabled rule in a single `agents`
+section. Explicit order comes first, then catalog order. The marker and library
+record carry the digest of the entire block. Settle edits to that block with
+`rule-resolve --section agents`; legacy sections awaiting a decision retain
+their individual ids. Migration preserves text outside the markers, already
+removed markers, and user-owned or edited sections. The full bilingual contracts
+remain available in the catalog.
 
 | id | version | Chinese title | English title |
 | --- | --- | --- | --- |
@@ -606,9 +611,12 @@ keep/overwrite/unmanage and user-modified protection.
 | `batch` | 3 | 批量处理原则 | Batch Processing Principle |
 | `unattended-commands` | 2 | 无人值守指令原则 | Unattended Commands Principle |
 | `silent-reporting` | 1 | 静默汇报原则 | Silent Reporting Principle |
+| `discussion-style` | 1 | 讨论表达 | Discussion |
 | `design-authority` | 1 | 设计权威与一致性原则 | Design Authority and Consistency Principle |
 | `residue-cleanup` | 1 | 无效残余收尾原则 | Residue Cleanup Principle |
 | `goal-writing` | 1 | 目标书写契约 | Goal Writing Contract |
+| `incremental-update` | 1 | 增量更新与共享提交原则 | Incremental Update and Shared Submission Principle |
+| `privacy-publication` | 1 | 隐私与发布身份原则 | Privacy and Publication Identity Principle |
 
 `residue-cleanup` and `goal-writing` are the Owner's two immediate rules
 (MIN-258 D3(c), MIN-259 D1). Their Chinese bodies are the Owner's wording, word
