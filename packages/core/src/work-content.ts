@@ -27,6 +27,7 @@ export interface RequirementAllocation extends RequirementRef {
   readonly childId: string;
   readonly responsibility: "implementation" | "verification";
 }
+export const WORK_ACCEPTANCE_STAGES = ["development", "release", "post-release"] as const;
 export interface WorkAcceptance {
   readonly id: string;
   readonly version: number;
@@ -286,6 +287,16 @@ export function workContentMissing(content: WorkContent, phase: "draft" | "write
   if (phase === "draft") return content.kind === "Pack" && content.packPlan === undefined ? ["packPlan"] : [];
   const missing: string[] = [];
   if (content.kind === "Pack" && content.packPlan === undefined) missing.push("packPlan");
+  const { evidenceStage, decisionStage } = content.details;
+  if (evidenceStage !== undefined || decisionStage !== undefined) {
+    if (!evidenceStage) missing.push("details.evidenceStage");
+    if (!decisionStage) missing.push("details.decisionStage");
+    if (evidenceStage === "post-release") {
+      for (const field of ["observationTrigger", "verificationOwner", "evidenceRecord"]) {
+        if (!content.details[field]?.trim()) missing.push("details." + field);
+      }
+    }
+  }
   if (!content.goal.trim()) missing.push("goal");
   if (!content.scope.trim()) missing.push("scope");
   if (!content.sources.length) missing.push("sources");

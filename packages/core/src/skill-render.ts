@@ -70,7 +70,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Draft by type",
     verbs: ["work-draft"],
-    action: "Types/defects; inherited constraints/gaps: specs/work-content-v1.md. One native content, not a second acceptance copy.",
+    action: "Types/defects, inherited constraints, stages: specs/work-content-v1.md. One record, not a second acceptance copy.",
   },
   {
     moment: "Full text",

@@ -50,6 +50,14 @@ review compares original source, actual behavior and assertions. Source extracti
 claims and decision meaning still require that review; the engine cannot certify
 their truth merely from a boolean, hash, summary or matching identifier.
 
+## Evidence availability and the decision it gates
+
+For each criterion identify the earliest stage that supplies its evidence and the decision it informs. Criteria on one work item can share these two values in the existing string-valued `details.evidenceStage` and `details.decisionStage`. Use `development`, `release` or `post-release` in chronological order. Split criteria with different deadlines into separate work. New delivery drafts prompt for both stages. Initiative drafts default the decision to development. Existing unstaged records retain their contract. An explicitly staged child uses development as the deadline of an unstaged Initiative. A lifecycle Initiative may declare a later deadline of its own.
+
+A child is a prerequisite of its delivery parent. A later stage belongs in a separate follow-up tree, linked to the original records and decision. An explicit hard predecessor must also be available by the dependent decision. Use a traceability relation for follow-ups. For post-release evidence, record `details.observationTrigger`, `details.verificationOwner` and `details.evidenceRecord`. Keep the original acceptance wording, source and scope. Actual published downloads, adoption and natural incidents provide evidence when their respective triggers occur. The delivery review can verify the handoff. Record the observation itself on the follow-up.
+
+Main records independent acceptance before finalizing validated delivery items to `done` bottom-up. Existing gates, unresolved evidence and applicable open descendants still apply. Retained untriggered observations continue to use their recorded scope.
+
 ## Initiative acceptance
 
 New Initiative drafts set `details.acceptanceScope` to `initiative`. Each child retains its criteria and implementation allocation. The independent verifier works from the INIT checklist after all Epic implementations are ready. Earlier drafts keep their recorded allocation contract.

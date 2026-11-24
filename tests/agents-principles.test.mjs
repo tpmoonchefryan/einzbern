@@ -40,7 +40,7 @@ test("a bilingual catalog renders the approved eight one-line principles with on
   const [section] = parsed.sections;
   assert.equal(section.body.replaceAll("\r\n", "\n"), [navigation, "", ...enabled.map(r => r.principle.zh), ""].join("\n"));
   assert.equal(section.digest, section.bodyDigest);
-  assert.equal(section.digest, "75288ce53f0a32df87cf0e559cae13f7f63305b85aba1ac0c323de61d551e4f7");
+  assert.equal(section.digest, "ba8ddb7a32add53ffed990a887d8f7782410530c419a67c79d83b66a7ee50a11");
   assert.equal(parsed.outside.join(""), "# Title\r\n\r\n\r\nKeep this note.\r\nEnd of file.");
   const next = await planPrinciples(project, { settings, configRecords: [...rules, record("agents", section.body)] });
   assert.equal(next.write, false);

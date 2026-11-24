@@ -4876,14 +4876,15 @@ function createWorkReducerDelta(state: WorkspaceState, input: {
  * work and is skipped. Lives here (not in the protocol graph validator) so the
  * check fires on a live mutation, never on replay.
  */
-function hasLiveNonTerminalDescendant(work: readonly WorkRecord[], recordId: string, allowUntriggered = false): boolean {
+function hasLiveNonTerminalDescendant(work: readonly WorkRecord[], recordId: string, allowUntriggered = false, requireDone = false): boolean {
   const parent = allowUntriggered ? work.find(row => row.id === recordId) : undefined;
   for (const candidate of work) {
     if (candidate.parentId !== recordId) continue;
     if (candidate.tombstone) continue;
     if (parent && conditionUntriggered(work, parent) && verificationOnly(parent, candidate)) continue;
-    if (candidate.status !== "done" && candidate.status !== "cancelled" && !(allowUntriggered && conditionUntriggered(work, candidate))) return true;
-    if (hasLiveNonTerminalDescendant(work, candidate.id, allowUntriggered)) return true;
+    const status = requireDone ? workflowStatus(candidate) : candidate.status;
+    if (status !== "done" && status !== "cancelled" && !(allowUntriggered && conditionUntriggered(work, candidate))) return true;
+    if (hasLiveNonTerminalDescendant(work, candidate.id, allowUntriggered, requireDone)) return true;
   }
   return false;
 }
@@ -4906,7 +4907,7 @@ function hasLiveNonTerminalDescendant(work: readonly WorkRecord[], recordId: str
 // exactly what the WSA-3 comment below was warning about. A rule placed there would refuse
 // a chain that legitimately closed an Initiative before 0.10.0 while descendants were open.
 // A rule placed here fires on live mutations only, which is what it always did.
-function assertTransitionAdmission(state: WorkspaceState, input: { readonly id: string; readonly status: WorkStatus }, validating = false): void {
+function assertTransitionAdmission(state: WorkspaceState, input: { readonly id: string; readonly status: WorkStatus }, validating = false, finalizing = false): void {
   // A live write-path admission rule; historical chains remain replayable. Before a Story
   // enters an execution or completion state it has a goal and an acceptance (TCRN-CROSS-STORY-473:
   // fields, or the blocks of its scope); a record bound to a template is checked against it.
@@ -4925,10 +4926,10 @@ function assertTransitionAdmission(state: WorkspaceState, input: { readonly id: 
   // (A tombstoned descendant holds no open work.)
   if (input.status === "done") {
     const current = state.work.find((entry) => entry.id === input.id);
-    if (current && current.kind === "Initiative" && !current.tombstone
-      && hasLiveNonTerminalDescendant(state.work, current.id, validating)) {
+    if (current && (current.kind === "Initiative" || finalizing) && !current.tombstone
+      && hasLiveNonTerminalDescendant(state.work, current.id, validating || finalizing, finalizing)) {
       fail("WORKSPACE_INPUT_INVALID",
-        `cannot close Initiative ${input.id} to done: it still holds live non-terminal work`);
+        `cannot close ${current.kind} ${input.id} to done: it still holds live non-terminal work`);
     }
   }
 }
@@ -4956,7 +4957,9 @@ export function transitionWorkDelta(input: WorkTransitionInput): (state: Workspa
     const next = validationTransition(state.work, current, input.status, input.summary, input.blockedCriteria);
     if (next.problem) fail("WORKSPACE_INPUT_INVALID", next.problem);
     const physical = { ...input, status: next.status };
-    assertTransitionAdmission(state, physical, input.status === "validated");
+    const finalizing = input.status === "done" && workflowStatus(current) === "validated";
+    assertTransitionAdmission(state, physical, input.status === "validated", finalizing);
+    if (finalizing) assertGateClearance(state.gates, current.id, "done", "WORKSPACE_GATE_PENDING");
     const labels = (current.labels ?? []).filter(label => !isValidationLabel(label));
     if (next.marker) labels.push(next.marker);
     const changedMarker = next.marker !== (current.labels ?? []).find(isValidationLabel);
@@ -5193,6 +5196,8 @@ function annotateWorkReducerDelta(state: WorkspaceState, input: WorkAnnotationIn
   if (input.content !== undefined) {
     assertContentDecisions(state, record, current);
     assertWorkContentAdmission(state, record, record.status === "planned" ? "draft" : record.status === "done" ? "done" : record.status === "active" ? "start" : "write");
+  } else if (input.relations?.blockedBy !== undefined && workContent(record)) {
+    assertWorkContentAdmission(state, record, "draft");
   }
   validateBoundTemplateWork(record, state.templates);
   const work = validateWorkGraph(state.work.map((entry) => entry.id === record.id ? record : entry), templateRegistry(state.templates));

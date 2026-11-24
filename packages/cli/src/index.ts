@@ -1,7 +1,7 @@
 import { isProjectArtifactBinding, resolveProjectArtifactBinding } from "../../core/src/portable-path.js";
 import { MEMORY_LEASE_VARIABLE } from "../../../scripts/lib/memory-budget.mjs";
 import { readWorkContentImpact } from "../../core/src/work-requirements.js";
-import { workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
+import { WORK_ACCEPTANCE_STAGES, workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
 import type { ContentWorkKind } from "../../core/src/work-content.js";
 import { workContentContext, workContentContextSegment } from "../../core/src/work-content-context.js";
 import { readWorkContentPolicy, defaultWorkContentTemplate, workContentRolloutReadiness } from "../../core/src/work-content-templates.js";
@@ -754,7 +754,10 @@ function workDraft(
   variant?: "standard" | "defect",
 ): Readonly<Record<string, unknown>> {
   const draft = workContentDraft(kind as ContentWorkKind, variant === undefined ? {} : { variant });
-  const content = kind === "Initiative" ? { ...draft, details: { ...draft.details, acceptanceScope: "initiative" } } : draft;
+  const content = kind === "Pack" ? draft : { ...draft, details: {
+    ...draft.details, evidenceStage: "", decisionStage: "",
+    ...(kind === "Initiative" ? { acceptanceScope: "initiative", decisionStage: "development" } : {}),
+  } };
   const policy = readWorkContentPolicy(state, projectId);
   const configuredTemplate = policy?.defaults[kind as ContentWorkKind];
   const contentTemplate = configuredTemplate === undefined ? defaultWorkContentTemplate(kind as ContentWorkKind)
@@ -785,6 +788,12 @@ function workDraft(
     template: scopeTemplate,
     optional: true,
     content, missing: [...workContentMissing(content, "write"), ...(contentTemplate === null ? ["configured-template-unavailable"] : [])], inheritedContext,
+    ...(kind === "Pack" ? {} : { acceptancePlanning: {
+      stages: WORK_ACCEPTANCE_STAGES,
+      evidenceStage: "Earliest stage at which each criterion can produce evidence.",
+      decisionStage: "Decision gated by those criteria. Split mixed stages into separate work.",
+      postRelease: "Use a linked follow-up outside the delivery tree. Set details.observationTrigger, verificationOwner and evidenceRecord.",
+    } }),
     contentPolicy: policy, contentTemplate,
     contentRolloutReadiness: workContentRolloutReadiness(state, policy?.rollout ?? null, { engineVersion: FRAMEWORK_VERSION, manifestMinEngineVersion: state.library?.minEngineVersion ?? null, requireCurrentBoundary: false }),
     note: policy === null ? WORK_DRAFT_NOTE : "Typed content uses the applicable project template; drafts may be incomplete. Completion is required only at done.",

@@ -97,7 +97,7 @@ export function validationTransition(work: readonly WorkRecord[], item: WorkReco
   const isBlocked = item.status === "blocked" && item.labels?.includes(blocked);
   if (target === from && item.labels?.some(isValidationLabel)) return { status: item.status, problem: "work already has status " + target };
   if (target !== "cancelled" && conditionUntriggered(work, item)) return { status: item.status, problem: "reconcile the implementation condition before changing work status" };
-  if (target === "done") {
+  if (target === "done" && from !== "validated") {
     let root: WorkRecord | undefined = item;
     while (root && root.parentId) {
       const parentId: string = root.parentId;

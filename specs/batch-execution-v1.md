@@ -8,6 +8,7 @@ Load only when the corresponding principle is enabled and this task needs its pr
 This governs approved decomposition, implementation, gates, testing, acceptance, chain writes, reporting and dispatch. It does not automatically add an INIT, agents or acceptance stages to ordinary tasks. Follow the current Owner decision on methods, roles, order, gates and criteria. Before changing an approved method, explain the difference, evidence, benefits, costs and risks and obtain the corresponding approval; unknown benefits remain unknown.
 
 1. One Initiative owns formal acceptance. Decompose implementation by dependency and shared writes. Keep requirement IDs, expected results and methods on each work item so implementers can test their work and the INIT can trace the results. Put all independent acceptance on the INIT checklist. Existing verification assignments and completed findings remain usable.
+For each criterion identify when evidence first exists and which decision it gates. Track evidence that needs publication, adoption or a business event in linked post-release work with its trigger, verifier and expected receipt. Independently validate the delivery scope and finalize accepted items bottom-up before starting release checks.
 2. Dispatch each authorized independent package as soon as its frozen inputs and a real slot are available. Fill the maximum compatible set within project, device and host capacity, then refill when a worker releases a slot. A pending predecessor can supply a usable implementation candidate. Overlapping writes or unavailable inputs hold only the affected packages. Reconcile native worker state after an interruption. Prepare the prior report alongside newly authorized work.
 When the queue empties, Main reads every Initiative covered by its current implementation grants and checks each full work tree, existing evidence, outstanding attempts and reports. Reconcile fully implemented legacy work to Pending Validate and retain partial scope. Record the basis and trigger for inactive conditions, and the evidence and release condition for actual blockers. Refill ready work until complete or every remaining applicable item is demonstrably blocked.
 
@@ -98,6 +99,7 @@ Record source/automated regression separately from native-host acceptance. The c
 适用于已获批的拆分、实施、跑门、测试、验收、链写、汇报与派工。批量原则不为普通任务自动新增 INIT、代理或验收阶段；具体执行方法、角色、顺序、门与判据遵循当前 Owner 决定。需要改变已批准方法时，说明差异、依据、收益、成本与风险并取得相应批准；未知收益保持未知。
 
 1. 正式验收只跟 INIT。拆单按硬依赖和共写范围分配实施，工单保留需求、判据和自测方法，汇总到 INIT 验收清单。旧工单的核验分工和历史有效结论继续复用。
+拆单逐项记录证据最早可取得的阶段及其决定的阶段。公开发行、实际采用或业务事件之后才有的证据交由关联的发布后工单收取，登记触发事件、收证人和回执。主对话独立验收本轮适用范围，验收通过的交付项自下而上转 done，再进入正式发行检查。
 2. 已授权的包有可用冻结候选和真实空槽即派，按项目、设备和宿主容量选出可并行的最大集合，释放一个名额即补位。待验的前置可以交付可用的实施输入。输入未就绪或写入冲突只影响相关包。中断后先核对原生在途和终态，上一批汇报可与新授权包并行。
 队列为空时，主对话从本次全部实施授权读取各 INIT 的完整工单树，核对已有证据、适用条件、在途尝试与未收报告。完整实施项逐项衔接为待验，局部交付保留剩余范围。条件未触发记依据及触发事件，真正受阻记缺口、证据和解除条件。继续派就绪包，完成或所有剩余适用工作确实受阻时才结束。
 

@@ -112,3 +112,42 @@ test("Readiness preview is read-only and distinct from persisted policy, with ac
   assert.equal(draft.contentRolloutReadiness.ready, false);
   assert.ok(draft.contentRolloutReadiness.problems.includes("ROLLOUT_OBSERVATION_MISSING_OR_INVALID"));
 });
+
+test("acceptance planning separates public evidence from development at the normal work entries", async t => {
+  const f = await workspaceFixture(t, { externalKey: "STAGE-PLAN" });
+  const run = (verb, ...args) => cli([verb, "--workspace", f.workspace, ...(["work-create", "work-annotate"].includes(verb) ? ["--at", instant(2)] : []), ...args]);
+  const receipts = {};
+  for (const kind of ["Initiative", "Epic", "Story"]) {
+    const template = defaultWorkContentTemplate(kind);
+    const state = await admitTemplateInWorkspace(f.workspace, { template, ownerId: "owner:fixture", occurredAt: instant(1) });
+    receipts[kind] = state.templates.find(entry => entry.template.id === template.id).receipt;
+  }
+  const create = async (key, kind, details, parentId) => {
+    const draft = await run("work-draft", "--kind", kind, "--project-id", f.projectId);
+    const content = { ...draft.content, details: { ...draft.content.details, ...details } };
+    return (await run("work-create", "--kind", kind, "--external-key", key, "--title", key, "--project-id", f.projectId,
+      "--template-receipt", JSON.stringify(receipts[kind]), "--content", JSON.stringify(content),
+      ...(parentId ? ["--parent-id", parentId] : []))).record.id;
+  };
+  const development = { evidenceStage: "development", decisionStage: "development" };
+  const observed = { evidenceStage: "post-release", decisionStage: "post-release", observationTrigger: "Public download", verificationOwner: "Receiver", evidenceRecord: "Download digest" };
+  const delivery = await create("DEV-INIT", "Initiative", development);
+  const child = await create("DEV-EPIC", "Epic", {}, delivery);
+  await assert.rejects(create("INVALID-DECISION", "Story", { ...observed, decisionStage: "development" }, child), /evidence-after-decision/);
+  await assert.rejects(create("INVALID-PARENT", "Story", observed, child), /later-than-parent/);
+  const followUp = await create("PUBLIC-INIT", "Initiative", observed);
+  const publicEpic = await create("PUBLIC-EPIC", "Epic", {}, followUp);
+  const leaf = await create("PUBLIC-STORY", "Story", observed, publicEpic);
+  const plannedDev = await create("DEV-STORY", "Story", development, child);
+  await assert.rejects(run("work-annotate", "--id", plannedDev, "--blocked-by", leaf), /later-blocker/);
+  await run("work-annotate", "--id", plannedDev, "--implements", leaf);
+  const upstream = await create("UPSTREAM", "Story", development, publicEpic);
+  await run("work-annotate", "--id", plannedDev, "--blocked-by", upstream);
+  const upstreamDraft = (await run("work-show", "--id", upstream)).content;
+  await assert.rejects(run("work-annotate", "--id", upstream, "--content", JSON.stringify({ ...upstreamDraft, details: { ...upstreamDraft.details, ...observed } })), /earlier-dependent/);
+  const before = await run("work-show", "--id", followUp);
+  await assert.rejects(run("work-annotate", "--id", followUp, "--content", JSON.stringify({ ...before.content, details: { ...before.content.details, ...development } })), /later-child/);
+  const planned = await run("work-show", "--id", leaf);
+  assert.equal(planned.record.status, "planned");
+  assert.deepEqual((await run("work-draft", "--kind", "Story", "--project-id", f.projectId)).acceptancePlanning.stages, ["development", "release", "post-release"]);
+});

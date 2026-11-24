@@ -55,6 +55,11 @@ test("normal work commands defer formal validation to the INIT, preserve partial
   for (const id of [b, e1, e2, init]) await move(id, "validated", "--summary", "Independent report for frozen candidate 2");
   assert.equal((await list("validated")).records.length, 6);
   assert.equal((await list("done")).records.length, 0);
+  await assert.rejects(move(init, "done"), /live non-terminal work/);
+  await assert.rejects(move(e1, "done"), /live non-terminal work/);
+  for (const id of [a, b, c, e1, e2, init]) await move(id, "done");
+  assert.equal((await list("done")).records.length, 6);
+  assert.equal((await show(a)).record.summary, "Independent report A, fixed candidate 2");
 });
 
 test("typed INIT scope retains child criteria and counts only fully blocked validation", () => {
