@@ -5,6 +5,10 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+## 5.8.0
+
+Einzbern and Mana Orchestrate ship in lockstep at 5.8.0.
+
 ### Work planning and acceptance
 
 - Record the earliest stage that supplies evidence and which decision depends on it. Work admission checks stage order for criteria, delivery children and explicit hard predecessors. Linked post-release work records the trigger, verification owner and expected receipt for evidence that depends on publication, adoption or a business event.
