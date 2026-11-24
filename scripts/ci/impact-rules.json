@@ -1862,7 +1862,7 @@
     "packages/core/src/models-category.ts": "28a6869eabbeb9151abf7917b31dcbd8711a01e97d3d15da3bd53925bc35574a",
     "packages/core/src/models-escalation.ts": "0afd573cd663718f87ffb5d5316c63e253ffb48099e667acd01ac627f0b5e24d",
     "packages/core/src/models-tiers.ts": "0c7eea501dbbcb68ac1bec334805c99f605708256aa582040d6474ba8375360a",
-    "packages/core/src/names.ts": "09ed10a1ea5ce67943702e7da03db437b77678d759945470f829830ddf4c354e",
+    "packages/core/src/names.ts": "d095c537eb36f547f87a91df50ab40e4e7621dc598f0a5cdc710cf9480e17c6d",
     "packages/core/src/native-tool-evidence.ts": "bb19a84c4d61cb58a9a81d505ef41ad49122a80cf7c25a07f6c1c57c0da51b9e",
     "packages/core/src/navigation-lines.ts": "a8f9654053a6d8759a06bdb4c57cdf90ea861cdb120d4d02b1e1e93605f6dceb",
     "packages/core/src/node-floor.ts": "338f93932309d6b459d1c82f92d9e46c1802a52e4519296c3cda20ca122b1e87",
