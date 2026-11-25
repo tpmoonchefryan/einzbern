@@ -54,10 +54,23 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["title", "tags"],
+        "required": [
+          "title",
+          "tags"
+        ],
         "properties": {
-          "title": { "type": "string", "minLength": 1 },
-          "tags": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tags": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
         }
       }
     },

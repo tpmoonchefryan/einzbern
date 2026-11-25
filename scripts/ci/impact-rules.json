@@ -1998,7 +1998,7 @@
     "schemas/extension-registration-v1.schema.json": "e882479cad6b7e54017e063a42260c8cc3ddaa724dff492b92fa4c40d73a5ab1",
     "schemas/gate-v1.schema.json": "1c99aecc8391c7850d5391cbad98a04624c749f42056c9ac2d327d6b3e312775",
     "schemas/knowledge-model-v1.schema.json": "3736374f4a3ba9a201c36446b374ef597da64212739ac157ccdb75c89133e394",
-    "schemas/minutes-v1.schema.json": "8c8f907257cec1726689308c3a80f79e031b12c9ba9d20f78f207b898844f238",
+    "schemas/minutes-v1.schema.json": "024abd35a0c1fc2a4c0b413af8cb64ad869d7911ae0cbf64fa8dd7deb568e539",
     "schemas/p3-acceptance-marker-v1.schema.json": "d781dd166eb9755a976cd3b00587b739d95426c3dda16fcddeb6ad4db741b3fd",
     "schemas/pack-plan-v1.schema.json": "7c42b9c1899219521151fefa8c1e4851bd3bb39b7f7e7ad3cfcf0966afb6dc5b",
     "schemas/profile-trust-v1.schema.json": "de20f6d31badfe57706b85a3f385fa29107b66d872b9c101ff9f4d19c694ede7",
