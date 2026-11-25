@@ -361,6 +361,8 @@ if (!MUTATION) {
       const panel = document.querySelector("#design-authority");
       const action = key => panel.querySelector(`[data-design-authority-action="${key}"]`);
       const panelState = () => panel.querySelector("[data-design-authority-state]")?.dataset.designAuthorityState;
+      const settingsWriteSettled = () => document.querySelector("#configuration-project-select")?.disabled === false;
+      const governedWriteTimeoutMs = 45_000;
       const address = "https://design.example.test/";
       const current = "https://docs.example.test/current/";
       const expected = address + "storybook/";
@@ -390,8 +392,8 @@ if (!MUTATION) {
       const author = document.querySelector('[data-setting-control="design.authority"]');
       author.value = address;
       author.dispatchEvent(new window.Event("change", { bubbles: true }));
-      await page.waitForSettled();
-      assert.ok(!panel.hidden && panelState() === "idle" && action("fetch"), receiptText(document));
+      await waitFor(() => settingsWriteSettled() && !panel.hidden && panelState() === "idle" && action("fetch"),
+        "the saved design authority to become available", governedWriteTimeoutMs);
       assert.equal(seen.length, 0);
       assert.equal(document.querySelector('[data-setting-row="design.consumedVersion"]'), null);
       assert.equal(document.querySelector(selector).value, current);
@@ -416,10 +418,12 @@ if (!MUTATION) {
       action("fill").click();
       page.hold(path => path === "/api/vocabulary");
       action("save").click();
-      await waitFor(() => panelState() === "available" && writes.length === 2 && page.held() === 1, "documentation read back before the settings page refresh");
+      await waitFor(() => panelState() === "available" && writes.length === 2 && page.held() === 1,
+        "documentation read back before the settings page refresh", governedWriteTimeoutMs);
       assert.equal(document.querySelector(selector).value, expected);
       assert.equal(page.release(), 1);
-      await page.waitForSettled();
+      await waitFor(() => settingsWriteSettled() && action("fetch")?.disabled === false,
+        "the documentation save controls to become available", governedWriteTimeoutMs);
       assert.ok(writes.every(write => write.libraryPath === page.workspace && write.libraryId === writes[0].libraryId));
       assert.deepEqual(writes.map(({ key, value }) => ({ key, value })), [{ key: "design.authority", value: address }, { key: "design.productionDocs", value: expected }]);
       assert.equal(document.querySelector(selector).value, expected);

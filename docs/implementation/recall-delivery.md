@@ -15,7 +15,13 @@ An exact technical identifier in a short query receives the existing body weight
 in record IDF units only when all query constraints match. A minutes record must
 carry that name in an eligible clause. Unmatched words receive no such bonus.
 
-Long prose queries use at most 48 informative terms. Without a title, summary or
+Long prose queries use at most 48 informative terms, selected by corpus rarity.
+In the controlled comparison on the migrated project corpus, both rarity and
+title-or-tag priority retrieved 6 of 12 judged references for queries of 87–108
+terms at the default threshold. The short controls retrieved 11 of 12 under
+both orders. The engine retains rarity ordering.
+
+Without a title, summary or
 authored expansion anchor, their scores scale by coverage of the complete query,
 including terms absent from the corpus. Explicit
 external keys retain their existing priority. The strong-hit threshold, relative
@@ -62,3 +68,5 @@ Admitted native dispatches offer short candidate lines using the work title and 
 Use `recall --view candidates` to repeat or rephrase a query. Use `recall-read --refs` to read any useful references. The optional recall observation records only successfully returned references for that library.
 
 Atelier and `minutes-list --query` use the same query and ranking path as explicit recall. After review of the historical supplements, the library setting `retrieval.metadataOnly` switches matching to titles, tags, authored search terms, and identifiers. The same switch enables short candidates in prompt hooks. The default preserves the existing matching and prompt format. Direct reads continue returning the original content.
+
+The supplement commands report the state of the append. Record an Owner sample review with the library, project, source version, supplemented version, and sample digest. Use that bounded copy for the retrieval rehearsal and relevance comparison allowed by the review. Record the production cutover scope and timing when making that decision.

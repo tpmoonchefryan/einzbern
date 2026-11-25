@@ -23,7 +23,7 @@ retrieval entry<br><sub>one lookup before every prompt, silent unless strongly r
 <td align="center" width="33%">
 
 ### 0
-runtime dependencies<br><sub>a single zero-dependency file, no database, no network</sub>
+runtime dependencies<br><sub>a single zero-dependency file, no database</sub>
 
 </td>
 <td align="center" width="33%">
@@ -123,7 +123,9 @@ Or tell your host: find a skill called Mana Orchestrate and install it.
 
 Then, in the project directory, say: install Einzbern. The wizard asks one screen of questions: fresh install or restore from an existing `Ether`, where the artifacts go, whether that folder is cloud-synced, which language, and whether to write a navigation section into AGENTS.md. It then lists every file it is about to write, and you confirm once. Update, repair, migrate from the previous version, uninstall, and health check are modes of the same wizard.
 
-It does not commit, push, edit your .gitignore, or delete anything, and it touches the network only to download the engine.
+The wizard does not commit, push, edit your .gitignore, or delete anything. It connects to download the engine and can install offline from a local archive.
+
+When you choose to read Storybook in Atelier, your browser requests Storybook metadata and the optional component manifest from the design authority address you configured.
 
 ## Day to day
 
@@ -204,7 +206,7 @@ Long-running tasks consume resources beyond writing code. Dispatch, continuation
 | **Claude Code: native path retained** | One main conversation coordinates worker subagents using the host's background execution and completion notifications. | Native notifications return results. Further optimization focuses on model categories, scheduled wakeups, returned content and acceptance cadence. Current samples do not establish a general need for a separate coordination conversation. |
 | **DeepSeek Harness: native path retained** | One main conversation uses runtime-managed subagents; the Mana Orchestrate plugin provides memory integration and bridge deduplication. | The runtime handles completion notifications and resource cleanup. Historical logs already show multiple returns coalesced into one main-conversation response. Further optimization depends on actual models and the share of coordination costs. |
 
-The two-conversation arrangement is **the sole Codex workflow** and has replaced the previous collector-hook path. Other hosts are unaffected. The economy coordinator receives worker results directly, with no separate collector agent. The corresponding workers handle implementation, integration and independent acceptance. The main and economy model categories are required; flagship is optional.
+Codex uses two conversations by default. The economy coordinator receives worker results directly. Set the device setting `execution.codexDualConversation` to `false` for Main to coordinate its own native workers and read their results. The `execution.codexAllowNonCoordinatorPolling` control appears only while dual-conversation mode is on and defaults to off. The corresponding workers handle implementation, integration and independent acceptance. The main and economy model categories are required. The flagship category is optional.
 
 The model performs this orchestration through host-supported tools. The engine records batches and receipts; it does not create conversations, dispatch work or send messages on its own.
 
