@@ -195,21 +195,35 @@ async function writeRegistry(registry: Registry, home?: string): Promise<void> {
   await writeFileAtomic(path, canonicalJson({ schemaVersion: REGISTRY_SCHEMA_VERSION, entries, ...(agentsProjectRoots === undefined ? {} : { agentsProjectRoots }) } as unknown as JsonValue));
 }
 
-/** Registered project paths for a library on this device, in stable lexical order. */
+async function liveAgentsProjectRoots(registry: Registry, libraryId: string): Promise<readonly string[]> {
+  const paths = eligibleAgentsProjectRoots(registry, libraryId);
+  const live = await Promise.all(paths.map(async path => {
+    try {
+      return (await lstat(path)).isDirectory();
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOENT" || code === "ENOTDIR") return false;
+      throw error;
+    }
+  }));
+  return paths.filter((_, index) => live[index]);
+}
+
+/** Existing registered project directories for a library, in stable lexical order. */
 export async function registeredAgentsProjectRoots(libraryId: string, home?: string): Promise<readonly string[]> {
-  return eligibleAgentsProjectRoots(await readRegistry(home), libraryId);
+  return liveAgentsProjectRoots(await readRegistry(home), libraryId);
 }
 
 /** A setup answer/default is valid only when it is this project or a live root of this library. */
 export async function validateAgentsProjectRoot(libraryId: string | null, candidate: string, currentProjectPath: string, home?: string): Promise<string | null> {
   const selected = await real(candidate).catch(() => null);
-  if (selected === null) return null;
+  if (selected === null || !(await lstat(selected).catch(() => null))?.isDirectory()) return null;
   const current = await real(currentProjectPath).catch(() => null);
   const registry = await readRegistry(home);
   const libraries = registry.entries.map(entry => entry.libraryPath);
   if (selected === current && !libraries.some(library => pathIsInside(library, selected))) return selected;
   if (libraryId === null) return null;
-  return eligibleAgentsProjectRoots(registry, libraryId).includes(selected) ? selected : null;
+  return (await liveAgentsProjectRoots(registry, libraryId)).includes(selected) ? selected : null;
 }
 
 /**
@@ -219,7 +233,7 @@ export async function validateAgentsProjectRoot(libraryId: string | null, candid
  */
 export async function readAgentsProjectRootSelection(libraryId: string, home?: string): Promise<AgentsProjectRootSelection> {
   const registry = await readRegistry(home);
-  const registered = eligibleAgentsProjectRoots(registry, libraryId);
+  const registered = await liveAgentsProjectRoots(registry, libraryId);
   if (Object.hasOwn(registry.agentsProjectRoots ?? {}, libraryId)) {
     const selected = registry.agentsProjectRoots![libraryId] ?? null;
     return { libraryId, projectPath: selected !== null && registered.includes(selected) ? selected : null, source: "registry" };
@@ -244,7 +258,7 @@ export async function setAgentsProjectRoots(selections: readonly { readonly libr
         continue;
       }
       const selected = await real(selection.projectPath);
-      if (!eligibleAgentsProjectRoots(registry, selection.libraryId).includes(selected)) {
+      if (!(await liveAgentsProjectRoots(registry, selection.libraryId)).includes(selected)) {
         fail("LIBRARY_REGISTRY_MISMATCH", `${selected} is not a registered project root of ${selection.libraryId}`, { libraryId: selection.libraryId, project: selected });
       }
       roots[selection.libraryId] = selected;
@@ -358,7 +372,7 @@ export async function registerLibrary(input: RegisterLibraryInput, home?: string
       ...(registry.agentsProjectRoots ?? {}),
       [library.manifest.libraryId]: await real(input.agentsProjectRoot),
     };
-    if (input.agentsProjectRoot !== undefined && !eligibleAgentsProjectRoots({ ...registry, entries }, library.manifest.libraryId).includes(agentsProjectRoots![library.manifest.libraryId]!)) {
+    if (input.agentsProjectRoot !== undefined && !(await liveAgentsProjectRoots({ ...registry, entries }, library.manifest.libraryId)).includes(agentsProjectRoots![library.manifest.libraryId]!)) {
       fail("LIBRARY_REGISTRY_MISMATCH", `${input.agentsProjectRoot} is not a registered project root of ${library.manifest.libraryId}`, { libraryId: library.manifest.libraryId, project: input.agentsProjectRoot });
     }
     await writeRegistry({ ...registry, entries, ...(agentsProjectRoots === undefined ? {} : { agentsProjectRoots }) }, directory);

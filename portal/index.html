@@ -4755,7 +4755,8 @@ const BOOT = __PORTAL_BOOT__;
   // Both catalogs' rows: the library's keys (settings-catalog) and this device's (machine-settings-catalog).
   const settingEntries = () => [
     ...(Array.isArray(state.settings?.settings) ? state.settings.settings : []).map((entry) => ({ ...entry })),
-    ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings : []).map((entry) => ({ ...entry, layer: "device" })),
+    ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings : [])
+      .filter((entry) => entry.key !== "agents.projectRoot").map((entry) => ({ ...entry, layer: "device" })),
   ];
   const settingEntry = (key) => settingEntries().find((entry) => entry.key === key);
   const entryGroup = (entry) => typeof entry?.group === "string" && entry.group.length > 0 ? entry.group : SETTING_GROUP_NAMES[0][0];

@@ -95,8 +95,10 @@ the legacy machine setting. `readAgentsProjectRootSelection` returns the effecti
 and its source; `registeredAgentsProjectRoots` enumerates eligible roots;
 `validateAgentsProjectRoot` and `setAgentsProjectRoots` validate and atomically persist
 selections. A legacy `agents.projectRoot` scalar is accepted only for the library that
-registers that path, and the compatibility CLI setter updates that library's map entry.
-Fresh setup, update and repair share same-library validation. Update or repair migrates
+registers that path. The compatibility CLI setter updates the library's map entry, and
+scoped catalog and remove commands accept `--project`. Setup rollback removes any
+legacy scalar after preserving applicable selections, before activating the old engine.
+Fresh setup, restore, update and repair share same-library validation. Update or repair migrates
 an old selection, adopts a sole eligible root automatically, and asks once when the
 current library has multiple eligible roots. No absolute path is exported with a library.
 New general-group display orders are 20 and 21, after existing design fields.

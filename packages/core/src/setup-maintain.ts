@@ -49,7 +49,7 @@ import { openLibrary } from "./ether-library.js";
 import { isEngineVersion } from "./format-version.js";
 import { utcStamp } from "./host-writable-roots.js";
 import { INSTALL_TREE_DIGEST_VERSION, computeInstallTreeDigest, normalizedInstallBytes } from "./install-tree-digest.js";
-import { readAgentsNavigation } from "./machine-settings.js";
+import { AGENTS_PROJECT_ROOT_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSettingRemove, readAgentsNavigation, readAgentsProjectRoot } from "./machine-settings.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
 import { parseManagedFile } from "./managed-sections.js";
 import { BRAND, DIRECTORY } from "./names.js";
@@ -538,6 +538,10 @@ export async function planUpdateSetup(input: SetupModeInput): Promise<SetupModeP
   const questions: SetupQuestion[] = [];
   if (options.rollback === true) {
     target = await planRollback(recorder, deviceHome, current);
+    const path = join(deviceHome, MACHINE_SETTINGS_FILE_NAME);
+    if (target !== null && await recorder.attempt("machine-settings", path, () => readAgentsProjectRoot(deviceHome)) !== null) {
+      recorder.write("machine-settings", path, "update");
+    }
   } else if (options.archive !== undefined) {
     target = await planRelease(recorder, input, resolve(projectRoot, options.archive), current);
   } else {
@@ -594,10 +598,23 @@ export async function applyUpdateSetup(plan: SetupPlan): Promise<SetupApplied> {
     // A damaged pointer is replaced by an update; there is no version to name as the one before.
     if (reasonOf(error) === null) throw error;
   }
+  const selections = plan.agentsProjectRootSelections ?? [];
+  const beforeSwitch = async (): Promise<void> => {
+    if (selections.length > 0) {
+      // The setter verifies the checkout paths against the locked registry before any write.
+      await setAgentsProjectRoots(selections, deviceHome);
+      recorder.write("registry", registryPath(deviceHome), "update");
+    }
+    if (planned.source === null && await readAgentsProjectRoot(deviceHome) !== null) {
+      const path = join(deviceHome, MACHINE_SETTINGS_FILE_NAME);
+      await applyMachineSettingRemove({ key: AGENTS_PROJECT_ROOT_SETTING, occurredAt: at, path });
+      recorder.write("machine-settings", path, "update");
+    }
+  };
   let report: EngineSwitchReport;
   if (planned.source === null) {
     if (planned.from === null) return setupFail("SETUP_INPUT_INVALID", "the rollback plan names no current engine version", { field: "plan" });
-    report = await rollbackEngine({ at, home: deviceHome, expectedCurrent: { version: planned.from, previous: planned.to } });
+    report = await rollbackEngine({ at, home: deviceHome, expectedCurrent: { version: planned.from, previous: planned.to }, beforeSwitch });
     recorder.write("engine", engineCurrentPath(deviceHome), "update");
   } else {
     const release = await readRelease(planned.source);
@@ -608,7 +625,7 @@ export async function applyUpdateSetup(plan: SetupPlan): Promise<SetupApplied> {
     const tree = await stageRelease(release, staging);
     recorder.write("engine", staging, "create");
     const pointer = await entryKind(engineCurrentPath(deviceHome));
-    report = await updateEngine({ from: tree, sha256: release.installTreeDigest, version: release.version, at, home: deviceHome });
+    report = await updateEngine({ from: tree, sha256: release.installTreeDigest, version: release.version, at, home: deviceHome, beforeSwitch });
     if (report.installed === "copied") recorder.write("engine", engineVersionDirectory(release.version, deviceHome), "create");
     recorder.write("engine", engineCurrentPath(deviceHome), pointer === null ? "create" : "update");
   }
@@ -625,10 +642,6 @@ export async function applyUpdateSetup(plan: SetupPlan): Promise<SetupApplied> {
     engineDirectory: engineVersionDirectory(report.current.version, deviceHome),
     steps: ENGINE_STEPS,
   });
-  if ((plan.agentsProjectRootSelections?.length ?? 0) > 0) {
-    await setAgentsProjectRoots(plan.agentsProjectRootSelections!, deviceHome);
-    recorder.write("registry", registryPath(deviceHome), "update");
-  }
   const engineDirectory = engineVersionDirectory(report.current.version, deviceHome);
   const managedUpdates = await applySetupManagedUpdates(recorder, plan, engineDirectory);
   for (const output of managedUpdates.filter(output => output.status === "unavailable" || output.status === "pending" || (output.status === "skipped" && output.reasonCode === "AGENTS_PROJECT_ROOT_REQUIRED"))) recorder.warnings.push({

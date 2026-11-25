@@ -29,7 +29,7 @@ import { NATIVE_TOOL_COMMAND_CATALOG, runNativeToolCommand } from "./native-tool
 import type { DotExecutionRequest } from "../../core/src/dot-execution.js";
 import type { RuntimeCommandCatalogEntry, RuntimeCommandFlag } from "../../core/src/runtime-input-contract.js";
 import type { ExecutionAdmissionRequest } from "../../core/src/execution-admission.js";
-import { readMachineSettings } from "../../core/src/machine-settings.js";
+import { AGENTS_PROJECT_ROOT_SETTING, readMachineSettings, validateMachineSettingValue } from "../../core/src/machine-settings.js";
 import { configurationContract, annotateConfigValue } from "../../core/src/configuration-contract.js";
 import { evaluateExecutionQuota, resolveExecutionConcurrency } from "../../core/src/execution-policy.js";
 import { DOT_AGENTS_TEMPLATE_VERSION, DOT_INSTALLATION_TARGET, SETUP_EXECUTION_TARGETS, dotEnabledRuleSources } from "../../core/src/dot-agents.js";
@@ -151,6 +151,7 @@ import {
   defaultImportTarget,
   DIRECTORY,
   importLegacyWorkspace,
+  readAgentsProjectRootSelection,
   readRegistry,
   registerLibrary,
   setAgentsProjectRoots,
@@ -1854,8 +1855,8 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // packages/core/src/machine-settings.ts for why a laptop's default theme is not
   // governed workspace state. `home` exists so a test can point the verbs at a
   // scratch directory instead of the real machine home.
-  { name: "machine-settings-catalog", availability: "cli", mutates: false, flags: [{ name: "home", required: false, valueKind: "string" }] },
-  { name: "machine-settings-remove", availability: "cli", mutates: true, flags: [{ name: "at", required: true, valueKind: "instant" }, { name: "key", required: true, valueKind: "string" }, { name: "home", required: false, valueKind: "string" }] },
+  { name: "machine-settings-catalog", availability: "cli", mutates: false, flags: [{ name: "home", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }] },
+  { name: "machine-settings-remove", availability: "cli", mutates: true, flags: [{ name: "at", required: true, valueKind: "instant" }, { name: "key", required: true, valueKind: "string" }, { name: "home", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }] },
   { name: "machine-settings-set", availability: "cli", mutates: true, flags: [{ name: "at", required: true, valueKind: "instant" }, { name: "key", required: true, valueKind: "string" }, { name: "value", required: true, valueKind: "string" }, { name: "home", required: false, valueKind: "string" }] },
   // TCRN-CROSS-STORY-475 R1, R2: minutes in one write, and their reads. TCRN-CROSS-SUB-426 (MIN-239
   // D3, D5, D6): minutes-record declares what it supersedes, withdraws or stands beside, and the reads
@@ -3332,8 +3333,18 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     return;
   }
   if (command === "machine-settings-catalog") {
-    const values = parseArguments(rest, ["home"]);
-    io.write(canonicalJson({ reasonCode: "MACHINE_SETTINGS_CATALOG_READY", ...await readMachineSettingsCatalog(machineSettingsPath(values.home)) }));
+    const values = parseArguments(rest, ["home", "project"]);
+    const path = machineSettingsPath(values.home);
+    const catalog = await readMachineSettingsCatalog(path);
+    if (values.project === undefined) {
+      io.write(canonicalJson({ reasonCode: "MACHINE_SETTINGS_CATALOG_READY", ...catalog }));
+      return;
+    }
+    const devicePath = dirname(path);
+    const library = await resolveLibrary(values.project, devicePath);
+    const rootSelection = await readAgentsProjectRootSelection(library.libraryId, devicePath);
+    const settings = catalog.settings.map(entry => entry.key === AGENTS_PROJECT_ROOT_SETTING ? { ...entry, currentValue: rootSelection.projectPath } : entry);
+    io.write(canonicalJson({ reasonCode: "MACHINE_SETTINGS_CATALOG_READY", ...catalog, settings, rootSelection }));
     return;
   }
   if (command === "machine-settings-set") {
@@ -3341,26 +3352,47 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     required(values, ["at", "key", "value"]);
     const settingsPath = machineSettingsPath(values.home);
     const devicePath = dirname(settingsPath);
-    let selectedLibrary: string | null = null;
-    if (values.key === "agents.projectRoot") {
-      const selectedRoot = await realpath(values.value ?? "");
+    if (values.key === AGENTS_PROJECT_ROOT_SETTING) {
+      assertStrictInstant(values.at!);
+      const candidate = validateMachineSettingValue(AGENTS_PROJECT_ROOT_SETTING, values.value);
+      const selectedRoot = await realpath(candidate).catch(error => {
+        if (!["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+        return null;
+      });
       const registered = (await readRegistry(devicePath)).entries.filter(entry => entry.projectPath === selectedRoot);
-      if (registered.length !== 1) fail("MACHINE_SETTING_VALUE_INVALID", `${selectedRoot} must be a registered project root on this device to select a managed-output library`);
+      if (selectedRoot === null || registered.length !== 1) fail("MACHINE_SETTING_VALUE_INVALID", `${candidate} must be a registered project root on this device to select a managed-output library`);
       const selection = registered[0]!;
       if (await validateAgentsProjectRoot(selection.libraryId, selectedRoot, selection.projectPath, devicePath) === null) {
         fail("MACHINE_SETTING_VALUE_INVALID", `${selectedRoot} is not an eligible managed-output root for ${selection.libraryId}`);
       }
-      selectedLibrary = selection.libraryId;
+      const file = await readMachineSettings(settingsPath);
+      await setAgentsProjectRoots([{ libraryId: selection.libraryId, projectPath: selectedRoot }], devicePath);
+      const rootSelection = await readAgentsProjectRootSelection(selection.libraryId, devicePath);
+      io.write(canonicalJson({ reasonCode: "MACHINE_SETTINGS_WRITE_COMMITTED", ...file, rootSelection }));
+      return;
     }
     const file = await applyMachineSettingSet({ key: values.key ?? "", value: values.value ?? "", occurredAt: values.at ?? "", path: settingsPath });
-    if (selectedLibrary !== null) await setAgentsProjectRoots([{ libraryId: selectedLibrary, projectPath: await realpath(values.value ?? "") }], devicePath);
     io.write(canonicalJson({ reasonCode: "MACHINE_SETTINGS_WRITE_COMMITTED", ...file }));
     return;
   }
   if (command === "machine-settings-remove") {
-    const values = parseArguments(rest, ["at", "key", "home"]);
+    const values = parseArguments(rest, ["at", "key", "home", "project"]);
     required(values, ["at", "key"]);
-    const file = await applyMachineSettingRemove({ key: values.key ?? "", occurredAt: values.at ?? "", path: machineSettingsPath(values.home) });
+    const path = machineSettingsPath(values.home);
+    if (values.project !== undefined) {
+      if (values.key !== AGENTS_PROJECT_ROOT_SETTING) fail("MACHINE_SETTING_VALUE_INVALID", "--project is only supported for agents.projectRoot");
+      assertStrictInstant(values.at!);
+      const devicePath = dirname(path);
+      const library = await resolveLibrary(values.project, devicePath);
+      const current = await readAgentsProjectRootSelection(library.libraryId, devicePath);
+      if (current.projectPath === null) fail("MACHINE_SETTING_NOT_SET", `no managed-output root selected for library ${library.libraryId}`);
+      const file = await readMachineSettings(path);
+      await setAgentsProjectRoots([{ libraryId: library.libraryId, projectPath: null }], devicePath);
+      const rootSelection = await readAgentsProjectRootSelection(library.libraryId, devicePath);
+      io.write(canonicalJson({ reasonCode: "MACHINE_SETTINGS_WRITE_COMMITTED", ...file, rootSelection }));
+      return;
+    }
+    const file = await applyMachineSettingRemove({ key: values.key ?? "", occurredAt: values.at ?? "", path });
     io.write(canonicalJson({ reasonCode: "MACHINE_SETTINGS_WRITE_COMMITTED", ...file }));
     return;
   }

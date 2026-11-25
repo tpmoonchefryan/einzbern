@@ -1164,6 +1164,7 @@
 | 旗标 | 必填 | 取值类型 |
 | --- | --- | --- |
 | `--home` | 可选 | `string` |
+| `--project` | 可选 | `string` |
 
 ## `machine-settings-remove`
 
@@ -1175,6 +1176,7 @@
 | `--at` | 必填 | `instant` |
 | `--key` | 必填 | `string` |
 | `--home` | 可选 | `string` |
+| `--project` | 可选 | `string` |
 
 ## `machine-settings-set`
 
