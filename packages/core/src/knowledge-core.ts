@@ -6040,16 +6040,44 @@ function knowledgeSnippetAnswer(id: string, units: readonly ScannedKnowledgeUnit
  */
 export async function readKnowledgeBody(workspaceRoot: string, id: string, options: KnowledgeBodyReadOptions): Promise<Readonly<Record<string, JsonValue>>> {
   assertKnowledgeReadId(id);
+  return withKnowledgeBodyReader(workspaceRoot, options, (read) => read(id));
+}
+
+type KnowledgeBodyReader = (id: string) => Promise<Readonly<Record<string, JsonValue>>>;
+
+/** Resolve the explicit-read policy once per store for all requested IDs. */
+export async function readKnowledgeBodies(workspaceRoot: string, ids: readonly string[], options: KnowledgeBodyReadOptions): Promise<readonly (
+  { readonly id: string; readonly result: Readonly<Record<string, JsonValue>> } | { readonly id: string; readonly reasonCode: string }
+)[]> {
+  for (const id of ids) assertKnowledgeReadId(id);
+  return withKnowledgeBodyReader(workspaceRoot, options, async (read) => {
+    const results = [];
+    for (const id of ids) {
+      try {
+        results.push({ id, result: await read(id) });
+      } catch (error) {
+        if (!(error instanceof KnowledgeCoreError)) throw error;
+        results.push({ id, reasonCode: error.reasonCode });
+      }
+    }
+    return results;
+  });
+}
+
+async function withKnowledgeBodyReader<T>(workspaceRoot: string, options: KnowledgeBodyReadOptions, operation: (read: KnowledgeBodyReader) => Promise<T>): Promise<T> {
   assertEvaluationInstant(options.at);
   assertStoreScope(options.scope);
   if (options.scope === "user") {
     return readUserCrest(options, async (scan) => {
-      if (scan === null) fail("KNOWLEDGE_NOT_FOUND", id);
-      return crestBodyAnswer(scan, id, options, userCrestBackend(scan.storeRoot, scan.device, options), null, USER_CREST_DISCLOSURE);
+      if (scan === null) return operation(async (id) => fail("KNOWLEDGE_NOT_FOUND", id));
+      const backend = userCrestBackend(scan.storeRoot, scan.device, options);
+      return operation((id) => crestBodyAnswer(scan, id, options, backend, null, USER_CREST_DISCLOSURE));
     });
   }
   const scan = await scanKnowledgeStore(workspaceRoot, options, false, "metadata-only");
-  return crestBodyAnswer(scan, id, options, storeBackendFor(scan.storeRoot, options), scan.workspace, trailingDisclosure(scan));
+  const backend = storeBackendFor(scan.storeRoot, options);
+  const disclosure = trailingDisclosure(scan);
+  return operation((id) => crestBodyAnswer(scan, id, options, backend, scan.workspace, disclosure));
 }
 
 // TCRN-CROSS-SUB-425 (C-R17-3): a removed card's body is cleared, and an explicit read of it is refused
