@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { evaluateExecutionQuota } from "./execution-policy.js";
+import type { EngineQuotaPolicy } from "./execution-policy.js";
 import { isAbsolute } from "node:path";
 import { parseStrictInstant } from "../../protocol/src/index.js";
 import { dotDigest } from "./dot-execution.js";
@@ -112,11 +113,11 @@ export function validateHostExecutionRequest(value: unknown): HostExecutionReque
   return value as HostExecutionRequest;
 }
 export function sameHostSelection(a: HostSelection, b: HostSelection): boolean { return a.kind === "host-managed" ? b.kind === "host-managed" : b.kind === "explicit" && sameHostTuple(a.tuple, b.tuple); }
-export function resolveHostExecution(requestValue: HostExecutionRequest, policy: EngineModelPolicyFile | null, contextDigest: string, evaluatedAt = new Date().toISOString()): HostExecutionDecision {
+export function resolveHostExecution(requestValue: HostExecutionRequest, policy: EngineModelPolicyFile | null, contextDigest: string, evaluatedAt = new Date().toISOString(), genericQuota?: { readonly quota: EngineQuotaPolicy; readonly configured: boolean }): HostExecutionDecision {
   const request = validateHostExecutionRequest(requestValue); instant(evaluatedAt);
   const { capabilities: c, authorization: a } = request;
   for (const observation of c.selectionObservations ?? []) { instant(observation.observedAt); if (parseStrictInstant(observation.observedAt) > parseStrictInstant(evaluatedAt)) throw new HostExecutionError("selection observation is in the future"); }
-  const intent = c.hostKind === "dot" ? { status: "not-applicable" as const, selection: null } : resolveNativePolicyIntentFromSnapshot(policy!, { host: c.hostKind === "claude" ? "claude-code" : c.hostKind, category: request.category, rejections: request.rejections, ...(c.combinations === undefined ? {} : { availableCombinations: c.combinations }) });
+  const intent = c.hostKind === "dot" ? { status: "not-applicable" as const, selection: null } : resolveNativePolicyIntentFromSnapshot(policy!, { host: c.hostKind === "claude" ? "claude-code" : c.hostKind, category: request.category, rejections: request.rejections, ...(c.combinations === undefined ? {} : { availableCombinations: c.combinations }), ...(genericQuota === undefined ? {} : { genericQuota: genericQuota.quota, genericQuotaConfigured: genericQuota.configured }) });
   const configuredIntent: HostSelection | null = intent.selection === null ? null : { kind: "explicit", tuple: { runner: intent.selection.record.runner, model: intent.selection.record.model, effort: intent.selection.record.effort } };
   const preferred = configuredIntent ?? request.selection;
   let selected = preferred;
@@ -149,7 +150,7 @@ export function resolveHostExecution(requestValue: HostExecutionRequest, policy:
     instant(c.usage.observedAt);
     const age = Number(parseStrictInstant(evaluatedAt) - parseStrictInstant(c.usage.observedAt)) / 1_000_000;
     if (age < 0) throw new HostExecutionError("usage observation is in the future");
-    if (age <= 300_000 && intent.selection?.quotaOrigin === "device-host-policy") {
+    if (age <= 300_000 && intent.selection && intent.selection.quotaOrigin !== "engine-default") {
       const { observedAt: _observedAt, ...windows } = c.usage;
       const quota = evaluateExecutionQuota(intent.selection.quota, windows);
       if (quota.decision === "wait") stop("observed-configured-quota-wait");

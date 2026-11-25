@@ -17,17 +17,17 @@ device host policy authority. `settings-catalog` also returns
 model values, declarations, inherited values, and source. This is a separate source projection,
 not another settings row: old records remain readable, while a configured device host policy is
 authoritative for that host and cannot be overridden by a project model setting. The CLI/API write
-surface and file contract are specified in `specs/engine-model-policy-v1.md`. The portal presents
-the old rows as historical / non-Codex compatibility information and routes compatible Codex
-editing to the engine-host policy API; it does not copy those rows into a host policy or change
-them as a side effect.
+surface and file contract are specified in `specs/engine-model-policy-v1.md`. The standalone
+Models page presents the old rows as historical / non-Codex compatibility information and routes
+compatible Codex editing to the engine-host policy API; it does not copy those rows into a host
+policy or change them as a side effect.
 
 ## Configuration scopes (INC-399 R1)
 
 Catalog `layer` and `scope` describe three ownership levels:
 
 - **project**: language, article folders, retrieval and prompt budgets, design bindings,
-  execution preferences and model configuration use an optional stable `projectId` on
+  legacy execution preferences and model compatibility history use an optional stable `projectId` on
   their recorded setting. Reads resolve the declared project, its explicitly recorded
   parent chain, legacy library defaults, then catalog defaults. Every row returns
   `declaredValue`, effective `currentValue`, `source` and `inheritedFrom`. Reset removes
@@ -36,16 +36,12 @@ Catalog `layer` and `scope` describe three ownership levels:
   `storage.snapshotEveryEvents` govern shared
   storage. A project-specific write refuses; all targets
   use the same declaration. Their values still travel with the library event chain.
-  On a classified coordination chain the library level also holds the chain's own
-  runtime settings (TCRN-CROSS-INIT-053 R47, c1-B): `artifact.language`,
-  `execution.maxConcurrentSubagents` and the four `quota.*` keys plus `workspace.generatedArtifactsPath` join the three above,
-  ten in all. There `settings-catalog` lists exactly these ten, each with `scope` and
-  `layer` `library`; they are read and written for the whole library (a write naming a
-  `projectId` refuses as above) and never inherited as development configuration.
-- **device**: `portal.*`, `crest.userPath`, `agents.navigation` and
-  `execution.maxConcurrentHeavyRuns` are kept in this device's `machine-settings.json`, never in
-  the library. Project setting verbs refuse
-  them with the existing device-level remedy.
+  Coordination libraries no longer hold execution limits. Historical events for
+  `execution.maxConcurrentSubagents` and `quota.*` remain readable but are compatibility-only.
+- **device**: `portal.*`, `crest.userPath`, `agents.navigation`, generic model concurrency and
+  quota settings, and `execution.*` device controls are kept in this device's
+  `machine-settings.json`, never in the library. Project setting verbs refuse them
+  with the existing device-level remedy.
 
 A registry entry binds a real filesystem project root to its stable native `projectId`;
 Atelier's target selector uses native projects and declared parents. Missing bindings
@@ -70,16 +66,18 @@ fields, and Atelier lays its configuration pages out from them instead of a copy
 (MIN-236 D7).
 
 - **`shape`**: `collection` or `scalar`. A collection key's value is a table of records, and
-  Atelier edits each collection on a page of its own; a scalar key is one value, and the
-  settings page shows it in its group. The collection keys are `models.category` and
-  `models.tiers`; every other key, and every device-level key, is `scalar`.
+  Atelier edits each collection on a page of its own; a scalar key is one value. The `models`
+  group renders on the standalone Models page, while other groups render on Settings. The
+  collection keys are `models.category` and `models.tiers`; every other key, and every
+  device-level key, is `scalar`.
 - **`group`**: a stable lowercase id from the closed list `SETTING_GROUPS`
-  (`packages/core/src/settings.ts`). The settings page shows the groups in the order of the
-  table below, and a group's name is the text key `settings.group.<id>`. A group may hold keys
-  of these scopes; Atelier marks the selected project, whole library or this device
-  from its `layer`. `models` is the models and escalation group: it holds the two
-  collection keys and the three `models.escalation.*` keys, and it is the group the escalation
-  summary on the model tiers page links to.
+  (`packages/core/src/settings.ts`); a group's name is the text key `settings.group.<id>`. The
+  Settings page shows its groups in the order of the table below, except `models`, which is
+  routed to the standalone Models page. A group may hold keys of these scopes; Atelier marks
+  the selected project, whole library or this device from its `layer`. `models` holds shared
+  device model categories, host tiers and escalation, generic concurrency and quota settings,
+  and device execution limits. Historical project `execution.maxConcurrentSubagents` and
+  `quota.*` rows stay read-only on the standalone Models page.
 - **`order`**: a positive integer, the key's place in its group. It is unique within the
   group across both catalogs, so it is unique within a layer and a group and a group that holds
   keys of both layers has one display order. It need not be contiguous.
@@ -112,14 +110,19 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `models` | `models.escalation.enabled` | project | scalar | 3 |
 | `models` | `models.escalation.threshold` | project | scalar | 4 |
 | `models` | `models.escalation.ceiling` | project | scalar | 5 |
-| `execution` | `execution.maxConcurrentSubagents` | project | scalar | 1 |
-| `execution` | `quota.fiveHourParallelOffPercent` | project | scalar | 2 |
-| `execution` | `quota.fiveHourWaitPercent` | project | scalar | 3 |
-| `execution` | `quota.weeklyParallelOffPercent` | project | scalar | 4 |
-| `execution` | `quota.weeklyWaitPercent` | project | scalar | 5 |
-| `execution` | `execution.maxConcurrentHeavyRuns` | device | scalar | 6 |
-| `execution` | `execution.maxConcurrentAgents` | device | scalar | 7 |
-| `execution` | `execution.memoryPolicy` | device | scalar | 8 |
+| `models` | `execution.maxConcurrentSubagents` | project | scalar | 6 |
+| `models` | `quota.fiveHourParallelOffPercent` | project | scalar | 7 |
+| `models` | `quota.fiveHourWaitPercent` | project | scalar | 8 |
+| `models` | `quota.weeklyParallelOffPercent` | project | scalar | 9 |
+| `models` | `quota.weeklyWaitPercent` | project | scalar | 10 |
+| `models` | `models.maxConcurrentSubagents` | device | scalar | 11 |
+| `models` | `models.quota.fiveHourParallelOffPercent` | device | scalar | 12 |
+| `models` | `models.quota.fiveHourWaitPercent` | device | scalar | 13 |
+| `models` | `models.quota.weeklyParallelOffPercent` | device | scalar | 14 |
+| `models` | `models.quota.weeklyWaitPercent` | device | scalar | 15 |
+| `models` | `execution.maxConcurrentAgents` | device | scalar | 16 |
+| `models` | `execution.maxConcurrentHeavyRuns` | device | scalar | 17 |
+| `models` | `execution.memoryPolicy` | device | scalar | 18 |
 | `knowledge` | `artifact.language` | project | scalar | 1 |
 | `knowledge` | `knowledge.articlesPath` | project | scalar | 2 |
 | `knowledge` | `crest.userPath` | device | scalar | 4 |
@@ -320,7 +323,14 @@ entries below are TCRN-CROSS-STORY-484's; the others name the change that retire
     TCRN-CROSS-STORY-213; the absolute form and its consumer are
     minutes:8bac4584d5bbffa7a96b82b1 D11, implemented by TCRN-CROSS-STORY-380.
 
-## Engine-consumed keys — models and quota
+## Historical project models and quota declarations
+
+The following workspace keys remain in the catalogue only to preserve and inspect existing events.
+New project writes refuse them with `SETTINGS_KEY_DEVICE_LEVEL`, and these declarations do not
+choose a runtime model, escalation path, concurrency limit or quota threshold. The current model
+categories, host tiers/escalation and optional host overrides live in the device engine model policy;
+generic concurrency and quota defaults live in the device machine-settings catalogue. See
+`specs/engine-model-policy-v1.md` for the runtime contract.
 
 The two model keys are tables of records (TCRN-CROSS-STORY-508 R1, R2; MIN-236 D5, D6):
 `models.category` is the parent table and every record of `models.tiers` is filed under one of
@@ -331,27 +341,25 @@ Scalar strings and tables have no product 4096/8192-character ceiling.
 
 - **Key:** `models.category`
   - **Type:** JSON text: `[{id, name, description, order}]`.
-  - **Layer:** `workspace_configuration`.
-  - **Tier:** 1 (the Owner sets it, in Atelier; a model never edits it).
-  - **Default:** `flagship` (order 10), `main` (20) and `economy` (30), each named by its id
-    with an empty description. While the key is unset, the table also holds every category the
-    effective `models.tiers` names that the default table lacks, by name, numbered on in steps
-    of 10, so a tiers table read from a legacy value never names a missing category.
+  - **Layer:** historical `workspace_configuration` events remain readable; new writes refuse.
+  - **Tier:** compatibility-only; runtime categories are owned by the device model policy.
+  - **Default:** the typed compatibility view retains `flagship` (order 10), `main` (20) and
+    `economy` (30), each named by its id with an empty description. While the key is unset, the
+    compatibility view also derives categories named by a legacy `models.tiers` value.
   - **Bounds:** exactly the four fields; `id` a name, unique (`MODELS_CATEGORY_DUPLICATE`);
     `name` non-empty and `description` a string, both without control characters;
     `order` a positive integer, unique (`MODELS_ORDER_DUPLICATE`). The lower the order the
     stronger the category.
-  - **Decision record:** MIN-236 D6 (TCRN-CROSS-STORY-508 R1).
+  - **Decision record:** MIN-236 D6 (TCRN-CROSS-STORY-508 R1); runtime ownership moved by EINZBERN-STORY-011.
 
 - **Key:** `models.tiers`
   - **Type:** JSON text: `[{order, category, runner, model, effort, note}]`.
-  - **Layer:** `workspace_configuration`.
-  - **Tier:** 1 (the Owner sets it, in Atelier; a model never edits it).
-  - **Default:** the hosts `claude-code` and `codex` crossed with the default categories, each
-    record with its host as runner, an empty model, effort and note (unfilled), numbered as a
-    legacy value is (below): 10 `flagship`/`codex`, 20 `flagship`/`claude-code`, 30
-    `main`/`codex`, 40 `main`/`claude-code`, 50 `economy`/`codex`, 60 `economy`/`claude-code`.
-    It is the TCRN-CROSS-STORY-484 default table read as records.
+  - **Layer:** historical `workspace_configuration` events remain readable; new writes refuse.
+  - **Tier:** compatibility-only; active tiers are held independently in the device host policy.
+  - **Default:** the compatibility view retains the TCRN-CROSS-STORY-484 host/category table:
+    10 `flagship`/`codex`, 20 `flagship`/`claude-code`, 30 `main`/`codex`, 40
+    `main`/`claude-code`, 50 `economy`/`codex`, 60 `economy`/`claude-code`, with empty
+    model, effort and note fields.
   - **Bounds:** exactly the six fields; `order` a positive integer, unique across the table
     (`MODELS_ORDER_DUPLICATE`); `category` and `runner` names; `model`,
     `effort` and `note` strings without control characters. Records are added
@@ -369,69 +377,51 @@ Scalar strings and tables have no product 4096/8192-character ceiling.
     descending name order, so the host whose name sorts first holds the category's largest
     order and is its base record. A new write takes the array only.
   - **Decision record:** MIN-227 D11, D12 (TCRN-CROSS-STORY-484 R3); MIN-236 D5, D6
-    (TCRN-CROSS-STORY-508 R2, R4).
+    (TCRN-CROSS-STORY-508 R2, R4); runtime ownership moved by EINZBERN-STORY-011.
 
-A write of either table (`settings-set`, and `settings-remove`, which puts the default table
-back) is checked against the other as it stands. A `models.tiers` record naming a category
-`models.category` does not hold is refused with `MODELS_CATEGORY_UNKNOWN` (`details.path`,
-`details.category` and `details.references`); a `models.category` value that drops a category
-records still name is refused with `MODELS_CATEGORY_IN_USE`, and `details.references` lists
-those records as `models.tiers.<order>`; one that drops the category the escalation ceiling names
-is refused the same way with `models.escalation.ceiling` as its reference (see that key). Nothing
-is recorded on a refusal. Replay checks each value's shape and no reference, the rule every
-recorded value follows: a merge may bring the two tables apart, and the next write of either
-names what is missing. Every other malformed field of either table is `SETTINGS_VALUE_INVALID`
-with its `details.path`.
+The stored table formats and cross-references remain documented so old events can be inspected.
+Replay validates each historical value's shape, but project setting writes do not edit these tables.
+The engine model policy uses one device category catalog and validates every host tier and
+escalation reference against it before a write.
 
-The three escalation keys say how a rule's record escalates along the order of `models.tiers`
-(TCRN-CROSS-STORY-508 R3, R4; MIN-236 D5, D6). They are scalars of the `models` group.
+The three escalation keys preserve the values older project declarations used alongside
+`models.tiers` (TCRN-CROSS-STORY-508 R3, R4; MIN-236 D5, D6). Their current runtime counterparts
+are part of each host policy.
 
 - **Key:** `models.escalation.enabled`
   - **Type:** `true` or `false` (`controlType` `boolean`, `trueValue` `true`, `falseValue` `false`).
-  - **Layer:** `workspace_configuration`.
-  - **Tier:** 1 (the Owner sets it, in Atelier; a model never edits it).
-  - **Default:** `true`.
+  - **Layer:** historical `workspace_configuration` events remain readable; new writes refuse.
+  - **Tier:** compatibility-only.
+  - **Default:** the typed compatibility view is `true`.
   - **Bounds:** the two values; any other is `SETTINGS_VALUE_INVALID`.
-  - **Meaning:** whether a rule's record escalates at all; `false` keeps every rule on its
-    category's base record.
+  - **Meaning:** whether a legacy project declaration escalated its table; active host policy has
+    its own escalation tuple.
   - **Decision record:** MIN-236 D5 (TCRN-CROSS-STORY-508 R3).
 
 - **Key:** `models.escalation.threshold`
   - **Type:** positive safe integer.
-  - **Layer:** `workspace_configuration`.
-  - **Tier:** 1 (the Owner sets it, in Atelier; a model never edits it).
-  - **Default:** `1`.
+  - **Layer:** historical `workspace_configuration` events remain readable; new writes refuse.
+  - **Tier:** compatibility-only.
+  - **Default:** the typed compatibility view is `1`.
   - **Bounds:** a canonical decimal positive safe integer; any other value is `SETTINGS_VALUE_INVALID`.
-  - **Meaning:** how many rejections escalate a record one step: after `n` rejections the record
-    has escalated `floor(n / threshold)` steps, as far as the ceiling lets it.
+  - **Meaning:** the historical step threshold; the active host policy has its own threshold.
   - **Decision record:** MIN-236 D5 (TCRN-CROSS-STORY-508 R3).
 
 - **Key:** `models.escalation.ceiling`
   - **Type:** a category id of `models.category`.
-  - **Layer:** `workspace_configuration`.
-  - **Tier:** 1 (the Owner sets it, in Atelier; a model never edits it).
-  - **Default:** `main`.
-  - **Bounds:** a name (`SETTINGS_VALUE_INVALID` otherwise) of a category `models.category` holds
-    when it is written. A `settings-set` naming a category the table does not hold, and a
-    `settings-remove` while the table does not hold `main`, are refused with
-    `MODELS_CATEGORY_UNKNOWN` (`details.path` `models.escalation.ceiling` and `details.category`),
-    and nothing is recorded. The other way round, a `models.category` write (`settings-set`, and
-    `settings-remove`, which puts the default table back) may not drop the category the effective
-    ceiling names (its recorded value, or `main` while it is unset) while the table holds it: it is
-    refused with `MODELS_CATEGORY_IN_USE`, `details.category` that category and
-    `details.references` `["models.escalation.ceiling"]`, and nothing is recorded. Tier records
-    that still name a dropped category are named first, as above; a category the ceiling does not
-    name may go. Replay checks the name only, so a merge may leave the ceiling without its
-    category; a later `models.category` write is not refused for that, and the ceiling is refused
-    where it is used (below).
-  - **Meaning:** the category an escalation stops in, at its record with the smallest order.
+  - **Layer:** historical `workspace_configuration` events remain readable; new writes refuse.
+  - **Tier:** compatibility-only.
+  - **Default:** the typed compatibility view is `main`.
+  - **Bounds:** a lowercase category name; replay retains the historical reference shape. The
+    current host ceiling is validated against the device's shared category catalog.
+  - **Meaning:** the historical category where escalation stopped; active host policies carry their
+    own ceiling.
   - **Decision record:** MIN-236 D5 (TCRN-CROSS-STORY-508 R3).
 
 **Escalation** (R4, second half; AC5). `resolveModelsTier` (`packages/core/src/models-escalation.ts`,
-exported by core) is a pure function of the two tables, the three keys' effective values
-(`readModelsEscalation`), the category a rule names and the number of rejections of the attempts
-that rule serves. It returns the selected `record`, the `steps` it escalated and whether it
-stopped at the ceiling (`atCeiling`).
+exported by core) is used by the device host policy resolver over the shared category catalog, that
+host's tiers and escalation tuple. Historical project values remain replay-only. It returns the
+selected `record`, the `steps` it escalated and whether it stopped at the ceiling (`atCeiling`).
 
 - It starts at the category's base record, the one with the largest order.
 - For every `threshold` rejections it escalates one record: to the record with the next smaller
@@ -452,22 +442,18 @@ orchestrating conversation's escalation ledger, for one). The engine records no 
 command that resolves a tier. What follows a rejection at the ceiling (MIN-236 D5: the next one
 stops and goes to the Owner) is the caller's process, not a rule of the function.
 
-There is no runner filter (MIN-236 D6), so a step may land on a record of another runner. The
-default table interleaves the two hosts within each category (see `models.tiers`): from the
-`economy` base record, `claude-code` at 60, the first step is `codex` at 50, the second
-`claude-code` at 40 in `main`, and the third `codex` at 30, the default ceiling's stop. The walk
-stays as it is; the Owner adds and removes records for the hosts the library dispatches through,
-so a library that runs one host keeps only that host's records.
+The historical `models.tiers` compatibility table interleaves hosts, but device policy entries are
+host-isolated: each tier's runner must equal its host, and a tier walk cannot select another host's
+record.
 
-- **Keys:** `quota.fiveHourParallelOffPercent` (default `75`), `quota.fiveHourWaitPercent`
+- **Historical project keys:** `quota.fiveHourParallelOffPercent` (old default `75`), `quota.fiveHourWaitPercent`
   (default `90`), `quota.weeklyParallelOffPercent` (default `95`) and
   `quota.weeklyWaitPercent` (no default: unset, the weekly window never makes it wait).
   - **Type:** integer percentage, 1 to 100.
-  - **Layer:** `workspace_configuration`.
-  - **Tier:** 1 (the Owner sets them, in Atelier; a model never edits them).
-  - **Meaning:** at or above the parallel-off threshold of a usage window the orchestrating
-    conversation runs one subagent at a time; at or above the wait threshold it dispatches none
-    until the window resets.
+  - **Layer:** old `workspace_configuration` events remain readable; new writes refuse them.
+  - **Tier:** compatibility-only; generic thresholds now live in device model settings.
+  - **Meaning:** historical advisory thresholds; active generic or host-local policy thresholds are
+    stored on the device and combined with separately supplied usage observations.
   - **Decision record:** MIN-233 D2 (TCRN-CROSS-STORY-484).
 
 Every entry of `settings-catalog` carries `modelWritable` (TCRN-CROSS-STORY-484 R4): whether a
@@ -478,10 +464,10 @@ model may write the key through the CLI. It is `false` for every key.
 - **Key:** `execution.maxConcurrentHeavyRuns`
   - **Type:** integer, 1 to 16.
   - **Layer:** `machine_configuration` (this device's `machine-settings.json`, listed by
-    `machine-settings-catalog` in the `execution` group, order 6).
+    `machine-settings-catalog` in the `models` group, order 17).
   - **Default:** `1`.
   - **Tier:** 1 (the Owner decides the value; it is written with `machine-settings-set` or on
-    Atelier's settings page and read back).
+    Atelier's standalone Models page and read back).
   - **Meaning:** how many heavy runs may run at once on this machine. `gates-run`, the whole test
     suite (`scripts/task.mjs test`), verify-p1 (`scripts/task.mjs verify-p1`), the portal proof
     train (`scripts/verify-portal.mjs`) and release finish (`scripts/release.mjs finish`) each
@@ -513,7 +499,12 @@ scope's existing set/remove verbs, never inferred from output files.
   absolute-path events replay unchanged, but new shared absolute-path writes refuse.
 - `execution.maxConcurrentAgents`: device integer, default `8`, from `1` through
   `Number.MAX_SAFE_INTEGER`. It caps host-policy agent concurrency independently of
-  the project subagent declaration and the heavy-run admission limit.
+  generic/host subagent concurrency and the heavy-run admission limit.
+- `models.maxConcurrentSubagents`: generic device concurrency default, overridden by a nullable
+  host-local limit in `engine-model-policy.json`. The smaller of the device hard cap, generic limit
+  and host override applies.
+- `models.quota.*`: four generic device quota thresholds. A host may override individual fields;
+  blank host values inherit the generic settings. Heavy-run concurrency remains generic only.
 
 These entries implement the approved integrated configuration migration; their
 catalog defaults, bounds and layout are the executable source of truth. A setting
@@ -642,16 +633,10 @@ the rule was explicitly enabled. A running engine too old to support that versio
 
 ## Coordination and target provenance
 
-Classified coordination chains expose their own runtime settings and nothing else
-(TCRN-CROSS-INIT-053 R47, c1-B): the four library keys, `artifact.language`, and
-`execution.maxConcurrentSubagents`, `quota.fiveHourParallelOffPercent`,
-`quota.fiveHourWaitPercent`, `quota.weeklyParallelOffPercent` and
-`quota.weeklyWaitPercent`, the orchestration limits of the work dispatched from the
-chain. Each is read and written at the library level only; a coordination chain is
-never a development target or a common default, so no involved project inherits
-them. `models.*` and every other development key stay per target and refuse on a
-coordination chain; its historical project development settings remain canonical
-history but are not effective development defaults. A concrete target is resolved from an explicit registered
+Classified coordination chains expose their design bindings and provenance, not execution limits.
+The older project concurrency and quota rows remain readable as compatibility history and are not
+effective defaults. Generic and host-local model settings are read from this device and are returned
+separately from project settings. A concrete target is resolved from an explicit registered
 `{libraryId, projectId}`. Each target independently supplies its effective
 settings and declared ancestry. An opted-in common default is separately marked
 `common`; device/user settings remain separately returned by their own catalog.

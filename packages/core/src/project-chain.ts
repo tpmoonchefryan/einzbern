@@ -15,7 +15,7 @@ import { readExecutionAdmissionSnapshot, resolveExecutionAdmissionFromSnapshot }
 import type { ExecutionAdmissionRequest, ExecutionAdmissionSnapshot } from "./execution-admission.js";
 import { variableExportDecision } from "./variables.js";
 import type { VariableRecordValue } from "./variables.js";
-import { engineModelPolicyCatalogFromSnapshot } from "./engine-model-policy.js";
+import { engineModelPolicyCatalogFromSnapshot, genericEngineConcurrencyFromValues, genericEngineQuotaFromValues } from "./engine-model-policy.js";
 import { MACHINE_SETTINGS_FILE_NAME, MACHINE_SETTINGS_CATALOG, readMachineSettings } from "./machine-settings.js";
 import type { MachineSettingsReadback } from "./machine-settings.js";
 import { resolveExecutionConcurrency } from "./execution-policy.js";
@@ -187,7 +187,7 @@ export function projectTargetHandoff(work: { readonly workId: string; readonly w
   return {
     workId: work.workId, workRevision: work.workRevision, ...(work.workContent === undefined ? {} : { workContent: work.workContent }), reference: context.reference, version: context.version, libraryPath: context.libraryPath,
     executionAdmission: context.executionAdmission ?? { status: "not-requested", reason: "read-only-context-is-not-dispatch-admission" },
-    enginePolicy: context.enginePolicy ?? null, executionConcurrency: context.executionConcurrency ?? null, repositories: context.repositoryContexts, settings: settings.filter(entry => !entry.key.startsWith("models.") && !entry.key.startsWith("quota.")), design: context.design, repositoryBindings: context.repositoryBindings, readiness: context.readiness,
+    enginePolicy: context.enginePolicy ?? null, executionConcurrency: context.executionConcurrency ?? null, repositories: context.repositoryContexts, settings: settings.filter(entry => !entry.key.startsWith("models.") && !entry.key.startsWith("quota.") && entry.key !== "execution.maxConcurrentSubagents"), design: context.design, repositoryBindings: context.repositoryBindings, readiness: context.readiness,
     output: { language: value("artifact.language"), knowledgeArticlesPath: value("knowledge.articlesPath"), generatedArtifactsPath: value("workspace.generatedArtifactsPath") },
     rules: records.filter(record => record.collection === "rule" && record.value.enabled === true).map(record => ({ id: record.key, version: record.value.version, ...(record.value.order === undefined ? {} : { order: record.value.order }) })),
     variables: variables.filter(entry => entry.reason === null).map(({ record }) => ({ key: record.key, value: record.value })),
@@ -220,14 +220,16 @@ export async function workProjectContexts(state: WorkspaceState, workId: string,
     catch (error) { return { reference, writeAuthority: "not-granted", status: "invalid-chain", reason: String(error) }; }
   }));
   const deviceLimit = Number(snapshot.machineSettings.values["execution.maxConcurrentAgents"] ?? MACHINE_SETTINGS_CATALOG.find(entry => entry.key === "execution.maxConcurrentAgents")!.defaultValue);
+  const genericLimit = genericEngineConcurrencyFromValues(snapshot.machineSettings.values);
+  const requestedHost = executionRequest && "host" in executionRequest ? executionRequest.host : undefined;
   const contexts: Record<string, unknown>[] = resolved.map(context => {
     const settings = context.settings as { key: string; value: unknown }[] | undefined;
-    const budget = settings?.find(entry => entry.key === "execution.maxConcurrentSubagents")?.value;
-    const executionConcurrency = Array.isArray(settings) ? resolveExecutionConcurrency(deviceLimit, budget == null ? undefined : Number(budget)) : null;
+    const hostLimit = requestedHost ? enginePolicy.hosts[requestedHost]?.maxConcurrentSubagents ?? undefined : undefined;
+    const executionConcurrency = Array.isArray(settings) ? resolveExecutionConcurrency(deviceLimit, undefined, genericLimit, hostLimit) : null;
     let executionAdmission: unknown = executionRequest === undefined ? { status: "not-requested", reason: "read-only-context-is-not-dispatch-admission" }
       : !Array.isArray(settings) ? { status: "refused", reasons: ["project-context-unresolved"] }
       : dotRequest !== null ? null
-      : resolveExecutionAdmissionFromSnapshot(snapshot as ExecutionAdmissionSnapshot, executionRequest as ExecutionAdmissionRequest, { now: evaluatedAt, ...(budget == null ? {} : { projectLimit: Number(budget) }) });
+      : resolveExecutionAdmissionFromSnapshot(snapshot as ExecutionAdmissionSnapshot, executionRequest as ExecutionAdmissionRequest, { now: evaluatedAt });
     let effectiveContext = context;
     if (dotRequest !== null && Array.isArray(settings)) {
       const failCheck = (reason: string): DotCheck => ({ status: "fail", evidenceRefs: [], reason });
@@ -248,7 +250,7 @@ export async function workProjectContexts(state: WorkspaceState, workId: string,
         ...(["blocked", "pending-owner-acceptance", "done", "cancelled"].includes(work.status) ? { state: failCheck("current work state does not allow dispatch") } : {}),
       };
       const { contextRead, ...requestWithoutContextRead } = dotRequest;
-      executionAdmission = resolveDotExecutionAdmission({ ...requestWithoutContextRead, checks, ...(contextRead === undefined || currentScopeDigest === null ? {} : { contextRead: { ...contextRead, expected: { ...contextRead.expected, workReference: workId, workRevision: work.revision, scopeDigest: currentScopeDigest, now: evaluatedAt, effectiveRoots: (context.repositoryContexts as { projectPath: string }[]).map(repository => repository.projectPath) } } }) }, { deviceLimit, ...(budget == null ? {} : { projectLimit: Number(budget) }), now: evaluatedAt, contextDigest: dotDigest({ workLibraryId: state.metadata.workspaceId, workId, workRevision: work.revision, scopeDigest: currentScopeDigest, context }) });
+      executionAdmission = resolveDotExecutionAdmission({ ...requestWithoutContextRead, checks, ...(contextRead === undefined || currentScopeDigest === null ? {} : { contextRead: { ...contextRead, expected: { ...contextRead.expected, workReference: workId, workRevision: work.revision, scopeDigest: currentScopeDigest, now: evaluatedAt, effectiveRoots: (context.repositoryContexts as { projectPath: string }[]).map(repository => repository.projectPath) } } }) }, { deviceLimit, projectLimit: genericLimit, now: evaluatedAt, contextDigest: dotDigest({ workLibraryId: state.metadata.workspaceId, workId, workRevision: work.revision, scopeDigest: currentScopeDigest, context }) });
       const readiness = context.readiness as Record<string, { ready: boolean; missing: string[] }> | undefined;
       if (readiness !== undefined) {
         const dotAdmission = executionAdmission as DotAdmission;
@@ -292,9 +294,9 @@ async function hostWorkProjectContexts(state: WorkspaceState, workId: string, re
   const contexts = await Promise.all(involvedProjects.targets.map(reference => resolveProjectTargetFromSnapshot(reference, home, new Set(), execution)));
   const effectiveRequest = request;
   // Explicit configured caps remain constraints. Default/platform limits are not telemetry gates.
-  const scoped = scopedWorkspaceState(state, work.projectId);
-  const projectCap = scoped.settings.find(setting => setting.key === "execution.maxConcurrentSubagents")?.value;
   const deviceCap = snapshot.machineSettings.values["execution.maxConcurrentAgents"];
+  const genericCap = genericEngineConcurrencyFromValues(snapshot.machineSettings.values);
+  const hostCap = request.capabilities.hostKind === "dot" ? undefined : execution.enginePolicy.hosts[request.capabilities.hostKind]?.maxConcurrentSubagents ?? undefined;
   const reported = request.hardLimits?.concurrency;
   const platform = request.capabilities.platformCapacity;
   const enforceCap = (limit: number, scope: "children" | "total"): void => {
@@ -311,7 +313,7 @@ async function hostWorkProjectContexts(state: WorkspaceState, workId: string, re
   const validationProblem = validationDispatchProblem(state.work, work, request.action);
   if (validationProblem) constraintReasons.push(validationProblem);
   if (deviceCap !== undefined) enforceCap(Number(deviceCap), "total");
-  if (projectCap !== undefined) enforceCap(Number(projectCap), "children");
+  enforceCap(hostCap ?? genericCap, "children");
   if (["blocked", "pending-owner-acceptance", "done", "cancelled"].includes(work.status)) constraintReasons.push("current-work-state-does-not-allow-new-dispatch");
   // Optional project association is checked if requested. No selected target is fabricated.
   const target = request.projectRef === undefined ? undefined : contexts.find(context => dotDigest(context.reference) === dotDigest(request.projectRef));
@@ -321,7 +323,8 @@ async function hostWorkProjectContexts(state: WorkspaceState, workId: string, re
     if (!readiness || ["design", "repository", "output", "language"].some(key => readiness[key]?.ready !== true)) constraintReasons.push("implementation-target-readiness-unresolved");
   }
   const contextDigest = dotDigest({ libraryId: state.metadata.workspaceId, workId, workRevision: work.revision, workContent, involvedProjects, contexts });
-  let decision: HostExecutionDecision = resolveHostExecution(effectiveRequest, policySnapshot?.enginePolicy ?? null, contextDigest);
+  const genericQuota = genericEngineQuotaFromValues(snapshot.machineSettings.values);
+  let decision: HostExecutionDecision = resolveHostExecution(effectiveRequest, policySnapshot?.enginePolicy ?? null, contextDigest, new Date().toISOString(), genericQuota);
   if (constraintReasons.length) decision = { ...decision, status: "blocked", additionalConfirmationsRequired: false, reasons: [...decision.reasons, ...constraintReasons] };
   const eligible = executionDecisionEligibility(decision) === "executable";
   return {

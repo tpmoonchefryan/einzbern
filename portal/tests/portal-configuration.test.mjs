@@ -387,10 +387,9 @@ test("i18n invariant policy does not waive translated text under the shortcut ke
 
 
 
-// TCRN-CROSS-STORY-467 R3: the execution route and its page left with the dispatch-* verbs, and the
-// dispatch mode setting with TCRN-CROSS-STORY-484 R3. The owner's concurrency limit is a registered
-// setting, written and read back through settings.
-test("execution settings: the owner scenario writes through settings while the execution route is gone", async (t) => {
+// TCRN-CROSS-STORY-467 R3: the execution route and its page left with the dispatch-* verbs. Generic
+// model concurrency is device-local and uses the machine-settings route.
+test("model concurrency uses machine settings while the execution route stays retired", async (t) => {
   const fixture = await scratch("tcrn-portal-conservation-execution-", "TCRN-PORTAL-CONSERVATION-EXECUTION");
   const { child, url } = await startPortal(fixture);
   t.after(async () => { child.kill(); await rm(fixture.base, { recursive: true, force: true }); });
@@ -402,18 +401,19 @@ test("execution settings: the owner scenario writes through settings while the e
   assert.equal(historical.response.status, 404);
   const retiredMode = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.dispatchMode", value: "eco" }));
   assert.equal(retiredMode.body.reasonCode, "SETTINGS_KEY_UNREGISTERED");
-  const active = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.maxConcurrentSubagents", value: "3" }));
-  assert.equal(active.body.reasonCode, "SETTINGS_WRITE_COMMITTED");
+  const retiredConcurrency = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.maxConcurrentSubagents", value: "3" }));
+  assert.equal(retiredConcurrency.response.status, 409);
+  assert.equal(retiredConcurrency.body.reasonCode, "SETTINGS_KEY_DEVICE_LEVEL");
+  const active = await request(url, "/api/machine-settings", writeOptions(boot.token, "POST", { key: "models.maxConcurrentSubagents", value: "3" }));
+  assert.equal(active.body.reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
   assert.equal(active.body.readback.currentValue, "3");
-  // TCRN-CROSS-STORY-482 R4: the execution surface's host projection is gone, so the write is
-  // answered by the engine receipt alone and renders nothing into a host file.
   assert.equal(Object.hasOwn(active.body, "hostRender"), false);
-  const readback = await request(url, "/api/settings", readOptions(boot.token));
-  assert.equal(readback.body.settings.find((entry) => entry.key === "execution.maxConcurrentSubagents").currentValue, "3");
-  const removed = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.maxConcurrentSubagents", reset: true }));
+  const readback = await request(url, "/api/machine-settings", readOptions(boot.token));
+  assert.equal(readback.body.settings.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, "3");
+  const removed = await request(url, "/api/machine-settings", writeOptions(boot.token, "POST", { key: "models.maxConcurrentSubagents", reset: true }));
   assert.equal(removed.response.status, 200);
   assert.equal(Object.hasOwn(removed.body, "hostRender"), false);
-  assert.equal(removed.body.version, active.body.version + 1, "the reset is the chain's next event and the only one");
+  assert.equal(removed.body.readback.currentValue, null, "reset removes the local value and restores the device default");
 });
 
 
@@ -764,7 +764,7 @@ test("SUB-338 (STORY-483 AC3): batch enabled at v1 reads update-available at the
 
 
 
-test("STORY-370 the retired identity surface is absent while execution settings remain writable", async (t) => {
+test("STORY-370 the retired identity surface is absent while generic device concurrency remains writable", async (t) => {
   const fixture = await scratch("tcrn-portal-conservation-cards-", "TCRN-PORTAL-CONSERVATION-CARDS");
   const { child, url } = await startPortal(fixture);
   t.after(async () => { child.kill(); await rm(fixture.base, { recursive: true, force: true }); });
@@ -781,9 +781,13 @@ test("STORY-370 the retired identity surface is absent while execution settings 
   assert.equal(custom.body.reasonCode, "PORTAL_ROUTE_UNKNOWN");
   const refused = await post({ action: RETIRED_PERSONA_ACTIONS.remove, name: "Portal auditor" });
   assert.equal(refused.body.reasonCode, "PORTAL_ROUTE_UNKNOWN");
-  // execution.subagentPolicy retired with TCRN-CROSS-STORY-484 R3; the concurrency limit stays writable.
-  const policy = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.maxConcurrentSubagents", value: "2" }));
-  assert.equal(policy.body.setting.value, "2");
+  // The historical project concurrency key is read-only; generic concurrency belongs to this device.
+  const retiredPolicy = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.maxConcurrentSubagents", value: "2" }));
+  assert.equal(retiredPolicy.response.status, 409);
+  assert.equal(retiredPolicy.body.reasonCode, "SETTINGS_KEY_DEVICE_LEVEL");
+  const policy = await request(url, "/api/machine-settings", writeOptions(boot.token, "POST", { key: "models.maxConcurrentSubagents", value: "2" }));
+  assert.equal(policy.body.reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
+  assert.equal(policy.body.readback.currentValue, "2");
   const settings = await request(url, "/api/settings", readOptions(boot.token));
   assert.equal(settings.body.settings.some((entry) => /persona/iu.test(entry.key)), false);
 });

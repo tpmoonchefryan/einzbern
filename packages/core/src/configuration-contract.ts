@@ -57,7 +57,7 @@ const CONSUMERS = Object.freeze({
   "design.pullRequestTarget": "project-chain.ts design context; project-scope.ts",
   "design.repository": "project-chain.ts design context; project-scope.ts",
   "engine.requiredVersion": "workspace engine compatibility check",
-  "execution.maxConcurrentSubagents": "execution-policy.ts project budget; orchestrator runtime handoff",
+  "execution.maxConcurrentSubagents": "historical project concurrency compatibility only; use models.maxConcurrentSubagents device setting and nullable engine-model-policy.ts host override",
   "injection.perPromptBytes": "recall.ts prompt injection budget",
   "knowledge.articlesPath": "settings.ts resolveKnowledgeArticlesPath; knowledge article output",
   "models.category": "engine-model-policy.ts host policy resolver; legacy replay diagnostics",
@@ -78,6 +78,11 @@ const CONSUMERS = Object.freeze({
   "paths.artifacts": "portable-path.ts local artifact binding resolution",
   "paths.knowledgeArticles": "portable-path.ts local knowledge article binding resolution",
   "execution.maxConcurrentAgents": "execution-policy.ts device agent concurrency cap",
+  "models.maxConcurrentSubagents": "machine-settings.ts generic subagent concurrency cap; engine-model-policy.ts nullable host override",
+  "models.quota.fiveHourParallelOffPercent": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
+  "models.quota.fiveHourWaitPercent": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
+  "models.quota.weeklyParallelOffPercent": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
+  "models.quota.weeklyWaitPercent": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
   "agents.navigation": "host-render.ts; host-hooks.ts local navigation installation",
   "crest.userPath": "device-home.ts user crest path resolution",
   "execution.memoryPolicy": "scripts/lib/memory-budget.mjs device safety policy and heavy-run admission",
@@ -102,7 +107,7 @@ function semanticType(entry: { readonly key: string; readonly type: string; read
 /** Every registered key is mapped, while defaults, ranges and allowed values stay in their catalogs. */
 function settingContracts(): readonly ConfigurationContractEntry[] {
   const governed = SETTINGS_CATALOG.map((entry): ConfigurationContractEntry => {
-    const host = entry.key.startsWith("models.") || entry.key.startsWith("quota.");
+    const host = entry.key.startsWith("models.") || entry.key.startsWith("quota.") || entry.key === "execution.maxConcurrentSubagents";
     return Object.freeze({
       key: entry.key,
       semanticType: semanticType(entry),
@@ -224,7 +229,8 @@ export function annotateConfigValue(key: string, value: string | null, valueOrig
 } {
   const contract = settingContracts().find((entry) => entry.key === key);
   if (contract === undefined) throw new ConfigurationContractError("CONFIGURATION_KEY_UNKNOWN", `Unknown configuration key: ${key}`);
-  const historical = key.startsWith("models.") || key.startsWith("quota.") || key === "design.consumedVersion";
+  const historical = key === "design.consumedVersion" || (contract.registeredScope !== "device"
+    && (key.startsWith("models.") || key.startsWith("quota.") || key === "execution.maxConcurrentSubagents"));
   const provenance = {
     valueRole: historical ? "historical-declaration" as const : "resolved-setting" as const,
     valueSource: historical ? "project-compatibility" as const : "caller-supplied-setting" as const,

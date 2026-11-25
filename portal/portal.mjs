@@ -623,14 +623,11 @@ const removeSetting = (key, library) => governedWrite((common) => ["settings-rem
 // TCRN-CROSS-STORY-508 R8 (TCRN-CROSS-SUB-409, contract C-R14-6): the keys the system variables
 // section of AGENTS.md shows. A write of one, or its removal, renders the managed sections again, so
 // AGENTS.md follows the value; the escalation keys join the section under their prefix.
-// TCRN-CROSS-STORY-540 GWT2 (Q4, Q5; TCRN-CROSS-SUB-508): a coordination library's section shows its
-// orchestration limits and the design bindings instead of the model tables, and both variable sections are
-// written in the library's artifact language, so a write of one of those renders them again as well.
+// A coordination library keeps design bindings in the system section. Model policy and quota settings
+// are device-local and never trigger a shared AGENTS.md render.
 const SYSTEM_VARIABLE_KEYS = Object.freeze(["design.authority", "models.category", "models.tiers"]);
-const COORDINATION_SYSTEM_VARIABLE_KEYS = Object.freeze(["execution.maxConcurrentSubagents", "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent"]);
-const rendersSystemVariables = (key, library = currentLibrary()) => key === "artifact.language" || key.startsWith("design.") || (library.chain?.role === "coordination"
-  ? COORDINATION_SYSTEM_VARIABLE_KEYS.includes(key)
-  : SYSTEM_VARIABLE_KEYS.includes(key) || key.startsWith("models.escalation."));
+const rendersSystemVariables = (key, library = currentLibrary()) => key === "artifact.language" || key.startsWith("design.") || (library.chain?.role !== "coordination"
+  && (SYSTEM_VARIABLE_KEYS.includes(key) || key.startsWith("models.escalation.")));
 
 // TCRN-CROSS-SUB-409 (TCRN-CROSS-STORY-508 R5, R6; contracts C-R14-2, C-R14-6): a collection key is
 // a table of records, written whole, so the engine judges the whole table and refuses it with one
@@ -1559,6 +1556,7 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
         "--workspace", library.libraryPath,
         "--host", host,
         "--policy", JSON.stringify(body.policy ?? null),
+        ...(Number.isSafeInteger(body.expectedStoreRevision) ? ["--expected-store-revision", String(body.expectedStoreRevision)] : []),
         "--at", new Date().toISOString(),
         "--actor", ACTOR,
         "--decided-in", decidedIn,

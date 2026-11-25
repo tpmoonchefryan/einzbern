@@ -27,7 +27,7 @@ const fixtureProjectIds = new Map();
 const GLOBAL_SETTING_KEYS = new Set(["engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath"]);
 // TCRN-CROSS-INIT-053 R47 (c1-B): a coordination chain writes these for the whole library as well, so a fixture
 // write of one to a coordination library names no project either.
-const COORDINATION_SETTING_KEYS = new Set([...GLOBAL_SETTING_KEYS, "artifact.language", "execution.maxConcurrentSubagents", "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent"]);
+const COORDINATION_SETTING_KEYS = new Set([...GLOBAL_SETTING_KEYS, "artifact.language"]);
 const coordinationLibraries = new Set();
 const MUTATION = process.env.TCRN_UI_MUTATION ?? "";
 const COMPONENTS = Object.freeze([
@@ -543,9 +543,14 @@ async function waitFor(predicate, label, timeoutMs = process.platform === "win32
 // for, and cleanup then kills the child mid-flight (ECONNRESET). Capture the text
 // before the click and wait for it to move.
 const receiptText = (document) => document.querySelector("#receipt-chip-text")?.textContent ?? "";
+const receiptRawText = (document) => document.querySelector("#receipt-raw")?.textContent ?? "";
 const receiptAdvanced = (document, before) => () => {
   const current = receiptText(document);
   return current !== before && /^✓v\d+$/u.test(current) ? current : null;
+};
+const machineReceiptAdvanced = (document, before) => () => {
+  const current = receiptRawText(document);
+  return current !== before && current.includes("MACHINE_SETTINGS_WRITE_COMMITTED") ? current : null;
 };
 
 // TCRN-CROSS-INIT-053 R45 (U14): the page's label rule, restated for expectations. Each target has
@@ -584,7 +589,7 @@ async function preparePage(env = {}) {
       finally { await removePage(page, fixture); }
     };
     page.document.querySelector('[data-page-target="settings"]')?.click();
-    page.document.querySelector('[data-setting-group="execution"]')?.click();
+    page.document.querySelector('[data-setting-group="models"]')?.click();
     await new Promise((resolve) => setTimeout(resolve, 80));
     return page;
   } catch (error) {
@@ -806,4 +811,4 @@ function policySwitchControls(page, selector) {
   };
   return { view, control, change, recovered };
 }
-export { CLI, COMPLETE_ID, DS_CONTRACT, GHOST_TARGET, MUTATION, appendHistoricalGateCreate, asFixtureDevice, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, coordinationContainerFixture, expectedTargetLabels, fixtureProjectIds, join, keydown, linkBridge, loadExecutedDom, localeTable, mkdir, nextAt, openWorkContentEditor, openWorkEditor, pageHierarchyFindings, policySwitchControls, policySwitchViews, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scopedWorkFixture, scratch, seed, test, topbarFindings, vm, waitFor, writeFile, writeScratch };
+export { CLI, COMPLETE_ID, DS_CONTRACT, GHOST_TARGET, MUTATION, appendHistoricalGateCreate, asFixtureDevice, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, coordinationContainerFixture, expectedTargetLabels, fixtureProjectIds, join, keydown, linkBridge, loadExecutedDom, localeTable, machineReceiptAdvanced, mkdir, nextAt, openWorkContentEditor, openWorkEditor, pageHierarchyFindings, policySwitchControls, policySwitchViews, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptRawText, receiptText, rm, scopedWorkFixture, scratch, seed, test, topbarFindings, vm, waitFor, writeFile, writeScratch };

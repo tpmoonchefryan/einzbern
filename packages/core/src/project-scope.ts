@@ -53,15 +53,15 @@ export function assertSettingScope(state: WorkspaceState, key: string, projectId
 
 /**
  * TCRN-CROSS-INIT-053 R47 (c1-B; Owner 2026-10-09, round 7): the settings a coordination chain keeps for
- * itself. The four library settings, and the artifact language and orchestration limits of the work
- * dispatched from it. On a coordination chain each is read and written for the whole library, and no
+ * itself. The four library settings, artifact language and shared AGENTS controls. On a coordination
+ * chain each is read and written for the whole library, and no
  * involved project inherits one as development configuration (a coordination chain is never a
- * development target or a common default). Every other key, models.* among them, stays per target.
+ * development target or a common default). Model concurrency and quota live on the device; old
+ * project model rows remain compatibility history.
  */
 export const COORDINATION_RUNTIME_SETTING_KEYS = Object.freeze([
   "engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath",
-  "artifact.language", "execution.maxConcurrentSubagents", "agents.generation", "agents.sharedNavigation",
-  "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent",
+  "artifact.language", "agents.generation", "agents.sharedNavigation",
 ] as const satisfies readonly SettingKey[]);
 
 /** Whether a coordination chain keeps this key for itself (COORDINATION_RUNTIME_SETTING_KEYS). */
