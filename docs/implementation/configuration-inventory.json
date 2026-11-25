@@ -1369,11 +1369,13 @@
           "codex",
           "dsh",
           "kiro",
-          "antigravity"
+          "antigravity",
+          "devin"
         ],
-        "defaultDescription": "claude-code when CLAUDE_PROJECT_DIR is nonempty, otherwise codex",
+        "defaultDescription": "devin when DEVIN_PROJECT_DIR is nonempty, else claude-code when CLAUDE_PROJECT_DIR is nonempty, otherwise codex",
         "precedence": [
           "valid EINZBERN_HOST",
+          "nonempty DEVIN_PROJECT_DIR implies devin",
           "nonempty CLAUDE_PROJECT_DIR implies claude-code",
           "codex"
         ],
@@ -1382,6 +1384,40 @@
           "packages/core/src/hook-recall.ts hookHost"
         ],
         "effect": "Selects hook protocol/context; caller declaration is not identity authentication."
+      },
+      {
+        "classification": "host-context",
+        "visibility": "integration",
+        "transport": "environment-string",
+        "defaultValue": null,
+        "owner": "invoking-host",
+        "source": "process environment",
+        "persistence": "process",
+        "sensitivity": "local-path",
+        "pathBase": null,
+        "sharing": "device-local; never a shared library declaration",
+        "export": "not exported to shared AGENTS or config/project.json",
+        "restart": "next invocation; restart a long-running process to change its startup input",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "env:DEVIN_PROJECT_DIR",
+        "kind": "environment",
+        "name": "DEVIN_PROJECT_DIR",
+        "semanticType": "string",
+        "validation": "Hook host inference checks nonempty string only, not path existence.",
+        "defaultDescription": "absent",
+        "precedence": [
+          "valid EINZBERN_HOST",
+          "DEVIN_PROJECT_DIR nonempty",
+          "CLAUDE_PROJECT_DIR nonempty",
+          "codex fallback"
+        ],
+        "scope": "host invocation",
+        "consumer": [
+          "packages/core/src/hook-recall.ts hookHost",
+          "scripts/einzbern-hook-launcher.mjs launch"
+        ],
+        "effect": "Inference for Devin, which also sets CLAUDE_PROJECT_DIR for the Claude Code registration it imports; does not itself register a project or prove host identity."
       },
       {
         "classification": "host-context",

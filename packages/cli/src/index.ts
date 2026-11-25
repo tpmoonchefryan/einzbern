@@ -3371,7 +3371,12 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const device = await readMachineSettings();
     const concurrency = resolveExecutionConcurrency(Number(device.values["execution.maxConcurrentAgents"] ?? "8"), values["project-budget"] === undefined ? undefined : integerValue(values, "project-budget"));
     const quotaDecision = evaluateExecutionQuota(resolution.quota, values.usage === undefined ? {} : argumentJsonValue(values.usage, "usage") as import("../../core/src/execution-policy.js").QuotaUsageObservation);
-    io.write(canonicalJson({ reasonCode: "EXECUTION_POLICY_RESOLVED", ...resolution, concurrency, quotaDecision, observationSource: values.usage === undefined ? "unavailable" : "caller-supplied-unverified" }));
+    // Devin dispatches by profile, not by model: name the profile the resolved tier row renders
+    // and whether this device holds it as rendered.
+    const devinProfile = resolution.host === "devin"
+      ? await (await import("../../core/src/devin-host.js")).inspectDevinProfile({ home: (await import("node:os")).homedir(), tier: resolution.record })
+      : undefined;
+    io.write(canonicalJson({ reasonCode: "EXECUTION_POLICY_RESOLVED", ...resolution, concurrency, quotaDecision, observationSource: values.usage === undefined ? "unavailable" : "caller-supplied-unverified", ...(devinProfile === undefined ? {} : { devinProfile }) }));
     return;
   }
   if (command === "engine-model-policy-catalog") {

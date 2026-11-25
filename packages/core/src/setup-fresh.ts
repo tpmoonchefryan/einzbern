@@ -89,6 +89,8 @@ import { computeInstallTreeDigest } from "./install-tree-digest.js";
 import { ARTIFACT_LANGUAGE_TAGS } from "./knowledge-language.js";
 import { AGENTS_NAVIGATION_SETTING, AGENTS_PROJECT_ROOT_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSettingSet, readAgentsNavigation, readAgentsProjectRoot } from "./machine-settings.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
+import { readEngineModelPolicyFile } from "./engine-model-policy.js";
+import type { ModelsTierRecord } from "./models-tiers.js";
 import { managedSectionRecordsFor, parseManagedFile } from "./managed-sections.js";
 import type { ManagedWritePlan } from "./managed-sections.js";
 import { BRAND } from "./names.js";
@@ -623,10 +625,63 @@ async function planLaunchers(recorder: SetupRecorder, launchers: EngineFiles["la
   }
 }
 
+// The devin host's tier rows of the device model policy; null when the policy names no devin host.
+async function devinPolicyTiers(deviceHome: string): Promise<readonly ModelsTierRecord[] | null> {
+  const policy = await readEngineModelPolicyFile(deviceHome);
+  return Object.hasOwn(policy.hosts, "devin") ? policy.hosts["devin"]!.tiers : null;
+}
+
+// Devin's part of the host-hooks step: its user configuration's hooks and the subagent profiles of
+// the device policy. Nothing is planned when Devin's configuration directory does not exist.
+async function planDevin(recorder: SetupRecorder, home: string, deviceHome: string, navigation: AgentsNavigationChoice | null, install: boolean): Promise<void> {
+  const { devinHooksFile, devinSelectionStatus, planDevinHooks, planDevinProfiles } = await import("./devin-host.js");
+  if (devinSelectionStatus({ home }) !== "selected") return;
+  const target = devinHooksFile({ home });
+  const hooks = await recorder.attempt("host-hooks", target, () => planDevinHooks({ home, deviceHome, install, navigation }));
+  if (hooks !== null) for (const file of hooks.files) {
+    if (!file.changed || file.after === null) continue;
+    recorder.write("host-hooks", file.path, file.before === null ? "create" : "update");
+    if (file.before !== null) recorder.backup("host-hooks", file.path);
+  }
+  const profiles = await recorder.attempt("host-hooks", target, async () => planDevinProfiles({ home, tiers: await devinPolicyTiers(deviceHome), install }));
+  if (profiles === null) return;
+  for (const path of profiles.conflicts) recorder.block("host-hooks", path, "DEVIN_PROFILE_USER_EDITED", `${path} is not an unmodified Einzbern profile; preserve and review it.`);
+  for (const file of profiles.files) {
+    if (file.action === "create") recorder.write("host-hooks", file.path, "create");
+    else if (file.action === "update") recorder.write("host-hooks", file.path, "update");
+    else if (file.action === "remove") recorder.write("host-hooks", file.path, "move");
+  }
+}
+
+async function applyDevin(recorder: SetupRecorder, input: { readonly home: string; readonly deviceHome: string; readonly at: string; readonly navigation: AgentsNavigationChoice | null; readonly install?: boolean }): Promise<void> {
+  const { applyDevinProfiles, devinSelectionStatus, planDevinHooks, planDevinProfiles } = await import("./devin-host.js");
+  const { home, deviceHome, at } = input;
+  if (devinSelectionStatus({ home }) !== "selected") return;
+  const install = input.install ?? true;
+  const hooks = await planDevinHooks({ home, deviceHome, install, navigation: input.navigation });
+  if (hooks !== null) {
+    await applyHostHooks(hooks, { at, backupRoot: backupsPath(deviceHome) });
+    for (const file of hooks.files) {
+      if (!file.changed || file.after === null) continue;
+      recorder.write("host-hooks", file.path, file.before === null ? "create" : "update");
+      if (file.before !== null) recorder.backup("host-hooks", file.path);
+    }
+  }
+  const profiles = await planDevinProfiles({ home, tiers: await devinPolicyTiers(deviceHome), install });
+  if (profiles === null) return;
+  await applyDevinProfiles(profiles, { at, deviceHome });
+  for (const file of profiles.files) {
+    if (file.action === "create") recorder.write("host-hooks", file.path, "create");
+    else if (file.action === "update") recorder.write("host-hooks", file.path, "update");
+    else if (file.action === "remove") recorder.write("host-hooks", file.path, "move");
+  }
+}
+
 /** The host-hooks step of a plan: each host's user files, rendered with (or, install false, without) the Einzbern hooks. */
 export async function planHooks(recorder: SetupRecorder, home: string, deviceHome: string, navigation: AgentsNavigationChoice | null, install = true, codexAdmission?: CodexHookAdmission, enableHooksAuthorized = false, projectRoot = home): Promise<void> {
   const { KIRO_USER_HOOKS_FILE, kiroSelectionStatus, planKiroHookScopes } = await import("./kiro-host.js");
   const { ANTIGRAVITY_USER_HOOKS_FILE, antigravityConfigRoot, antigravitySelectionStatus, planAntigravityHookScopes } = await import("./antigravity-host.js");
+  await planDevin(recorder, home, deviceHome, navigation, install);
   for (const host of HOST_HOOK_FILE_HOSTS) {
     const plan = await recorder.attempt("host-hooks", join(home, ...HOST_HOOK_FILES[host].split("/")),
       async () => readHostHooks(planHostHooks({ host, scope: "user", deviceHome, userHome: home, navigation, install, ...(codexAdmission ? { codexAdmission } : {}), enableHooksAuthorized }), { root: home, home }));
@@ -931,6 +986,7 @@ export async function applyHooks(recorder: SetupRecorder, input: {
   const { applyKiroHookPlan, kiroSelectionStatus, planKiroHookScopes } = await import("./kiro-host.js");
   const { antigravityConfigRoot, antigravitySelectionStatus, applyAntigravityHookPlans, planAntigravityHookScopes } = await import("./antigravity-host.js");
   const { home, deviceHome, at, navigation } = input;
+  await applyDevin(recorder, { home, deviceHome, at, navigation, ...(input.install === undefined ? {} : { install: input.install }) });
   for (const host of HOST_HOOK_FILE_HOSTS) {
     const hooks = await readHostHooks(planHostHooks({ host, scope: "user", deviceHome, userHome: home, navigation, install: input.install ?? true, ...(input.codexAdmission ? { codexAdmission: input.codexAdmission } : {}), enableHooksAuthorized: input.enableHooksAuthorized === true }), { root: home, home });
     await applyHostHooks(hooks, { at, backupRoot: backupsPath(deviceHome) });

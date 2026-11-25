@@ -5,6 +5,13 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+### Devin host
+
+- Devin (CLI and Devin Desktop) is a supported host. When its user configuration directory exists, setup, update and repair write Einzbern's commands into the `hooks` key of its `config.json`: prompt recall, the read window for its `read` tool, and the navigation pointer when shared navigation is declined. Other keys and hooks are preserved; a configuration that is not strict JSON is refused and left unchanged.
+- A Devin hook run is recorded as host `devin`. Devin also runs the Claude Code registration it imports; that run yields only when Devin's configuration has a matching handler for the same event, so a partial installation cannot suppress prompt recall. It is never routed to Codex coordination.
+- Devin dispatches subagents by profile, not by model. Setup renders one `einzbern-<category>-<order>` profile per tier row of the device policy's `devin` host, and `execution-policy-resolve --host devin` names the profile for the resolved row with its installed status. Edited profiles are kept and reported.
+- `execution-host-prepare`, `execution-host-record` and `execution-host-evidence` accept `hostKind: devin`. Doctor reports Devin's selection, versions, hooks and profiles. Devin coordinates in a single main conversation with native completion notifications. See `specs/devin-host-v1.md` for the contract and its evidence boundary.
+
 ### Managed AGENTS.md
 
 - Each library can select one registered directory on this device to hold its managed AGENTS.md. A managed write to another root of that library returns `MANAGED_SECTION_OUTPUT_UNREGISTERED`. Variable changes there still commit to the library. The device registry stores the selection, and older `agents.projectRoot` values are read for the library that owns the registered path.

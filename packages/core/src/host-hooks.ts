@@ -79,9 +79,12 @@ function unsupported(file: string, reason: string): never {
 
 // Every host the hook may run under. DSH runs the same launcher through its plugin; Kiro and
 // Antigravity use their own managed JSON layouts. HOST_HOOK_FILE_HOSTS names only grouped files rendered by this module.
-export type HostHookHost = "claude-code" | "codex" | "dsh" | "kiro" | "antigravity";
-export const HOST_HOOK_HOSTS: readonly HostHookHost[] = Object.freeze(["claude-code", "codex", "dsh", "kiro", "antigravity"]);
+export type HostHookHost = "claude-code" | "codex" | "dsh" | "kiro" | "antigravity" | "devin";
+export const HOST_HOOK_HOSTS: readonly HostHookHost[] = Object.freeze(["claude-code", "codex", "dsh", "kiro", "antigravity", "devin"]);
+// Hosts whose hooks live in a grouped JSON document this module merges. Devin shares the format
+// but is planned only when the device selects it (devin-host.ts).
 export type HostHookFileHost = Exclude<HostHookHost, "dsh" | "kiro" | "antigravity">;
+// The two hosts every installation renders.
 export const HOST_HOOK_FILE_HOSTS: readonly HostHookFileHost[] = Object.freeze(["claude-code", "codex"]);
 export type HostHookScope = "user" | "project";
 export const HOST_HOOK_SCOPES: readonly HostHookScope[] = Object.freeze(["user", "project"]);
@@ -104,6 +107,10 @@ export const HOST_HOOK_POINTER_EVENTS: Readonly<Record<string, string>> = Object
   SessionStart: "session-start",
   SubagentStart: "subagent-start",
 });
+// Devin has no SubagentStart event. Its read guard is the only PreToolUse duty, so the group is
+// matched to the read tool instead of starting a process for every tool call.
+export const DEVIN_HOOK_EVENTS: readonly string[] = Object.freeze(["UserPromptSubmit", "PreToolUse"]);
+export const DEVIN_READ_MATCHER = "^read$" as const;
 // Every event a launcher word may name, pointer hooks included.
 const HOOK_EVENT_WORDS: Readonly<Record<string, string>> = Object.freeze({ ...HOST_HOOK_EVENTS, ...CODEX_HOOK_EVENTS, ...HOST_HOOK_POINTER_EVENTS });
 // The stable launcher, in engine/ of the device directory; installed from
@@ -115,6 +122,8 @@ export const HOST_HOOK_LAUNCHER = ENGINE_HOOK_LAUNCHER;
 export const HOST_HOOK_FILES: Readonly<Record<HostHookFileHost, string>> = Object.freeze({
   "claude-code": ".claude/settings.json",
   codex: ".codex/hooks.json",
+  // Relative to Devin's user configuration directory, not the home (devin-host.ts).
+  devin: "config.json",
 });
 // Codex's own settings, relative to the user's home whichever scope its hooks are in: the hooks
 // feature switch and the trust state of every hook its user approved are kept there.
@@ -127,6 +136,8 @@ export interface HostHook {
 }
 
 export interface HostHookGroup {
+  // A tool-name restriction the engine writes with the group; absent for every event of Claude Code and Codex.
+  readonly matcher?: string;
   readonly hooks: readonly HostHook[];
 }
 
@@ -246,8 +257,8 @@ export function planHostHooks(request: HostHooksRequest): HostHooksExpectation {
     fail("HOST_HOOKS_INPUT_INVALID", `host must be one of ${HOST_HOOK_HOSTS.join(", ")}`, { host: String(request.host) });
   }
   // DSH's plugin and Kiro's standalone JSON are handled elsewhere; this planner owns grouped files.
-  if (!(HOST_HOOK_FILE_HOSTS as readonly string[]).includes(request.host)) {
-    fail("HOST_HOOKS_HOST_NOT_FILE_BASED", `${request.host} keeps no hook file Einzbern writes; hook files are written for ${HOST_HOOK_FILE_HOSTS.join(", ")}`, { host: request.host });
+  if (!Object.hasOwn(HOST_HOOK_FILES, request.host)) {
+    fail("HOST_HOOKS_HOST_NOT_FILE_BASED", `${request.host} keeps no hook file Einzbern writes; hook files are written for ${Object.keys(HOST_HOOK_FILES).join(", ")}`, { host: request.host });
   }
   const host = request.host as HostHookFileHost;
   if (!HOST_HOOK_SCOPES.includes(request.scope)) {
@@ -270,13 +281,21 @@ export function planHostHooks(request: HostHooksRequest): HostHooksExpectation {
   if (admission.state === "supported" && (admission.version === null || admission.evidenceRef === null || !(admission.preToolUse === true || admission.subagentStop === true) || admission.trust !== "permitted")) fail("HOST_HOOKS_INPUT_INVALID", "supported Codex admission requires actual version/capability/trust evidence");
   const groups: Record<string, readonly HostHookGroup[]> = {};
   if (install) {
-    const events = [...new Set([
-      ...Object.keys(HOST_HOOK_EVENTS),
-      ...(host === "codex" ? Object.keys(CODEX_HOOK_EVENTS) : []),
-      ...(navigation === "declined" ? Object.keys(HOST_HOOK_POINTER_EVENTS) : []),
-    ])];
-    for (const event of events) {
-      groups[event] = [{ hooks: [{ type: "command", command: hostHookCommand(launcher, event, request.userHome, platform) }] }];
+    if (host === "devin") {
+      // Devin also runs the Claude Code registration it imports, so its own commands name the host.
+      for (const event of [...DEVIN_HOOK_EVENTS, ...(navigation === "declined" ? ["SessionStart"] : [])]) {
+        const command = hostHookCommand(launcher, event, request.userHome, platform, "devin");
+        groups[event] = [{ ...(event === "PreToolUse" ? { matcher: DEVIN_READ_MATCHER } : {}), hooks: [{ type: "command", command }] }];
+      }
+    } else {
+      const events = [...new Set([
+        ...Object.keys(HOST_HOOK_EVENTS),
+        ...(host === "codex" ? Object.keys(CODEX_HOOK_EVENTS) : []),
+        ...(navigation === "declined" ? Object.keys(HOST_HOOK_POINTER_EVENTS) : []),
+      ])];
+      for (const event of events) {
+        groups[event] = [{ hooks: [{ type: "command", command: hostHookCommand(launcher, event, request.userHome, platform) }] }];
+      }
     }
   }
   return {
@@ -368,7 +387,7 @@ export interface HostHooksMerge {
 // One event's groups with ours taken out and the wanted groups put where the first of ours was
 // (at the end when there was none), so that rendering again leaves the list as it is. null when
 // the event holds nothing of ours and nothing is wanted in it.
-function mergeEvent(event: string, groups: readonly unknown[], wanted: readonly HostHookGroup[], removed: RemovedHook[], retireNativeStop = false): unknown[] | null {
+function mergeEvent(event: string, groups: readonly unknown[], wanted: readonly HostHookGroup[], removed: RemovedHook[], retireNativeStop = false, ownedAround: Readonly<Record<string, unknown>> = {}): unknown[] | null {
   const kept: unknown[] = [];
   const ours: unknown[] = [];
   let insertAt: number | null = null;
@@ -412,6 +431,10 @@ function mergeEvent(event: string, groups: readonly unknown[], wanted: readonly 
       } else if (expectedGroup) {
         baselineAround = { ...expectedGroup }; delete baselineAround.hooks;
         baselineHook = { ...expectedGroup.hooks.find(candidate => commandOf(candidate) === command) };
+      } else {
+        // A relocated device directory or an uninstall leaves no wanted copy of this command.
+        // The restriction the engine wrote with the group (Devin's read matcher) is still ours.
+        baselineAround = { ...ownedAround };
       }
       if (stableJson(around) !== stableJson(baselineAround) || stableJson(hook) !== stableJson(baselineHook)) {
         unsupported(`hooks.${event}`, "owned hook restrictions/settings were edited; explicit plan conflict (including moved/legacy commands)");
@@ -461,7 +484,8 @@ export function mergeHostHooks(existing: unknown, expected: HostHooksExpectation
       if (wanted.length > 0) unsupported(file, `hooks.${event} is not a list`);
       continue;
     }
-    const next = mergeEvent(event, current ?? [], wanted, removedHooks, retireNativeStop);
+    const ownedAround = expected.host === "devin" && event === "PreToolUse" ? { matcher: DEVIN_READ_MATCHER } : {};
+    const next = mergeEvent(event, current ?? [], wanted, removedHooks, retireNativeStop, ownedAround);
     if (next === null) continue;
     touched = true;
     // An event left with nothing but ours goes with it; the hooks object itself stays, if empty.
