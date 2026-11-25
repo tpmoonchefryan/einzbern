@@ -110,7 +110,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
 ].map((entry) => Object.freeze({ ...entry, verbs: Object.freeze([...entry.verbs]) })));
 
 // Verbs the text names outside the table.
-const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "library-resolve", "setup", "work-list", "work-create", "work-batch"]);
+const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "engine-list", "library-resolve", "setup", "work-list", "work-create", "work-batch"]);
 
 /** Every engine verb SKILL.md names, the table's first and in its order, without repeats. */
 export function skillNamedVerbs(): readonly string[] {
