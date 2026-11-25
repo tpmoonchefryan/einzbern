@@ -99,7 +99,9 @@ test("exclusive output session preserves a foreign lock whose identity is outsid
   context.after(() => rm(temporary, { recursive: true, force: true }));
   const gitDirectory = resolve(temporary, ".git");
   await mkdir(gitDirectory);
-  await mkdir(resolve(gitDirectory, "einzbern-output.lock"));
+  const lock = resolve(gitDirectory, "einzbern-output.lock");
+  await mkdir(lock);
+  if (process.platform !== "win32") await chmod(lock, 0o755);
   await assert.rejects(
     withExclusiveOutputSession(temporary, async () => undefined),
     (error) => error.reasonCode === (process.platform === "win32" ? "OUTPUT_SESSION_OWNER_INVALID" : "OUTPUT_SESSION_RECOVERY_IDENTITY"),

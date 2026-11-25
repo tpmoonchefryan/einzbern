@@ -2416,7 +2416,7 @@
     "tests/installer-cleanup-audit-regressions.test.mjs": "271ea2fd770b316930c90311553b0e91d48975365f19b2bcdddb79757bd06fef",
     "tests/integration-release.test.mjs": "4101d36b02f2437689180837d2402f64f92fe03dc04c5811905b88c43a04d82e",
     "tests/involved-projects-cli.test.mjs": "8c3defe454094d3db43efd12677e4eced1e06ef50c29f04af2f48df7063e995a",
-    "tests/io-boundaries.test.mjs": "6587c80546f5efac57a2ed021960dbc26151d85d605a35af929b992a85dd0b32",
+    "tests/io-boundaries.test.mjs": "e7a1a8d943626b7a6b5e48111c0c5ad3f8c9a40479bce3f4ce9d59208750c8dc",
     "tests/io-policy.test.mjs": "3177d0e8054b62989bcfb00c4d11fb9e0297f075602d6bcf1495105e198af075",
     "tests/kiro-hooks.test.mjs": "edd157ffbb976bc816a6c451985b3cc34b97d1dc1921a667756b19a0a13b3f0e",
     "tests/kiro-native-execution.test.mjs": "0ef40a50bb775948bb7cb841435056a01b497451e05636b36634690b1f87f56e",
