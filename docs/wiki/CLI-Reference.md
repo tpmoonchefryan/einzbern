@@ -346,6 +346,7 @@
 | `--workspace` | 可选 | `string` |  |
 | `--host` | 必填 | `string` |  |
 | `--policy` | 必填 | `json` |  |
+| `--expected-store-revision` | 可选 | `integer` |  |
 | `--at` | 必填 | `instant` |  |
 | `--actor` | 必填 | `string` |  |
 | `--decided-in` | 必填 | `string` | `minutes:<id>#D<n>` |
@@ -1205,8 +1206,6 @@
 | `--offset` | 可选 | `integer` |
 
 ## `minutes-record`
-
-`--decisions-file` 接受按编号顺序排列的 JSON 决定。每条可包含 `text`、`title` 和 `tags`，旧有的字符串数组仍可使用。
 
 - 可用范围：`cli`。
 - 是否写入：是。

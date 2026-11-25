@@ -200,7 +200,7 @@ test("692-AC01: generated Skill gives a source-bound Codex doctor and copyable p
   }
   const nativeSchema = (await readFile(join(repositoryRoot, "docs", "codex-native-controller.md"), "utf8")).replace(/\s+/gu, " ");
   for (const field of ["tcrn.codex-hook-observation.v1", "observedAt", "actual client `version`", "`cwd`", "original public app-server `hooks/list` result in `raw`", "`files` (`path`, byte `sha256`)", "returned hook `sourcePath`", "current user `.codex/config.toml`", "enabled, currentHash trusted", "unchanged observed hook/config bytes"]) assert.ok(nativeSchema.includes(field), field);
-  assert.ok(markdown.includes("`minutes-record --decisions-file <json>` takes a JSON string array"));
+  assert.ok(markdown.includes("`minutes-record --decisions-file <json>` accepts {text,title,tags} entries or strings"));
   assert.ok(Buffer.byteLength(markdown, "utf8") <= 6000, `${Buffer.byteLength(markdown, "utf8")} bytes`);
 });
 

@@ -146,7 +146,7 @@ test("unknown verbs fail closed and every cataloged verb dispatches", async () =
   }
 });
 
-test("INIT-056: the engine policy catalog accepts no arguments and set requires audit fields while workspace may resolve from the registry", () => {
+test("INIT-056: engine policy reads can select a host and writes preserve audit fields with optional compare-and-set", () => {
   const entry = (name) => COMMAND_CATALOG.find((candidate) => candidate.name === name);
   const catalog = entry("engine-model-policy-catalog");
   assert.equal(catalog.mutates, false);
@@ -155,7 +155,8 @@ test("INIT-056: the engine policy catalog accepts no arguments and set requires 
   const set = entry("engine-model-policy-set");
   assert.equal(set.mutates, true);
   assert.deepEqual(set.flags.map((flag) => [flag.name, flag.required, flag.valueKind]), [
-    ["workspace", false, "string"], ["host", true, "string"], ["policy", true, "json"], ["at", true, "instant"],
+    ["workspace", false, "string"], ["host", true, "string"], ["policy", true, "json"],
+    ["expected-store-revision", false, "integer"], ["at", true, "instant"],
     ["actor", true, "string"], ["decided-in", true, "string"],
   ]);
   assert.equal(set.flags.find((flag) => flag.name === "decided-in")?.valueShape, "minutes:<id>#D<n>");

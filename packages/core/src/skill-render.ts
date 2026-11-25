@@ -173,7 +173,7 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "## Core commands",
     "",
-    "work-list summarizes; --full true shows content. work-create/work-transition/work-annotate/work-batch write. `minutes-record --decisions-file <json>` accepts {text,title,tags} entries or strings. Verify readback and delivery.",
+    "work-list --full true shows content. work-create/work-transition/work-annotate/work-batch write. `minutes-record --decisions-file <json>` accepts {text,title,tags} entries or strings. Check verifiedReadback/localCommitted and delivery.",
     "",
     "Codex: owning App Server JSON-RPC `initialize` → `hooks/list` for `$PWD`; fresh project-bound `--codex-admission` from raw result; SHA-256 hook `sourcePath`/config hashes. docs/codex-native-controller.md. Reobserve within five minutes; require `ok=true` and `hooks-present.detail.codexGuard.ready`.",
     "",
