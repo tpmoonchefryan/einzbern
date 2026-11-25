@@ -91,7 +91,7 @@ test("479-AC1: every verb the navigation table names is a verb of the current co
   // STORY-479 AC1 with EPIC-144 R3: reading the full text before development dispatch includes
   // each involved project's own configuration (work-project-context).
   assert.deepEqual(SKILL_NAVIGATION.map((entry) => [...entry.verbs]), [
-    ["recall", "rule-list"],
+    ["recall", "recall-read", "rule-list"],
     ["work-draft"],
     ["work-show", "work-content-context", "minutes-show", "work-project-context", "execution-prepare", "execution-record", "execution-evidence"],
     ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"],
@@ -126,6 +126,7 @@ test("C.1: generated navigation points Kiro Spec work to its reference and manag
   const markdown = render();
   const startingWork = tableRows(markdown).find(([, verbs]) => verbs.includes("`recall`"));
   assert.ok(startingWork[2].includes("`references/kiro-specs.md`"));
+  assert.ok(startingWork[2].includes("Rephrase if useful. `recall-read --refs` is optional."));
   const reference = await readFile(join(referenceDirectory, "kiro-specs.md"), "utf8");
   assert.ok(reference.includes("scripts/kiro-specs.mjs"));
   assert.doesNotMatch(reference, /KIRO-OPEN-OPERATIONAL-VALIDATION:BEGIN/);

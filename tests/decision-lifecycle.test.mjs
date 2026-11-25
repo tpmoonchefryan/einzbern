@@ -342,6 +342,14 @@ test("MIN-239 D6: the prompt hook recalls valid decisions only and says what rep
   assert.equal(afterLines.some((line) => line.includes("[纪要 DL-MIN-1]")), false, JSON.stringify(afterLines));
   const storyLines = (await ask("zebrafish tank", 16))?.lines ?? [];
   assert.ok(storyLines.some((line) => line.includes(`过时决策 ${address("DL-MIN-1", 1)}→${address("DL-MIN-2", 1)}`)), JSON.stringify(storyLines));
+  await setWorkspaceSetting(fx.workspace, {
+    occurredAt: at(17), key: "retrieval.metadataOnly", value: "true", authorization: { surface: "atelier" },
+  });
+  const compact = (await ask("zebrafish tank", 18))?.lines ?? [];
+  assert.deepEqual(compact, [
+    `Story · DL-STORY · Zebrafish tank · ${deriveStableId("work", "DL-STORY")}`,
+    `minutes · DL-MIN-2 · Minutes DL-MIN-2 · ${address("DL-MIN-2", 1)}`,
+  ]);
 });
 
 // TCRN-CROSS-SUB-426 R17 续作修订三 (C-R18-1; MIN-239 D6; STORY-514 R4): recall --status takes valid,

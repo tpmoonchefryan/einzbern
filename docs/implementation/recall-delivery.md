@@ -55,3 +55,10 @@ bind the cases and floors before scoring. Byte drift and private text refuse by
 name. Recording and scoring run with the filesystem write tripwire over the
 fixture library, with before/after byte digests. Raw outputs stay in the caller's
 private output directory.
+## Candidate delivery and minutes search
+
+Admitted native dispatches offer short candidate lines using the work title and goal. Each line carries a record type, key, title, and read reference. Preparation keeps the references beside the bound prompt, and native execution receipts retain that preparation.
+
+Use `recall --view candidates` to repeat or rephrase a query. Use `recall-read --refs` to read any useful references. The optional recall observation records only successfully returned references for that library.
+
+Atelier and `minutes-list --query` use the same query and ranking path as explicit recall. After review of the historical supplements, the library setting `retrieval.metadataOnly` switches matching to titles, tags, authored search terms, and identifiers. The same switch enables short candidates in prompt hooks. The default preserves the existing matching and prompt format. Direct reads continue returning the original content.

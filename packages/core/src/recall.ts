@@ -578,7 +578,7 @@ function hitOf(document: RecallDocument, lexicon: DocumentLexicon, vocabulary: W
   };
   return {
     ...hitMetadata(document, score, query),
-    lead: requested > 0 && selected?.number !== requested ? "" : decision === undefined ? document.lead : `D${decision.number} ${decision.text}`,
+    lead: requested > 0 && selected?.number !== requested ? "" : decision === undefined ? document.lead : `D${decision.number} ${decision.text || decision.metadata?.title || ""}`.trimEnd(),
     ...(decision === undefined || requested > 0 && selected?.number !== requested ? {} : { decision }),
   };
 }
@@ -1553,6 +1553,7 @@ export interface RecallInputs {
   readonly minutes?: readonly RecallMinutesInput[];
   readonly work?: readonly RecallWorkInput[];
   readonly scopeExcerptBytes?: number;
+  readonly metadataOnly?: boolean;
 }
 
 export const RECALL_DEFAULT_SCOPE_EXCERPT_BYTES = 512;
@@ -1585,6 +1586,7 @@ function knowledgeMetadataBody(card: RecallKnowledgeInput): string {
  */
 export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[] {
   const scopeExcerptBytes = inputs.scopeExcerptBytes ?? RECALL_DEFAULT_SCOPE_EXCERPT_BYTES;
+  const metadataOnly = inputs.metadataOnly === true;
   const documents: RecallDocument[] = [];
   for (const card of inputs.knowledge ?? []) {
     documents.push({
@@ -1593,10 +1595,10 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       key: card.externalKey,
       status: "active",
       title: card.subject,
-      body: knowledgeMetadataBody(card),
+      body: metadataOnly ? "" : knowledgeMetadataBody(card),
       tags: card.tags.join(" "),
       expansions: card.expansions ?? "",
-      summary: card.summary,
+      summary: metadataOnly ? "" : card.summary,
       recordKind: "card",
       parentChain: [],
       lead: "",
@@ -1617,16 +1619,16 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       title: minutes.conferenceTitle,
       // Decision references are hyphen-joined identifiers; splitting them lets a prompt
       // naming one part of a ruling reach the minutes that carry it.
-      body: [minutes.summary, ...decisionTitles, minutes.decisions.join(" ").replace(/-/gu, " ")].join(" ").trim(),
+      body: metadataOnly ? "" : [minutes.summary, ...decisionTitles, minutes.decisions.join(" ").replace(/-/gu, " ")].join(" ").trim(),
       tags: ["minutes", minutes.conferenceType, ...decisionTags].filter(Boolean).join(" "),
-      expansions: "",
-      summary: minutes.summary,
+      expansions: metadataOnly ? decisionTitles.join(" ") : "",
+      summary: metadataOnly ? "" : minutes.summary,
       recordKind: "minutes",
       parentChain: [],
-      lead: first === undefined ? "" : `D${String(firstNumber)} ${first}${minutes.decisions.length > 1 ? " …" : ""}`,
+      lead: metadataOnly || first === undefined ? "" : `D${String(firstNumber)} ${first}${minutes.decisions.length > 1 ? " …" : ""}`,
       decisions: minutes.decisions.map((text, index) => ({
         number: minutes.decisionNumbers?.[index] ?? index + 1,
-        text,
+        text: metadataOnly ? "" : text,
         ...(minutes.decisionMetadata?.[index] == null ? {} : { metadata: minutes.decisionMetadata[index] }),
         reference: `${minutes.id}#D${minutes.decisionNumbers?.[index] ?? index + 1}`,
         scope: minutes.projectId ?? "本纪要",
@@ -1648,8 +1650,8 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
     const text = fullText
       ? [goal, record.body ?? ""].filter((part) => part.length > 0).join("\n\n")
       : goal;
-    const body = record.contract ?? (text.length > 0 ? text : fullText ? summary : (record.summary ?? ""));
-    if (title.length === 0 && body.length === 0) continue;
+    const body = metadataOnly ? "" : record.contract ?? (text.length > 0 ? text : fullText ? summary : (record.summary ?? ""));
+    if (title.length === 0 && body.length === 0 && !metadataOnly) continue;
     documents.push({
       id: record.id,
       kind: "work",
@@ -1658,8 +1660,8 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       title,
       body,
       tags: `${record.kind} ${workflowStatus(record)} ${record.labels.join(" ")}`.trim(),
-      expansions: record.contract === undefined ? "" : (record.summary ?? ""),
-      summary: summary.length > 0 ? summary : goal,
+      expansions: metadataOnly || record.contract === undefined ? "" : (record.summary ?? ""),
+      summary: metadataOnly ? "" : summary.length > 0 ? summary : goal,
       recordKind: record.kind,
       ...(record.involvedProjects === undefined ? {} : { involvedProjects: record.involvedProjects }),
       parentChain: record.parentChain ?? [],

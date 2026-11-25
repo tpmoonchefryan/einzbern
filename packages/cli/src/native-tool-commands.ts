@@ -202,7 +202,7 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
       ? codexWorkerArguments(request, { selection: tool.selection, argumentsValue: tool.argumentsValue })
       : tool as { selection: HostSelection; argumentsValue: unknown };
     const hooks = observedHooks(admission);
-    const result = await prepareHostNativeDispatch(workspace.state, request, { ...preparedTool, peerWorker: values["codex-peer-worker"] === "true", ...(startupEvidence === undefined ? {} : { codexCoordinatorStartup: startupEvidence }), ...(settingsIntent === undefined ? {} : { codexSettingsIntent: settingsIntent }), ...(priorPeerReceipt === undefined ? {} : { priorPeerReceipt }), ...(hooks ? { codexObservation: hooks } : {}) }, context.home);
+    const result = await prepareHostNativeDispatch(workspace.state, request, { ...preparedTool, workspaceRoot: workspace.root, peerWorker: values["codex-peer-worker"] === "true", ...(startupEvidence === undefined ? {} : { codexCoordinatorStartup: startupEvidence }), ...(settingsIntent === undefined ? {} : { codexSettingsIntent: settingsIntent }), ...(priorPeerReceipt === undefined ? {} : { priorPeerReceipt }), ...(hooks ? { codexObservation: hooks } : {}) }, context.home);
     await writeDispatchArtifact(values.output!, result, [workspace.root], context.home);
     if (settingsIntent !== undefined && result.attempt) {
       const sessionId = process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"];

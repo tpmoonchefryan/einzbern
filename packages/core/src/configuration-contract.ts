@@ -72,6 +72,7 @@ const CONSUMERS = Object.freeze({
   "retrieval.promptLanguages": "retrieval prompt-language resolution",
   "retrieval.scopeExcerptBytes": "recall scope excerpt budget",
   "retrieval.tau": "retrieval admission score threshold",
+  "retrieval.metadataOnly": "minutes search, recall and dispatch candidates after historical metadata review",
   "storage.segmentBytes": "workspace.ts event segment rotation",
   "storage.snapshotEveryEvents": "workspace.ts snapshot cadence",
   "workspace.generatedArtifactsPath": "artifact-store.ts artifact root resolution",

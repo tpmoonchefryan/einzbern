@@ -226,7 +226,7 @@ export function bindPackDispatchToNativeArguments(argumentsValue: unknown, conte
   const context = validatePackDispatchContext(contextValue);
   if (argumentsValue === null || typeof argumentsValue !== "object" || Array.isArray(argumentsValue)) fail("Pack dispatch needs a native argument object with a supported text field");
   const args = structuredClone(argumentsValue) as Record<string, unknown>;
-  const field = ["prompt", "instructions", "task", "description", "text", "content", "message"].find(key => typeof args[key] === "string");
+  const field = nativeTaskPromptField(args);
   if (!field) fail("Pack dispatch needs a native prompt, instructions, task, description, text, content or message field");
   const packPrompt = [
     "[Einzbern Pack assignment: follow this row and do not expand its scope]",
@@ -242,6 +242,10 @@ export function bindPackDispatchToNativeArguments(argumentsValue: unknown, conte
   ].join("\n");
   args[field] = `${args[field]}\n\n${packPrompt}`;
   return args;
+}
+
+export function nativeTaskPromptField(args: Readonly<Record<string, unknown>>): string | undefined {
+  return ["prompt", "instructions", "task", "description", "text", "content", "message"].find(key => typeof args[key] === "string");
 }
 
 /** Post-INIT enforcement is derived from the live root Initiative; no caller flag can enable it early. */

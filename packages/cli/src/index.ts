@@ -271,7 +271,8 @@ import {
   required,
 } from "./cli-args.js";
 import type { CliIo } from "./cli-args.js";
-import { runRecallCli, runRecallCommand } from "./recall-fast.js";
+import { readRecallQuery, runRecallCli, runRecallCommand } from "./recall-fast.js";
+import { logRecallCandidateReads } from "../../core/src/recall-observation-log.js";
 
 export { WorkflowCliError, type CliIo };
 
@@ -341,7 +342,17 @@ function recallReadReference(ref: string): RecallReadReference {
   fail("CLI_ARGUMENT_MALFORMED", `refs: ${ref}`);
 }
 
-async function readRecallReferences(workspace: string, at: string, references: readonly RecallReadReference[], full: boolean): Promise<Readonly<Record<string, unknown>>> {
+interface RecallReadResult {
+  readonly schemaVersion: "tcrn.recall-read.v1";
+  readonly reasonCode: "RECALL_READ_READY";
+  readonly workspaceId: string;
+  readonly version: number;
+  readonly headEventHash: string | null;
+  readonly full: boolean;
+  readonly records: readonly (RecallReadOutcome & Pick<RecallReadReference, "ref" | "kind">)[];
+}
+
+async function readRecallReferences(workspace: string, at: string, references: readonly RecallReadReference[], full: boolean): Promise<RecallReadResult> {
   const state = await validateWorkspace(workspace);
   const records = new Map<string, RecallReadOutcome>();
   for (const user of [false, true]) {
@@ -1940,7 +1951,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // TCRN-CROSS-STORY-475 R1, R2: minutes in one write, and their reads. TCRN-CROSS-SUB-426 (MIN-239
   // D3, D5, D6): minutes-record declares what it supersedes, withdraws or stands beside, and the reads
   // take --status valid|obsolete|all (valid by default).
-  { name: "minutes-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "work-id", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
+  { name: "minutes-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "work-id", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }, { name: "query", required: false, valueKind: "string" }] },
   { name: "minutes-record", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project-id", required: true, valueKind: "string" }, { name: "title", required: true, valueKind: "string" }, { name: "summary", required: true, valueKind: "string" }, ...exactlyOneCatalogFlags("minutes-record"), { name: "decided-by", required: false, valueKind: "list" }, { name: "work-ids", required: false, valueKind: "list" }, { name: "external-key", required: false, valueKind: "string" }, { name: "supersedes", required: false, valueKind: "list" }, { name: "withdraws", required: false, valueKind: "list" }, { name: "coexists", required: false, valueKind: "list" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "minutes-show", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, ...exactlyOneCatalogFlags("minutes-show"), { name: "status", required: false, valueKind: "string" }] },
   { name: "project-bindings-remove", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: true, valueKind: "string" }, { name: "key", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
@@ -4731,7 +4742,8 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     return;
   }
   // Every live minutes record, new and historical, in the order recorded; --work-id keeps the ones
-  // that link the work record or that the work record names as decided-in. TCRN-CROSS-SUB-426 (MIN-239
+  // that link the work record or that the work record names as decided-in. With --query, use the
+  // matching minutes in recall order. TCRN-CROSS-SUB-426 (MIN-239
   // D6): each with its valid decisions and a record with none left out, unless --status asks for the
   // obsolete decisions or all of them.
   if (command === "recall-read") {
@@ -4741,20 +4753,31 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     assertStrictInstant(at);
     const references = listValue(values.refs).map(recallReadReference);
     if (references.length === 0) fail("CLI_ARGUMENT_MALFORMED", "refs");
-    io.write(canonicalJson(await readRecallReferences(values.workspace!, at, references, booleanValue(values.full, "full"))));
+    const result = await readRecallReferences(values.workspace!, at, references, booleanValue(values.full, "full"));
+    io.write(canonicalJson(result));
+    await logRecallCandidateReads(result.workspaceId, result.records.filter(entry => entry.ok).map(entry => entry.ref));
     return;
   }
   if (command === "minutes-list") {
-    const values = parseArguments(rest, ["workspace", "project-id", "work-id", "status", "limit", "offset"]);
+    const values = parseArguments(rest, ["workspace", "project-id", "work-id", "status", "limit", "offset", "query"]);
     required(values, ["workspace"]);
     const status = decisionStatusValue(values.status);
-    const state = await validateWorkspace(values.workspace ?? "");
+    const search = values.query === undefined ? undefined : await readRecallQuery(values.workspace!, values.query, {
+      at: new Date().toISOString(), decisions: status, limit: Number.MAX_SAFE_INTEGER,
+      ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }),
+    });
+    const state = search?.state ?? await validateWorkspace(values.workspace!);
     const workId = values["work-id"];
     const decidedIn = workId === undefined ? [] : workRelations(state, workId).forward.decidedIn;
     const records = minutesView(state, status).filter((entry) =>
       (values["project-id"] === undefined || entry.projectId === values["project-id"]) &&
       (workId === undefined || entry.linkedWorkIds.includes(workId) || decidedIn.includes(entry.id)));
-    io.write(canonicalJson(paginate(state, "minutes", records, values)));
+    const byId = new Map(records.map(record => [record.id, record]));
+    const matches = search === undefined ? records : search.result.records.flatMap(hit => {
+      const record = byId.get(hit.id);
+      return hit.kind === "minutes" && record !== undefined ? [record] : [];
+    });
+    io.write(canonicalJson(paginate(state, "minutes", matches, values)));
     return;
   }
   // One minutes record by id or by external key, with the work records that name it as decided-in.

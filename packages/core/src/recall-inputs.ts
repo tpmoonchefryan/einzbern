@@ -40,11 +40,19 @@ export const RECALL_LINE_MAX_BYTES = RUNTIME_CAPACITY.bufferBytes;
 export interface RecallInputOptions {
   readonly projectId?: string;
   readonly scopeExcerptBytes?: number;
+  readonly metadataOnly?: boolean;
   // TCRN-CROSS-SUB-426 R17 续作修订三 (C-R18-1; MIN-239 D6; STORY-514 R4): which decisions of each
   // minutes record recall indexes, as minutes-list reads them. Left out, the valid ones; "obsolete" the
   // obsolete ones alone and "all" every one, which only a recall asked for them gives (the recall verb's
   // --status obsolete or all). The prompt hook leaves it out.
   readonly decisions?: DecisionStatusFilter;
+}
+
+export function recallMetadataOnly(settings: WorkspaceState["settings"]): boolean {
+  return settings.some(setting =>
+    setting.key === "retrieval.metadataOnly" &&
+    (setting.projectId ?? null) === null &&
+    setting.value === "true");
 }
 
 function displayTitle(record: Pick<WorkRecord, "title" | "externalKey">): string {
@@ -449,7 +457,7 @@ export function recallInputsFromState(
     const content = workContent(record);
     const fullText = record.kind === "Story" || record.kind === "Incident";
     const scope = record.extensions["advisory:scope"]?.value;
-    const currentDecisions = decisionsOfMinutes(ledger, decidedInOf(record))
+    const currentDecisions = options.metadataOnly ? [] : decisionsOfMinutes(ledger, decidedInOf(record))
       .map((reference) => ledger.decisions.get(reference))
       .filter((decision) => decision?.status === "valid")
       .map((decision) => decision!.text);
@@ -502,6 +510,7 @@ export function recallInputsFromState(
     knowledge: cards.map((card): RecallKnowledgeInput => (card.scope === undefined ? { ...card, scope: "project" } : card)),
     minutes,
     work,
+    ...(options.metadataOnly ? { metadataOnly: true } : {}),
     ...(options.scopeExcerptBytes === undefined ? {} : { scopeExcerptBytes: options.scopeExcerptBytes }),
   };
 }

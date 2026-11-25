@@ -824,6 +824,29 @@
       "max": 100
     },
     {
+      "key": "retrieval.metadataOnly",
+      "semanticType": "enum",
+      "storageType": "string",
+      "controlType": "boolean",
+      "registeredScope": "library",
+      "scope": "library",
+      "owner": "governed-owner",
+      "schemaOwner": "installed-engine",
+      "source": "library events bound to stable target identity",
+      "storageSource": "library settings.updated events (historical string transport)",
+      "inheritance": "target library only",
+      "sharing": "portable declarations sync with library",
+      "export": "consumer-specific whitelist; library config projection is not an authority",
+      "consumer": "minutes search, recall and dispatch candidates after historical metadata review",
+      "effect": "next consumer read; managed outputs require explicit render",
+      "compatibility": "historical string events preserved; typed readback does not rewrite events",
+      "defaultValue": "false",
+      "allowedValues": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "key": "retrieval.promptLanguages",
       "semanticType": "list",
       "storageType": "string",
@@ -11209,6 +11232,11 @@
             "name": "offset",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "query",
+            "required": false,
+            "valueKind": "string"
           }
         ]
       },

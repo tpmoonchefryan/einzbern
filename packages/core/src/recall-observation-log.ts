@@ -18,3 +18,20 @@ export async function logCliRecall(observation: RecallObservation, results: read
     // Observability never changes the CLI output, exception or exit status.
   }
 }
+
+export async function logRecallCandidateReads(workspaceId: string, references: readonly string[]): Promise<void> {
+  if (references.length === 0 || process.env["EINZBERN_RECALL_OBSERVATION"] !== "1") return;
+  try {
+    const directory = join(deviceHome(), "log");
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const event = {
+      schemaVersion: "einzbern.recall-read-observation.v1",
+      at: new Date().toISOString(),
+      workspaceId,
+      references: [...new Set(references)],
+    };
+    await appendFile(join(directory, "recall-read.ndjson"), `${JSON.stringify(event)}\n`, { mode: 0o600 });
+  } catch {
+    // The result has already been delivered.
+  }
+}
