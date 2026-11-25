@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { compareSemver } from "../packages/core/src/format-version.ts";
 
 const engineRepo = "tpmoonchefryan/einzbern";
 const manaRepo = "tpmoonchefryan/mana-orchestrate";
@@ -236,8 +237,12 @@ async function verify(root, from, to, receipt) {
 }
 
 const [fromVersion, toVersion, output, ...extra] = process.argv.slice(2);
-assert.ok(output && !extra.length && versionPattern.test(fromVersion) && versionPattern.test(toVersion) && fromVersion !== toVersion,
+assert.ok(output && !extra.length && versionPattern.test(fromVersion) && versionPattern.test(toVersion),
   "Usage: node scripts/verify-release-packages.mjs <from-version> <to-version> <new-receipt.json>");
+if (compareSemver(toVersion, fromVersion) <= 0) {
+  process.stderr.write(`${JSON.stringify({ ok: false, reasonCode: "RELEASE_UPGRADE_VERSION_ORDER_INVALID", fromVersion, toVersion })}\n`);
+  process.exit(1);
+}
 const receipt = { schemaVersion: "einzbern.release-package-verification.v1", fromVersion, toVersion, ok: false, artifacts: [], checks: [] };
 const root = await realpath(await mkdtemp(join(tmpdir(), "einzbern-release-packages-")));
 try {

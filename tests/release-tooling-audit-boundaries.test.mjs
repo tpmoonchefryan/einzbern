@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -61,6 +64,22 @@ test("audit: protocol proof evaluator identity matches installed Ajv", async () 
   const require = createRequire(new URL("../scripts/lib/protocol-proof.mjs", import.meta.url));
   const version = require("ajv/package.json").version;
   assert.ok(text.includes(`ajv@${version}-draft-2020-12`));
+});
+test("published release verification refuses downgrades and equal versions before fetching", async (context) => {
+  const dir = await mkdtemp(join(tmpdir(), "einzbern-release-order-"));
+  context.after(() => rm(dir, { recursive: true, force: true }));
+  const receipt = join(dir, "release-packages.json");
+  const script = fileURLToPath(new URL("../scripts/verify-release-packages.mjs", import.meta.url));
+  const fromVersion = "5.10.0";
+  for (const toVersion of ["5.9.0", "5.10.0", "5.010.0"]) {
+    const child = spawnSync(process.execPath, [script, fromVersion, toVersion, receipt], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: dir },
+    });
+    assert.equal(child.status, 1, child.stderr);
+    assert.deepEqual(JSON.parse(child.stderr), { ok: false, reasonCode: "RELEASE_UPGRADE_VERSION_ORDER_INVALID", fromVersion, toVersion });
+    await assert.rejects(readFile(receipt), { code: "ENOENT" });
+  }
 });
 for (const { name, commit, digest } of [
   { name: "PR24", commit: "b543cd4365fc388f1d217b8caecace24cf2836f1", digest: "de36be9877b705c41d86e3aed18fc252925f93aebd432e8a789746f0a2a23751" },
