@@ -87,7 +87,7 @@ import {
 } from "./host-writable-roots.js";
 import { computeInstallTreeDigest } from "./install-tree-digest.js";
 import { ARTIFACT_LANGUAGE_TAGS } from "./knowledge-language.js";
-import { AGENTS_NAVIGATION_SETTING, AGENTS_PROJECT_ROOT_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSettingSet, readAgentsNavigation, readAgentsProjectRoot } from "./machine-settings.js";
+import { AGENTS_NAVIGATION_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSettingSet, readAgentsNavigation } from "./machine-settings.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
 import { readEngineModelPolicyFile } from "./engine-model-policy.js";
 import type { ModelsTierRecord } from "./models-tiers.js";
@@ -429,33 +429,6 @@ export async function readDeviceNavigation(recorder: SetupRecorder, deviceHome: 
     if (reasonCode === null) throw error;
     recorder.block("machine-settings", join(deviceHome, MACHINE_SETTINGS_FILE_NAME), reasonCode, messageOf(error));
     return null;
-  }
-}
-
-/**
- * Legacy agents.projectRoot scalar, retained as a compatibility hint and mirror. The registry map
- * is authoritative per library. A settings file that does not read answers null here:
- * readDeviceNavigation has made it a blocker of machine-settings already.
- */
-async function readDeviceProjectRoot(deviceHome: string): Promise<string | null> {
-  try {
-    return await readAgentsProjectRoot(deviceHome);
-  } catch (error) {
-    if (reasonOf(error) === null) throw error;
-    return null;
-  }
-}
-
-/**
- * This device's registry entries, for what the project root question and the managed-sections step
- * read of them. A registry that does not read answers none here: the registry step makes it a blocker.
- */
-async function registeredEntries(deviceHome: string): Promise<Registry["entries"]> {
-  try {
-    return (await readRegistry(deviceHome)).entries;
-  } catch (error) {
-    if (reasonOf(error) === null) throw error;
-    return [];
   }
 }
 
@@ -827,19 +800,16 @@ export async function planWiring(recorder: SetupRecorder, input: WiringPlanInput
   if (runs(steps, "host-hooks")) await planHooks(recorder, home, deviceHome, navigation, true, input.codexAdmission, input.enableHooksAuthorized === true, projectRoot);
   if (library !== null && runs(steps, "writable-roots")) await planRoots(recorder, projectRoot, library.path);
   const settingsFile = join(deviceHome, MACHINE_SETTINGS_FILE_NAME);
-  const heldRoot = await readDeviceProjectRoot(deviceHome);
   const agentsRoot = input.agentsProjectRoot ?? (library?.libraryId == null ? null : await declaredManagedRoot(library.libraryId, deviceHome));
-  // Maintain the old scalar for existing integrations. Runtime managed-output selection reads the
-  // per-library registry map and scopes this scalar to the library that registers its path.
-  const compatibilityRoot = input.agentsProjectRoot ?? heldRoot;
-  if (runs(steps, "machine-settings") && (input.deviceNavigation !== navigation || compatibilityRoot !== heldRoot) && recorder.blockers.every((blocker) => blocker.step !== "machine-settings")) {
+  if (runs(steps, "machine-settings") && input.deviceNavigation !== navigation && recorder.blockers.every((blocker) => blocker.step !== "machine-settings")) {
     recorder.write("machine-settings", settingsFile, await entryKind(settingsFile) === null ? "create" : "update");
   }
   if (library === null || !runs(steps, "managed-sections")) return [];
-  const currentLibraryEntries = library.libraryId === null ? [] : (await registeredEntries(deviceHome)).filter(entry => entry.libraryId === library.libraryId);
-  if (agentsRoot !== null && agentsRoot !== projectRoot && currentLibraryEntries.some(entry => entry.projectPath === agentsRoot)) return [];
-  if (agentsRoot === null && currentLibraryEntries.length > 1) return [];
-  if (agentsRoot === null && currentLibraryEntries.length === 1 && currentLibraryEntries[0]!.projectPath !== projectRoot) return [];
+  if (agentsRoot !== null && agentsRoot !== projectRoot) return [];
+  if (agentsRoot === null && library.libraryId !== null) {
+    const roots = await registeredAgentsProjectRoots(library.libraryId, deviceHome);
+    if (roots.length > 1 || (roots.length === 1 && roots[0] !== projectRoot)) return [];
+  }
   if (library.state.configRecords.some((record) => record.collection === "chain" && record.key === "identity" && record.projectId === undefined && record.value.role === "coordination")) {
     const native = await materializeWorkspaceFromGenesis(library.path);
     if (!await coordinationSectionsRoot(library.path, projectRoot, native, deviceHome, agentsRoot ?? undefined)) return [];
@@ -922,7 +892,7 @@ async function applyRegistry(recorder: SetupRecorder, input: WiringApplyInput, l
     (Object.hasOwn(registry.agentsProjectRoots ?? {}, library.libraryId) && registry.agentsProjectRoots![library.libraryId] === input.agentsProjectRoot);
   if (entry !== null && entry.projectId === input.configurationProjectId && entry.libraryPath === library.path && entry.libraryId === library.libraryId && entry.cloudHosted === input.cloud && entry.gitRemote === remote.normalized && selectedRootCurrent && await registryPathsPortable(deviceHome)) return;
   const kind = await entryKind(registryFile);
-  await registerLibrary({ projectPath: projectRoot, libraryPath: library.path, ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), registeredAt: at, cloudHosted: input.cloud, gitRemote: remote.raw, ...(input.agentsProjectRoot === undefined ? {} : { agentsProjectRoot: input.agentsProjectRoot }) }, deviceHome);
+  await registerLibrary({ projectPath: projectRoot, libraryPath: library.path, ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), registeredAt: at, cloudHosted: input.cloud, gitRemote: remote.raw, ...(selectedRootCurrent || input.agentsProjectRoot === undefined ? {} : { agentsProjectRoot: input.agentsProjectRoot }) }, deviceHome);
   recorder.write("registry", registryFile, kind === null ? "create" : "update");
 }
 
@@ -1043,16 +1013,12 @@ async function applyRoots(recorder: SetupRecorder, input: WiringApplyInput, libr
   }
 }
 
-// The machine-settings step: navigation and a compatibility mirror of the selected project root.
-// The registry map remains authoritative. One recorded settings-file write, as the plan lists it.
+// Device navigation stays in machine settings. Managed-output root selection is recorded with the registry.
 async function applyDeviceSettings(recorder: SetupRecorder, input: WiringApplyInput): Promise<void> {
   const settingsFile = join(input.deviceHome, MACHINE_SETTINGS_FILE_NAME);
-  const navigationChanges = await readAgentsNavigation(input.deviceHome) !== input.navigation;
-  const rootChanges = input.agentsProjectRoot !== undefined && await readAgentsProjectRoot(input.deviceHome) !== input.agentsProjectRoot;
-  if (!navigationChanges && !rootChanges) return;
+  if (await readAgentsNavigation(input.deviceHome) === input.navigation) return;
   const action: SetupWriteAction = await entryKind(settingsFile) === null ? "create" : "update";
-  if (navigationChanges) await applyMachineSettingSet({ key: AGENTS_NAVIGATION_SETTING, value: input.navigation, occurredAt: input.at, path: settingsFile });
-  if (rootChanges) await applyMachineSettingSet({ key: AGENTS_PROJECT_ROOT_SETTING, value: input.agentsProjectRoot, occurredAt: input.at, path: settingsFile });
+  await applyMachineSettingSet({ key: AGENTS_NAVIGATION_SETTING, value: input.navigation, occurredAt: input.at, path: settingsFile });
   recorder.write("machine-settings", settingsFile, action);
 }
 
@@ -1111,7 +1077,7 @@ export async function applyWiring(recorder: SetupRecorder, input: WiringApplyInp
     // Contract item 3: the coordination a project library names is resolved, never replaced; one
     // this device does not locate stays unregistered here, and a competing identity refuses.
     if (identity?.role === "project") await resolveCoordinationBinding(identity.coordinationLibraryId, input.deviceHome);
-    if (identity?.role === "coordination") coordinationRoot = await coordinationSectionsRoot(library.path, input.projectRoot, prior, input.deviceHome);
+    if (identity?.role === "coordination") coordinationRoot = await coordinationSectionsRoot(library.path, input.projectRoot, prior, input.deviceHome, input.agentsProjectRoot);
     const configurationProjectId = coordinationRoot !== null ? input.configurationProjectId : input.configurationProjectId ?? await ensureSetupProjectBinding(input.projectRoot, library.path, input);
     input = { ...input, ...(configurationProjectId === undefined ? {} : { configurationProjectId }) };
     if ((await materializeWorkspace(library.path)).version !== prior.version) recorder.write("library", library.path, "update");
@@ -1221,8 +1187,8 @@ export async function planFreshSetup(input: SetupModeInput): Promise<SetupModePl
     if (reasonOf(error) === null) throw error;
     return null;
   });
-  const inferredDefault = priorSelection ?? (sameLibraryRoots.length === 0 ? projectRoot : sameLibraryRoots.length === 1 ? sameLibraryRoots[0]! : null);
-  const defaultProjectRoot = inferredDefault === null ? null : await validateAgentsProjectRoot(library.libraryId, inferredDefault, projectRoot, deviceHome);
+  const inferredDefault = sameLibraryRoots.length === 0 ? projectRoot : sameLibraryRoots.length === 1 ? sameLibraryRoots[0]! : null;
+  const defaultProjectRoot = priorSelection ?? (inferredDefault === null ? null : await validateAgentsProjectRoot(library.libraryId, inferredDefault, projectRoot, deviceHome));
   const explicitProjectRoot = answers.projectRoot === undefined ? null : await validateAgentsProjectRoot(library.libraryId, resolve(projectRoot, answers.projectRoot), projectRoot, deviceHome);
   const agentsRoot = answers.projectRoot === undefined ? defaultProjectRoot : explicitProjectRoot;
   if (agentsRoot === null) {

@@ -745,6 +745,51 @@ export async function tryReadVerifiedMaterializedState(library: Library): Promis
   }
 }
 
+/** Darwin reads that skip native verification (an unmerged library, or a merged
+ * one under the full-read cost limit) still classify every source segment before
+ * the general reader opens it. Unknown status or unreadable metadata leaves the
+ * general reader, and its own errors, unchanged. */
+export async function assertDarwinSourcesAvailable(library: Library, rootIndex?: Awaited<ReturnType<typeof readConsolidationIndex>>): Promise<void> {
+  const { listStreamDevices, readStreamManifest } = await import("./akasha.js");
+  const files: OpenSegment[] = [];
+  const rootManifest = canonicalSha256(library.manifest);
+  async function collect(root: string, source: LibraryManifest, archive: string): Promise<void> {
+    const sourceManifest = canonicalSha256(source);
+    for (const deviceId of await listStreamDevices(root)) {
+      const manifest = await readStreamManifest(root, deviceId, { archivedManifest: source });
+      if (manifest === null) continue;
+      for (const segment of manifest.segments) {
+        const binding: SegmentBinding = { libraryId: library.manifest.libraryId, sourceId: source.libraryId, archive, streamId: manifest.streamId, deviceId, identityScheme: manifest.identityScheme, segment, rootManifest, sourceManifest };
+        files.push({ path: join(root, "akasha", deviceId, segment.name), segment, binding });
+      }
+    }
+    const index = (root === library.root ? rootIndex : undefined) ?? await readConsolidationIndex(root, source);
+    for (const entry of index?.sources ?? []) {
+      const child = join(root, entry.archive);
+      await collect(child, entry.manifest, relative(library.root, child).split("\\").join("/"));
+    }
+  }
+  try {
+    await collect(library.root, library.manifest, "");
+  } catch {
+    observeCacheReason("source-availability-precheck-metadata-unavailable");
+    return;
+  }
+  for (let offset = 0; offset < files.length; offset += 64) {
+    const batch = files.slice(offset, offset + 64);
+    const availability = await queryDarwinAvailability(batch).catch(() => null);
+    if (availability === null) {
+      observeCacheReason("source-availability-precheck-unavailable");
+      return;
+    }
+    const dataless = availability.findIndex(status => status === "dataless");
+    if (dataless >= 0) {
+      observeCacheReason("source-verification-preopen-unavailable");
+      throw new DatalessSourceFallbackError(batch[dataless]!);
+    }
+  }
+}
+
 /** Only the materializer enters this scope. Public source-event readers always
  * read source bytes. Issuance follows a successful full authority replay. */
 export async function withSourceVerification(library: Library, operation: () => Promise<{ readonly value: WorkspaceState; readonly read: LibraryRead; readonly accepted: boolean }>): Promise<WorkspaceState> {

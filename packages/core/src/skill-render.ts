@@ -110,7 +110,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
 ].map((entry) => Object.freeze({ ...entry, verbs: Object.freeze([...entry.verbs]) })));
 
 // Verbs the text names outside the table.
-const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "library-resolve", "setup", "work-list", "work-create", "work-batch"]);
+const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "engine-list", "library-resolve", "setup", "work-list", "work-create", "work-batch"]);
 
 /** Every engine verb SKILL.md names, the table's first and in its order, without repeats. */
 export function skillNamedVerbs(): readonly string[] {
@@ -159,7 +159,7 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "## Navigation",
     "",
-    `Root: nonempty absolute \`${DEVICE_HOME_ENVIRONMENT_VARIABLE}\`, else \`~/${DIRECTORY.device}\`. commands/<verb> --help: flags; --at UTC. Read engine bundle \`specs/\` beside \`scripts/\`, not this Skill.`,
+    `Root: absolute \`${DEVICE_HOME_ENVIRONMENT_VARIABLE}\` or \`~/${DIRECTORY.device}\`. Flags: \`e <verb> --help\`; --at UTC. Read engine bundle \`specs/\` beside \`scripts/\`, not this Skill.`,
     "",
     "Local writes queue together, not cross-device exclusion. Remote submission: serial handoff. Dot installs no native hook, lifecycle manager or sync service.",
     "",
@@ -169,7 +169,7 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "Coding: `specs/coding-style-v1.md`.",
     "",
-    "Version: patch fixes, minor adds, major breaks; --version.",
+    "Patch fixes, minor adds, major breaks. `e engine-list`: `current.version`.",
     "",
     "## Core commands",
     "",

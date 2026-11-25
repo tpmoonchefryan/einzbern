@@ -12,7 +12,7 @@ import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
-import { copyFile, cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { chmod, copyFile, cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { gzipSync } from "node:zlib";
@@ -24,7 +24,7 @@ import { parseManagedFile } from "../dist/build/packages/core/src/managed-sectio
 import { renderAgentsSections, resolveAgentsSection } from "../dist/build/packages/core/src/agents-sections.js";
 import { DOCTOR_CHECKS } from "../dist/build/packages/core/src/doctor.js";
 import { parseEngineVersion } from "../dist/build/packages/core/src/format-version.js";
-import { MACHINE_SETTINGS_FILE_NAME } from "../dist/build/packages/core/src/machine-settings.js";
+import { AGENTS_PROJECT_ROOT_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSettingSet, readMachineSettings } from "../dist/build/packages/core/src/machine-settings.js";
 import { BUILT_IN_RULES, ruleBody } from "../dist/build/packages/core/src/rules-catalog.js";
 import { dotContentDigest } from "../dist/build/packages/core/src/dot-agents.js";
 import { applySetup, planSetup } from "../dist/build/packages/core/src/setup.js";
@@ -276,8 +276,9 @@ test("480-R4: update installs a newer release, switches engine/current and lays 
 
 test("update uses the selected catalog across registered outputs and preserves Owner choices", async context => {
   const f = await installed(context);
-  const secondProject = join(f.base, "second-project");
-  await mkdir(secondProject);
+  const secondParent = join(f.base, "second-volume");
+  const secondProject = join(secondParent, "second-project");
+  await mkdir(secondProject, { recursive: true });
   const second = { ...f, project: secondProject, library: join(secondProject, ".ether") };
   await applySetup(await plan(second, "fresh", { answers: { artifacts: second.library } }));
   const registry = await readRegistry(f.deviceHome);
@@ -326,15 +327,43 @@ test("update uses the selected catalog across registered outputs and preserves O
   assert.equal(again.managedUpdates.find(output => output.projectPath === second.project)?.reasonCode, "GENERATION_DISABLED");
   await setWorkspaceSetting(second.library, { configurationProjectId: projectId(second.project), key: "agents.generation", value: "managed", occurredAt: at() });
   const absent = join(f.base, "temporarily-unavailable");
+  const registryFile = join(f.deviceHome, "registry.json");
+  const legacy = JSON.parse(await readFile(registryFile, "utf8"));
+  const secondLibraryId = registry.entries.find(entry => entry.projectPath === second.project).libraryId;
+  delete legacy.agentsProjectRoots[secondLibraryId];
+  await writeFile(registryFile, `${JSON.stringify(legacy)}\n`);
   await rename(second.project, absent);
   const unavailable = await plan(f, "update", { rollback: true });
   assert.deepEqual(unavailable.blockers, [], "an unavailable output does not block the engine or other outputs");
   assert.equal(unavailable.managedUpdates.find(output => output.projectPath === second.project)?.status, "unavailable");
   assert.ok(unavailable.warnings.some(warning => warning.file === join(second.project, "AGENTS.md")));
+  assert.ok(!unavailable.agentsProjectRootSelections.some(selection => selection.libraryId === secondLibraryId));
+  const updatedWithMissingCheckout = await applySetup(await plan(f, "update", { archive: release.archive }));
+  assert.equal(updatedWithMissingCheckout.engineSwitch.to, NEWER);
+  assert.equal(updatedWithMissingCheckout.managedUpdates.find(output => output.projectPath === second.project)?.status, "unavailable");
   await rename(absent, second.project);
+  const machinePath = join(f.deviceHome, MACHINE_SETTINGS_FILE_NAME);
+  await applyMachineSettingSet({ path: machinePath, key: AGENTS_PROJECT_ROOT_SETTING, value: second.project, occurredAt: at() });
   const rolled = await applySetup(await plan(f, "update", { rollback: true }));
+  assert.equal((await readMachineSettings(machinePath)).values[AGENTS_PROJECT_ROOT_SETTING], undefined);
+  assert.equal((await readRegistry(f.deviceHome)).agentsProjectRoots[secondLibraryId], second.project);
   assert.equal(rolled.engineSwitch.to, FRAMEWORK_VERSION);
   assert.doesNotMatch(await readFile(join(second.project, "AGENTS.md"), "utf8"), /Selected release catalog fixture/u, "managed text follows the rollback engine too");
+
+  if (process.platform !== "win32" && process.getuid?.() !== 0) {
+    await chmod(secondParent, 0o000);
+    try {
+      await assert.rejects(lstat(second.project), { code: "EACCES" });
+      const closedVolume = await plan(f, "update", { archive: release.archive });
+      assert.deepEqual(closedVolume.blockers, []);
+      const switched = await applySetup(closedVolume);
+      assert.equal(switched.engineSwitch.to, NEWER);
+      assert.equal(switched.managedUpdates.find(output => output.projectPath === second.project)?.status, "unavailable");
+      assert.equal((await readRegistry(f.deviceHome)).agentsProjectRoots[secondLibraryId], second.project);
+    } finally {
+      await chmod(secondParent, 0o700);
+    }
+  }
 });
 
 test("update migrates single-root libraries automatically, asks once for a multi-root library, and repair writes only the selected root", async context => {
@@ -351,12 +380,11 @@ test("update migrates single-root libraries automatically, asks once for a multi
   await setAgentsProjectRoots([{ libraryId: idAInitial, projectPath: secondA }], f.deviceHome);
   await renderAgentsSections(f.library, { projectRoot: secondA, navigation: null, occurredAt: at() });
 
-  // Remove the candidate's per-library record and global fallback to model an installed 5.8-era device.
+  // Remove the candidate's per-library records to model an installed 5.8-era device.
   const registryPath = join(f.deviceHome, "registry.json");
   const legacy = JSON.parse(await readFile(registryPath, "utf8"));
   delete legacy.agentsProjectRoots;
   await writeFile(registryPath, `${JSON.stringify(legacy)}\n`);
-  await cli(["machine-settings-remove", "--key", "agents.projectRoot", "--at", at()]);
 
   const release = await releaseOf(f.base, NEWER);
   const unanswered = await plan(f, "update", { archive: release.archive });
@@ -405,6 +433,17 @@ test("update migrates single-root libraries automatically, asks once for a multi
   await applySetup(repair);
   assert.ok((await readFile(join(secondA, "AGENTS.md"), "utf8")).includes("einzbern:section"));
   await assert.rejects(renderAgentsSections(f.library, { projectRoot: f.project, navigation: null, occurredAt: at() }), error => error.reasonCode === "MANAGED_SECTION_OUTPUT_UNREGISTERED");
+  const disconnected = join(f.base, "offline-a");
+  await rename(secondA, disconnected);
+  const offlinePlan = await plan(f, "update", { archive: release.archive });
+  assert.deepEqual(offlinePlan.blockers, []);
+  assert.deepEqual(offlinePlan.agentsProjectRootSelections, []);
+  const offline = await applySetup(offlinePlan);
+  assert.equal(offline.managedUpdates.find(output => output.projectPath === secondA)?.status, "unavailable");
+  assert.equal(offline.managedUpdates.find(output => output.projectPath === f.project)?.status, "skipped");
+  assert.equal((await readRegistry(f.deviceHome)).agentsProjectRoots[idA], secondA);
+  await rename(disconnected, secondA);
+  assert.equal((await plan(f, "update", { archive: release.archive })).managedUpdates.find(output => output.projectPath === secondA)?.status, "planned");
 });
 
 test("setup rollback refuses changed current or previous identities before changing the engine or wiring", async (context) => {

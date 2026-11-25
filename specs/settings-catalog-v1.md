@@ -685,13 +685,16 @@ for a selected library writes only there and refuses other roots with
 `MANAGED_SECTION_OUTPUT_UNREGISTERED`; a library with no effective selection cannot write a
 managed section until setup chooses one. Other libraries use their own entries. A legacy
 `machine-settings.json` `agents.projectRoot` scalar remains a compatibility hint and is accepted
-only by the library that registers that path. `machine-settings-set` keeps working by updating the
-same library's map entry. The registry still resolves a directory to its library and project; the
+only by the library that registers that path. `machine-settings-set --key agents.projectRoot` writes
+the selected library's map entry. `machine-settings-catalog --project <dir>` reads the library's
+selection and `machine-settings-remove --key agents.projectRoot --project <dir>` clears it.
+Setup is the owner-facing entry point and the generic Atelier settings omit the legacy scalar.
+The registry still resolves a directory to its library and project; the
 selection only says which of that library's registered roots keeps the managed file. It is local
 to this device and never written into a library or AGENTS.md, because a project may have a
 different path on another device.
 
-`setup --mode fresh`, `update` and `repair` accept `--project-root <dir>`. Explicit answers and
+`setup --mode fresh`, `restore`, `update` and `repair` accept `--project-root <dir>`. Explicit answers and
 defaults use the same real-path and same-library validation: only the current project or an
 eligible root registered to its library is accepted (`SETUP_ANSWER_INVALID` otherwise). Fresh
 setup uses the current project when the library has no roots, reuses an effective selection, or
@@ -699,6 +702,10 @@ adopts the sole eligible root; if multiple roots exist without a selection, it a
 `SETUP_ANSWER_REQUIRED`. Update and repair migrate old device settings by the same per-library
 rule: one eligible root is selected automatically, while multiple roots for the current library
 require one answer and persist it for later updates. A null tombstone is never treated as a default.
+An unavailable selected checkout retains its selection. Setup reports its managed output as
+unavailable until the checkout is reachable or the Owner explicitly selects another registered root.
+An in-place coordination restore without any eligible external root registers the library with
+managed output unconfigured.
 No selection creates a file; AGENTS.md is created by the next explicit managed-section write
 (`agents-render`, a rule change, setup).
 

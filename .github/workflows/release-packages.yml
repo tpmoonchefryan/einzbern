@@ -1,0 +1,50 @@
+name: Published release packages
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      from_version:
+        description: Installed baseline release version
+        type: string
+        default: "5.0.1"
+        required: true
+      to_version:
+        description: Candidate published release version
+        type: string
+        default: "5.8.0"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify published install, upgrade and rollback
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24.16.0
+      - name: Exercise both published distributions
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FROM_VERSION: ${{ inputs.from_version || '5.0.1' }}
+          TO_VERSION: ${{ inputs.to_version || '5.8.0' }}
+        run: node scripts/verify-release-packages.mjs "$FROM_VERSION" "$TO_VERSION" "$RUNNER_TEMP/release-packages.json"
+      - name: Retain artifact provenance and lifecycle results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-packages-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release-packages.json

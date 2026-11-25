@@ -8,7 +8,7 @@ import { availableParallelism, hostname, totalmem } from "node:os";
 import { basename, isAbsolute, join, resolve, dirname } from "node:path";
 
 import { readStorageLocation } from "./storage-location.mjs";
-import { createPrivateWindowsDirectory, hasPrivateWindowsPermissions, queryWindows } from "./windows-system.mjs";
+import { createPrivateWindowsDirectory, inspectWindowsPermissions, queryWindows } from "./windows-system.mjs";
 
 export const MEMORY_POLICY_SETTING = "execution.memoryPolicy";
 export const MEMORY_LEASE_VARIABLE = "EINZBERN_MEMORY_LEASE";
@@ -145,11 +145,13 @@ function unsafeWritableMode(metadata) {
   return uid === 0 || uid !== process.getgid() || metadata.uid !== uid || metadata.gid !== uid;
 }
 
-function privatePermissions(path, metadata) {
-  if (process.platform !== "win32") {
-    return !unsafeWritableMode(metadata) && (typeof process.getuid !== "function" || metadata.uid === process.getuid());
+function requirePrivatePermissions(path, metadata) {
+  if (process.platform === "win32") {
+    const aclStatus = inspectWindowsPermissions(path);
+    if (aclStatus !== "accepted") fail("MEMORY_DOMAIN_INVALID", { aclStatus });
+  } else if (unsafeWritableMode(metadata) || (typeof process.getuid === "function" && metadata.uid !== process.getuid())) {
+    fail("MEMORY_DOMAIN_INVALID");
   }
-  return hasPrivateWindowsPermissions(path);
 }
 
 /** Only the registered default locks forwarding may resolve through a link. */
@@ -161,9 +163,15 @@ export function resolveMemoryDirectory(deviceHome, directory) {
     try {
       let pointer;
       try { pointer = lstatSync(join(deviceHome, "storage-location.json")); } catch (error) { if (error.code !== "ENOENT") throw error; }
-      if (pointer && (!pointer.isFile() || pointer.isSymbolicLink() || pointer.nlink !== 1 || !privatePermissions(join(deviceHome, "storage-location.json"), pointer))) fail("MEMORY_DOMAIN_INVALID");
+      if (pointer) {
+        if (!pointer.isFile() || pointer.isSymbolicLink() || pointer.nlink !== 1) fail("MEMORY_DOMAIN_INVALID");
+        requirePrivatePermissions(join(deviceHome, "storage-location.json"), pointer);
+      }
       location = readStorageLocation(deviceHome);
-    } catch { fail("MEMORY_DOMAIN_INVALID"); }
+    } catch (error) {
+      if (error instanceof MemoryBudgetError) throw error;
+      fail("MEMORY_DOMAIN_INVALID");
+    }
     if (location) {
       target = resolve(location.runtime, "locks");
       let forwarding;
@@ -180,7 +188,8 @@ export function resolveMemoryDirectory(deviceHome, directory) {
     mkdirSync(target, { recursive: true, mode: 0o700 });
   }
   const metadata = lstatSync(target);
-  if (!metadata.isDirectory() || metadata.isSymbolicLink() || !privatePermissions(target, metadata)) fail("MEMORY_DOMAIN_INVALID");
+  if (!metadata.isDirectory() || metadata.isSymbolicLink()) fail("MEMORY_DOMAIN_INVALID");
+  requirePrivatePermissions(target, metadata);
   return realpathSync.native(target);
 }
 
