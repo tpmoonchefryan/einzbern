@@ -4936,7 +4936,8 @@ const BOOT = __PORTAL_BOOT__;
       return;
     }
     const first = await standardStorybook(base);
-    const result = first.status === "available" || base.pathname.endsWith("/storybook/") || first.message === "design.warnUnreachable"
+    if (designAuthorityRead !== request || context !== designAuthorityContext()) return;
+    const result = first.status === "available" || base.pathname.endsWith("/storybook/")
       ? first
       : await standardStorybook(new URL("storybook/", base));
     if (designAuthorityRead !== request || context !== designAuthorityContext()) return;
