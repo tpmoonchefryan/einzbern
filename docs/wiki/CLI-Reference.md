@@ -1978,6 +1978,7 @@
 
 | 旗标 | 必填 | 取值类型 |
 | --- | --- | --- |
+| `--expected-revision` | 可选 | `integer` |
 | `--blocked-criteria` | 可选 | `list` |
 | `--workspace` | 可选 | `string` |
 | `--at` | 必填 | `instant` |

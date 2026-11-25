@@ -1195,6 +1195,20 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       const result = await governedWrite(common => ["work-annotate", ...common, "--id", String(body.id ?? ""), "--expected-revision", String(body.revision), "--involved-projects", JSON.stringify(body.involvedProjects)], {}, { ...selected, configurationProjectId: null });
       send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok }); return;
     }
+    if (request.method === "POST" && pathname === "/api/work/validation") {
+      const selected = currentLibrary();
+      const body = await readJsonBody(request);
+      if (typeof body.id !== "string" || !["validated", "active"].includes(body.status) ||
+          !Number.isSafeInteger(body.revision) || body.revision < 1 ||
+          (body.summary !== undefined && typeof body.summary !== "string")) {
+        send(response, 400, { ok: false, reasonCode: "CLI_ARGUMENT_MALFORMED" }); return;
+      }
+      const result = await governedWrite(common => ["work-transition", ...common,
+        "--id", body.id, "--status", body.status, "--expected-revision", String(body.revision),
+        ...(body.summary === undefined ? [] : ["--summary", body.summary]),
+      ], ATELIER_SURFACE, { ...selected, configurationProjectId: null });
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok }); return;
+    }
     // TCRN-CROSS-STORY-528 (MIN-256; TCRN-CROSS-SUB-459): Atelier releases a work item's lease by
     // force, another actor's running one included: work-release --force true, which runs for Atelier
     // only, written as TCRN_PORTAL_ACTOR. Atelier's own writes are held by a lease like any other

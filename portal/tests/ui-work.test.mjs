@@ -3,6 +3,58 @@ import { canonicalDocumentBytes } from "../../scripts/lib/canonical-json.mjs";
 // Tests in this file run sequentially; Node isolates each file in a process.
 import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, machineReceiptAdvanced, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptRawText, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile, writeScratch } from "./ui-presence-support.mjs";
 
+if (!MUTATION) test("INIT-003 validates and returns work through the same engine transition as the CLI", async () => {
+  const fixture = await scratch("einzbern-work-validation-");
+  const workspace = ["--workspace", fixture.workspace];
+  const run = (command, ...args) => cli([command, ...workspace, ...args], fixture.deviceEnv);
+  const show = async (id) => (await run("work-show", "--id", id)).record;
+  const pending = async (key) => {
+    const created = await run("work-create", "--project-id", fixture.projectId, "--at", nextAt(),
+      "--external-key", key, "--kind", "Initiative", "--title", key, "--status", "active");
+    await run("work-transition", "--at", nextAt(), "--id", created.record.id, "--status", "pending-validate");
+    return show(created.record.id);
+  };
+  let page;
+  try {
+    const accepted = await pending("ATELIER-ACCEPT");
+    const returned = await pending("ATELIER-RETURN");
+    page = await loadExecutedDom(fixture);
+    const { document, window } = page;
+    await openWorkEditor(page);
+    const summary = document.querySelector("#work-validation-summary");
+    const form = document.querySelector("#work-validation-form");
+    const action = (record, status) => document.querySelector(`[data-work-validation-id="${record.id}"][data-work-validation="${status}"]`);
+    await waitFor(() => action(accepted, "validated"), "the validation action");
+    action(accepted, "validated").click();
+    assert.equal(summary.required, true);
+    document.querySelector("#work-validation-cancel").click();
+    assert.equal(form.hidden, true);
+    assert.equal((await show(accepted.id)).status, "pending-validate");
+    const submit = async (text, refusal) => {
+      summary.value = text;
+      const before = receiptText(document);
+      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+      const received = refusal ? () => refusal.test(receiptRawText(document)) : receiptAdvanced(document, before);
+      await waitFor(received, "the transition receipt");
+    };
+    action(accepted, "validated").click();
+    await submit("Independent validation report");
+    assert.equal((await show(accepted.id)).status, "validated");
+    action(returned, "active").click();
+    await run("work-annotate", "--at", nextAt(), "--id", returned.id, "--summary", "A concurrent edit");
+    await submit("Missing evidence", /work revision changed/u);
+    assert.equal((await show(returned.id)).status, "pending-validate");
+    const updated = await show(returned.id);
+    await waitFor(() => action(returned, "active")?.dataset.workValidationRevision === String(updated.revision), "the refreshed work revision");
+    action(returned, "active").click();
+    await submit("Missing evidence");
+    assert.equal((await show(returned.id)).status, "active");
+  } finally {
+    if (page) await closePage(page, fixture);
+    else await rm(fixture.base, { recursive: true, force: true });
+  }
+});
+
 if (!MUTATION) test("INIT-003 Atelier activity and pending actions use the read-only engine views", async () => {
   const page = await preparePage();
   const { document, window } = page;

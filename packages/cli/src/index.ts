@@ -2006,7 +2006,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   { name: "work-show", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, ...exactlyOneCatalogFlags("work-show")] },
   // TCRN-CROSS-STORY-485 R4: work-transition and work-batch take --project, the project the gates of a
   // Story going to done run in.
-  { name: "work-transition", availability: "cli", mutates: true, flags: [{ name: "blocked-criteria", required: false, valueKind: "list" }, { name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "status", required: true, valueKind: "string" }, { name: "summary", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "work-transition", availability: "cli", mutates: true, flags: [{ name: "expected-revision", required: false, valueKind: "integer" }, { name: "blocked-criteria", required: false, valueKind: "list" }, { name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "status", required: true, valueKind: "string" }, { name: "summary", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   // TCRN-CROSS-STORY-470 R3: move a library; the old place keeps a tombstone and refuses writes.
   { name: "workspace-consolidate", availability: "cli", mutates: true, flags: [{ name: "mapping", required: true, valueKind: "string" }, { name: "to", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: true, valueKind: "string" }, { name: "yes", required: false, valueKind: "boolean" }] },
   { name: "workspace-consolidate-clean", availability: "cli", mutates: true, flags: [{ name: "to", required: true, valueKind: "string" }, { name: "copies", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "yes", required: false, valueKind: "boolean" }] },
@@ -4308,7 +4308,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   if (command === "work-transition") {
     // TCRN-CROSS-STORY-485 R4: --project names the project the gates run in, for a Story going to
     // done (the registry's project for the library when left out).
-    const values = parseArguments(rest, [...shared, "id", "status", "summary", "project", "actor", "blocked-criteria"]);
+    const values = parseArguments(rest, [...shared, "id", "expected-revision", "status", "summary", "project", "actor", "blocked-criteria"]);
     required(values, [...requiredShared, "id", "status"]);
     if (values["blocked-criteria"] !== undefined && values.status !== "blocked") fail("CLI_ARGUMENT_MALFORMED", "blocked-criteria requires blocked");
     if (values.status !== undefined && !isWorkflowStatus(values.status)) fail("CLI_ARGUMENT_MALFORMED", `status=${values.status}`);
@@ -4334,6 +4334,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       return {
         state: await transitionWork(workspace, {
           occurredAt: at, id: values.id ?? "", status: values.status as WorkflowStatus,
+          ...(values["expected-revision"] === undefined ? {} : { expectedRevision: integerValue(values, "expected-revision") }),
           ...(values["blocked-criteria"] === undefined ? {} : { blockedCriteria: listValue(values["blocked-criteria"]) }),
           ...(values.summary !== undefined ? { summary: values.summary } : {}),
           ...(values.actor ? { actorId: values.actor } : {}),
