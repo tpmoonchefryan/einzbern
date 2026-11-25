@@ -1224,6 +1224,7 @@ html[data-tcrn-theme="dark"] [data-theme-icon="dark"],
   overflow-y: hidden;
   overscroll-behavior-inline: contain;
 }
+[data-recall-preview-table] { --tcrn-table-column-count: 4; }
 .tcrn-table-shell__head,
 .tcrn-table-shell__row {
   display: grid;
@@ -4190,7 +4191,7 @@ button:disabled { cursor: not-allowed; }
         <a class="tcrn-nav-item" href="#engine-model-policy" data-nav-item-has-icon="true" data-page-target="engine-model-policy" aria-label="Models" data-i18n-aria-label="settings.group.models"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10v10H3z"/><path d="M5.5 8h5M8 5.5v5"/></svg></span><span class="tcrn-nav-item__label" data-i18n="settings.group.models">Models and escalation</span></a>
         <a class="tcrn-nav-item" href="#variables" data-nav-item-has-icon="true" data-page-target="variables" aria-label="Variables" data-i18n-aria-label="nav.variables"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.2h10M3 8h10M3 12.8h10"/><circle cx="5.2" cy="3.2" r="1.5" fill="currentColor"/><circle cx="10.8" cy="8" r="1.5" fill="currentColor"/><circle cx="7.2" cy="12.8" r="1.5" fill="currentColor"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.variables">Variables</span></a>
         <a class="tcrn-nav-item" href="#prose" data-nav-item-has-icon="true" data-page-target="prose" aria-label="Rules" data-i18n-aria-label="nav.prose"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h10M3 5.5h10M3 8.5h6.5"/><path d="M3 12.5h4"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.prose">Rules</span></a>
-        <a class="tcrn-nav-item" href="#recall-preview" data-page-target="recall-preview" aria-label="Recall preview" data-i18n-aria-label="recallPreview.title"><span class="tcrn-nav-item__label" data-i18n="recallPreview.title">Recall preview</span></a>
+        <a class="tcrn-nav-item" href="#recall-preview" data-nav-item-has-icon="true" data-page-target="recall-preview" aria-label="Recall preview" data-i18n-aria-label="recallPreview.title"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg></span><span class="tcrn-nav-item__label" data-i18n="recallPreview.title">Recall preview</span></a>
         <a class="tcrn-nav-item" href="#vocabulary" data-nav-item-has-icon="true" data-page-target="vocabulary" aria-label="Vocabulary" data-i18n-aria-label="nav.vocabulary"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.8C6.6 1.9 4.4 1.7 2.2 2.2v10.6c2.2-.5 4.4-.3 5.8.6 1.4-.9 3.6-1.1 5.8-.6V2.2C11.6 1.7 9.4 1.9 8 2.8Z"/><path d="M8 2.8v10.6"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.vocabulary">Vocabulary</span></a>
         <a class="tcrn-nav-item" href="#gates" data-nav-item-has-icon="true" data-page-target="gates" aria-label="Gates" data-i18n-aria-label="nav.gates"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10v10H3z"/><path d="m5 8 2 2 4-4"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.gates">Gates</span></a>
       </nav>
@@ -7213,12 +7214,14 @@ const BOOT = __PORTAL_BOOT__;
       root.innerHTML = `<p class="tcrn-text">${esc(t(result === null ? "recallPreview.loading" : "recallPreview.unavailable"))}</p>`;
       return;
     }
+    const columns = ["key", "candidate", "score", "terms"].map(key => esc(t("recallPreview." + key)));
     const table = (label, rows, name) => rows.length === 0
       ? `<p class="tcrn-text">${esc(t("recallPreview.empty"))}</p>`
-      : `<div class="tcrn-table-scroll"><table class="tcrn-table" data-recall-preview-table="${name}" aria-label="${esc(t(label))}">
-          <thead><tr>${["key", "candidate", "score", "terms"].map(key => `<th scope="col">${esc(t("recallPreview." + key))}</th>`).join("")}</tr></thead>
-          <tbody>${rows.map(row => `<tr><td>${esc(row.key)}</td><td>${esc(row.title)}</td><td>${esc(row.score)}</td><td>${esc(row.matchedTerms.join(", "))}</td></tr>`).join("")}</tbody>
-        </table></div>`;
+      : `<div class="tcrn-table-shell" role="table" data-recall-preview-table="${name}" aria-label="${esc(t(label))}">
+          <div class="tcrn-table-shell__head" role="row">${columns.map(column => `<span role="columnheader">${column}</span>`).join("")}</div>
+          ${rows.map(row => `<div class="tcrn-table-shell__row" role="row">${[row.key,row.title,row.score,row.matchedTerms.join(", ")].map((value,index) =>
+            `<span class="tcrn-table-shell__cell" role="cell" data-label="${columns[index]}">${esc(value)}</span>`).join("")}</div>`).join("")}
+        </div>`;
     root.innerHTML = `<article class="tcrn-surface"><h2>${esc(t("recallPreview.candidates"))}</h2>
         <p class="tcrn-text">${esc(t("recallPreview.threshold"))} <strong>${esc(result.threshold)}</strong></p>
         ${table("recallPreview.candidates", result.candidates, "candidates")}</article>
