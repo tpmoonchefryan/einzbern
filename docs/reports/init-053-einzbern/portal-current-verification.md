@@ -40,13 +40,13 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
   "currentSources": [
     {
       "path": "portal/index.html",
-      "bytes": 537273,
-      "sha256": "16e2558e401e41b3e999fed6e10fc543f203869c0e783f97893066b46782ac9f"
+      "bytes": 537425,
+      "sha256": "4cee4c6ea78fd6a8a22949127130a6ec67af395d79196d8b42f2b90044cbdea1"
     },
     {
       "path": "portal/locales.js",
-      "bytes": 322569,
-      "sha256": "938c360f254cec252dc9c594d65f2c16124b991374801c73bdde2d23ba9e83a0"
+      "bytes": 322579,
+      "sha256": "e303e7c3f67268623314e2746ddeec480012f95a9b8efbbf105dde281a533a9a"
     },
     {
       "path": "portal/portal.mjs",
