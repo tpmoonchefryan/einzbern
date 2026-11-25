@@ -4,6 +4,7 @@ import { readWorkContentImpact } from "../../core/src/work-requirements.js";
 import { WORK_ACCEPTANCE_STAGES, workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
 import type { ContentWorkKind } from "../../core/src/work-content.js";
 import { workContentContext, workContentContextSegment } from "../../core/src/work-content-context.js";
+import { KnowledgeCoreError, readKnowledgeBodies } from "../../core/src/knowledge-core.js";
 import { readWorkContentPolicy, defaultWorkContentTemplate, workContentRolloutReadiness } from "../../core/src/work-content-templates.js";
 import { readDotExtensionSource } from "../../core/src/dot-agents.js";
 import type { HostExecutionRequest } from "../../core/src/execution-fallback.js";
@@ -236,7 +237,7 @@ import { cp, lstat, mkdir, readdir, realpath, writeFile } from "node:fs/promises
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { ProtocolError, assertStrictInstant, canonicalExternalKey, canonicalJson, canonicalSha256, deriveStableId } from "../../protocol/src/index.js";
+import { ProtocolError, assertProtocolId, assertStrictInstant, canonicalExternalKey, canonicalJson, canonicalSha256, deriveStableId } from "../../protocol/src/index.js";
 import { isWorkflowStatus, workflowStatus } from "../../core/src/work-validation.js";
 import type { WorkflowStatus } from "../../core/src/work-validation.js";
 import { isWorkStatus } from "../../protocol/src/index.js";
@@ -318,6 +319,67 @@ function listValue(value: string | undefined): readonly string[] {
   const values = value.split(",");
   if (values.some((entry) => entry.length === 0)) fail("CLI_ARGUMENT_MALFORMED", "list");
   return values;
+}
+
+type RecallReadReference = { readonly ref: string; readonly id: string; readonly kind: "work" | "minutes" | "card"; readonly user: boolean };
+type RecallReadOutcome =
+  | { readonly ok: true; readonly record: Readonly<Record<string, unknown>>; readonly context?: ReturnType<typeof workContentContext> }
+  | { readonly ok: false; readonly reasonCode: string };
+
+function recallReadReference(ref: string): RecallReadReference {
+  const user = ref.startsWith("user/");
+  const id = user ? ref.slice(5) : ref;
+  const [recordId, decision, extra] = id.split("#");
+  if (recordId === undefined || extra !== undefined) fail("CLI_ARGUMENT_MALFORMED", `refs: ${ref}`);
+  try { assertProtocolId(recordId); } catch { fail("CLI_ARGUMENT_MALFORMED", `refs: ${ref}`); }
+  if (recordId.startsWith("knowledge:") && decision === undefined) return { ref, id, kind: "card", user };
+  if (!user && recordId.startsWith("work:") && decision === undefined) return { ref, id, kind: "work", user };
+  if (!user && recordId.startsWith("minutes:") && (decision === undefined || /^D[1-9][0-9]*$/u.test(decision))) return { ref, id, kind: "minutes", user };
+  fail("CLI_ARGUMENT_MALFORMED", `refs: ${ref}`);
+}
+
+async function readRecallReferences(workspace: string, at: string, references: readonly RecallReadReference[], full: boolean): Promise<Readonly<Record<string, unknown>>> {
+  const state = await validateWorkspace(workspace);
+  const records = new Map<string, RecallReadOutcome>();
+  for (const user of [false, true]) {
+    const cards = references.filter(ref => ref.kind === "card" && ref.user === user);
+    if (cards.length === 0) continue;
+    const identify = (id: string): string => user ? `user/${id}` : id;
+    try {
+      const results = await readKnowledgeBodies(workspace, [...new Set(cards.map(ref => ref.id))], { at, ...(user ? { scope: "user" } : {}) });
+      for (const item of results) {
+        records.set(identify(item.id), "reasonCode" in item
+          ? { ok: false, reasonCode: item.reasonCode } : { ok: true, record: item.result });
+      }
+    } catch (error) {
+      if (!(error instanceof KnowledgeCoreError)) throw error;
+      for (const card of cards) records.set(card.ref, { ok: false, reasonCode: error.reasonCode });
+    }
+  }
+  const work = new Map(state.work.filter(item => !item.tombstone).map(item => [item.id, item]));
+  for (const ref of references) {
+    if (records.has(ref.ref)) continue;
+    if (ref.kind === "work") {
+      const item = work.get(ref.id);
+      records.set(ref.ref, item === undefined
+        ? { ok: false, reasonCode: "WORKSPACE_INPUT_INVALID" }
+        : { ok: true, record: workListSummary(item), ...(full ? { context: workContentContext(state, ref.id) } : {}) });
+    } else if (ref.kind === "minutes") {
+      try {
+        const record = minutesById(state, ref.id);
+        records.set(ref.ref, { ok: true, record: full ? { ...minutesById(state, record.id, "all") } : { ...record } });
+      } catch (error) {
+        const reasonCode = (error as { reasonCode?: string }).reasonCode;
+        if (reasonCode === undefined) throw error;
+        records.set(ref.ref, { ok: false, reasonCode });
+      }
+    }
+  }
+  return {
+    schemaVersion: "tcrn.recall-read.v1", reasonCode: "RECALL_READ_READY",
+    workspaceId: state.metadata.workspaceId, version: state.version, headEventHash: state.headEventHash, full,
+    records: references.map(({ ref, kind }) => ({ ref, kind, ...records.get(ref)! })),
+  };
 }
 
 // INIT-008: a sprint member reference is a qualified cross-partition pointer. The CLI
@@ -1862,7 +1924,8 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // TCRN-CROSS-STORY-527 (Q6; TCRN-CROSS-SUB-478): Atelier settles a proposal (see rule-propose below).
   { name: "proposal-approve", availability: "cli", mutates: true, flags: [{ name: "key", required: true, valueKind: "string" }, { name: "proposed-at", required: true, valueKind: "instant" }, { name: "at", required: true, valueKind: "instant" }, { name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "proposal-reject", availability: "cli", mutates: true, flags: [{ name: "key", required: true, valueKind: "string" }, { name: "proposed-at", required: true, valueKind: "instant" }, { name: "at", required: true, valueKind: "instant" }, { name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "recall", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "host", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "query", required: true, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "tau", required: false, valueKind: "string" }, { name: "allow-trailing", required: false, valueKind: "boolean" }, { name: "status", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "view", required: false, valueKind: "enum", valueShape: "agent or preview (omit for the full tcrn.recall.v1 response)" }] },
+  { name: "recall", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "host", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "query", required: true, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "tau", required: false, valueKind: "string" }, { name: "allow-trailing", required: false, valueKind: "boolean" }, { name: "status", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "view", required: false, valueKind: "enum", valueShape: "agent, candidates, or preview (omit for the full tcrn.recall.v1 response)" }] },
+  { name: "recall-read", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "refs", required: true, valueKind: "list", valueShape: "comma-separated candidate references, optionally user/knowledge:<id> or minutes:<id>#D<n>" }, { name: "full", required: false, valueKind: "boolean" }] },
   { name: "recover", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   // TCRN-CROSS-STORY-483 R2 (with agents-render and rule-resolve): the Command Spell rules of the
   // project the registry resolves from --project (the current directory when left out).
@@ -4596,6 +4659,16 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // that link the work record or that the work record names as decided-in. TCRN-CROSS-SUB-426 (MIN-239
   // D6): each with its valid decisions and a record with none left out, unless --status asks for the
   // obsolete decisions or all of them.
+  if (command === "recall-read") {
+    const values = parseArguments(rest, ["workspace", "at", "refs", "full"]);
+    required(values, ["workspace", "at", "refs"]);
+    const at = values.at!;
+    assertStrictInstant(at);
+    const references = listValue(values.refs).map(recallReadReference);
+    if (references.length === 0) fail("CLI_ARGUMENT_MALFORMED", "refs");
+    io.write(canonicalJson(await readRecallReferences(values.workspace!, at, references, booleanValue(values.full, "full"))));
+    return;
+  }
   if (command === "minutes-list") {
     const values = parseArguments(rest, ["workspace", "project-id", "work-id", "status", "limit", "offset"]);
     required(values, ["workspace"]);

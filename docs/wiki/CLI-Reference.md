@@ -1378,7 +1378,19 @@
 | `--allow-trailing` | 可选 | `boolean` |  |
 | `--status` | 可选 | `string` |  |
 | `--project-id` | 可选 | `string` |  |
-| `--view` | 可选 | `enum` | `agent or preview (omit for the full tcrn.recall.v1 response)` |
+| `--view` | 可选 | `enum` | `agent, candidates, or preview (omit for the full tcrn.recall.v1 response)` |
+
+## `recall-read`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 | 写法 |
+| --- | --- | --- | --- |
+| `--workspace` | 可选 | `string` |  |
+| `--at` | 必填 | `instant` |  |
+| `--refs` | 必填 | `list` | `comma-separated candidate references, optionally user/knowledge:<id> or minutes:<id>#D<n>` |
+| `--full` | 可选 | `boolean` |  |
 
 ## `recover`
 

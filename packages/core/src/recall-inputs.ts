@@ -732,6 +732,26 @@ export function recallContextLines(hits: readonly RecallHit[], perPromptBytes: n
   return recallContextEntries(hits, perPromptBytes).map((entry) => entry.line);
 }
 
+export function recallCandidateRef(hit: RecallHit): string {
+  if (hit.decision !== undefined) return hit.decision.reference;
+  return hit.kind === "card" && hit.scope === "user" ? `user/${hit.id}` : hit.id;
+}
+
+export function recallCandidateEntries(hits: readonly RecallHit[], perPromptBytes: number): readonly { hit: RecallHit; line: string }[] {
+  const entries: { hit: RecallHit; line: string }[] = [];
+  let used = 0;
+  for (const hit of hits) {
+    const title = hit.title.replace(/\s+/gu, " ").trim();
+    if (title === "") continue;
+    const line = [hit.kind === "work" ? hit.recordKind : hit.kind, hit.key, title, recallCandidateRef(hit)].join(" · ");
+    const bytes = Buffer.byteLength(line, "utf8") + (entries.length === 0 ? 0 : 1);
+    if (used + bytes > perPromptBytes) continue;
+    entries.push({ hit, line });
+    used += bytes;
+  }
+  return entries;
+}
+
 export function recallContextEntries(hits: readonly RecallHit[], perPromptBytes: number): readonly { hit: RecallHit; line: string }[] {
   const entries: { hit: RecallHit; line: string }[] = [];
   let used = 0;

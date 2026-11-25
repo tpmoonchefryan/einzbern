@@ -10,7 +10,7 @@ import { effectiveProjectState } from "../../core/src/project-state-read.js";
 import { readRuntimeKnowledgeLanguagePolicy, resolveQueryLanguage } from "../../core/src/knowledge-language.js";
 import { RECALL_DEFAULT_TAU, preparePersistentRecall, recallDocuments, recallPersistent } from "../../core/src/recall.js";
 import type { RecallHit } from "../../core/src/recall.js";
-import { formatRecallLine, readRecallCards, recallContextEntries, recallDecisionHints, recallInputsFromState } from "../../core/src/recall-inputs.js";
+import { formatRecallLine, readRecallCards, recallCandidateEntries, recallContextEntries, recallDecisionHints, recallInputsFromState } from "../../core/src/recall-inputs.js";
 import type { RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { DecisionStatusFilter } from "../../core/src/minutes.js";
 import type { KnowledgeStatusFilter } from "../../core/src/knowledge-core.js";
@@ -54,7 +54,7 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   const values = parseArguments(rest, ["project-id", "workspace", "host", "at", "query", "limit", "tau", "allow-trailing", "status", "view"]);
   required(values, ["workspace", "at", "query"]);
   const status = recallStatusOption(values.status);
-  if (values.view !== undefined && values.view !== "agent" && values.view !== "preview") fail("CLI_ARGUMENT_MALFORMED", "view");
+  if (values.view !== undefined && values.view !== "agent" && values.view !== "preview" && values.view !== "candidates") fail("CLI_ARGUMENT_MALFORMED", "view");
   const cardStatus: KnowledgeStatusFilter = status.status === "removed" || status.status === "all" ? status.status : "valid";
   const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
   const workspace = values.workspace ?? "";
@@ -124,13 +124,23 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   // under obsoleteDecisions, with the decision that superseded it (null when withdrawn), and its line
   // says so.
   const hits = recallDecisionHints(state, cards.cards, statusHits, { decisions });
-  const delivery = recallContextEntries(hits, perPromptBytes);
-  const context = delivery.map((entry) => entry.line);
   const source = {
     workspaceId: state.metadata.workspaceId,
     version: state.version,
     headEventHash: state.headEventHash,
   };
+  if (values.view === "candidates") {
+    const context = recallCandidateEntries(hits, perPromptBytes).map((item) => item.line);
+    io.write(canonicalJson({
+      schemaVersion: "tcrn.recall-candidates.v1", reasonCode: result.reasonCode, ...source,
+      perPromptBytes, context,
+      knowledgeReasonCode: cards.stores.project.reasonCode,
+      userKnowledgeReasonCode: cards.stores.user.reasonCode,
+    }));
+    return;
+  }
+  const delivery = recallContextEntries(hits, perPromptBytes);
+  const context = delivery.map((entry) => entry.line);
   if (result.explanation !== undefined) {
     const { threshold, matchedTerms, nearMisses } = result.explanation;
     const candidate = (hit: RecallHit) => ({

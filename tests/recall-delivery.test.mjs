@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
-import { createProject, createWork, initializeLibrary, recordMinutes } from "../dist/build/packages/core/src/index.js";
+import { captureKnowledgeUnit, createProject, createWork, initializeKnowledgeStore, initializeLibrary, recordMinutes } from "../dist/build/packages/core/src/index.js";
 import { RecallIndex, recall, recallDocuments, recallQueryTokens, recallScoreUnit, resetRecallCache, segmentForIndex } from "../dist/build/packages/core/src/recall.js";
 import { formatRecallLine, recallContextLines, recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
 import { deriveStableId } from "../dist/build/packages/protocol/src/index.js";
@@ -62,6 +62,63 @@ test("the recall preview explains the same scored selection and shows a near mis
   } finally {
     resetRecallCache();
   }
+});
+
+test("candidate references batch-read their own content and expand only on request", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "recall-candidate-read-"));
+  t.after(async () => { resetRecallCache(); await rm(root, { recursive: true, force: true }); });
+  await initializeLibrary({ root, createdAt: at });
+  const project = (await createProject(root, { occurredAt: at, externalKey: "READ-PROJECT", name: "Reference reading" })).projects[0];
+  const common = { occurredAt: at, projectId: project.id };
+  const parentKey = "READ-INIT-001";
+  const parent = (await createWork(root, { ...common, externalKey: parentKey, kind: "Initiative", parentId: null, title: "Routing governance", goal: "Keep the parent rule" })).work[0];
+  const epicKey = "READ-EPIC-001";
+  const epic = (await createWork(root, { ...common, externalKey: epicKey, kind: "Epic", parentId: parent.id, title: "Public endpoint work" })).work.find((item) => item.externalKey === epicKey);
+  const storyKey = "READ-STORY-001";
+  const body = "Convergence retains the original checkpoint. ".repeat(220);
+  const story = (await createWork(root, { ...common, externalKey: storyKey, kind: "Story", parentId: epic.id, title: "Convergence validation",
+    goal: "Validate the replay", acceptance: "A resumed reader sees the same result", body })).work.find((item) => item.externalKey === storyKey);
+  const recorded = await recordMinutes(root, { ...common, externalKey: "READ-MIN-501", title: "Public API decisions", summary: "Review of two independent endpoints",
+    decisions: ["Use a stable routing address.", "Review read policy on project scope."], decidedBy: [], linkedWorkIds: [] });
+  const minutesId = recorded.minutes.find((item) => item.externalKey === "READ-MIN-501").id;
+  await initializeKnowledgeStore(root, { disposableAcknowledged: true });
+  const card = await captureKnowledgeUnit(root, { occurredAt: at, externalKey: "READ-CARD-001", subject: "Ledger notice",
+    summary: "Retain a notice", snippet: "Ledger notice", tags: ["ledger"], accountableOwnerId: "owner:test",
+    scope: "project", projectId: project.id, body: "A ledger notice should preserve the original record." });
+  const user = await captureKnowledgeUnit(root, { occurredAt: at, externalKey: "READ-CARD-USER-001", subject: "Personal rehearsal",
+    summary: "Personal reading note", snippet: "Rehearsal", tags: ["rehearsal"], accountableOwnerId: "owner:test",
+    scope: "user", body: "A rehearsal reminder from the personal crest." });
+
+  const call = async (verb, args) => {
+    let output = "";
+    await runCli([verb, "--workspace", root, "--at", at, ...args], { write(chunk) { output += chunk; } });
+    return JSON.parse(output);
+  };
+  const query = ["--query", `${storyKey} READ-MIN-501#D2`, "--view", "candidates"];
+  const candidates = await call("recall", query);
+  assert.equal(candidates.schemaVersion, "tcrn.recall-candidates.v1");
+  assert.deepEqual(candidates.context, [
+    `Story · ${storyKey} · Convergence validation · ${story.id}`,
+    `minutes · READ-MIN-501 · Public API decisions · ${minutesId}#D2`,
+  ]);
+  assert.deepEqual((await call("recall", query)).context, candidates.context);
+
+  const missing = "work:000000000000000000000000";
+  const chosen = [`${minutesId}#D2`, story.id, card.id, `user/${user.id}`, missing];
+  const flags = ["--refs", chosen.join(",")];
+  const direct = await call("recall-read", flags);
+  assert.deepEqual(direct.records.map((row) => row.ref), chosen);
+  assert.deepEqual(direct.records[0].record.decisions.map((row) => row.number), [2]);
+  assert.equal(direct.records[1].record.fields.body, body);
+  assert.ok(Buffer.byteLength(direct.records[1].record.fields.body) > candidates.perPromptBytes);
+  assert.equal(direct.records[1].context, undefined);
+  assert.equal(direct.records[2].record.body, "A ledger notice should preserve the original record.");
+  assert.equal(direct.records[3].record.body, "A rehearsal reminder from the personal crest.");
+  assert.deepEqual([direct.records[4].ok, direct.records[4].reasonCode], [false, "WORKSPACE_INPUT_INVALID"]);
+  const full = await call("recall-read", [...flags, "--full", "true"]);
+  assert.deepEqual(full.records[0].record.decisions.map((row) => row.number), [1, 2]);
+  assert.deepEqual(full.records[1].context.records.map((row) => row.workId), [story.id, epic.id, parent.id]);
+  assert.equal(full.headEventHash, direct.headEventHash);
 });
 
 test("a 2060B second candidate cannot block a 788B third candidate in 1600B", () => {
