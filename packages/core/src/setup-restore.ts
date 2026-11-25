@@ -53,6 +53,7 @@ import { legacyControlDirectory } from "./legacy-workspace.js";
 import { MACHINE_SETTINGS_CATALOG, MACHINE_SETTINGS_FILE_NAME, readMachineSettings } from "./machine-settings.js";
 import { managedSectionRecordsFor, planManagedWrite } from "./managed-sections.js";
 import { DIRECTORY, LEGACY_CONTROL_DIRECTORY } from "./names.js";
+import { pathIsInside } from "./path-containment.js";
 import { gitRemoteOf, normalizeGitRemote, readAgentsProjectRootSelection, readRegistry, registeredAgentsProjectRoots, validateAgentsProjectRoot } from "./registry.js";
 import { registryPath } from "./device-home.js";
 import type { SetupApplied, SetupColumns, SetupCoordination, SetupModeInput, SetupModePlan, SetupPlan, SetupQuestion, ResolvedSetupAnswers } from "./setup.js";
@@ -647,21 +648,23 @@ function restoreQuestions(input: SetupModeInput, library: string | null, cloud: 
   return questions;
 }
 
-async function resolveRestoreAgentsRoot(recorder: SetupRecorder, libraryId: string, projectRoot: string, deviceHome: string, answer: string | undefined): Promise<string | null> {
+async function resolveRestoreAgentsRoot(recorder: SetupRecorder, library: Pick<VerifiedLibrary, "libraryId" | "root">, projectRoot: string, deviceHome: string, answer: string | undefined): Promise<string | null> {
+  const { libraryId } = library;
   if (answer !== undefined) {
     const candidate = resolve(projectRoot, answer);
     const root = await validateAgentsProjectRoot(libraryId, candidate, projectRoot, deviceHome);
-    if (root === null) recorder.block("registry", candidate, "SETUP_ANSWER_INVALID", `choose a managed-output root of library ${libraryId} with --project-root <dir>`);
-    return root;
+    if (root !== null && !pathIsInside(library.root, root)) return root;
+    recorder.block("registry", candidate, "SETUP_ANSWER_INVALID", `choose an eligible managed-output root of library ${libraryId} with --project-root <dir>`);
+    return null;
   }
   const prior = await readAgentsProjectRootSelection(libraryId, deviceHome);
-  if (prior.projectPath !== null) return prior.projectPath;
-  const roots = await registeredAgentsProjectRoots(libraryId, deviceHome);
+  if (prior.projectPath !== null && !pathIsInside(library.root, prior.projectPath)) return prior.projectPath;
+  const roots = (await registeredAgentsProjectRoots(libraryId, deviceHome)).filter(root => !pathIsInside(library.root, root));
   if (roots.length > 1) {
     recorder.block("registry", registryPath(deviceHome), "SETUP_ANSWER_REQUIRED", `library ${libraryId} has multiple registered roots; choose one with --project-root <dir>`);
     return null;
   }
-  return roots[0] ?? projectRoot;
+  return roots[0] ?? (pathIsInside(library.root, projectRoot) ? null : projectRoot);
 }
 
 /**
@@ -698,7 +701,7 @@ export async function planRestoreSetup(input: SetupModeInput): Promise<SetupMode
   const verification = await verifyRestore({ projectRoot, home, deviceHome, libraryPath: resolve(projectRoot, input.options.restore) });
   if (!verification.ok || verification.library === null) throw restoreRefusal(verification);
   const library = verification.library;
-  const agentsRoot = await resolveRestoreAgentsRoot(recorder, library.libraryId, projectRoot, deviceHome, answers.projectRoot);
+  const agentsRoot = await resolveRestoreAgentsRoot(recorder, library, projectRoot, deviceHome, answers.projectRoot);
   // Contract item 3: the coordination the restored library names is resolved on this device and
   // never replaced. One registered here is checked; the same identity at this device's default
   // coordination location is registered by the apply; one this device does not locate stays
@@ -736,7 +739,7 @@ export async function planRestoreSetup(input: SetupModeInput): Promise<SetupMode
   return {
     questions: [
       ...restoreQuestions(input, library.root, cloud),
-      ...(answers.projectRoot === undefined && agentsRoot === null
+      ...(recorder.blockers.some(blocker => blocker.step === "registry" && blocker.reasonCode === "SETUP_ANSWER_REQUIRED")
         ? [{ id: "projectRoot" as const, flag: "--project-root", default: null, choices: null }] : []),
     ],
     resolved,
@@ -790,8 +793,8 @@ export async function applyRestoreSetup(plan: SetupPlan): Promise<SetupApplied> 
   }
   const coordination = await restoredCoordinationBinding(chainIdentity(library.state), library.libraryId, deviceHome);
   const recorder = new SetupRecorder(deviceHome, at);
-  const agentsRoot = await resolveRestoreAgentsRoot(recorder, library.libraryId, projectRoot, deviceHome, plan.answers.projectRoot);
-  if (agentsRoot === null || agentsRoot !== resolved.projectRoot) {
+  const agentsRoot = await resolveRestoreAgentsRoot(recorder, library, projectRoot, deviceHome, plan.answers.projectRoot);
+  if (recorder.blockers.length > 0 || agentsRoot !== (resolved.projectRoot ?? null)) {
     return setupFail("SETUP_BLOCKED", "the managed-output root changed after restore was planned; make a new restore plan", { library: library.root });
   }
   const device = await applyDevice(recorder, deviceHome, at);
@@ -812,7 +815,7 @@ export async function applyRestoreSetup(plan: SetupPlan): Promise<SetupApplied> 
     ...(library.configurationProjectId === undefined ? {} : { configurationProjectId: library.configurationProjectId }),
     cloud: resolved.cloud,
     navigation: navigationChoice(resolved.navigation),
-    agentsProjectRoot: agentsRoot,
+    ...(agentsRoot === null ? {} : { agentsProjectRoot: agentsRoot }),
     engineDirectory: directory,
     actorId: SETUP_ACTOR,
   });

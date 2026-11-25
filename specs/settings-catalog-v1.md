@@ -702,6 +702,10 @@ adopts the sole eligible root; if multiple roots exist without a selection, it a
 `SETUP_ANSWER_REQUIRED`. Update and repair migrate old device settings by the same per-library
 rule: one eligible root is selected automatically, while multiple roots for the current library
 require one answer and persist it for later updates. A null tombstone is never treated as a default.
+An unavailable selected checkout retains its selection. Setup reports its managed output as
+unavailable until the checkout is reachable or the Owner explicitly selects another registered root.
+An in-place coordination restore without any eligible external root registers the library with
+managed output unconfigured.
 No selection creates a file; AGENTS.md is created by the next explicit managed-section write
 (`agents-render`, a rule change, setup).
 
