@@ -79,6 +79,7 @@ const CONSUMERS = Object.freeze({
   "paths.knowledgeArticles": "portable-path.ts local knowledge article binding resolution",
   "execution.maxConcurrentAgents": "execution-policy.ts device agent concurrency cap",
   "agents.navigation": "host-render.ts; host-hooks.ts local navigation installation",
+  "agents.projectRoot": "registry.ts per-library managed AGENTS.md output selection; machine-settings.ts scalar is legacy compatibility only",
   "crest.userPath": "device-home.ts user crest path resolution",
   "execution.memoryPolicy": "scripts/lib/memory-budget.mjs device safety policy and heavy-run admission",
   "execution.maxConcurrentHeavyRuns": "scripts/lib/heavy-runs.mjs slot acquisition",
@@ -137,9 +138,11 @@ function settingContracts(): readonly ConfigurationContractEntry[] {
     schemaOwner: "installed-engine",
     source: "device machine-settings.json",
     storageSource: "device machine-settings.json",
-    inheritance: entry.key.startsWith("portal.default") ? "browser/explicit startup choice before device preference; consumer fallback last" : "device declaration then consumer default",
+    inheritance: entry.key === "agents.projectRoot" ? "registry agentsProjectRoots[libraryId] selection; legacy scalar applies only to the library that registers its path; no cross-library fallback" : entry.key.startsWith("portal.default") ? "browser/explicit startup choice before device preference; consumer fallback last" : "device declaration then consumer default",
     sharing: "device-local; not library synced",
-    export: entry.key === "agents.navigation" ? "local host integration; shared navigation follows project generation contract" : "local runtime only; no shared project export",
+    export: entry.key === "agents.navigation" ? "local host integration; shared navigation follows project generation contract"
+      : entry.key === "agents.projectRoot" ? "device registry maps each library id to its selected registered real root or a null invalidation tombstone; legacy scalar stays local and is accepted only for its owning library; never written into a library or into AGENTS.md"
+      : "local runtime only; no shared project export",
     consumer: CONSUMERS[entry.key],
     effect: entry.key === "execution.maxConcurrentHeavyRuns" ? "next slot acquisition" : entry.appliesOn,
     compatibility: "catalog default may differ from consumer fallback; no global precedence chain",

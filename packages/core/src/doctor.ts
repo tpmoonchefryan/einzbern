@@ -71,7 +71,7 @@ import { readAgentsNavigation } from "./machine-settings.js";
 import { listRules } from "./rules.js";
 import { DIRECTORY } from "./names.js";
 import { NODE_FLOOR, meetsNodeFloor } from "./node-floor.js";
-import { gitRemoteOf, gitTopLevel, normalizeGitRemote, readRegistry } from "./registry.js";
+import { gitRemoteOf, gitTopLevel, normalizeGitRemote, readAgentsProjectRootSelection, readRegistry, registeredAgentsProjectRoots } from "./registry.js";
 import type { Registry, RegistryEntry, ResolutionPath } from "./registry.js";
 import { verifySkillCopies } from "./skill-copies.js";
 import { materializeWorkspaceFromGenesis, readLibraryTombstone } from "./workspace.js";
@@ -752,6 +752,27 @@ async function managedSectionsCheck(context: DoctorContext, located: ProjectLibr
   if (located.libraryPath === null) return result("managed-sections", ["LIBRARY_NOT_FOUND"], { libraryPath: null });
   // Replayed from the streams, read-only: neither the device cache nor the projection is trusted.
   const native = await materializeWorkspaceFromGenesis(located.libraryPath);
+  // This library's selected managed-output root can be another registered project:
+  // the engine writes no section into this project, so no file here can disagree with the library.
+  let selection: Awaited<ReturnType<typeof readAgentsProjectRootSelection>> = { libraryId: native.metadata.workspaceId, projectPath: null, source: "unset" };
+  let roots: readonly string[] = [];
+  try {
+    selection = await readAgentsProjectRootSelection(native.metadata.workspaceId, context.deviceHome);
+    roots = await registeredAgentsProjectRoots(native.metadata.workspaceId, context.deviceHome);
+  } catch (error) {
+    // A broken registry is already reported by the independent registry check. Keep inspecting
+    // the resolved library's current project as the doctor did before the per-library map existed.
+    if (causeOf(error) === null) throw error;
+  }
+  // A pre-upgrade device with exactly one eligible root keeps its former direct-write behavior.
+  // A persisted null is an invalidation tombstone and must wait for setup to select again.
+  const declaredRoot = selection.projectPath ?? (selection.source === "unset" && roots.length === 1 ? roots[0]! : null);
+  if (declaredRoot !== null && declaredRoot !== context.projectRoot) {
+    return result("managed-sections", [], { libraryPath: located.libraryPath, files: [], fileReadbacks: [], sections: [], pending: [], removed: [], outdated: [], problems: [], skipped: [], projectRoot: declaredRoot });
+  }
+  if (declaredRoot === null && (selection.source === "registry" || roots.length > 1)) {
+    return result("managed-sections", ["AGENTS_PROJECT_ROOT_REQUIRED"], { libraryPath: located.libraryPath, projectRoot: null, projectRoots: roots, files: [], fileReadbacks: [], sections: [], pending: [], removed: [], outdated: [], problems: [], skipped: [] });
+  }
   const state = isSharedLibrary(native) ? scopedWorkspaceState(native, located.entry?.projectId) : native;
   const effective = await effectiveProjectState(native, located.entry?.projectId);
   const recorded = state.configRecords.filter((record) => record.collection === MANAGED_SECTION_COLLECTION);

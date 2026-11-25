@@ -5,6 +5,12 @@ Versioning after the first accepted release.
 
 ## Unreleased
 
+### Managed AGENTS.md
+
+- Each library can select one registered directory on this device to hold its managed AGENTS.md. A managed write to another root of that library returns `MANAGED_SECTION_OUTPUT_UNREGISTERED`. Variable changes there still commit to the library. The device registry stores the selection, and older `agents.projectRoot` values are read for the library that owns the registered path.
+- Fresh setup, update and repair accept `--project-root <dir>`. With no existing selection, setup uses the sole eligible registered root, or the current project on a fresh installation with no registered roots. If the current library has several eligible roots, setup asks once and reuses the answer on later runs.
+- Unregistering or uninstalling the selected root invalidates the selection. Setup only offers eligible registered roots for the next selection.
+
 ## 5.8.0
 
 Einzbern and Mana Orchestrate ship in lockstep at 5.8.0.

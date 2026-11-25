@@ -69,7 +69,7 @@ import type {
   ParsedSection,
 } from "./managed-sections.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
-import { gitTopLevel, readRegistry, resolveLibrary } from "./registry.js";
+import { gitTopLevel, readAgentsProjectRootSelection, readRegistry, resolveLibrary } from "./registry.js";
 import type { ResolutionPath } from "./registry.js";
 import { BUILT_IN_RULES, builtInRule, ruleBody } from "./rules-catalog.js";
 import type { WithheldEntry } from "./variables-sections.js";
@@ -508,6 +508,17 @@ function insideLibrary(path: string, libraries: readonly string[]): boolean {
 }
 
 /**
+ * The one selected directory that takes a library's managed sections on this device, or null until
+ * that library has an effective selection. The device registry stores the per-library selection;
+ * the former scalar agents.projectRoot is read only as a compatibility hint for the library that
+ * registers its path. A null registry tombstone prevents an unregistered selection from reviving.
+ * `home` is the device directory whose registry is read, as in managedOutputBinding.
+ */
+export async function declaredManagedRoot(libraryId: string, home?: string): Promise<string | null> {
+  return (await readAgentsProjectRootSelection(libraryId, home)).projectPath;
+}
+
+/**
  * Where a library's managed sections may be written, checked by every entry point that writes them
  * (agents-render, rule-resolve, rule-enable, rule-disable and the variable sections), even for a direct
  * caller. A project root is never the library or a directory within it
@@ -524,27 +535,64 @@ function insideLibrary(path: string, libraries: readonly string[]): boolean {
  * entry point refuses (assertManagedOutputRoot). A project library is bound wherever it is not refused.
  * `home` is the device directory whose registry is read: this process's by default, setup's own
  * when setup plans (TCRN-CROSS-SUB-507, setup-fresh.ts).
+ *
+ * The per-library selected project root comes first (declaredManagedRoot): that library takes
+ * managed sections in that directory and in no other, a project library and a coordination library
+ * alike, and any other directory is refused with MANAGED_SECTION_OUTPUT_UNREGISTERED. A legacy
+ * installation with no map and one eligible root can use that sole root until setup migrates it.
  */
-export async function managedOutputBinding(libraryRoot: string, projectRoot: string, state: Pick<WorkspaceState, "configRecords" | "metadata">, home?: string): Promise<ManagedOutputBinding> {
+export async function managedOutputBinding(libraryRoot: string, projectRoot: string, state: Pick<WorkspaceState, "configRecords" | "metadata">, home?: string, options?: { readonly agentsProjectRoot?: string | null }): Promise<ManagedOutputBinding> {
   const library = await realpath(libraryRoot);
   const project = await realpath(projectRoot);
+  const registry = await readRegistry(home);
+  const libraries = [library, ...registry.entries.map((entry) => entry.libraryPath)];
+  const registered = registry.entries.filter((entry) => entry.libraryId === state.metadata.workspaceId);
+  const roots = [...new Set(registered.map((entry) => entry.projectPath).filter(root => !insideLibrary(root, libraries)))].sort();
   const insideRefusal = (): never => fail("MANAGED_SECTION_OUTPUT_INSIDE_LIBRARY", `managed prose cannot be written inside a library: ${project} is ${library} or lies within a library`, {
     library,
     project,
   });
-  if (chainIdentity(state)?.role !== "coordination") {
-    if (insideLibrary(project, [library])) insideRefusal();
+  const selectionState = await readAgentsProjectRootSelection(state.metadata.workspaceId, home);
+  const hasPlannedSelection = options !== undefined && Object.hasOwn(options, "agentsProjectRoot");
+  const declaredRoot = hasPlannedSelection
+    ? options.agentsProjectRoot ?? null
+    : selectionState.projectPath ?? (selectionState.source === "unset" && roots.length === 1 ? roots[0]! : null);
+  if (declaredRoot !== null) {
+    if (insideLibrary(project, libraries)) insideRefusal();
+    if (declaredRoot !== project) {
+      fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `this device writes the library's managed sections only into its selected registered project root ${declaredRoot}, not ${project}`, {
+        library,
+        project,
+        remedy: "setup --mode repair --project-root",
+      });
+    }
     return "bound";
   }
-  const registry = await readRegistry(home);
-  const libraries = [library, ...registry.entries.map((entry) => entry.libraryPath)];
-  const roots = registry.entries
-    .filter((entry) => entry.libraryId === state.metadata.workspaceId && !insideLibrary(entry.projectPath, libraries))
-    .map((entry) => entry.projectPath);
-  if (roots.length === 0) return "unconfigured";
+  if (roots.length > 1) {
+    if (insideLibrary(project, libraries)) insideRefusal();
+    fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `the device has ${roots.length} registered project roots for library ${state.metadata.workspaceId}; choose one with setup --project-root before writing managed sections`, {
+      library,
+      project,
+      remedy: "setup --project-root",
+    });
+  }
+  if (roots.length > 0 && declaredRoot === null) {
+    if (insideLibrary(project, libraries)) insideRefusal();
+    fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `the device has no effective managed-output root selected for library ${state.metadata.workspaceId}; choose one with setup --project-root`, {
+      library,
+      project,
+      remedy: "setup --mode update --project-root",
+    });
+  }
+  if (roots.length === 0 && chainIdentity(state)?.role === "coordination") return "unconfigured";
+  if (roots.length === 0 && registered.length > 0) return "unconfigured";
+  if (roots.length === 0) {
+    if (insideLibrary(project, libraries)) insideRefusal();
+    return "bound";
+  }
   if (insideLibrary(project, libraries)) insideRefusal();
   if (!roots.includes(project)) {
-    fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `the coordination library ${state.metadata.workspaceId} writes managed sections only into the project root this device registered for it, not ${project}`, {
+    fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `the library ${state.metadata.workspaceId} writes managed sections only into its registered project root, not ${project}`, {
       library,
       project,
       remedy: "library-register",
@@ -560,10 +608,10 @@ export async function managedOutputBinding(libraryRoot: string, projectRoot: str
  */
 export async function assertManagedOutputRoot(libraryRoot: string, projectRoot: string, state: Pick<WorkspaceState, "configRecords" | "metadata">): Promise<void> {
   if (await managedOutputBinding(libraryRoot, projectRoot, state) === "unconfigured") {
-    fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `the coordination library ${state.metadata.workspaceId} has no project root registered on this device outside a library, so its managed sections have nowhere to go`, {
+    fail("MANAGED_SECTION_OUTPUT_UNREGISTERED", `the library ${state.metadata.workspaceId} has no selected registered project root on this device, so its managed sections have nowhere to go`, {
       library: await realpath(libraryRoot),
       project: await realpath(projectRoot),
-      remedy: "library-register",
+      remedy: "setup --project-root",
     });
   }
 }

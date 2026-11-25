@@ -33,9 +33,12 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 //                     as a place the host may write (host-writable-roots.ts); either file that Git
 //                     tracks is named in the warnings of the plan and of the receipt
 //                     (HOST_WRITABLE_ROOTS_TRACKED_BY_GIT, TCRN-CROSS-SUB-385 R16)
-//   machine-settings  the device key agents.navigation (--navigation)
+//   machine-settings  the device key agents.navigation (--navigation); the legacy agents.projectRoot
+//                     value is kept for compatibility while the selected managed-output root is
+//                     stored in registry.json per library, with a same-library default or answer
 //   managed-sections  CLAUDE.md's import section, AGENTS.md's navigation section when it is written,
-//                     and AGENTS.md's variable sections (agents-sections.ts)
+//                     and AGENTS.md's variable sections (agents-sections.ts); none when the device's
+//                     project root is another root of the same library
 //
 // The engine version directory is the one engine/current names: the skill's scripts/install.mjs
 // puts it there before the wizard runs, laid out as the release is (scripts/pack-release.mjs). An
@@ -58,7 +61,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 // The barrel is loaded first, so every module below is evaluated in the order the engine's own entry
 // evaluates it, whichever module a caller imports first.
 import { FRAMEWORK_VERSION } from "./framework-version.js";
-import { AGENTS_FILE, CLAUDE_FILE, disableAgentsSection, managedOutputBinding, planClaudeImport, renderAgentsSections } from "./agents-sections.js";
+import { AGENTS_FILE, CLAUDE_FILE, declaredManagedRoot, disableAgentsSection, managedOutputBinding, planClaudeImport, renderAgentsSections } from "./agents-sections.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { DOT_INSTALLATION_TARGET, applyDotAgents, assertNotDotAgentsTarget, planDotAgents } from "./dot-agents.js";
 import { suggestCloudHosted } from "./cloud-roots.js";
@@ -84,12 +87,12 @@ import {
 } from "./host-writable-roots.js";
 import { computeInstallTreeDigest } from "./install-tree-digest.js";
 import { ARTIFACT_LANGUAGE_TAGS } from "./knowledge-language.js";
-import { AGENTS_NAVIGATION_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSettingSet, readAgentsNavigation } from "./machine-settings.js";
+import { AGENTS_NAVIGATION_SETTING, AGENTS_PROJECT_ROOT_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSettingSet, readAgentsNavigation, readAgentsProjectRoot } from "./machine-settings.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
 import { managedSectionRecordsFor, parseManagedFile } from "./managed-sections.js";
 import type { ManagedWritePlan } from "./managed-sections.js";
 import { BRAND } from "./names.js";
-import { gitRemoteOf, normalizeGitRemote, readRegistry, registryPathsPortable, registerLibrary } from "./registry.js";
+import { gitRemoteOf, normalizeGitRemote, readAgentsProjectRootSelection, readRegistry, registeredAgentsProjectRoots, registryPathsPortable, registerLibrary, validateAgentsProjectRoot } from "./registry.js";
 import type { Registry } from "./registry.js";
 import { SETTINGS_CATALOG } from "./settings.js";
 import { SETUP_ACTOR, SETUP_APPLIED_SCHEMA_VERSION, SETUP_QUESTIONS, setupFail } from "./setup.js";
@@ -427,6 +430,33 @@ export async function readDeviceNavigation(recorder: SetupRecorder, deviceHome: 
   }
 }
 
+/**
+ * Legacy agents.projectRoot scalar, retained as a compatibility hint and mirror. The registry map
+ * is authoritative per library. A settings file that does not read answers null here:
+ * readDeviceNavigation has made it a blocker of machine-settings already.
+ */
+async function readDeviceProjectRoot(deviceHome: string): Promise<string | null> {
+  try {
+    return await readAgentsProjectRoot(deviceHome);
+  } catch (error) {
+    if (reasonOf(error) === null) throw error;
+    return null;
+  }
+}
+
+/**
+ * This device's registry entries, for what the project root question and the managed-sections step
+ * read of them. A registry that does not read answers none here: the registry step makes it a blocker.
+ */
+async function registeredEntries(deviceHome: string): Promise<Registry["entries"]> {
+  try {
+    return (await readRegistry(deviceHome)).entries;
+  } catch (error) {
+    if (reasonOf(error) === null) throw error;
+    return [];
+  }
+}
+
 /** The device step: device.json is created when it is absent; one that is there must read. */
 export async function planDevice(recorder: SetupRecorder, deviceHome: string): Promise<void> {
   const deviceFile = deviceFilePath(deviceHome);
@@ -497,8 +527,8 @@ function questionsFor(input: SetupModeInput, defaults: ResolvedSetupAnswers): re
   };
   return SETUP_QUESTIONS.filter((id) => input.answers[id] === undefined).map((id) => ({
     id,
-    flag: `--${id}`,
-    default: defaults[id],
+    flag: id === "projectRoot" ? "--project-root" : `--${id}`,
+    default: defaults[id] ?? null,
     choices: choices[id] ?? null,
   }));
 }
@@ -519,6 +549,8 @@ export interface WiringPlanInput {
   readonly navigation: AgentsNavigationChoice;
   // What this device holds for agents.navigation now.
   readonly deviceNavigation: AgentsNavigationChoice | null;
+  // The selected root for this library on this device, as this plan leaves it.
+  readonly agentsProjectRoot?: string;
   // What the skill copies and the launchers come from; null when there is nothing to install from.
   readonly engine: EngineFiles | null;
   // The steps planned; every step from registry on when left out.
@@ -538,7 +570,9 @@ async function planRegistry(recorder: SetupRecorder, input: WiringPlanInput, lib
   const entry = registry.entries.find((candidate) => candidate.projectPath === input.projectRoot) ?? null;
   const current = entry !== null && entry.libraryPath === library.path && entry.cloudHosted === input.cloud && entry.gitRemote === remote &&
     (library.libraryId === null || entry.libraryId === library.libraryId);
-  if (!current || !await registryPathsPortable(input.deviceHome)) recorder.write("registry", registryFile, await entryKind(registryFile) === null ? "create" : "update");
+  const selectedRootCurrent = library.libraryId === null || input.agentsProjectRoot === undefined ||
+    (Object.hasOwn(registry.agentsProjectRoots ?? {}, library.libraryId) && registry.agentsProjectRoots![library.libraryId] === input.agentsProjectRoot);
+  if (!current || !selectedRootCurrent || !await registryPathsPortable(input.deviceHome)) recorder.write("registry", registryFile, await entryKind(registryFile) === null ? "create" : "update");
 }
 
 async function planSkillCopies(recorder: SetupRecorder, digest: string, home: string, deviceHome: string, includeKiro = false, includeAntigravity = false): Promise<void> {
@@ -714,8 +748,8 @@ async function planSections(recorder: SetupRecorder, projectRoot: string, state:
 // outside every library (agents-sections.ts, managedOutputBinding). Its sections are planned and written
 // as a project's are, from the library's own configuration; any other root of a coordination library
 // (one within a library, as setup registers its own coordination library) takes none.
-async function coordinationSectionsRoot(libraryPath: string, projectRoot: string, state: WorkspaceState, deviceHome: string): Promise<boolean> {
-  return managedOutputBinding(libraryPath, projectRoot, state, deviceHome).then((binding) => binding === "bound", () => false);
+async function coordinationSectionsRoot(libraryPath: string, projectRoot: string, state: WorkspaceState, deviceHome: string, agentsProjectRoot?: string): Promise<boolean> {
+  return managedOutputBinding(libraryPath, projectRoot, state, deviceHome, agentsProjectRoot === undefined ? undefined : { agentsProjectRoot }).then((binding) => binding === "bound", () => false);
 }
 
 /**
@@ -738,13 +772,22 @@ export async function planWiring(recorder: SetupRecorder, input: WiringPlanInput
   if (runs(steps, "host-hooks")) await planHooks(recorder, home, deviceHome, navigation, true, input.codexAdmission, input.enableHooksAuthorized === true, projectRoot);
   if (library !== null && runs(steps, "writable-roots")) await planRoots(recorder, projectRoot, library.path);
   const settingsFile = join(deviceHome, MACHINE_SETTINGS_FILE_NAME);
-  if (runs(steps, "machine-settings") && input.deviceNavigation !== navigation && recorder.blockers.every((blocker) => blocker.step !== "machine-settings")) {
+  const heldRoot = await readDeviceProjectRoot(deviceHome);
+  const agentsRoot = input.agentsProjectRoot ?? (library?.libraryId == null ? null : await declaredManagedRoot(library.libraryId, deviceHome));
+  // Maintain the old scalar for existing integrations. Runtime managed-output selection reads the
+  // per-library registry map and scopes this scalar to the library that registers its path.
+  const compatibilityRoot = input.agentsProjectRoot ?? heldRoot;
+  if (runs(steps, "machine-settings") && (input.deviceNavigation !== navigation || compatibilityRoot !== heldRoot) && recorder.blockers.every((blocker) => blocker.step !== "machine-settings")) {
     recorder.write("machine-settings", settingsFile, await entryKind(settingsFile) === null ? "create" : "update");
   }
   if (library === null || !runs(steps, "managed-sections")) return [];
+  const currentLibraryEntries = library.libraryId === null ? [] : (await registeredEntries(deviceHome)).filter(entry => entry.libraryId === library.libraryId);
+  if (agentsRoot !== null && agentsRoot !== projectRoot && currentLibraryEntries.some(entry => entry.projectPath === agentsRoot)) return [];
+  if (agentsRoot === null && currentLibraryEntries.length > 1) return [];
+  if (agentsRoot === null && currentLibraryEntries.length === 1 && currentLibraryEntries[0]!.projectPath !== projectRoot) return [];
   if (library.state.configRecords.some((record) => record.collection === "chain" && record.key === "identity" && record.projectId === undefined && record.value.role === "coordination")) {
     const native = await materializeWorkspaceFromGenesis(library.path);
-    if (!await coordinationSectionsRoot(library.path, projectRoot, native, deviceHome)) return [];
+    if (!await coordinationSectionsRoot(library.path, projectRoot, native, deviceHome, agentsRoot ?? undefined)) return [];
     const sections = await planSections(recorder, projectRoot, scopedWorkspaceState(native), navigation);
     if (sections.recordsChange) recorder.write("library", library.path, "update");
     return sections.pending;
@@ -771,6 +814,8 @@ export interface WiringApplyInput {
   readonly library: { readonly path: string; readonly libraryId: string } | null;
   readonly cloud: boolean;
   readonly navigation: AgentsNavigationChoice;
+  // The selected registered root for this library; left out, an existing selection stays.
+  readonly agentsProjectRoot?: string;
   readonly engineDirectory: string;
   readonly steps?: ReadonlySet<SetupStep>;
   // The actor named on each event the steps write into the library, which a chain that enabled
@@ -816,10 +861,13 @@ async function applyRegistry(recorder: SetupRecorder, input: WiringApplyInput, l
   const { projectRoot, deviceHome, at } = input;
   const remote = normalizedRemote(projectRoot);
   const registryFile = registryPath(deviceHome);
-  const entry = (await readRegistry(deviceHome)).entries.find((candidate) => candidate.projectPath === projectRoot) ?? null;
-  if (entry !== null && entry.projectId === input.configurationProjectId && entry.libraryPath === library.path && entry.libraryId === library.libraryId && entry.cloudHosted === input.cloud && entry.gitRemote === remote.normalized && await registryPathsPortable(deviceHome)) return;
+  const registry = await readRegistry(deviceHome);
+  const entry = registry.entries.find((candidate) => candidate.projectPath === projectRoot) ?? null;
+  const selectedRootCurrent = input.agentsProjectRoot === undefined ||
+    (Object.hasOwn(registry.agentsProjectRoots ?? {}, library.libraryId) && registry.agentsProjectRoots![library.libraryId] === input.agentsProjectRoot);
+  if (entry !== null && entry.projectId === input.configurationProjectId && entry.libraryPath === library.path && entry.libraryId === library.libraryId && entry.cloudHosted === input.cloud && entry.gitRemote === remote.normalized && selectedRootCurrent && await registryPathsPortable(deviceHome)) return;
   const kind = await entryKind(registryFile);
-  await registerLibrary({ projectPath: projectRoot, libraryPath: library.path, ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), registeredAt: at, cloudHosted: input.cloud, gitRemote: remote.raw }, deviceHome);
+  await registerLibrary({ projectPath: projectRoot, libraryPath: library.path, ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), registeredAt: at, cloudHosted: input.cloud, gitRemote: remote.raw, ...(input.agentsProjectRoot === undefined ? {} : { agentsProjectRoot: input.agentsProjectRoot }) }, deviceHome);
   recorder.write("registry", registryFile, kind === null ? "create" : "update");
 }
 
@@ -939,11 +987,16 @@ async function applyRoots(recorder: SetupRecorder, input: WiringApplyInput, libr
   }
 }
 
-async function applyNavigationSetting(recorder: SetupRecorder, input: WiringApplyInput): Promise<void> {
+// The machine-settings step: navigation and a compatibility mirror of the selected project root.
+// The registry map remains authoritative. One recorded settings-file write, as the plan lists it.
+async function applyDeviceSettings(recorder: SetupRecorder, input: WiringApplyInput): Promise<void> {
   const settingsFile = join(input.deviceHome, MACHINE_SETTINGS_FILE_NAME);
-  if (await readAgentsNavigation(input.deviceHome) === input.navigation) return;
+  const navigationChanges = await readAgentsNavigation(input.deviceHome) !== input.navigation;
+  const rootChanges = input.agentsProjectRoot !== undefined && await readAgentsProjectRoot(input.deviceHome) !== input.agentsProjectRoot;
+  if (!navigationChanges && !rootChanges) return;
   const action: SetupWriteAction = await entryKind(settingsFile) === null ? "create" : "update";
-  await applyMachineSettingSet({ key: AGENTS_NAVIGATION_SETTING, value: input.navigation, occurredAt: input.at, path: settingsFile });
+  if (navigationChanges) await applyMachineSettingSet({ key: AGENTS_NAVIGATION_SETTING, value: input.navigation, occurredAt: input.at, path: settingsFile });
+  if (rootChanges) await applyMachineSettingSet({ key: AGENTS_PROJECT_ROOT_SETTING, value: input.agentsProjectRoot, occurredAt: input.at, path: settingsFile });
   recorder.write("machine-settings", settingsFile, action);
 }
 
@@ -1016,8 +1069,14 @@ export async function applyWiring(recorder: SetupRecorder, input: WiringApplyInp
   if (runs(steps, "launchers")) await applyLaunchers(recorder, input);
   if (runs(steps, "host-hooks")) await applyHooks(recorder, input);
   if (library !== null && runs(steps, "writable-roots")) await applyRoots(recorder, input, library);
-  if (runs(steps, "machine-settings")) await applyNavigationSetting(recorder, input);
-  return library !== null && runs(steps, "managed-sections") && coordinationRoot !== false ? applySections(recorder, input, library) : [];
+  if (runs(steps, "machine-settings")) await applyDeviceSettings(recorder, input);
+  if (library === null || !runs(steps, "managed-sections") || coordinationRoot === false) return [];
+  // Another root of this library is its selected managed-output root: it alone takes the sections, as
+  // planWiring planned. The settings and registry steps above have run, so the device's own
+  // records answer.
+  const declaredRoot = await declaredManagedRoot(library.libraryId, input.deviceHome);
+  if (declaredRoot !== null && declaredRoot !== input.projectRoot) return [];
+  return applySections(recorder, input, library);
 }
 
 /** SETUP_APPLIED for a plan, with what the recorder kept (its warnings too) and doctor's eight checks right after. */
@@ -1097,17 +1156,42 @@ export async function planFreshSetup(input: SetupModeInput): Promise<SetupModePl
   // library
   const library = await planLibrary(recorder, input, artifacts);
   const currentLanguage = libraryLanguage(library.action === "reuse" ? await setupTargetState(projectRoot, library.path, deviceHome) : library.state);
+  // The root is device-local and per library. Legacy device-wide state is accepted only when its
+  // path is registered to this library; otherwise one same-library root is the safe default.
+  const sameLibraryRoots = library.libraryId === null ? [] : [...await registeredAgentsProjectRoots(library.libraryId, deviceHome)];
+  const currentIsEligible = await validateAgentsProjectRoot(library.libraryId, projectRoot, projectRoot, deviceHome);
+  if (currentIsEligible !== null && !sameLibraryRoots.includes(currentIsEligible)) sameLibraryRoots.push(currentIsEligible);
+  const priorSelection = library.libraryId === null ? null : await readAgentsProjectRootSelection(library.libraryId, deviceHome).then(selection => selection.projectPath, error => {
+    if (reasonOf(error) === null) throw error;
+    return null;
+  });
+  const inferredDefault = priorSelection ?? (sameLibraryRoots.length === 0 ? projectRoot : sameLibraryRoots.length === 1 ? sameLibraryRoots[0]! : null);
+  const defaultProjectRoot = inferredDefault === null ? null : await validateAgentsProjectRoot(library.libraryId, inferredDefault, projectRoot, deviceHome);
+  const explicitProjectRoot = answers.projectRoot === undefined ? null : await validateAgentsProjectRoot(library.libraryId, resolve(projectRoot, answers.projectRoot), projectRoot, deviceHome);
+  const agentsRoot = answers.projectRoot === undefined ? defaultProjectRoot : explicitProjectRoot;
+  if (agentsRoot === null) {
+    if (answers.projectRoot !== undefined) {
+      const invalidPath = await realTarget(resolve(projectRoot, answers.projectRoot));
+      recorder.block("machine-settings", invalidPath, "SETUP_ANSWER_INVALID",
+        `the managed-output root must be this project or a registered root of library ${library.libraryId ?? "being created"}`);
+    } else {
+      recorder.block("machine-settings", join(deviceHome, MACHINE_SETTINGS_FILE_NAME), "SETUP_ANSWER_REQUIRED",
+        "this device has multiple registered roots for the library; choose the one that keeps its managed sections with --project-root <dir>");
+    }
+  }
   const defaults: ResolvedSetupAnswers = {
     artifacts,
     cloud: defaultCloud(context, artifacts),
     language: currentLanguage ?? defaultLanguage(),
     navigation: deviceNavigation !== "declined",
+    ...(defaultProjectRoot === null ? {} : { projectRoot: defaultProjectRoot }),
   };
   const resolved: ResolvedSetupAnswers = {
     artifacts,
     cloud: answers.cloud ?? defaults.cloud,
     language: answers.language === undefined ? defaults.language : freshLanguageTag(answers.language),
     navigation: answers.navigation ?? defaults.navigation,
+    ...(agentsRoot === null ? {} : { projectRoot: agentsRoot }),
   };
   if (library.action === "create") recorder.write("library", library.path, "create");
   else if (currentLanguage !== resolved.language) recorder.write("library", library.path, "update");
@@ -1145,6 +1229,7 @@ export async function planFreshSetup(input: SetupModeInput): Promise<SetupModePl
     cloud: resolved.cloud,
     navigation: navigationChoice(resolved.navigation),
     deviceNavigation,
+    ...(agentsRoot === null ? {} : { agentsProjectRoot: agentsRoot }),
     engine: files,
   });
   if ((basename(artifacts) === DIRECTORY.cloudDefaultParent || artifacts === defaultSharedLibraryPath(deviceHome)) && readStorageLocation(deviceHome) === null) recorder.write("device", join(deviceHome, "storage-location.json"), "create");
@@ -1239,6 +1324,7 @@ export async function applyFreshSetup(plan: SetupPlan): Promise<SetupApplied> {
     configurationProjectId,
     cloud: resolved.cloud,
     navigation: navigationChoice(resolved.navigation),
+    ...(resolved.projectRoot === undefined ? {} : { agentsProjectRoot: resolved.projectRoot }),
     engineDirectory: directory,
   });
 

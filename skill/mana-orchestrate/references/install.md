@@ -7,7 +7,8 @@ It is the wizard for a first installation, `setup --mode fresh`: one screen of q
 confirmation, then the apply. Run the engine verbs below the way SKILL.md says to invoke the
 engine. Supply two flags yourself: `--project <dir>`, the root of the project being set up (ask
 only when it is unclear which project), and `--at <UTC>`, the current instant written
-`YYYY-MM-DDTHH:MM:SSZ`.
+`YYYY-MM-DDTHH:MM:SSZ`. Where this device keeps the AGENTS.md Einzbern manages is a question of
+its own, the project root below, and the user answers it.
 
 ## Installation layers
 
@@ -80,6 +81,19 @@ never ask again for an answer the user already gave, and never guess an answer.
    `--navigation false`. The answer belongs to this device, not to the project, and each project
    registered here follows it only once it is repaired: when the answer changes, repair each
    other project `library-list` names with the same `--navigation` answer, as `update.md` says.
+5. Project root. The folder that keeps the AGENTS.md Einzbern manages for this library on this
+   device. The skill and the hooks live in the user's home; AGENTS.md is the only file that
+   lives with a project, so the user says where it is. One library has one such folder on a
+   device: another project of the same library is registered and recalled as usual and takes no
+   managed sections of its own. The plan suggests the root this device already holds, else the
+   project being set up when it is the library's first here. When the library already has other
+   projects registered on a device that holds no root, the plan has no suggestion and reports
+   `SETUP_ANSWER_REQUIRED`: the user must name it. An answer is the project being set up or a
+   project root this device registered; to keep one AGENTS.md for a folder of several projects,
+   set that folder up as the project (`--project`). Always ask this question on a first
+   installation and never take the current directory for the answer.
+   Flag: `--project-root <dir>`. The answer belongs to this device; it is changed later with
+   `machine-settings-set --key agents.projectRoot --value <dir> --at <UTC>`.
 
 ## Model groups for the selected host
 
@@ -158,6 +172,7 @@ Antigravity IDE or Antigravity App.
 | Cloud drive | `--cloud true` or `--cloud false` |
 | Language | `--language <tag>` |
 | Navigation section | `--navigation true` or `--navigation false` |
+| Project root of this device | `--project-root <dir>` |
 | Yes at the final confirmation | `--yes true` |
 
 Check the installation again at any time with `doctor --project <dir>`.
