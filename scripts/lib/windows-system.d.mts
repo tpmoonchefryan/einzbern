@@ -8,4 +8,5 @@ export declare function windowsJobProcesses(name: string): { Exists: boolean; Pi
 export declare function queryWindows(script: string, timeoutMs?: number): unknown;
 export declare function createPrivateWindowsDirectory(path: string): boolean;
 export declare function hasPrivateWindowsPermissions(path: string, privateRead?: boolean): boolean;
+export declare function inspectWindowsPermissions(path: string, privateRead?: boolean): "accepted" | "policy-rejected" | "helper-unavailable" | "query-failed";
 export declare function retireWindowsOutputSession(path: string, expectedOwner: Uint8Array, destination: string): boolean;

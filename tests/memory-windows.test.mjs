@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/pro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireHeavySlot } from "../scripts/lib/heavy-runs.mjs";
-import { queryWindows } from "../scripts/lib/windows-system.mjs";
+import { inspectWindowsPermissions, queryWindows } from "../scripts/lib/windows-system.mjs";
 import { checkMemorySample, memoryTestArguments, parseMemoryPolicy, processTable, resolveMemoryDirectory, sampleMemory } from "../scripts/lib/memory-budget.mjs";
 
 const memoryModule = new URL("../scripts/lib/memory-budget.mjs", import.meta.url).href;
@@ -256,5 +256,20 @@ $rule = [Security.AccessControl.FileSystemAccessRule]::new($everyone, 'Write', '
 $acl.AddAccessRule($rule);
 [IO.Directory]::SetAccessControl($path, $acl);
 `], { timeout: 15_000, windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
-  assert.throws(() => resolveMemoryDirectory(undefined, directory), { reasonCode: "MEMORY_DOMAIN_INVALID" });
+  assert.throws(() => resolveMemoryDirectory(undefined, directory), { reasonCode: "MEMORY_DOMAIN_INVALID", details: { aclStatus: "policy-rejected" } });
+  assert.equal(inspectWindowsPermissions(join(directory, "missing")), "query-failed");
+});
+
+test("native Windows domain reports an unavailable ACL helper on a private directory", { skip: process.platform !== "win32" }, async t => {
+  const directory = await privateWindowsDirectory(t);
+  assert.equal(resolveMemoryDirectory(undefined, directory), directory);
+  const child = spawnSync(process.execPath, ["--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import { resolveMemoryDirectory } from ${JSON.stringify(memoryModule)};
+    delete process.env.SystemRoot;
+    assert.throws(() => resolveMemoryDirectory(undefined, process.argv[1]), {
+      reasonCode: "MEMORY_DOMAIN_INVALID", details: { aclStatus: "helper-unavailable" }
+    });
+  `, directory], { encoding: "utf8", windowsHide: true, timeout: 15_000 });
+  assert.equal(child.status, 0, child.stderr);
 });
