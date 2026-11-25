@@ -9,7 +9,8 @@ import { readRecallAuthority } from "../../core/src/recall-authority.js";
 import { effectiveProjectState } from "../../core/src/project-state-read.js";
 import { readRuntimeKnowledgeLanguagePolicy, resolveQueryLanguage } from "../../core/src/knowledge-language.js";
 import { RECALL_DEFAULT_TAU, preparePersistentRecall, recallDocuments, recallPersistent } from "../../core/src/recall.js";
-import { formatRecallLine, readRecallCards, recallContextLines, recallDecisionHints, recallInputsFromState } from "../../core/src/recall-inputs.js";
+import type { RecallHit } from "../../core/src/recall.js";
+import { formatRecallLine, readRecallCards, recallContextEntries, recallDecisionHints, recallInputsFromState } from "../../core/src/recall-inputs.js";
 import type { RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { DecisionStatusFilter } from "../../core/src/minutes.js";
 import type { KnowledgeStatusFilter } from "../../core/src/knowledge-core.js";
@@ -53,7 +54,7 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   const values = parseArguments(rest, ["project-id", "workspace", "host", "at", "query", "limit", "tau", "allow-trailing", "status", "view"]);
   required(values, ["workspace", "at", "query"]);
   const status = recallStatusOption(values.status);
-  if (values.view !== undefined && values.view !== "agent") fail("CLI_ARGUMENT_MALFORMED", "view");
+  if (values.view !== undefined && values.view !== "agent" && values.view !== "preview") fail("CLI_ARGUMENT_MALFORMED", "view");
   const cardStatus: KnowledgeStatusFilter = status.status === "removed" || status.status === "all" ? status.status : "valid";
   const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
   const workspace = values.workspace ?? "";
@@ -102,6 +103,7 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
         ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) })),
       query,
       tau,
+      ...(values.view === "preview" ? { explain: true } : {}),
       ...(limit === undefined ? {} : { limit }),
     }, workspace, prepared);
   } catch (error) {
@@ -122,12 +124,27 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   // under obsoleteDecisions, with the decision that superseded it (null when withdrawn), and its line
   // says so.
   const hits = recallDecisionHints(state, cards.cards, statusHits, { decisions });
-  const context = [...recallContextLines(hits, perPromptBytes)];
+  const delivery = recallContextEntries(hits, perPromptBytes);
+  const context = delivery.map((entry) => entry.line);
   const source = {
     workspaceId: state.metadata.workspaceId,
     version: state.version,
     headEventHash: state.headEventHash,
   };
+  if (result.explanation !== undefined) {
+    const { threshold, matchedTerms, nearMisses } = result.explanation;
+    const candidate = (hit: RecallHit) => ({
+      id: hit.id, key: hit.key, title: hit.title, kind: hit.kind, score: String(hit.score),
+      matchedTerms: matchedTerms.get(hit.id) ?? [],
+      ...(hit.decision === undefined ? {} : { decisionReference: hit.decision.reference }),
+    });
+    io.write(canonicalJson({
+      schemaVersion: "tcrn.recall-preview.v1", reasonCode: result.reasonCode, ...source, ...status,
+      indexed: result.indexed, threshold: String(threshold), tau: String(result.tau), relativeFloor: String(result.relativeFloor),
+      candidates: delivery.map(({ hit }) => candidate(hit)), nearMisses: nearMisses.map(candidate),
+    }));
+    return;
+  }
   const knowledge = {
     knowledgeReasonCode: cards.stores.project.reasonCode,
     // Both stores' reads: each one's reason code and how many cards it gave.

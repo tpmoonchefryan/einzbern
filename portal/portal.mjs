@@ -1204,6 +1204,19 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       send(response, result.ok ? 200 : 409, result.body);
       return;
     }
+    if (request.method === "POST" && pathname === "/api/recall/preview") {
+      const selected = currentLibrary();
+      const body = await readJsonBody(request);
+      if (typeof body?.query !== "string" || body.query.trim() === "" || !body.query.isWellFormed() || body.query.includes("\0")) {
+        send(response, 400, { ok: false, reasonCode: "PORTAL_RECALL_QUERY_INVALID" });
+        return;
+      }
+      const result = await cliResult(["recall", "--workspace", selected.libraryPath, "--at", readInstant(),
+        "--query", body.query, "--view", "preview",
+        ...(selected.configurationProjectId ? ["--project-id", selected.configurationProjectId] : [])]);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
+      return;
+    }
     if (request.method === "GET" && pathname === "/api/vocabulary") {
       send(response, 200, await vocabulary());
       return;

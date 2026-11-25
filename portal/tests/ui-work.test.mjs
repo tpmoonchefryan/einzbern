@@ -3,6 +3,39 @@ import { canonicalDocumentBytes } from "../../scripts/lib/canonical-json.mjs";
 // Tests in this file run sequentially; Node isolates each file in a process.
 import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile } from "./ui-presence-support.mjs";
 
+if (!MUTATION) test("INIT-003 recall preview shows the same candidate and terms as the engine", async () => {
+  const page = await preparePage();
+  try {
+    const { document, window, workspace, deviceEnv } = page;
+    const { record } = await cli(["work-create", "--workspace", workspace, "--project-id", page.fixture.projectId,
+      "--at", nextAt(), "--kind", "Initiative", "--external-key", "PREVIEW-INIT-040", "--title", "Quartz route checks",
+      "--summary", "Read the current quartz route checks"], deviceEnv);
+    const args = ["recall", "--workspace", workspace, "--project-id", page.fixture.projectId, "--at", nextAt(), "--query", record.externalKey];
+    const normal = await cli(args, deviceEnv);
+    const preview = await cli([...args, "--view", "preview"], deviceEnv);
+    assert.equal(preview.candidates[0].id, record.id);
+    assert.ok(normal.context.some((line) => line.includes(record.externalKey)));
+    assert.deepEqual(preview.candidates[0].matchedTerms, [record.externalKey]);
+    document.querySelector('[data-page-target="recall-preview"]').click();
+    const panel = document.querySelector('[data-page="recall-preview"]');
+    assert.equal(panel.hidden, false);
+    const form = panel.querySelector("form");
+    const input = form.querySelector("textarea");
+    const submit = (query) => { input.value = query; form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); };
+    const row = () => panel.querySelector('[data-recall-preview-table="candidates"] tbody tr');
+    submit(record.externalKey);
+    await waitFor(() => row()?.textContent.includes(record.externalKey), "the rendered recall candidate");
+    assert.deepEqual([...row().querySelectorAll("td")].map((cell) => cell.textContent), [record.externalKey, record.title, preview.candidates[0].score, record.externalKey]);
+    document.querySelector('[data-locale-option="fr"]').click();
+    assert.equal(panel.querySelector("h1").textContent, "Aperçu du rappel");
+    submit("unmatchedbrevity");
+    await waitFor(() => panel.textContent.includes("Aucun candidat correspondant."), "the empty recall preview");
+    assert.equal(row(), null);
+  } finally {
+    await page.cleanup();
+  }
+});
+
 
 
 // TCRN-CROSS-INIT-053 R46 (I09; I04, U20 D5): a library whose knowledge store was never created shows the

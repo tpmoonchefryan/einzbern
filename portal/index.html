@@ -4190,6 +4190,7 @@ button:disabled { cursor: not-allowed; }
         <a class="tcrn-nav-item" href="#engine-model-policy" data-nav-item-has-icon="true" data-page-target="engine-model-policy" aria-label="Models" data-i18n-aria-label="settings.group.models"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10v10H3z"/><path d="M5.5 8h5M8 5.5v5"/></svg></span><span class="tcrn-nav-item__label" data-i18n="settings.group.models">Models and escalation</span></a>
         <a class="tcrn-nav-item" href="#variables" data-nav-item-has-icon="true" data-page-target="variables" aria-label="Variables" data-i18n-aria-label="nav.variables"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.2h10M3 8h10M3 12.8h10"/><circle cx="5.2" cy="3.2" r="1.5" fill="currentColor"/><circle cx="10.8" cy="8" r="1.5" fill="currentColor"/><circle cx="7.2" cy="12.8" r="1.5" fill="currentColor"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.variables">Variables</span></a>
         <a class="tcrn-nav-item" href="#prose" data-nav-item-has-icon="true" data-page-target="prose" aria-label="Rules" data-i18n-aria-label="nav.prose"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h10M3 5.5h10M3 8.5h6.5"/><path d="M3 12.5h4"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.prose">Rules</span></a>
+        <a class="tcrn-nav-item" href="#recall-preview" data-page-target="recall-preview" aria-label="Recall preview" data-i18n-aria-label="recallPreview.title"><span class="tcrn-nav-item__label" data-i18n="recallPreview.title">Recall preview</span></a>
         <a class="tcrn-nav-item" href="#vocabulary" data-nav-item-has-icon="true" data-page-target="vocabulary" aria-label="Vocabulary" data-i18n-aria-label="nav.vocabulary"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.8C6.6 1.9 4.4 1.7 2.2 2.2v10.6c2.2-.5 4.4-.3 5.8.6 1.4-.9 3.6-1.1 5.8-.6V2.2C11.6 1.7 9.4 1.9 8 2.8Z"/><path d="M8 2.8v10.6"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.vocabulary">Vocabulary</span></a>
         <a class="tcrn-nav-item" href="#gates" data-nav-item-has-icon="true" data-page-target="gates" aria-label="Gates" data-i18n-aria-label="nav.gates"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10v10H3z"/><path d="m5 8 2 2 4-4"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.gates">Gates</span></a>
       </nav>
@@ -4304,6 +4305,16 @@ button:disabled { cursor: not-allowed; }
           <div class="tcrn-page-hierarchy__section-tabs" data-page-hierarchy-region="section-tabs" data-page-hierarchy-slot="section-tabs"><p class="tcrn-text" data-i18n="modelTiers.scope">The engine stores this policy for the selected host.</p></div>
           <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content"><div id="engine-model-policy-view" data-ui="engine-model-policy-view"></div></div>
         </div>
+      </section>
+      <section class="tcrn-page tcrn-product-shell-content-stack" data-page="recall-preview" hidden>
+        <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="recallPreview.title">Recall preview</h1></div></div></header>
+        <div class="tcrn-surface">
+          <form id="recall-preview-form">
+            <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="recallPreview.query">Prompt</span><textarea class="tcrn-textarea" name="query" rows="4" required></textarea></label>
+            <button type="submit" class="tcrn-button tcrn-button--primary tcrn-button--md" data-i18n="recallPreview.submit">Preview candidates</button>
+          </form>
+        </div>
+        <div id="recall-preview-results" aria-live="polite"></div>
       </section>
       <section class="tcrn-page tcrn-product-shell-content-stack" data-page="variables" hidden>
         <div class="tcrn-page-hierarchy" data-page-hierarchy="true" data-page-hierarchy-depth="two" data-page-hierarchy-source="explicit-depth-prop" data-page-hierarchy-width-policy="container-only" data-page-hierarchy-shell-boundary="global-product-shell-external" data-page-hierarchy-valid="true" data-page-hierarchy-validation="valid">
@@ -4554,7 +4565,8 @@ const BOOT = __PORTAL_BOOT__;
   // moved to; the page says so above its pages and offers to switch back or to follow, and shows nothing
   // of the other target meanwhile. A write's answer always reaches its receipt.
   const api = async (path, options = {}) => {
-    const { anyTarget = false, retried = false, target = pageTarget(), ...request } = options;
+    const { anyTarget = false, retried = false, readOnly = false, target = pageTarget(), ...request } = options;
+    const read = readOnly || (request.method ?? "GET") === "GET";
     if (path === "/api/settings" && request.method === "POST") {
       if (state.librarySwitching) return { ok: false, reasonCode: "PORTAL_LIBRARY_CHANGED" };
       const sent = JSON.parse(request.body);
@@ -4569,12 +4581,11 @@ const BOOT = __PORTAL_BOOT__;
     } catch {
       // Read callers own their unavailable view/receipt and cleanup in catch/finally.
       // Preserve that contract without exposing raw transport errors or private URLs.
-      if ((request.method ?? "GET") === "GET") throw new Error("Unable to read the response.");
+      if (read) throw new Error("Unable to read the response.");
       // A lost write response does not establish whether the engine committed. Never retry it.
       return answered({ ok: false, reasonCode: "PORTAL_RESPONSE_UNAVAILABLE", outcome: "unknown", retrySafe: false }, target);
     }
     const served = servedTargetOf(response);
-    const read = (request.method ?? "GET") === "GET";
     const dropped = () => answered({ ok: false, reasonCode: "PORTAL_ANSWER_DISCARDED", discarded: true, httpStatus: response.status }, served);
     const moved = response.status === 409 && body?.reasonCode === "PORTAL_CONFIGURATION_TARGET_CHANGED" && body.target !== null && typeof body.target === "object" ? body.target : null;
     if (moved !== null && !anyTarget) {
@@ -6910,6 +6921,7 @@ const BOOT = __PORTAL_BOOT__;
     const library = BOOT.library ? libraryLabel(BOOT.library) : "";
     const page = state.workspaceLabelPage;
     setText("#workspace-label", page ? `${library} / ${$(`[data-page-target="${page}"] .tcrn-nav-item__label`)?.textContent || page}` : library);
+    renderRecallPreview();
   };
   const renderConfigurationTargets = () => {
     const select = $("#configuration-project-select");
@@ -7188,6 +7200,48 @@ const BOOT = __PORTAL_BOOT__;
     navigate(button.dataset.pageTarget);
     if (marked) renderCollections();
   }));
+  let recallPreview = null;
+  const renderRecallPreview = () => {
+    const root = $("#recall-preview-results");
+    const preview = recallPreview;
+    if (preview === null || !sameTarget(preview.target) || preview.target.epoch !== BOOT.epoch) {
+      root.replaceChildren();
+      return;
+    }
+    const result = preview.result;
+    if (result === null || result.ok !== true) {
+      root.innerHTML = `<p class="tcrn-text">${esc(t(result === null ? "recallPreview.loading" : "recallPreview.unavailable"))}</p>`;
+      return;
+    }
+    const table = (label, rows, name) => rows.length === 0
+      ? `<p class="tcrn-text">${esc(t("recallPreview.empty"))}</p>`
+      : `<div class="tcrn-table-scroll"><table class="tcrn-table" data-recall-preview-table="${name}" aria-label="${esc(t(label))}">
+          <thead><tr>${["key", "candidate", "score", "terms"].map(key => `<th scope="col">${esc(t("recallPreview." + key))}</th>`).join("")}</tr></thead>
+          <tbody>${rows.map(row => `<tr><td>${esc(row.key)}</td><td>${esc(row.title)}</td><td>${esc(row.score)}</td><td>${esc(row.matchedTerms.join(", "))}</td></tr>`).join("")}</tbody>
+        </table></div>`;
+    root.innerHTML = `<article class="tcrn-surface"><h2>${esc(t("recallPreview.candidates"))}</h2>
+        <p class="tcrn-text">${esc(t("recallPreview.threshold"))} <strong>${esc(result.threshold)}</strong></p>
+        ${table("recallPreview.candidates", result.candidates, "candidates")}</article>
+      ${result.nearMisses.length === 0 ? "" : `<article class="tcrn-surface"><h2>${esc(t("recallPreview.nearMisses"))}</h2>${table("recallPreview.nearMisses", result.nearMisses, "near-misses")}</article>`}`;
+  };
+  $("#recall-preview-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const query = event.currentTarget.querySelector('[name="query"]').value;
+    if (query.trim() === "") return;
+    const preview = { target: pageTarget(), result: null };
+    recallPreview = preview;
+    renderRecallPreview();
+    try {
+      const result = await api("/api/recall/preview", { method: "POST", readOnly: true, target: preview.target, body: JSON.stringify({ query }) });
+      if (recallPreview !== preview) return;
+      if (unkept(result)) { recallPreview = null; renderRecallPreview(); return; }
+      preview.target = result.servedTarget ?? preview.target;
+      preview.result = result;
+    } catch {
+      preview.result = { ok: false };
+    }
+    renderRecallPreview();
+  });
   const parseGateArgv = (value) => { try { const command = JSON.parse(value); return Array.isArray(command) && command.length > 0 && command.every((part) => typeof part === "string" && part.length > 0) ? command : null; } catch { return null; } };
   const gateCoversFrom = (container) => [...container.querySelectorAll("[data-gate-cover]")].map((input) => input.value.trim()).filter((cover) => cover.length > 0);
   $("#gate-add-form").addEventListener("submit", async (event) => {
