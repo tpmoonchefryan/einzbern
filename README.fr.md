@@ -23,7 +23,7 @@ point de recherche<br><sub>une recherche avant chaque prompt, silence sans lien 
 <td align="center" width="33%">
 
 ### 0
-dépendance à l'exécution<br><sub>un seul fichier hors ligne, sans base de données. Lorsque vous lisez une autorité de design dans Atelier, le navigateur contacte l’adresse que vous avez saisie.</sub>
+dépendance à l'exécution<br><sub>un seul fichier sans dépendance, ni base de données, ni réseau</sub>
 
 </td>
 <td align="center" width="33%">

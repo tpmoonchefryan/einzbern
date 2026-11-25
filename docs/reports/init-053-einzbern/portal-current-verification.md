@@ -41,7 +41,7 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     {
       "path": "portal/index.html",
       "bytes": 537425,
-      "sha256": "4cee4c6ea78fd6a8a22949127130a6ec67af395d79196d8b42f2b90044cbdea1"
+      "sha256": "22ecd7109fd984d887c01dd08d21abdff4d237bbb900a0f882c0c38a310df3a4"
     },
     {
       "path": "portal/locales.js",
@@ -50,8 +50,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/portal.mjs",
-      "bytes": 98798,
-      "sha256": "42f74d146f5819b1679e5b4d65e751403c3f5b3c93e7aa0037f5ccf1fe0cdd29"
+      "bytes": 98987,
+      "sha256": "69bead63e7022502b305b1c4822afa31b7abf3d74818540a12fb12fa02604592"
     },
     {
       "path": "portal/scripts/i18n-proof.mjs",
@@ -70,13 +70,13 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/ui-presence.test.mjs",
-      "bytes": 84723,
-      "sha256": "a2d050c34ce2d34b20a4fa825c514adc2ba9b4d4f026a394bdfb2dd1df5dd684"
+      "bytes": 84734,
+      "sha256": "c7848cf3a82bb163cbac95800fc02b56134120ffd7de980e3e85e33024aca796"
     },
     {
       "path": "portal/tests/ui-presence-support.mjs",
-      "bytes": 52071,
-      "sha256": "91e1ecbf2ec1ba306d705f17ba83094867248c97a7909f0fbe429fcbc49158f4"
+      "bytes": 52055,
+      "sha256": "1fcbb4f719ba2a9ece3b940ee85f64e89f5191a5359c9da224f41fc518de83ed"
     },
     {
       "path": "portal/tests/portal-support.mjs",

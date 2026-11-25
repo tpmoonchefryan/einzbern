@@ -149,7 +149,8 @@ test("minutes search shares recall matching and preserves original text through 
     return JSON.parse(output);
   };
   const minuteIds = async query => (await call("minutes-list", ["--query", query, "--project-id", project.id])).records.map(row => row.id);
-  const recallRefs = async query => (await call("recall", ["--query", query, "--project-id", project.id, "--view", "candidates", "--at", at])).context;
+  const recallView = (query, view) => call("recall", ["--query", query, "--project-id", project.id, "--at", at, ...(view ? ["--view", view] : [])]);
+  const recallRefs = async query => (await recallView(query, "candidates")).context;
   const expected = `minutes · SEARCH-MIN-601 · Auroral retention · ${record.id}#D1`;
   for (const query of ["lumencompat", "SEARCH-MIN-601#D1", "Auroral retention", "Relay inventory", "plexitarian"]) {
     assert.deepEqual(await minuteIds(query), [record.id]);
@@ -167,6 +168,13 @@ test("minutes search shares recall matching and preserves original text through 
     assert.deepEqual(await minuteIds(query), [record.id]);
     assert.deepEqual(await recallRefs(query), [expected]);
   }
+  const preview = await recallView("lumencompat", "preview");
+  assert.deepEqual(preview.candidates.map(row => row.decisionReference), [`${record.id}#D1`]);
+  assert.deepEqual((await recallView("plexitarian", "preview")).candidates, []);
+  assert.deepEqual((await recallView("lumencompat", "agent")).context, [expected]);
+  const fullRecall = await recallView("lumencompat");
+  assert.deepEqual(fullRecall.context, [expected]);
+  assert.equal(fullRecall.records[0].line, expected);
   const read = await call("recall-read", ["--refs", `${record.id}#D1`, "--at", at]);
   assert.equal(read.records[0].record.decisions[0].text, text);
 });

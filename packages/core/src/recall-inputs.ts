@@ -750,13 +750,18 @@ export function recallCandidateRef(hit: RecallHit): string {
   return hit.kind === "card" && hit.scope === "user" ? `user/${hit.id}` : hit.id;
 }
 
+export function formatRecallCandidateLine(hit: RecallHit): string {
+  const title = (hit.decision?.metadata?.title ?? hit.title).replace(/\s+/gu, " ").trim();
+  if (title === "") return "";
+  return [hit.kind === "work" ? hit.recordKind : hit.kind, hit.key, title, recallCandidateRef(hit)].join(" · ");
+}
+
 export function recallCandidateEntries(hits: readonly RecallHit[], perPromptBytes: number): readonly { hit: RecallHit; line: string }[] {
   const entries: { hit: RecallHit; line: string }[] = [];
   let used = 0;
   for (const hit of hits) {
-    const title = (hit.decision?.metadata?.title ?? hit.title).replace(/\s+/gu, " ").trim();
-    if (title === "") continue;
-    const line = [hit.kind === "work" ? hit.recordKind : hit.kind, hit.key, title, recallCandidateRef(hit)].join(" · ");
+    const line = formatRecallCandidateLine(hit);
+    if (line === "") continue;
     const bytes = Buffer.byteLength(line, "utf8") + (entries.length === 0 ? 0 : 1);
     if (used + bytes > perPromptBytes) continue;
     entries.push({ hit, line });

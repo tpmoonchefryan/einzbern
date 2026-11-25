@@ -11,7 +11,7 @@ import { readRuntimeKnowledgeLanguagePolicy, resolveQueryLanguage } from "../../
 import type { KnowledgeQueryLanguageAnswer } from "../../core/src/knowledge-language.js";
 import { RECALL_DEFAULT_TAU, preparePersistentRecall, recallDocuments, recallPersistent } from "../../core/src/recall.js";
 import type { RecallHit, RecallResult } from "../../core/src/recall.js";
-import { formatRecallLine, readRecallCards, recallCandidateEntries, recallContextEntries, recallDecisionHints, recallInputsFromState, recallMetadataOnly } from "../../core/src/recall-inputs.js";
+import { formatRecallCandidateLine, formatRecallLine, readRecallCards, recallCandidateEntries, recallContextEntries, recallDecisionHints, recallInputsFromState, recallMetadataOnly } from "../../core/src/recall-inputs.js";
 import type { RecallCardRead, RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { DecisionStatusFilter } from "../../core/src/minutes.js";
 import type { KnowledgeStatusFilter } from "../../core/src/knowledge-core.js";
@@ -61,6 +61,7 @@ interface RecallQueryResult {
   readonly cards: RecallCardRead;
   readonly scopeExcerptBytes: number;
   readonly perPromptBytes: number;
+  readonly metadataOnly: boolean;
   readonly languageAnswer: KnowledgeQueryLanguageAnswer;
 }
 
@@ -106,7 +107,7 @@ export async function readRecallQuery(workspace: string, query: string, options:
       ...(options.explain ? { explain: true } : {}),
       ...(limit === undefined ? {} : { limit }),
     }, workspace, prepared);
-    return { result, state, cards, scopeExcerptBytes, perPromptBytes, languageAnswer };
+    return { result, state, cards, scopeExcerptBytes, perPromptBytes, metadataOnly, languageAnswer };
   } catch (error) {
     await prepared?.handle.close().catch(() => {});
     throw error;
@@ -123,7 +124,7 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
   const workspace = values.workspace ?? "";
   const query = values.query ?? "";
-  const { result, state, cards, scopeExcerptBytes, perPromptBytes, languageAnswer } = await readRecallQuery(workspace, query, {
+  const { result, state, cards, scopeExcerptBytes, perPromptBytes, metadataOnly, languageAnswer } = await readRecallQuery(workspace, query, {
     at: values.at ?? "",
     ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }),
     ...(values.host === undefined ? {} : { host: values.host }),
@@ -152,8 +153,11 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
     version: state.version,
     headEventHash: state.headEventHash,
   };
+  const delivery = metadataOnly || values.view === "candidates"
+    ? recallCandidateEntries(hits, perPromptBytes)
+    : recallContextEntries(hits, perPromptBytes);
+  const context = delivery.map((entry) => entry.line);
   if (values.view === "candidates") {
-    const context = recallCandidateEntries(hits, perPromptBytes).map((item) => item.line);
     io.write(canonicalJson({
       schemaVersion: "tcrn.recall-candidates.v1", reasonCode: result.reasonCode, ...source,
       perPromptBytes, context,
@@ -162,8 +166,6 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
     }));
     return;
   }
-  const delivery = recallContextEntries(hits, perPromptBytes);
-  const context = delivery.map((entry) => entry.line);
   if (result.explanation !== undefined) {
     const { threshold, matchedTerms, nearMisses } = result.explanation;
     const candidate = (hit: RecallHit) => ({
@@ -270,7 +272,7 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
     records: hits.map((hit) => ({
       kind: hit.kind, key: hit.key, id: hit.id, status: hit.status,
       title: hit.title, summary: hit.summary, score: hit.score.toFixed(4),
-      line: formatRecallLine(hit), parentChain: [...hit.parentChain],
+      line: metadataOnly ? formatRecallCandidateLine(hit) : formatRecallLine(hit), parentChain: [...hit.parentChain],
       ...(hit.scope === undefined ? {} : { scope: hit.scope }),
       ...(hit.involvedProjects === undefined ? {} : { involvedProjects: hit.involvedProjects }),
       ...(hit.obsoleteDecisions === undefined ? {} : { obsoleteDecisions: hit.obsoleteDecisions.map((entry) => ({ ...entry })) }),

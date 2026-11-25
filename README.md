@@ -23,7 +23,7 @@
 <td align="center" width="33%">
 
 ### 0
-运行时依赖<br><sub>零依赖单文件，离线运行。通过 Atelier 读取时，浏览器会访问你填写的设计权威地址。</sub>
+运行时依赖<br><sub>零依赖单文件，不装数据库，不联网</sub>
 
 </td>
 <td align="center" width="33%">

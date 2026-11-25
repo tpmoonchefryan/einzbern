@@ -92,7 +92,11 @@ function sectionOf(text, id) {
 }
 
 const list = async (project) => cli(["rule-list", "--project", project]);
-const ruleOf = async (project, id) => { const { source, ...rule } = (await list(project)).rules.find((rule) => rule.id === id); assert.ok(source === null || source.projectId, "the read retains configuration provenance"); return rule; };
+const ruleOf = async (project, id) => {
+  const { source, ...rule } = (await list(project)).rules.find((rule) => rule.id === id);
+  if (source !== null) assert.equal(source.kind, source.projectId === null ? "library" : "project", "the read retains configuration provenance");
+  return rule;
+};
 const enable = (project, id) => cli(["rule-enable", "--project", project, "--id", id, "--at", at()]);
 const render = (project) => cli(["agents-render", "--project", project, "--at", at()]);
 
@@ -106,12 +110,13 @@ test("483-AC1 via rule-enable: batch processing's v3 text goes into AGENTS.md, t
   assert.equal(enabled.reasonCode, "RULE_ENABLED");
   const { source: enabledSource, ...enabledRule } = enabled.rule;
   const enabledRead = await list(project);
-  assert.equal(enabledRead.rules.find(rule=>rule.id==="batch").source.projectId, enabledRead.projectId);
+  const enabledProvenance = enabledRead.rules.find(rule => rule.id === "batch").source;
+  assert.deepEqual([enabledProvenance.kind, enabledProvenance.projectId], ["library", null]);
   assert.deepEqual(enabledRule, { id: "batch", version: 3, recordedVersion: 3, fileVersion: 1, section: "agents", state: "enabled" });
   assert.deepEqual([enabled.section, enabled.file, enabled.action, enabled.result, enabled.written, enabled.recorded], ["agents", "AGENTS.md", "enable", "create", true, 2]);
   // STORY-467 receipts name global records; `section` above remains the local section id.
   const projectId = (await list(project)).projectId;
-  assert.deepEqual([...enabled.ids].sort(), [`managed-section:${projectId}:AGENTS.md#agents`, `rule:${projectId}:batch`]);
+  assert.deepEqual([...enabled.ids].sort(), [`managed-section:${projectId}:AGENTS.md#agents`, "rule:batch"]);
   assert.equal(enabled.backupDir.startsWith(join(device, "backups")), true, "the backup is in the device directory");
   assert.equal(enabled.backupPath, join(enabled.backupDir, "AGENTS.md"));
   assert.equal(await readFile(enabled.backupPath, "utf8"), USER_TEXT, "AGENTS.md was backed up before it was replaced");

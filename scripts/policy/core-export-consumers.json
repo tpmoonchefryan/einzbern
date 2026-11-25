@@ -281,7 +281,6 @@
     "KnowledgeBatchProblem",
     "KnowledgeBodyReadOptions",
     "knowledgeConflictHits",
-    "KnowledgeCoreError",
     "KnowledgeExportDisposition",
     "KnowledgeFaultPoint",
     "KnowledgeLifecycle",
@@ -369,7 +368,6 @@
     "ModelsTierResolutionInput",
     "ModelsTiers",
     "MULTI_AGENT_DEFAULT_TYPES",
-    "NAVIGATION_LINES",
     "newLibraryId",
     "NODE_FLOOR",
     "NODE_FLOOR_REASON_CODES",
@@ -422,6 +420,7 @@
     "readStreamManifest",
     "ReferencePersonaReadback",
     "RejectedEvent",
+    "recallContextLines",
     "RELEASE_REASON_CODES",
     "ReleaseAdmissionRequest",
     "ReleaseReasonCode",
@@ -581,9 +580,11 @@
     "WorkspaceSettingRecord",
     "workspaceViewDocuments",
     "writeFileAtomic",
-    "AgentsProjectRootSelection",
-    "registeredAgentsProjectRoots"
+    "AgentsProjectRootSelection"
   ],
+  "compatibilityApiAllowanceRationale": {
+    "recallContextLines": "Retains the expanded recall renderer for existing callers while the CLI and hooks use the compact candidate renderer."
+  },
   "nativeApiAllowanceRationale": {
     "CodexHookAdmission": "External owning-client version/capability/trust observation type carried by SetupOptions and the normal CLI JSON-file route; nested SetupOptions usage does not name it in the recorded roots. The checked record is not native authentication or acceptance."
   }

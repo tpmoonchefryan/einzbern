@@ -189,7 +189,7 @@ test('R4: V1 bytes, complete deep values, large arrays/objects, explicit invalid
 
 test('R4: large settings/custom value, actual event replay/export, full query candidates pass former ceilings',async ctx=>{
  const {workspace,projectId:p}=await workspaceFixture(ctx,{externalKey:'R27-CAPACITY'});
- for(const [key,v] of Object.entries({'execution.maxConcurrentSubagents':'33','injection.perPromptBytes':'20000','storage.segmentBytes':'100000000','storage.snapshotEveryEvents':'25001','retrieval.scopeExcerptBytes':'100000','retrieval.tau':'201'}))await setWorkspaceSetting(workspace,{key,value:v,occurredAt:at()});
+ for(const [key,v] of Object.entries({'injection.perPromptBytes':'20000','storage.segmentBytes':'100000000','storage.snapshotEveryEvents':'25001','retrieval.scopeExcerptBytes':'100000','retrieval.tau':'201'}))await setWorkspaceSetting(workspace,{key,value:v,occurredAt:at()});
  const policy = await applyEngineModelPolicySet({ host:'codex', occurredAt:at(), actor:'agent:test', authorization:{decidedIn:'minutes:'+'a'.repeat(24)+'#D1',libraryId:'library:'+'b'.repeat(24),target:ENGINE_MODEL_POLICY_WRITE_TARGET},policy:{categories:[{id:'economy',name:'Economy',description:'',order:10}],tiers:[{order:10,category:'economy',runner:'codex',model:'fixture-economy',effort:'medium',note:''}],escalation:{enabled:true,threshold:101,ceiling:'economy'}} });
  assert.equal(policy.hosts.codex.escalation.threshold,101,'large runtime threshold is device policy, not a new legacy project write');
  const large='Large完整內容'.repeat(130000);

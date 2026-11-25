@@ -455,7 +455,7 @@ async function workProjection() {
 // another status; removed cards come back as each is kept, with no body to read.
 const KNOWLEDGE_STATUSES = Object.freeze(["valid", "removed", "all"]);
 
-async function knowledgeProjection(status = "valid") {
+async function knowledgeProjection(status = "valid", nativeInventory = false) {
   const selected = currentLibrary();
   const at = readInstant();
   // TCRN-CROSS-MIN-225 (TCRN-CROSS-SUB-259): the knowledge view never read the retire-proposals
@@ -464,14 +464,14 @@ async function knowledgeProjection(status = "valid") {
   let listing;
   let total;
   let snapshot;
-  let pageLimit = CLI === BUNDLED_CLI ? RUNTIME_CAPACITY.safeInteger : 100;
+  let pageLimit = nativeInventory ? RUNTIME_CAPACITY.safeInteger : 100;
   const args = ["knowledge-list", "--workspace", selected.libraryPath, "--at", at, "--selection", "all", "--status", status, "--allow-trailing", "true"];
   const seen = new Set();
   const digest = createHash("sha256").update("[", "utf8");
   // Page until the declared inventory is complete; never present a prefix as the inventory.
   do {
     listing = await cliResult([...args, "--limit", String(pageLimit), "--offset", String(records.length),
-      ...(CLI === BUNDLED_CLI && snapshot !== undefined ? ["--snapshot", snapshot] : [])]);
+      ...(nativeInventory && snapshot !== undefined ? ["--snapshot", snapshot] : [])]);
     if (!listing.ok && listing.body?.reasonCode === "INPUT_OVERSIZED" && pageLimit > 1) {
       pageLimit = pageLimit === RUNTIME_CAPACITY.safeInteger ? 100 : Math.floor(pageLimit / 2);
       continue;
@@ -574,6 +574,8 @@ async function governedWrite(build, environment = {}, selected = currentLibrary(
 async function projectWrite(build, environment = {}, selected = currentLibrary(), runtimeRule = false) {
   return targetWrite(selected, async () => {
     if (runtimeRule) {
+      const binding = proseBinding(selected);
+      if (binding.status === "ambiguous") return { ok: false, body: bindingRefusal(binding, selected) };
       const output = await ruleListing(selected);
       if (!output.ok) return output;
       const projectPath = output.body.projectPath ?? (selected.chain?.role === "coordination" ? selected.projectPath : null);
@@ -1265,7 +1267,7 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
     if (request.method === "GET" && pathname === "/api/knowledge") {
       const status = url.searchParams.get("status") ?? "valid";
       if (!KNOWLEDGE_STATUSES.includes(status)) { send(response, 400, { ok: false, reasonCode: "PORTAL_KNOWLEDGE_STATUS_INVALID", status }); return; }
-      send(response, 200, await knowledgeProjection(status));
+      send(response, 200, await knowledgeProjection(status, CLI === BUNDLED_CLI));
       return;
     }
     if (request.method === "GET" && pathname === "/api/knowledge/body") {

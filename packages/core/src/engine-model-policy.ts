@@ -311,12 +311,12 @@ function validateOperations(value: unknown, revision: number): Readonly<Record<s
   return Object.freeze(operations);
 }
 
-function validateLegacyFile(record: Record<string, unknown>): EngineModelPolicyFile {
+function validateLegacyPolicySnapshot(record: Record<string, unknown>): EngineModelPolicyFile {
   const transactional = record.schemaVersion === ENGINE_MODEL_POLICY_TRANSACTION_VERSION;
   exactFields(record, transactional ? "hosts,operations,revision,schemaVersion" : STORE_FIELDS, "engine model policy file");
   const revision = safeRevision(record.revision, "revision", 0);
   const rawHosts = object(record.hosts, "hosts");
-  const raw: { host: string; config: EngineModelPolicyConfig; metadata: ReturnType<typeof validateEntryMetadata> }[] = [];
+  const hosts: Record<string, EngineModelPolicyEntry> = {};
   for (const [rawHost, rawEntry] of Object.entries(rawHosts)) {
     const host = hostId(rawHost), entry = object(rawEntry, `hosts.${host}`);
     exactFields(entry, Object.hasOwn(entry, "quota") ? "actor,categories,decidedIn,decidedInLibraryId,digest,escalation,quota,revision,tiers,updatedAt" : ENTRY_FIELDS, `hosts.${host}`);
@@ -324,23 +324,20 @@ function validateLegacyFile(record: Record<string, unknown>): EngineModelPolicyF
     const config = entryConfig(host, entry, entry.categories);
     const digest = policyDigest(host, config);
     if (entry.digest !== digest) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.digest does not match its policy`, { host, expected: digest });
-    raw.push({ host, config, metadata });
+    hosts[host] = Object.freeze({ ...config, ...metadata, digest });
   }
-  if ((raw.length === 0) !== (revision === 0)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "an empty store has revision zero and a configured store has a positive revision");
-  const categories = sharedLegacyCategories(raw.map(entry => entry.config.categories));
-  const hosts: Record<string, EngineModelPolicyEntry> = {};
-  for (const { host, config, metadata } of raw) {
-    const shared = validateEngineModelPolicy(host, { ...config, categories });
-    hosts[host] = Object.freeze({ ...shared, ...metadata, digest: policyDigest(host, shared) });
-  }
-  const operations = transactional ? validateOperations(record.operations, revision) : Object.freeze({});
-  return Object.freeze({ schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION, categoryCatalog: categories, revision, hosts: Object.freeze(hosts), operations });
+  if ((Object.keys(hosts).length === 0) !== (revision === 0)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "an empty store has revision zero and a configured store has a positive revision");
+  return Object.freeze({
+    schemaVersion: transactional ? ENGINE_MODEL_POLICY_TRANSACTION_VERSION : ENGINE_MODEL_POLICY_SCHEMA_VERSION,
+    revision, hosts: Object.freeze(hosts),
+    ...(transactional ? { operations: validateOperations(record.operations, revision) } : {}),
+  });
 }
 
-/** Validate the on-disk closed schema, promoting old device files in memory without writing them. */
-export function validateEngineModelPolicyFile(value: unknown): EngineModelPolicyFile {
+/** Validate the policy and host digests in the format retained by the receipt. */
+export function validateEngineModelPolicySnapshot(value: unknown): EngineModelPolicyFile {
   const record = object(value, "engine model policy file");
-  if (record.schemaVersion === ENGINE_MODEL_POLICY_SCHEMA_VERSION || record.schemaVersion === ENGINE_MODEL_POLICY_TRANSACTION_VERSION) return validateLegacyFile(record);
+  if (record.schemaVersion === ENGINE_MODEL_POLICY_SCHEMA_VERSION || record.schemaVersion === ENGINE_MODEL_POLICY_TRANSACTION_VERSION) return validateLegacyPolicySnapshot(record);
   if (record.schemaVersion !== ENGINE_MODEL_POLICY_SHARED_VERSION) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `schemaVersion must be ${ENGINE_MODEL_POLICY_SHARED_VERSION}`);
   exactFields(record, "categoryCatalog,hosts,operations,revision,schemaVersion", "engine model policy file");
   const revision = safeRevision(record.revision, "revision", 0);
@@ -361,6 +358,22 @@ export function validateEngineModelPolicyFile(value: unknown): EngineModelPolicy
   if ((Object.keys(hosts).length === 0) !== (revision === 0)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "an empty store has revision zero and a configured store has a positive revision");
   const operations = validateOperations(record.operations, revision);
   return Object.freeze({ schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION, categoryCatalog: categories, revision, hosts: Object.freeze(hosts), operations });
+}
+
+/** Validate the on-disk closed schema, promoting old device files in memory without writing them. */
+export function validateEngineModelPolicyFile(value: unknown): EngineModelPolicyFile {
+  const snapshot = validateEngineModelPolicySnapshot(value);
+  if (snapshot.schemaVersion === ENGINE_MODEL_POLICY_SHARED_VERSION) return snapshot;
+  const categories = sharedLegacyCategories(Object.values(snapshot.hosts).map(entry => entry.categories));
+  const hosts: Record<string, EngineModelPolicyEntry> = {};
+  for (const [host, entry] of Object.entries(snapshot.hosts)) {
+    const shared = validateEngineModelPolicy(host, { categories, tiers: entry.tiers, escalation: entry.escalation,
+      ...(entry.quota === undefined ? {} : { quota: entry.quota }),
+      ...(entry.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: entry.maxConcurrentSubagents }) });
+    hosts[host] = Object.freeze({ ...entry, ...shared, digest: policyDigest(host, shared) });
+  }
+  return Object.freeze({ schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION, categoryCatalog: categories, revision: snapshot.revision,
+    hosts: Object.freeze(hosts), operations: snapshot.operations ?? Object.freeze({}) });
 }
 
 function persistedEngineModelPolicy(file: EngineModelPolicyFile): Record<string, unknown> {
@@ -577,7 +590,7 @@ export function resolveEngineExecutionPolicyFromSnapshot(
   input: EngineExecutionPolicyInput,
 ): EngineExecutionPolicyResolution {
   const host = hostId(input.host);
-  const file = validateEngineModelPolicyFile(snapshot);
+  const file = validateEngineModelPolicySnapshot(snapshot);
   const policy = Object.hasOwn(file.hosts, host) ? file.hosts[host] : undefined;
   if (policy === undefined) {
     fail("ENGINE_MODEL_POLICY_UNAVAILABLE", `No device engine policy is configured for host ${host}; project model settings are not a fallback`, { host });

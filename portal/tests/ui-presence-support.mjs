@@ -681,13 +681,11 @@ async function assertBehaviorContract(page) {
   assert.equal(drawer.getAttribute("aria-hidden"), "false", "receipt drawer must expose its open state");
   document.querySelector("#drawer-close").click();
   const beforeSetting = receiptText(document);
-  const control = document.querySelector('#settings-rows [data-setting-control]');
+  document.querySelector('[data-setting-group="retrieval"]').click();
+  const control = document.querySelector('#settings-rows [data-setting-control="retrieval.metadataOnly"]');
   assert.ok(control, "fixture must expose a settings control for the write leg");
-  if (control.tagName === "BUTTON") control.click();
-  else {
-    if (control.tagName === "SELECT") control.value = control.value;
-    control.dispatchEvent(new window.Event("change", { bubbles: true }));
-  }
+  control.checked = true;
+  control.dispatchEvent(new window.Event("change", { bubbles: true }));
   await waitFor(receiptAdvanced(document, beforeSetting), "the receipt chip to advance after the settings write");
   const chipText = document.querySelector("#receipt-chip-text").textContent;
   assert.match(chipText, /^✓v\d+$/u, `receipt chip must update after a successful write, got ${JSON.stringify(chipText)}`);

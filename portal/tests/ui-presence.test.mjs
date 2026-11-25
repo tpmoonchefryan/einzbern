@@ -704,7 +704,7 @@ if (!MUTATION) {
   test("TCRN-CROSS-STORY-405 proves the fixed DS semantics, rejects structural mutations, and preserves coordination status", async () => {
     const page = await preparePage();
     try {
-      page.document.querySelector('[data-setting-group="models"]')?.click();
+      page.document.querySelector('[data-setting-group="storage"]').click();
       await new Promise((resolve) => setTimeout(resolve, 80));
       const layout = page.document.querySelector('[data-settings-layout-component="SettingsLayout"]');
       assert.ok(layout);
@@ -1181,7 +1181,7 @@ if (!MUTATION) {
     try {
       const tabs = [...page.document.querySelectorAll("[data-workspace-tab]")].map((tab) => tab.dataset.workspaceTab);
       // TCRN-CROSS-SUB-513 (TCRN-CROSS-STORY-541) adds the Library tab: chain identity and the registry.
-      assert.deepEqual(tabs, ["overview", "work", "knowledge", "activity", "library"]);
+      assert.deepEqual(tabs, ["overview", "work", "knowledge", "minutes", "activity", "library"]);
       assert.deepEqual([...page.document.querySelectorAll("[data-workspace-panel]")].map((panel) => panel.dataset.workspacePanel), tabs);
       for (const selector of ['[data-ui="evolution-dashboard"]', "#evolution-retirement", "#evolution-eval", "#evolution-hosts", "#audit-button", "#dashboard-audit", "#drawer-audit", '[data-ui="dispatch-config-surface"]']) {
         assert.equal(page.document.querySelector(selector), null, `${selector} must be absent`);

@@ -447,6 +447,60 @@
 | --- | --- | --- | --- |
 | `--from-file` | 必填 | `string` | `Observed free slots, frozen candidate inputs and package write sets.` |
 
+## `execution-codex-batch-adopt`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 必填 | `string` |
+| `--from-file` | 必填 | `string` |
+| `--timing` | 可选 | `string` |
+
+## `execution-codex-batch-arm`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 必填 | `string` |
+| `--initiative` | 必填 | `string` |
+| `--coordinator` | 必填 | `string` |
+| `--decided-in` | 必填 | `string` |
+| `--existing` | 可选 | `string` |
+
+## `execution-codex-batch-observe`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+无旗标。
+
+## `execution-codex-batch-prepare`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 必填 | `string` |
+| `--from-file` | 必填 | `string` |
+| `--codex-admission` | 必填 | `string` |
+| `--codex-capacity` | 必填 | `string` |
+| `--codex-usage` | 可选 | `string` |
+| `--output` | 必填 | `string` |
+
+## `execution-codex-batch-status`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--coordinator` | 必填 | `string` |
+
 ## `execution-codex-peer-evidence`
 
 - 可用范围：`cli`。
@@ -472,7 +526,15 @@
 | `--actor` | 可选 | `string` |
 | `--delivery` | 可选 | `string` |
 | `--prior` | 可选 | `string` |
+| `--timing` | 可选 | `string` |
 | `--output` | 必填 | `string` |
+
+## `execution-codex-polling-policy`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+无旗标。
 
 ## `execution-evidence`
 
@@ -1243,6 +1305,30 @@
 | `--external-key` | 可选 | `string` | `exactly-one-of(--id,--external-key)` |
 | `--status` | 可选 | `string` |  |
 
+## `minutes-supplement-batch`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 可选 | `string` |
+| `--project-id` | 可选 | `string` |
+| `--from-file` | 必填 | `string` |
+| `--at` | 必填 | `instant` |
+| `--actor` | 可选 | `string` |
+| `--timeout-ms` | 可选 | `integer` |
+
+## `minutes-supplement-inventory`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 可选 | `string` |
+| `--project-id` | 可选 | `string` |
+
 ## `pending-actions`
 
 - 可用范围：`cli`。
@@ -1420,6 +1506,24 @@
 | `--at` | 必填 | `instant` |
 | `--timeout-ms` | 可选 | `integer` |
 
+## `rule-create`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 | 写法 |
+| --- | --- | --- | --- |
+| `--id` | 必填 | `string` |  |
+| `--title` | 必填 | `string` |  |
+| `--body` | 必填 | `string` |  |
+| `--order` | 可选 | `integer` |  |
+| `--at` | 必填 | `instant` |  |
+| `--project` | 可选 | `string` |  |
+| `--actor` | 可选 | `string` |  |
+| `--project-id` | 可选 | `string` |  |
+| `--decided-in` | 可选 | `string` | `minutes:<id>#D<n>` |
+| `--timeout-ms` | 可选 | `integer` |  |
+
 ## `rule-disable`
 
 - 可用范围：`cli`。
@@ -1496,6 +1600,24 @@
 | `--actor` | 可选 | `string` |
 | `--project-id` | 可选 | `string` |
 | `--timeout-ms` | 可选 | `integer` |
+
+## `rule-update`
+
+- 可用范围：`cli`。
+- 是否写入：是。
+
+| 旗标 | 必填 | 取值类型 | 写法 |
+| --- | --- | --- | --- |
+| `--id` | 必填 | `string` |  |
+| `--title` | 可选 | `string` |  |
+| `--body` | 可选 | `string` |  |
+| `--order` | 可选 | `integer` |  |
+| `--at` | 必填 | `instant` |  |
+| `--project` | 可选 | `string` |  |
+| `--actor` | 可选 | `string` |  |
+| `--project-id` | 可选 | `string` |  |
+| `--decided-in` | 可选 | `string` | `minutes:<id>#D<n>` |
+| `--timeout-ms` | 可选 | `integer` |  |
 
 ## `settings-catalog`
 

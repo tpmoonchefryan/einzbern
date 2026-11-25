@@ -220,7 +220,7 @@ test("configuration: coordinator owns shared generation without a project bindin
     assert.equal(catalog.settings.find(row => row.key === key).scope, "library");
     const typed = catalog.typedValues.find(row => row.key === key);
     assert.equal(typed.effectiveScope, "library");
-    assert.equal(typed.contract.registeredScope, "project", "static registry scope remains explicit");
+    assert.equal(typed.contract.registeredScope, key === "artifact.language" ? "project" : "library", "static registry scope remains explicit");
   }
   assert.equal(catalog.settings.some(row => row.key === "execution.maxConcurrentSubagents" || row.key.startsWith("quota.")), false,
     "coordination catalogs do not present historical project model controls as runtime settings");

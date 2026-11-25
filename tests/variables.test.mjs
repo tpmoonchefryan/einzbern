@@ -524,7 +524,6 @@ test("489: a variable-section write whose records went in before the failure (a 
 
 // ---- TCRN-CROSS-STORY-540 GWT2, Q4, Q5 (MIN-243 D1; TCRN-CROSS-SUB-506) ----
 
-const COORDINATION_LIMITS = ["execution.maxConcurrentSubagents"];
 const DESIGN_KEYS = ["design.authority", "design.repository", "design.pullRequestTarget", "design.productionDocs", "design.buildService", "design.buildProject"];
 
 // The project fixture's library as a coordination library, registered on this device for the project
@@ -539,29 +538,25 @@ async function coordination(context) {
 
 const scoped = async (fx) => scopedWorkspaceState(await materializeWorkspace(fx.library));
 
-test("540-GWT2: a coordination library's system section lists its limits and the design bindings, never models.*", async (context) => {
-  assert.deepEqual(COORDINATION_SYSTEM_VARIABLE_KEYS, [...COORDINATION_LIMITS, ...DESIGN_KEYS]);
+test("540-GWT2: a coordination library's system section lists design binding provenance", async (context) => {
+  assert.deepEqual(COORDINATION_SYSTEM_VARIABLE_KEYS, DESIGN_KEYS);
   const fx = await coordination(context);
   const { body } = renderSystemVariablesSection(await scoped(fx));
   assert.doesNotMatch(body, /models\./u, "a coordination library has no models.*");
-  assert.doesNotMatch(body, /execution\.dispatchTiers/u);
+  assert.doesNotMatch(body, /execution\.(?:dispatchTiers|maxConcurrentSubagents)|quota\./u);
   for (const key of COORDINATION_SYSTEM_VARIABLE_KEYS) assert.match(body, new RegExp(`^\\| ${key.replace(/\./gu, "\\.")} \\|`, "mu"), key);
-  assert.ok(body.includes("Written by Einzbern from the coordination library's configuration."));
-  // Each limit at its effective value: the engine's default while the library declares none.
-  for (const [key, value] of [["execution.maxConcurrentSubagents", "8"]]) {
-    assert.ok(body.includes(`| ${key} | ${value} |`), `${key} reads ${value}`);
-  }
+  assert.ok(body.startsWith("## System variables\n\n### design.authority"));
   assert.ok(body.includes("| design.authority | (unconfigured) | default | false |"));
 });
 
 test("principles-only coordination: settings and variable changes stay queryable without resident copies", async (context) => {
   const fx = await coordination(context);
   await writeFile(fx.agents, OWNER_TEXT);
-  for (const value of ["3", "2"]) {
-    await setWorkspaceSetting(fx.library, { key: "execution.maxConcurrentSubagents", value, occurredAt: at() });
+  for (const value of ["fr", "en"]) {
+    await setWorkspaceSetting(fx.library, { key: "artifact.language", value, occurredAt: at() });
     assert.equal((await write(fx)).written, false);
     const catalog = await cli(["settings-catalog", "--workspace", fx.library]);
-    assert.equal(catalog.settings.find(setting => setting.key === "execution.maxConcurrentSubagents").currentValue, value);
+    assert.equal(catalog.settings.find(setting => setting.key === "artifact.language").currentValue, value);
     assert.equal(await readFile(fx.agents, "utf8"), OWNER_TEXT);
   }
   const receipt = await asAtelier(() => cli(["variable-set", "--exports", "agents", "--workspace", fx.library, "--name", "release-train", "--type", "string", "--value", "weekly", "--at", at()]));
@@ -577,10 +572,9 @@ test("540-Q4: the variable sections follow artifact.language: Chinese for zh-CN,
   await setVariable(fx.library, { exports: ["agents"], name: "owner", type: "string", value: "release-owner", occurredAt: at() });
   const state = await scoped(fx);
   const system = renderSystemVariablesSection(state).body;
-  assert.ok(system.startsWith("## 系统变量\n\n由 Einzbern 按协调库的配置写入。"));
-  assert.ok(system.includes("| 设置 | 取值 |"));
+  assert.ok(system.startsWith("## 系统变量\n\n### design.authority"));
+  assert.ok(system.includes("| 设置 | 声明值 | 生效来源 | 继承 |"));
   assert.doesNotMatch(system, /\| quota\./u);
-  assert.match(system, /model policy|模型/u);
   assert.ok(system.includes("| design.authority | （未配置） | default | false |"));
   assert.ok(system.includes("| 系统设置 | 生效来源 | 继承 |"));
   const custom = renderCustomVariablesSection(state).body;

@@ -127,7 +127,7 @@ test("479-AC1, AC3 through the CLI: every verb the generated table names is list
   const verbs = tableVerbs(markdown);
   // The full-text moment includes both project context and the packaged evidence entry.
   assert.deepEqual(verbs, SKILL_NAVIGATION.flatMap(entry => [...entry.verbs]), "CLI output preserves the complete current navigation contract");
-  assert.equal(verbs.length, 29, "core navigation includes host policy, configuration, typed work and peer receipts");
+  assert.equal(verbs.length, 30, "core navigation includes host policy, configuration, typed work and peer receipts");
   for (const verb of ["work-draft", "work-content-context"]) assert.ok(verbs.includes(verb), `${verb} remains in installed navigation`);
   assert.equal(verbs.filter(verb => verb === "rule-list").length, 1, "the normal installed starting-work row names current rule state exactly once");
   assert.ok(verbs.includes("execution-evidence"), "the installed workflow names its public evidence entry");

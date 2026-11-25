@@ -41,6 +41,10 @@ fallback. The coordination contract is in `docs/codex-native-controller.md`.
 
 ## File schema and migration
 
+The device reads the historical `tcrn.engine-model-policy.v1` and
+`tcrn.engine-model-policy.v2` schemas and projects their categories into the shared catalog.
+Native receipt replay validates the policy schema and host digests recorded at dispatch.
+
 The closed file shape is:
 
 ```json

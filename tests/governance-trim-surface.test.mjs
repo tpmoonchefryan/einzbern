@@ -25,7 +25,7 @@ test("467-AC1: the command catalog lists no retired verb family", async () => {
   for (const prefix of ["attestation-", "gate-", "dispatch-", "profile-", "telemetry-", "lease-", "conference-"]) {
     assert.deepEqual(names.filter((name) => name.startsWith(prefix)), [], `${prefix}* is retired`);
   }
-  assert.deepEqual(names.filter((name) => name.startsWith("minutes-")), ["minutes-list", "minutes-record", "minutes-show"]);
+  assert.deepEqual(names.filter((name) => name.startsWith("minutes-")), ["minutes-list", "minutes-record", "minutes-show", "minutes-supplement-batch", "minutes-supplement-inventory"]);
 });
 
 test("467-AC5: the guard registry, the proof budget and the verification map do not exist", () => {

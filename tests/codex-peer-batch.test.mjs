@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { prepareHostNativeDispatch } from "../dist/build/packages/core/src/dispatch-workflow.js";
 import { recordHostNativeEvents } from "../dist/build/packages/core/src/native-tool-evidence.js";
-import { applyEngineModelPolicySet, engineModelPolicyOnboarding } from "../dist/build/packages/core/src/engine-model-policy.js";
+import { ENGINE_MODEL_POLICY_SCHEMA_VERSION, applyEngineModelPolicySet, engineModelPolicyOnboarding, validateEngineModelPolicyFile } from "../dist/build/packages/core/src/engine-model-policy.js";
 import { recordCodexPeerBatch as recordAtCutoff, normalizeCodexPeerBatch, codexPeerReportPrefix } from "../dist/build/packages/core/src/codex-peer-batch.js";
 import { canonicalSha256 } from "../dist/build/packages/protocol/src/index.js";
 import { nativeFixture, selection, codexGuardFixture } from "./helpers/host-native-fixture.mjs";
@@ -961,6 +961,24 @@ test("peer identity references must match retained native response fields, not g
       assert.throws(() => recordCodexPeerBatch({ ...f.input, manifest: { ...f.input.manifest, [role]: replacement } }));
     }
   }
+});
+
+test("a retained Codex batch replays with the original host catalog after device policy promotion", async t => {
+  const f = await fixture(t);
+  const current = f.input.policy.hosts.codex;
+  const categories = current.categories.map(category => category.id === "main" ? { ...category, name: "Legacy main" } : category);
+  const digest = canonicalSha256({ host: "codex", categories, tiers: current.tiers, escalation: current.escalation });
+  const legacy = { schemaVersion: ENGINE_MODEL_POLICY_SCHEMA_VERSION, revision: f.input.policy.revision, hosts: { codex: { ...current, categories, digest } } };
+  assert.notEqual(validateEngineModelPolicyFile(legacy).hosts.codex.digest, digest);
+  const input = { ...f.input, policy: legacy, manifest: { ...f.input.manifest, policyDigest: digest } };
+  const pending = recordCodexPeerBatch(input);
+  assert.equal(pending.allTerminal, false);
+  assert.deepEqual(pending.policy, legacy);
+  const finished = recordCodexPeerBatch({ ...input, records: [finish(f)], prior: pending });
+  assert.equal(finished.reportEligible, true);
+  assert.equal(finished.policy.hosts.codex.digest, digest);
+  assert.deepEqual(normalizeCodexPeerBatch(JSON.parse(JSON.stringify(finished))), finished);
+  assert.throws(() => normalizeCodexPeerBatch(resealReceipt({ ...finished, blockedReasons: ["tampered"] })), /differs from retained/u);
 });
 
 test("CLI batch record reads current workspace and device policy, writes private receipt and replays it", async t => {

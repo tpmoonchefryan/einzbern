@@ -825,9 +825,11 @@ test("R47-04 (fixture): the coordination partition's own language and orchestrat
   const catalog = (library, extra = []) => receipt(run(m, ["settings-catalog", "--workspace", library, ...extra])).settings;
   const runtime = (settings) => Object.fromEntries(settings.filter((entry) => ["artifact.language", "execution.maxConcurrentSubagents"].includes(entry.key))
     .map((entry) => [entry.key, [entry.currentValue, entry.scope, entry.source?.kind ?? null]]));
-  assert.deepEqual(runtime(catalog(targets[0])), { "artifact.language": ["fr", "library", "library"], "execution.maxConcurrentSubagents": ["3", "library", "library"] },
-    "the coordination library reads its own values at the library level");
+  assert.deepEqual(runtime(catalog(targets[0])), { "artifact.language": ["fr", "library", "library"] },
+    "the coordination library reads its language at the library level");
   const coordinationEvents = (await readAllStreams(targets[0])).streams.flatMap((stream) => stream.events);
+  assert.ok(coordinationEvents.some(event => event.payload.record?.key === "execution.maxConcurrentSubagents" && event.payload.record.value === "3"),
+    "the imported event preserves the historical orchestration limit");
   assert.deepEqual(coordinationEvents.slice(expected.events + 2).map((event) => event.payload.record?.key), ["identity"], "the import carried both; the wizard wrote neither");
   const projectId = (await readRegistry(m.deviceHome)).entries.find((entry) => entry.projectPath === projectRoot).projectId;
   for (const [index, row] of rows.entries()) {
@@ -835,7 +837,7 @@ test("R47-04 (fixture): the coordination partition's own language and orchestrat
     const reads = [runtime(catalog(targets[index])), ...(index === 1 ? [runtime(catalog(targets[index], ["--project-id", projectId]))] : [])];
     for (const read of reads) {
       assert.notEqual(read["artifact.language"][0], "fr", row.partition);
-      assert.notEqual(read["execution.maxConcurrentSubagents"][0], "3", row.partition);
+      assert.notEqual(read["execution.maxConcurrentSubagents"]?.[0], "3", row.partition);
     }
   }
 

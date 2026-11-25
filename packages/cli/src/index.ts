@@ -276,7 +276,6 @@ import type { CliIo } from "./cli-args.js";
 import { readRecallQuery, runRecallCli, runRecallCommand } from "./recall-fast.js";
 import { RECALL_FIELD_WEIGHTS } from "../../core/src/recall.js";
 import { recallMetadataOnly } from "../../core/src/recall-inputs.js";
-import { logRecallCandidateReads } from "../../core/src/recall-observation-log.js";
 
 export { WorkflowCliError, type CliIo };
 
@@ -4854,6 +4853,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     if (references.length === 0) fail("CLI_ARGUMENT_MALFORMED", "refs");
     const result = await readRecallReferences(values.workspace!, at, references, booleanValue(values.full, "full"));
     io.write(canonicalJson(result));
+    const { logRecallCandidateReads } = await import("../../core/src/recall-observation-log.js");
     await logRecallCandidateReads(result.workspaceId, result.records.filter(entry => entry.ok).map(entry => entry.ref));
     return;
   }

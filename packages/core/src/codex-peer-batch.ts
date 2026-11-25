@@ -7,7 +7,7 @@ import { dotInstant } from "./dot-execution.js";
 import { canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
 import { hasCodexReportSessionSetting } from "./codex-peer-settings.js";
 import { hostObject, hostText, HostExecutionError } from "./host-capabilities.js";
-import { codexPeerReadiness, resolveEngineExecutionPolicyFromSnapshot, validateEngineModelPolicyFile } from "./engine-model-policy.js";
+import { codexPeerReadiness, resolveEngineExecutionPolicyFromSnapshot, validateEngineModelPolicySnapshot } from "./engine-model-policy.js";
 import type { EngineModelPolicyFile } from "./engine-model-policy.js";
 import { normalizeHostNativeRecord, recordHostNativeEvents, isCodexNativeSpawn } from "./native-tool-evidence.js";
 import type { HostNativeRecord } from "./native-tool-evidence.js";
@@ -309,7 +309,7 @@ function derive(
   if (version !== "tcrn.codex-peer-batch.v3" && input.applicationHistory !== undefined && input.applicationHistory.length > 0) {
     fail("application history requires the v3 peer receipt");
   }
-  const policy = validateEngineModelPolicyFile(input.policy);
+  const policy = validateEngineModelPolicySnapshot(input.policy);
   const capacity = hostObject(input.capacity, "capacity", ["limit", "active"]);
   positive(capacity.limit, "capacity limit");
   if (capacity.active !== null && (!Number.isSafeInteger(capacity.active) || Number(capacity.active) < 0)) fail("capacity active must be observed nonnegative count or null");

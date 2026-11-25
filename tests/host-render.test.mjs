@@ -49,7 +49,8 @@ function refusal(args, env) {
 }
 
 function oneHook(device, host = "claude-code") {
-  return Object.fromEntries([["UserPromptSubmit", "user-prompt-submit"], ["SubagentStart", "subagent-start"], ["PreToolUse", "pre-tool-use"], ...(host === "codex" ? [["PostToolUse", "post-tool-use"], ["Stop", "stop"]] : [])].map(([event]) => [event, [{ hooks: [{ type: "command", command: hostHookCommand(join(device, "engine", "hook.mjs"), event, join(dirname(device), "home")) }] }]]));
+  const events = ["UserPromptSubmit", "SubagentStart", "PreToolUse", ...(host === "codex" ? ["PostToolUse", "Stop"] : []), "SessionStart"];
+  return Object.fromEntries(events.map(event => [event, [{ hooks: [{ type: "command", command: hostHookCommand(join(device, "engine", "hook.mjs"), event, join(dirname(device), "home")) }] }]]));
 }
 
 test("BL34/35: --scope user renders the exact host-specific engine hooks into the home directory", async (t) => {

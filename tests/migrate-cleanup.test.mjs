@@ -333,7 +333,7 @@ test("489-R3, AC2 (fixture): after the cleanup each host's user file holds one E
   const userClaude = await readJson(join(m.home, CLAUDE));
   const userCodex = await readJson(join(m.home, CODEX));
   for (const [label, document] of [["claude", userClaude], ["codex", userCodex]]) {
-    assert.deepEqual(hookCommands(document).filter((hook) => isEinzbernHookCommand(hook.command)).sort((a, b) => a.event.localeCompare(b.event)), [...(label === "codex" ? [["PostToolUse", "post-tool-use"]] : []), ["PreToolUse", "pre-tool-use"], ...(label === "codex" ? [["Stop", "stop"]] : []), ["SubagentStart", "subagent-start"], ["UserPromptSubmit", "user-prompt-submit"]].map(([event, suffix]) => ({ event, command: launcherCommand(m.device).replace(/user-prompt-submit$/u, suffix) })), label);
+    assert.deepEqual(hookCommands(document).filter((hook) => isEinzbernHookCommand(hook.command)).sort((a, b) => a.event.localeCompare(b.event)), [...(label === "codex" ? [["PostToolUse", "post-tool-use"]] : []), ["PreToolUse", "pre-tool-use"], ["SessionStart", "session-start"], ...(label === "codex" ? [["Stop", "stop"]] : []), ["SubagentStart", "subagent-start"], ["UserPromptSubmit", "user-prompt-submit"]].map(([event, suffix]) => ({ event, command: launcherCommand(m.device).replace(/user-prompt-submit$/u, suffix) })), label);
     assert.deepEqual(hookCommands(document).filter((hook) => isLegacyHookCommand(hook.command)), [], label);
   }
   // Other tools' hooks and every other key stay.

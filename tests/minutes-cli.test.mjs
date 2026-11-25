@@ -272,7 +272,7 @@ test("STORY-475 AC3, R3: conference-open answers CLI_COMMAND_UNKNOWN, and the ca
   const names = COMMAND_CATALOG.map((entry) => entry.name);
   assert.deepEqual(names.filter((name) => name.startsWith("conference-")), []);
   const mutates = Object.fromEntries(COMMAND_CATALOG.filter((entry) => entry.name.startsWith("minutes-")).map((entry) => [entry.name, entry.mutates]));
-  assert.deepEqual(mutates, { "minutes-list": false, "minutes-record": true, "minutes-show": false });
+  assert.deepEqual(mutates, { "minutes-list": false, "minutes-record": true, "minutes-show": false, "minutes-supplement-batch": true, "minutes-supplement-inventory": false });
 });
 
 test("666: comma-separated parameter fragments require a decisions file and complete short decisions remain valid", async (context) => {
