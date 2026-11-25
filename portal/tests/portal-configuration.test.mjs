@@ -2,7 +2,6 @@
 // Tests in this file run sequentially; Node isolates each file in a process.
 import { R46_AT, R47_COORDINATION_KEYS, RETIRED_PERSONA_ACTIONS, TEST_ACTOR, appendHistoricalAttestationEnable, asDevice, assert, cli, cliRefusal, ensureProjectCoordination, execFileAsync, forgeOwnStream, join, managedSection, mkdir, mkdtemp, normalizedSection, portalRoot, readBoot, readFile, readOptions, realpath, registeredLibrary, request, rm, scratch, sectionDigest, startPortal, test, tmpdir, unordered, unregisterLibrary, withoutSource, writeFile, writeOptions } from "./portal-support.mjs";
 import { cachePath } from "../../scripts/lib/registry-lock.mjs";
-import { NAVIGATION_LINES } from "../../dist/build/packages/core/src/navigation-lines.js";
 
 
 
@@ -48,6 +47,11 @@ test("E01/E05/E13: Atelier edits a custom library rule and routes navigation thr
   const id = "custom-verify-output";
   const rulePath = `/api/rules/${id}`;
   const key = "agents.sharedNavigation";
+  const navigationText = [
+    "This project is managed by Einzbern.",
+    "Load the Mana Orchestrate skill before you start work.",
+    "Recall first: run Einzbern's recall for the task before you plan or change anything.",
+  ].join("\n");
   const output = () => readFile(join(fixture.proseRoot, "AGENTS.md"), "utf8");
   const row = (receipt) => receipt.body.rules.find(rule => rule.id === id);
   const deviceBefore = (await get("/api/machine-settings")).body.settings.find(setting => setting.key === "agents.navigation");
@@ -70,7 +74,7 @@ test("E01/E05/E13: Atelier edits a custom library rule and routes navigation thr
     const settings = await get("/api/settings");
     const navigation = settings.body.settings.find(setting => setting.key === key);
     assert.deepEqual([navigation.scope, navigation.currentValue], ["library", value]);
-    assert.equal((await output()).includes(NAVIGATION_LINES.join("\n")), value === "written");
+    assert.equal((await output()).includes(navigationText), value === "written");
   }
   assert.deepEqual((await get("/api/machine-settings")).body.settings.find(setting => setting.key === "agents.navigation"), deviceBefore);
   const switched = await post("/api/library", { library: fixture.second.project });
