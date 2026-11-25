@@ -412,8 +412,8 @@ test("480-R3: once all eight pass, the project is registered and wired from the 
     [[f.project, library, first.library.libraryId, false]]);
   for (const root of SKILL_COPY_ROOTS) assert.ok((await lstat(join(skillCopyPath(f.b.home, root), "SKILL.md"))).isFile(), root.host);
   const launcher = join(f.b.deviceHome, "engine", "hook.mjs");
-  assert.deepEqual(await einzbernHooks(join(f.b.home, ".claude", "settings.json")), [["UserPromptSubmit", hostHookCommand(launcher, "UserPromptSubmit", f.b.home)], ["SubagentStart", hostHookCommand(launcher, "SubagentStart", f.b.home)], ["PreToolUse", hostHookCommand(launcher, "PreToolUse", f.b.home)]]);
-  assert.deepEqual(await einzbernHooks(join(f.b.home, ".codex", "hooks.json")), [["UserPromptSubmit", hostHookCommand(launcher, "UserPromptSubmit", f.b.home)], ["SubagentStart", hostHookCommand(launcher, "SubagentStart", f.b.home)], ["PreToolUse", hostHookCommand(launcher, "PreToolUse", f.b.home)], ["PostToolUse", hostHookCommand(launcher, "PostToolUse", f.b.home)], ["Stop", hostHookCommand(launcher, "Stop", f.b.home)]]);
+  assert.deepEqual(await einzbernHooks(join(f.b.home, ".claude", "settings.json")), [["UserPromptSubmit", hostHookCommand(launcher, "UserPromptSubmit", f.b.home)], ["SubagentStart", hostHookCommand(launcher, "SubagentStart", f.b.home)], ["PreToolUse", hostHookCommand(launcher, "PreToolUse", f.b.home)], ["SessionStart", hostHookCommand(launcher, "SessionStart", f.b.home)]]);
+  assert.deepEqual(await einzbernHooks(join(f.b.home, ".codex", "hooks.json")), [["UserPromptSubmit", hostHookCommand(launcher, "UserPromptSubmit", f.b.home)], ["SubagentStart", hostHookCommand(launcher, "SubagentStart", f.b.home)], ["PreToolUse", hostHookCommand(launcher, "PreToolUse", f.b.home)], ["PostToolUse", hostHookCommand(launcher, "PostToolUse", f.b.home)], ["Stop", hostHookCommand(launcher, "Stop", f.b.home)], ["SessionStart", hostHookCommand(launcher, "SessionStart", f.b.home)]]);
 
   // Two columns: the project's settings and records that came back, and this device's own keys.
   const project = applied.columns.project;
@@ -524,7 +524,7 @@ test("480-R3 (U04): a second device recognizes the restored coordination identit
 });
 
 // TCRN-CROSS-INIT-053 R47 (R47-04, audit P6; PC-2): the coordination chain's own runtime settings on a
-// second device. Device a's coordination library holds its own language and orchestration limit at
+// second device. Device a's coordination library holds its own language and generation policy at
 // its library level, as a migration leaves them (c1-B). Device b restores the project: it recognizes
 // the same coordination identity and creates none; unregistered there, the restore completes as
 // usual and runs no recall smoke (that is migrate's alone). The restored project library reads neither
@@ -537,13 +537,13 @@ test("R47-04 (P6): a second device restores with the coordination unregistered, 
   const coordinationId = chainIdentity(await materializeWorkspace(f.library)).coordinationLibraryId;
   const coordinationOnA = join(f.a.deviceHome, "coordination-library");
   const coordinationOnB = join(f.b.deviceHome, "coordination-library");
-  for (const [key, value] of [["artifact.language", "fr"], ["execution.maxConcurrentSubagents", "3"]]) {
+  for (const [key, value] of [["artifact.language", "fr"], ["agents.generation", "none"]]) {
     await setWorkspaceSetting(coordinationOnA, { key, value, occurredAt: at(), actorId: "agent:setup" });
   }
   const runtime = async (library, extra = []) => Object.fromEntries((await cli(["settings-catalog", "--workspace", library, ...extra])).settings
-    .filter((entry) => ["artifact.language", "execution.maxConcurrentSubagents"].includes(entry.key))
+    .filter((entry) => ["artifact.language", "agents.generation"].includes(entry.key))
     .map((entry) => [entry.key, [entry.currentValue, entry.scope, entry.source?.kind ?? null]]));
-  const own = { "artifact.language": ["fr", "library", "library"], "execution.maxConcurrentSubagents": ["3", "library", "library"] };
+  const own = { "artifact.language": ["fr", "library", "library"], "agents.generation": ["none", "library", "library"] };
   assert.deepEqual(await runtime(coordinationOnA), own);
 
   use(f.b);
@@ -558,7 +558,7 @@ test("R47-04 (P6): a second device restores with the coordination unregistered, 
   const projectId = (await readRegistry(f.b.deviceHome)).entries.find((entry) => entry.projectPath === f.project).projectId;
   for (const read of [await runtime(f.library), await runtime(f.library, ["--project-id", projectId])]) {
     assert.notEqual(read["artifact.language"][0], "fr", "the project library does not read the coordination chain's language");
-    assert.notEqual(read["execution.maxConcurrentSubagents"][0], "3", "nor its orchestration limit");
+    assert.notEqual(read["agents.generation"][0], "none", "the project retains its own generation policy");
   }
 
   await cp(coordinationOnA, coordinationOnB, { recursive: true });

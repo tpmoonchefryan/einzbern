@@ -11,7 +11,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 import { CONFIG_BACKUP_RESERVATION_FILE, CONFIG_BACKUP_RESERVED_AREAS, CONFIG_BACKUP_RESERVATION_TEXT } from "../../../scripts/lib/config-backup-reservation.mjs";
 import { absolutePathLine, parseManagedFile } from "./managed-sections.js";
 import { CONFIG_BACKUP_MACHINE_KEYS, readMachineSettings, validateMachineSettingValue } from "./machine-settings.js";
-import { validateSettingValue } from "./settings.js";
+import { SETTINGS_CATALOG, validateSettingValue } from "./settings.js";
 import { checkVariableInput, looksSecretShaped } from "./variables.js";
 import { BUILT_IN_RULES } from "./rules-catalog.js";
 import { materializeWorkspace } from "./workspace.js";
@@ -57,6 +57,10 @@ export interface ConfigBackupSource {
   readonly libraryRoot: string; readonly projectRoot: string; readonly machineSettingsPath: string;
   readonly projectRef: ConfigBackupProjectRef;
   readonly declarationScope: "project" | "library";
+}
+export function configBackupDeclarationScope(source: ConfigBackupSource, kind: ConfigBackupSelection["kind"], key: string): ConfigBackupSource["declarationScope"] {
+  if (kind === "rule" || (kind === "setting" && SETTINGS_CATALOG.some(entry => entry.key === key && entry.scope === "library"))) return "library";
+  return source.declarationScope;
 }
 export interface ConfigBackupPlan {
   readonly schemaVersion: "einzbern.config-backup-plan.v1"; readonly manifest: ConfigBackupManifest;
@@ -224,8 +228,6 @@ export async function assertConfigBackupSource(source: ConfigBackupSource): Prom
 }
 export async function collectConfigBackupPayloads(source: ConfigBackupSource, selection: readonly ConfigBackupSelection[]): Promise<readonly ConfigBackupPayload[]> {
   await assertConfigBackupSource(source);
-  const scopeId = source.declarationScope === "project" ? source.projectRef.projectId : undefined;
-  const declarationSource = source.declarationScope === "project" ? "project-declaration" as const : "library-declaration" as const;
   const state = await materializeWorkspace(source.libraryRoot);
   if (state.metadata.workspaceId !== source.projectRef.libraryId || !state.projects.some(project => project.id === source.projectRef.projectId && !project.tombstone)) configBackupFail("CONFIG_BACKUP_SOURCE_MISMATCH");
   try { await readConfigBackupFile(dirname(source.machineSettingsPath), source.machineSettingsPath.slice(dirname(source.machineSettingsPath).length + 1)); }
@@ -234,6 +236,9 @@ export async function collectConfigBackupPayloads(source: ConfigBackupSource, se
   let fragments: readonly string[] | undefined;
   for (const item of selection) {
     configBackupObject(item, ["kind", "key"]); configBackupString(item.key);
+    const scope = configBackupDeclarationScope(source, item.kind, item.key);
+    const scopeId = scope === "project" ? source.projectRef.projectId : undefined;
+    const declarationSource = scope === "project" ? "project-declaration" as const : "library-declaration" as const;
     if (item.kind === "setting") result.push({ kind: item.kind, key: item.key, value: state.settings.find(record => record.projectId === scopeId && record.key === item.key)?.value ?? null, source: declarationSource });
     else if (item.kind === "device-preference") result.push({ kind: item.kind, key: item.key as typeof CONFIG_BACKUP_MACHINE_KEYS[number], value: machine.values[item.key] ?? null, source: "device-declaration" });
     else if (item.kind === "path-remapping") result.push({ kind: item.kind, key: item.key as "paths.artifacts" | "paths.knowledgeArticles", remappingRequired: true });

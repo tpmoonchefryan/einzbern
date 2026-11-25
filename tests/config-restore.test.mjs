@@ -157,21 +157,23 @@ test("CFG-R01/R02: variables and rule inputs use their supported typed engine mu
   const rule = BUILT_IN_RULES.find(entry => entry.id === "autonomy");
   const f = await fixture(t, home, [
     { kind: "variable", name: "example.limit", declaration: { type: "number", value: "2", description: "Example count", exports: ["handoff"], order: 3 }, source: "project-declaration" },
-    { kind: "rule", id: rule.id, version: rule.version, enabled: true, source: "project-declaration" },
+    { kind: "rule", id: rule.id, version: rule.version, enabled: true, source: "library-declaration" },
   ]);
   const plan = await planConfigRestore({ packageRoot: f.packageRoot, target: f.target, at });
   const result = await applyConfigRestore({ packageRoot: f.packageRoot, target: f.target, plan, approvedPlanDigest: plan.planDigest, at });
   const state = await materializeWorkspace(f.source.libraryRoot);
   const variable = state.configRecords.find(record => record.collection === "variable" && record.key === "example.limit");
   assert.equal(variable.value.type, "number"); assert.equal(variable.value.value, "2"); assert.deepEqual(variable.value.exports, ["handoff"]);
-  assert.equal(state.configRecords.find(record => record.collection === "rule" && record.key === rule.id).value.enabled, true);
+  const restoredRule = state.configRecords.find(record => record.collection === "rule" && record.key === rule.id);
+  assert.equal(restoredRule.value.enabled, true);
+  assert.equal(restoredRule.projectId, undefined);
   assert.ok(result.items.every(item => item.receipt?.authority === "engine"));
 }));
 
 test("CFG-B01/R01: missing rule declarations are not relabeled as explicit local disabled records", async t => asPinnedDevice(async home => {
   const { BUILT_IN_RULES } = await import("../dist/build/packages/core/src/rules-catalog.js");
   const rule = BUILT_IN_RULES.find(entry => entry.id === "autonomy");
-  const f = await fixture(t, home, [{ kind: "rule", id: rule.id, version: rule.version, enabled: false, source: "project-declaration" }]);
+  const f = await fixture(t, home, [{ kind: "rule", id: rule.id, version: rule.version, enabled: false, source: "library-declaration" }]);
   await assert.rejects(collectConfigBackupPayloads(f.source, [{ kind: "rule", key: rule.id }]), { reasonCode: "CONFIG_BACKUP_DECLARATION_MISSING" });
   const plan = await planConfigRestore({ packageRoot: f.packageRoot, target: f.target, at });
   assert.equal(plan.items[0].targetDigest, null);
@@ -209,14 +211,27 @@ test("J04 independent dot ownership survives user, rule, variable and language r
 }));
 
 test("J04 scalar restore uses complete traditional projections, not only variables", async t => asPinnedDevice(async home => {
-  const f = await fixture(t, home, [{ kind: "setting", key: "agents.generation", value: "managed", source: "project-declaration" }]);
-  await setWorkspaceSetting(f.source.libraryRoot, { key: "agents.generation", value: "none", occurredAt: at, configurationProjectId: f.source.projectRef.projectId });
+  const f = await fixture(t, home, [{ kind: "setting", key: "agents.generation", value: "managed", source: "library-declaration" }]);
+  await setWorkspaceSetting(f.source.libraryRoot, { key: "agents.generation", value: "none", occurredAt: at });
   await setWorkspaceSetting(f.source.libraryRoot, { key: "artifact.language", value: "en", occurredAt: at, configurationProjectId: f.source.projectRef.projectId });
   const plan = await planConfigRestore({ packageRoot: f.packageRoot, target: f.target, at });
   const result = await applyConfigRestore({ packageRoot: f.packageRoot, target: f.target, plan, approvedPlanDigest: plan.planDigest, at });
   const receipt = result.items[0].receipt;
+  assert.deepEqual(await collectConfigBackupPayloads(f.source, [{ kind: "setting", key: "agents.generation" }]), [{ kind: "setting", key: "agents.generation", value: "managed", source: "library-declaration" }]);
   assert.ok(["rendered", "pending"].includes(receipt.projection));
   if (receipt.projection === "rendered") assert.match(await readFile(join(f.source.projectRoot, "AGENTS.md"), "utf8"), /einzbern:.*section|einzbern:begin/u);
+}));
+
+test("E14: a historical project backup cannot overwrite the library navigation setting", async t => asPinnedDevice(async home => {
+  const key = "agents.sharedNavigation";
+  const f = await fixture(t, home, [{ kind: "setting", key, value: "declined", source: "project-declaration" }]);
+  await setWorkspaceSetting(f.source.libraryRoot, { key, value: "written", occurredAt: at });
+  const plan = await planConfigRestore({ packageRoot: f.packageRoot, target: f.target, at });
+  assert.equal(plan.items[0].classification, "unmappable");
+  const result = await applyConfigRestore({ packageRoot: f.packageRoot, target: f.target, plan, approvedPlanDigest: plan.planDigest, at });
+  assert.equal(result.items[0].status, "skipped");
+  const [current] = await collectConfigBackupPayloads(f.source, [{ kind: "setting", key }]);
+  assert.equal(current.value, "written");
 }));
 
 test("J05 original recovery cannot reuse an incompatible same-selection package", async t => asPinnedDevice(async home => {

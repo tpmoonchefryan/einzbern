@@ -40,18 +40,18 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
   "currentSources": [
     {
       "path": "portal/index.html",
-      "bytes": 531319,
-      "sha256": "d1a83cc57d70e521ca3f5b02dc548ac05510cc75dccc88f670a561b82e0adcbf"
+      "bytes": 537273,
+      "sha256": "16e2558e401e41b3e999fed6e10fc543f203869c0e783f97893066b46782ac9f"
     },
     {
       "path": "portal/locales.js",
-      "bytes": 316930,
-      "sha256": "70969f2adcd1ecb0a77ba9736064b40e9866abeb338e4591dc0ca6a26c4f05cf"
+      "bytes": 322569,
+      "sha256": "938c360f254cec252dc9c594d65f2c16124b991374801c73bdde2d23ba9e83a0"
     },
     {
       "path": "portal/portal.mjs",
-      "bytes": 97572,
-      "sha256": "e7da0f0ca6a8f5456c46d3c20f7971bd0043ec3885b7708d3ca99ec1ed2c4180"
+      "bytes": 98798,
+      "sha256": "42f74d146f5819b1679e5b4d65e751403c3f5b3c93e7aa0037f5ccf1fe0cdd29"
     },
     {
       "path": "portal/scripts/i18n-proof.mjs",
@@ -90,8 +90,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/portal-configuration.test.mjs",
-      "bytes": 58892,
-      "sha256": "c76395fa7dc0a34b30cf2df753b753f63c7d0fb4d20bd52dee50d1e405cda5d1"
+      "bytes": 61846,
+      "sha256": "3705d5180f4f1fcfa148acae83279fffcc93c536c390f0f319ab76ef2dc96e99"
     },
     {
       "path": "portal/tests/portal-library.test.mjs",
@@ -105,8 +105,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/ui-configuration.test.mjs",
-      "bytes": 127114,
-      "sha256": "b19ffd42095986c3aade28e059cd98d388b7a341bc9da312de332765eacee57f"
+      "bytes": 127128,
+      "sha256": "02924119d186939ae1016e20db5e369f7eb318f5f27e737c79f5bd6d91706ccb"
     },
     {
       "path": "portal/tests/ui-library.test.mjs",
@@ -189,7 +189,7 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
       "const modelPolicyPendingFor = (host) => state.modelPolicyReadPending === true && state.modelPolicyReadTarget?.host === host && modelPolicyReadCurrent(state.modelPolicyReadTarget);",
       "const readiness = state.modelPolicy?.selectedHost === host ? state.modelPolicy.peerReadiness : null;",
       "const registered = (BOOT.libraries || []).filter((library) => library.chain?.role === \"coordination\" && library.libraryId !== own).map((library) => library.libraryId);",
-      "const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? \"en\", theme: document.documentElement.dataset.tcrnTheme, page: \"dashboard\", dashboardTab: \"overview\", settingGroup: \"general\", collections: { \"models.category\": { draft: null, dirty: false, findings: [], refusal: null }, \"models.tiers\": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: \"codex\", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: \"\", knowledgeStatus: \"valid\", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: \"conferenceTypes\", receipt: null, operationDetailsOpen: false, agentsText: \"\", reconciliation: null, rules: null, pendingSection: \"\", searchIndex: [], searchResults: [], searchSelection: 0 };",
+      "const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? \"en\", theme: document.documentElement.dataset.tcrnTheme, page: \"dashboard\", dashboardTab: \"overview\", settingGroup: \"general\", customRuleEditing: \"\", collections: { \"models.category\": { draft: null, dirty: false, findings: [], refusal: null }, \"models.tiers\": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: \"codex\", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: \"\", knowledgeStatus: \"valid\", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: \"conferenceTypes\", receipt: null, operationDetailsOpen: false, agentsText: \"\", reconciliation: null, rules: null, pendingSection: \"\", searchIndex: [], searchResults: [], searchSelection: 0 };",
       "const template = state.modelPolicy?.selectedHost === host ? state.modelPolicy.onboarding : null;",
       "host.hidden = !designAuthorityUrl() || state.settings?.chain?.role === \"coordination\" || state.settingGroup !== settingGroup(\"design.authority\");",
       "if (!state.chainDeclarePending) $(\"[data-chain-role]\", form).value = identity?.role === \"coordination\" ? \"coordination\" : \"project\";",
@@ -224,9 +224,9 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
         "leg": "key-coverage",
         "ok": true,
         "reasonCode": "EVERY_KEY_TRANSLATED",
-        "keyCount": 756,
+        "keyCount": 772,
         "localeCount": 5,
-        "expectedStrings": 3780,
+        "expectedStrings": 3860,
         "gaps": []
       },
       {

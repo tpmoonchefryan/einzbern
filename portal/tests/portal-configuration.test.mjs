@@ -2,6 +2,7 @@
 // Tests in this file run sequentially; Node isolates each file in a process.
 import { R46_AT, R47_COORDINATION_KEYS, RETIRED_PERSONA_ACTIONS, TEST_ACTOR, appendHistoricalAttestationEnable, asDevice, assert, cli, cliRefusal, ensureProjectCoordination, execFileAsync, forgeOwnStream, join, managedSection, mkdir, mkdtemp, normalizedSection, portalRoot, readBoot, readFile, readOptions, realpath, registeredLibrary, request, rm, scratch, sectionDigest, startPortal, test, tmpdir, unordered, unregisterLibrary, withoutSource, writeFile, writeOptions } from "./portal-support.mjs";
 import { cachePath } from "../../scripts/lib/registry-lock.mjs";
+import { NAVIGATION_LINES } from "../../dist/build/packages/core/src/navigation-lines.js";
 
 
 
@@ -35,6 +36,46 @@ test("AGENTS.md read/write is allow-listed and reconciliation reports line-level
   const escapedWrite = await request(url, "/api/agents-md", writeOptions(boot.token, "PUT", { file: "../AGENTS.md", text: "no" }));
   assert.equal(escapedWrite.response.status, 404);
   assert.equal(escapedWrite.body.reasonCode, "PORTAL_PATH_ESCAPE");
+});
+
+test("E01/E05/E13: Atelier edits a custom library rule and routes navigation through the shared setting", async (t) => {
+  const fixture = await scratch("tcrn-portal-library-rules-", "TCRN-PORTAL-LIBRARY-RULES");
+  const { child, url } = await startPortal(fixture);
+  t.after(async () => { child.kill(); await rm(fixture.base, { recursive: true, force: true }); });
+  const { boot } = await readBoot(url);
+  const post = (path, body) => request(url, path, writeOptions(boot.token, "POST", body));
+  const get = (path) => request(url, path, readOptions(boot.token));
+  const id = "custom-verify-output";
+  const rulePath = `/api/rules/${id}`;
+  const key = "agents.sharedNavigation";
+  const output = () => readFile(join(fixture.proseRoot, "AGENTS.md"), "utf8");
+  const row = (receipt) => receipt.body.rules.find(rule => rule.id === id);
+  const deviceBefore = (await get("/api/machine-settings")).body.settings.find(setting => setting.key === "agents.navigation");
+
+  const created = await post(rulePath, { action: "create", title: "Verify output", body: "Read back the result.", order: 9 });
+  assert.equal(created.response.status, 200, created.body.reasonCode);
+  assert.deepEqual([row(created).custom, row(created).title, row(created).body, row(created).order, row(created).source.kind], [true, "Verify output", "Read back the result.", 9, "library"]);
+  const updated = await post(rulePath, { action: "update", body: "Read back the final version.", order: 6 });
+  assert.equal(updated.response.status, 200, updated.body.reasonCode);
+  assert.deepEqual([row(updated).title, row(updated).body, row(updated).order], ["Verify output", "Read back the final version.", 6]);
+  assert.match(await output(), /Read back the final version\./u);
+  const disabled = await post(rulePath, { action: "disable" });
+  assert.equal(disabled.response.status, 200, disabled.body.reasonCode);
+  assert.equal(row(disabled).state, "disabled");
+  assert.doesNotMatch(await output(), /Read back the final version\./u);
+
+  for (const value of ["declined", "written"]) {
+    const changed = await post("/api/settings", { key, value });
+    assert.equal(changed.response.status, 200, changed.body.reasonCode);
+    const settings = await get("/api/settings");
+    const navigation = settings.body.settings.find(setting => setting.key === key);
+    assert.deepEqual([navigation.scope, navigation.currentValue], ["library", value]);
+    assert.equal((await output()).includes(NAVIGATION_LINES.join("\n")), value === "written");
+  }
+  assert.deepEqual((await get("/api/machine-settings")).body.settings.find(setting => setting.key === "agents.navigation"), deviceBefore);
+  const switched = await post("/api/library", { library: fixture.second.project });
+  assert.equal(switched.response.status, 200, switched.body.reasonCode);
+  assert.equal(row(await get("/api/rules")), undefined);
 });
 
 

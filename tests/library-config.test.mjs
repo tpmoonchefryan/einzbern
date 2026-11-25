@@ -17,7 +17,7 @@ import test from "node:test";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { cachePath, materializeWorkspace } from "../dist/build/packages/core/src/index.js";
 import { createWorkspaceSettingRecord } from "../dist/build/packages/core/src/settings.js";
-import { appendEvent } from "../dist/build/packages/core/src/workspace.js";
+import { appendEvents } from "../dist/build/packages/core/src/workspace.js";
 
 // TCRN-CROSS-STORY-484 R4: these tests write settings through the CLI, as Atelier does.
 standInForAtelier();
@@ -79,10 +79,10 @@ test("E14: old AGENTS settings follow the selected lineage until the first libra
   const legacy = async (key, value, id) => {
     const occurredAt = at();
     const record = createWorkspaceSettingRecord(key, value, 1, occurredAt, library, id);
-    await appendEvent(library, state => ({
+    await appendEvents(library, [state => ({
       payload: { operation: "settings.updated", record }, work: state.work, projects: state.projects,
       settings: [...state.settings.filter(row => row.key !== key || row.projectId !== id), record],
-    }), { occurredAt });
+    })], { occurredAt });
   };
   const catalogValue = async (home, projectId, key) => {
     const result = await as(home, ["settings-catalog", "--workspace", library, "--project-id", projectId]);

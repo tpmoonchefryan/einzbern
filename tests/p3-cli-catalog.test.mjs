@@ -137,7 +137,7 @@ test("unknown verbs fail closed and every cataloged verb dispatches", async () =
     // library-list lists this device's registry, empty or not (TCRN-CROSS-STORY-470 R1), and
     // engine-list its engine versions, none or some (TCRN-CROSS-STORY-471 R2). doctor checks this
     // device with the current directory as the project (TCRN-CROSS-STORY-480 R4).
-    if (entry.name === "commands" || entry.name === "doctor" || entry.name === "engine-list" || entry.name === "engine-model-policy-catalog" || entry.name === "install-manifest" || entry.name === "library-list" || entry.name === "machine-settings-catalog" || entry.name === "vocabulary") {
+    if (entry.name === "commands" || entry.name === "doctor" || entry.name === "engine-list" || entry.name === "engine-model-policy-catalog" || entry.name === "execution-codex-polling-policy" || entry.name === "install-manifest" || entry.name === "library-list" || entry.name === "machine-settings-catalog" || entry.name === "vocabulary") {
       assert.equal(outcome.ok, true, `${entry.name} resolves with no flags`);
       continue;
     }

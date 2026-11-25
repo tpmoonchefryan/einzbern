@@ -10,9 +10,11 @@ retention numbers or cleanup authorization are supplied by this specification.
 
 `collectConfigBackupPayloads` reads only explicitly selected logical keys from a
 registered library/project pair and that device's machine-settings file. An explicit
-`declarationScope` selects local project declarations or library declarations. It
-never turns an inherited effective value into a new declaration. The source label
-is preserved in the package; restoration to another declaration scope is unmappable.
+`declarationScope` selects local project declarations or library declarations for
+keys that can use either scope. Built-in rules and library-scoped settings use
+their explicit library declarations. Inherited values remain out of the package.
+The source label is preserved in the package. A historical project declaration for
+a key that now belongs to the library is unmappable during restore.
 The selection does not contain arbitrary filesystem paths.
 
 The initial closed collection is:

@@ -101,7 +101,7 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `general` | `design.productionDocs` | project | scalar | 6 |
 | `general` | `design.buildService` | project | scalar | 7 |
 | `general` | `design.buildProject` | project | scalar | 8 |
-| `general` | `design.consumedVersion` (historical) | project | scalar | 9 |
+| `general` | `design.consumedVersion` | project | scalar | 9 |
 | `general` | `agents.projectRoot` | device | scalar | 10 |
 | `general` | `agents.generation` | library | scalar | 20 |
 | `general` | `agents.sharedNavigation` | library | scalar | 21 |
@@ -133,6 +133,7 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `retrieval` | `retrieval.tau` | project | scalar | 2 |
 | `retrieval` | `retrieval.scopeExcerptBytes` | project | scalar | 3 |
 | `retrieval` | `injection.perPromptBytes` | project | scalar | 4 |
+| `retrieval` | `retrieval.metadataOnly` | library | scalar | 5 |
 | `storage` | `workspace.generatedArtifactsPath` | project | scalar | 1 |
 | `storage` | `storage.segmentBytes` | library | scalar | 2 |
 | `storage` | `storage.snapshotEveryEvents` | library | scalar | 3 |

@@ -172,7 +172,7 @@ export async function runCodexPeerHook(event: string, payload: unknown, device: 
     }
   }
   const query = await runCodexQueryGuard(event, body, device, async () =>
-    (await resolveCodexPollingPolicy(device, body.session_id, text(body.agent_id) ? body.agent_id : undefined)).scope);
+    (await resolveCodexPollingPolicy(device, sessionId, text(body.agent_id) ? body.agent_id : undefined)).scope);
   if (query.reasonCode !== "HOOK_PEER_NOT_APPLICABLE") return query;
   if (event === "PreToolUse" && tool === SEND) {
     const problem = await codexPeerReportDispatchProblem(device, body.session_id, SEND, body.tool_input);
