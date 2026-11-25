@@ -3733,7 +3733,7 @@ export async function materializeLibrary(libraryOrRoot: Library | string, option
   if (options.readFile !== undefined || options.timeoutMs !== undefined || options.archivedManifest !== undefined
     || heldWriteLocks.getStore()?.has(library.root) === true
     || (library.manifest.consolidation === undefined && (await listStreamDevices(library.root)).length === 0)
-    || (process.platform !== "linux" && (process.platform !== "darwin" || library.manifest.consolidation === undefined))) {
+    || (process.platform !== "linux" && process.platform !== "darwin")) {
     const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
     const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
     observeCheckpoint(state.headEventHash);

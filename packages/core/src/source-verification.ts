@@ -109,12 +109,16 @@ async function readArchiveCostHint(library: Library): Promise<number | null> {
 
 export async function withSourceVerification(library: Library, operation: () => Promise<{ readonly value: WorkspaceState; readonly read: LibraryRead; readonly accepted: boolean }>): Promise<WorkspaceState> {
   if (process.platform !== "darwin") return (await nativeVerifier()).withSourceVerification(library, operation);
-  if (library.manifest.consolidation === undefined) return (await operation()).value;
+  const fullRead = async (index?: Awaited<ReturnType<typeof readConsolidationIndex>>): Promise<WorkspaceState> => {
+    await (await nativeVerifier()).assertDarwinSourcesAvailable(library, index);
+    return (await operation()).value;
+  };
+  if (library.manifest.consolidation === undefined) return fullRead();
   const hintedBytes = await readArchiveCostHint(library);
   if (hintedBytes !== null) {
     if (hintedBytes < FULL_READ_MAX_BYTES) {
       observeCacheReason("source-verification-full-cost-path");
-      return (await operation()).value;
+      return fullRead();
     }
     return withConsolidationIndexParseReuse(async () => (await nativeVerifier()).withSourceVerification(library, operation));
   }
@@ -137,7 +141,7 @@ export async function withSourceVerification(library: Library, operation: () => 
     }
     if (archiveBytes < FULL_READ_MAX_BYTES) {
       observeCacheReason("source-verification-full-cost-path");
-      return (await operation()).value;
+      return fullRead(index);
     }
     return (await nativeVerifier()).withSourceVerification(library, operation);
   });
