@@ -4836,8 +4836,16 @@ const BOOT = __PORTAL_BOOT__;
   const conceptTip = (key, placement = "top") => {
     const body = t(`concept.${key}`);
     if (body === `concept.${key}`) return "";
+    const scoring = key === "setting.retrieval.tau" ? state.settings?.recallScoring : null;
+    const weights = scoring ? `<table class="tcrn-text"><caption>${esc(t("recallScoring.weights"))}</caption><tbody>${[
+      [t("recallScoring.title"), scoring.title],
+      [t("recallScoring.tags"), scoring.tags],
+      [t("recallScoring.expansions"), scoring.expansions],
+      [t("recallScoring.externalKey"), scoring.externalKey],
+      [t("recallScoring.body"), scoring.body],
+    ].map(([label, value]) => `<tr><th scope="row">${esc(label)}</th><td>${esc(value ?? t("recallScoring.excluded"))}</td></tr>`).join("")}</tbody></table>` : "";
     const id = `concept-tip-${conceptTipSequence += 1}`;
-    const kind = key === "setting.design.authority" || body.length > 240 ? "popover" : "tooltip";
+    const kind = key === "setting.design.authority" || weights !== "" || body.length > 240 ? "popover" : "tooltip";
     const layerTag = kind === "popover" ? "section" : "span";
     const layerClass = kind === "popover" ? "tcrn-popover" : "tcrn-tooltip__content";
     const layerRole = kind === "popover" ? `role="dialog" aria-modal="false" aria-label="${esc(t("concept.explain"))}" data-overlay-scope="popover"` : `role="tooltip" data-tooltip-scope="supplemental" data-tooltip-interactive-content="forbidden"`;
@@ -4846,7 +4854,7 @@ const BOOT = __PORTAL_BOOT__;
       + `<button type="button" class="tcrn-button tcrn-button--quiet tcrn-icon-button" ${triggerRelation} data-static-overlay-trigger="true" data-static-overlay-kind="${kind}" aria-label="${esc(t("concept.explain"))}">`
       + `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v4"/><path d="M8 4.8h.01"/></svg>`
       + `</button>`
-      + `<${layerTag} id="${id}" ${layerRole} class="${layerClass}" data-static-overlay-layer="true" data-static-overlay-kind="${kind}" data-ds-overlay-candidate="TCRN-Design-System@d53f23055ddedc6e0881cd85d54e6ab79cd02f75" hidden>${esc(body)}</${layerTag}>`
+      + `<${layerTag} id="${id}" ${layerRole} class="${layerClass}" data-static-overlay-layer="true" data-static-overlay-kind="${kind}" data-ds-overlay-candidate="TCRN-Design-System@d53f23055ddedc6e0881cd85d54e6ab79cd02f75" hidden>${esc(body)}${weights}</${layerTag}>`
       + `</span>`;
   };
   const settingDescription = (key) => t(`setting.${settingCopyKey(key)}.description`);

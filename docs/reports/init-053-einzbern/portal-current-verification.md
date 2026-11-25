@@ -40,13 +40,13 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
   "currentSources": [
     {
       "path": "portal/index.html",
-      "bytes": 530653,
-      "sha256": "81b8eb1588e3c512df413480e496cc802b41e697e13e0e5f6f22f55f6848b64c"
+      "bytes": 531319,
+      "sha256": "d1a83cc57d70e521ca3f5b02dc548ac05510cc75dccc88f670a561b82e0adcbf"
     },
     {
       "path": "portal/locales.js",
-      "bytes": 315366,
-      "sha256": "045818280f00300aa1cddc886e6d9e71e38d0f639ad628fcff0a8b6c6fb4faec"
+      "bytes": 316930,
+      "sha256": "70969f2adcd1ecb0a77ba9736064b40e9866abeb338e4591dc0ca6a26c4f05cf"
     },
     {
       "path": "portal/portal.mjs",
@@ -105,8 +105,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/ui-configuration.test.mjs",
-      "bytes": 126301,
-      "sha256": "46e9650e2c40c708b11e55a7bb2a1db17372c896a38507659778f15b1761888e"
+      "bytes": 127114,
+      "sha256": "b19ffd42095986c3aade28e059cd98d388b7a341bc9da312de332765eacee57f"
     },
     {
       "path": "portal/tests/ui-library.test.mjs",
@@ -224,16 +224,16 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
         "leg": "key-coverage",
         "ok": true,
         "reasonCode": "EVERY_KEY_TRANSLATED",
-        "keyCount": 749,
+        "keyCount": 756,
         "localeCount": 5,
-        "expectedStrings": 3745,
+        "expectedStrings": 3780,
         "gaps": []
       },
       {
         "leg": "translation-reality",
         "ok": true,
         "reasonCode": "TRANSLATIONS_DIFFER_FROM_ENGLISH",
-        "addedKeyCount": 0,
+        "addedKeyCount": 7,
         "gaps": []
       },
       {

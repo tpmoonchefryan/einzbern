@@ -342,9 +342,13 @@ test("MIN-239 D6: the prompt hook recalls valid decisions only and says what rep
   assert.equal(afterLines.some((line) => line.includes("[纪要 DL-MIN-1]")), false, JSON.stringify(afterLines));
   const storyLines = (await ask("zebrafish tank", 16))?.lines ?? [];
   assert.ok(storyLines.some((line) => line.includes(`过时决策 ${address("DL-MIN-1", 1)}→${address("DL-MIN-2", 1)}`)), JSON.stringify(storyLines));
+  const scoring = async () => (await cli(["settings-catalog", "--workspace", fx.workspace, "--project-id", fx.projectId])).recallScoring;
+  const fullScoring = await scoring();
+  assert.deepEqual(fullScoring, { title: 8, tags: 5, expansions: 6, externalKey: 1, body: 3 });
   await setWorkspaceSetting(fx.workspace, {
     occurredAt: at(17), key: "retrieval.metadataOnly", value: "true", authorization: { surface: "atelier" },
   });
+  assert.deepEqual(await scoring(), { ...fullScoring, body: null });
   const compact = (await ask("zebrafish tank", 18))?.lines ?? [];
   assert.deepEqual(compact, [
     `Story · DL-STORY · Zebrafish tank · ${deriveStableId("work", "DL-STORY")}`,

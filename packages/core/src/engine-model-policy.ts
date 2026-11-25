@@ -480,7 +480,8 @@ export async function applyEngineModelPolicySet(input: {
     const current = await readEngineModelPolicyFile(home);
     if (input.expectedStoreRevision !== undefined && current.revision !== input.expectedStoreRevision) fail("ENGINE_MODEL_POLICY_CAS_CONFLICT", "shared categories or another host changed after the approved catalog snapshot", { expectedStoreRevision: input.expectedStoreRevision, actualStoreRevision: current.revision });
     const currentHost = Object.hasOwn(current.hosts, host) ? current.hosts[host] : undefined;
-    const categories = input.expectedStoreRevision === undefined && current.revision > 0
+    const hasOtherHosts = Object.keys(current.hosts).some(existingHost => existingHost !== host);
+    const categories = input.expectedStoreRevision === undefined && hasOtherHosts
       ? categoriesForHostWrite(config.categories, current.categoryCatalog ?? [])
       : config.categories;
     const hosts: Record<string, EngineModelPolicyEntry> = {};

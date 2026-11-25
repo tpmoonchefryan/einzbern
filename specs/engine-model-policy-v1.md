@@ -120,8 +120,9 @@ receipt.
   --actor <id> --decided-in minutes:<id>#D<n>` validates an Owner decision naming
   `models.engine-policy`, writes that host record and the shared category catalog, and returns the
   stored policy readback. The optional `--expected-store-revision` rejects a write based on a stale
-  shared catalog or another host's concurrent edit. A per-host write without this revision keeps
-  categories omitted by that host; pass the revision when replacing the whole shared catalog.
+  shared catalog or another host's concurrent edit. When multiple hosts share the catalog, a
+  per-host write without this revision keeps categories omitted by that host. Pass the revision
+  when replacing the whole shared catalog.
   An unconfigured host's draft uses the current shared categories and preserves their order.
   The workspace locates the decision; if omitted, the device registry resolves it from the current
   directory under the CLI's existing rules. It does not scope the resulting policy.

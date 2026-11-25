@@ -1010,7 +1010,9 @@ if (!MUTATION) {
       assert.doesNotMatch(page.source, /\bSETTING_GROUPS\b/u, "the page's hard-coded key-to-group table is gone");
       const project = (await cli(["settings-catalog", "--workspace", page.workspace], page.deviceEnv)).settings;
       const device = (await cli(["machine-settings-catalog"], { ...page.deviceEnv, HOME: page.fixture.home, USERPROFILE: page.fixture.home })).settings;
-      const rows = [...project.filter((entry) => entry.key !== "design.consumedVersion"), ...device.map((entry) => ({ ...entry, layer: "device" }))];
+      assert.ok(device.some(entry => entry.key === "agents.projectRoot"), "the compatibility key remains in the machine catalog");
+      const rows = [...project.filter((entry) => entry.key !== "design.consumedVersion"), ...device.filter(entry => entry.key !== "agents.projectRoot").map(entry => ({ ...entry, layer: "device" }))];
+      assert.equal(page.document.querySelector('[data-machine-row="agents.projectRoot"]'), null, "manage the library's root through setup");
       const settingsRows = rows.filter((row) => row.group !== "models");
       for (const row of rows) {
         assert.equal(page.source.includes(`"${row.key}": "${row.group}"`), false, `${row.key} has no group written into the page`);
@@ -1038,6 +1040,13 @@ if (!MUTATION) {
         assert.equal(rows.some((row) => row.key === retiredEconomySettingKey), false);
         assert.equal(page.document.querySelector(`[data-setting-row="${retiredEconomySettingKey}"]`), null, `the retired economy-tier model stays out of ${group}`);
       }
+
+      page.document.querySelector('[data-setting-group="retrieval"]')?.click();
+      const scoringTrigger = page.document.querySelector('[data-concept-tip="setting.retrieval.tau"] button');
+      assert.ok(scoringTrigger);
+      const scoring = page.document.getElementById(scoringTrigger.getAttribute("aria-controls"))?.querySelector("table");
+      assert.ok(scoring);
+      assert.deepEqual([...scoring.querySelectorAll("td")].map(cell => cell.textContent), ["8", "5", "6", "1", "3"]);
 
       // Project model rows are historical compatibility information. Current device controls and
       // their search destinations live on the standalone Models page.

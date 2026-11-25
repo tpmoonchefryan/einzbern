@@ -273,6 +273,8 @@ import {
 } from "./cli-args.js";
 import type { CliIo } from "./cli-args.js";
 import { readRecallQuery, runRecallCli, runRecallCommand } from "./recall-fast.js";
+import { RECALL_FIELD_WEIGHTS } from "../../core/src/recall.js";
+import { recallMetadataOnly } from "../../core/src/recall-inputs.js";
 import { logRecallCandidateReads } from "../../core/src/recall-observation-log.js";
 
 export { WorkflowCliError, type CliIo };
@@ -3638,6 +3640,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       projects: state.projects.filter(entry => !entry.tombstone).map(entry => ({ id: entry.id, externalKey: entry.externalKey, name: entry.name, parentProjectId: entry.parentProjectId ?? null })),
       design: chain?.role === "coordination" ? null : designConfiguration(state),
       modelPolicy,
+      recallScoring: { ...RECALL_FIELD_WEIGHTS, body: recallMetadataOnly(declarationState.settings) ? null : RECALL_FIELD_WEIGHTS.body },
       configurationContract: configurationContract(COMMAND_CATALOG),
       migrationDiagnostics: diagnoseLegacySharedPaths(declarationState),
       contentRollout,
