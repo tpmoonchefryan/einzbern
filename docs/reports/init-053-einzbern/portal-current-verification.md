@@ -234,7 +234,7 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
         "leg": "translation-reality",
         "ok": true,
         "reasonCode": "TRANSLATIONS_DIFFER_FROM_ENGLISH",
-        "addedKeyCount": 2,
+        "addedKeyCount": 0,
         "gaps": []
       },
       {
