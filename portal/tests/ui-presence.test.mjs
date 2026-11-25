@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tests in this file run sequentially; Node isolates each file in a process.
-import { CLI, DS_CONTRACT, GHOST_TARGET, MUTATION, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, join, keydown, linkBridge, loadExecutedDom, localeTable, nextAt, pageHierarchyFindings, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scratch, test, topbarFindings, vm, waitFor, writeFile, writeScratch } from "./ui-presence-support.mjs";
+import { CLI, DS_CONTRACT, GHOST_TARGET, MUTATION, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, join, keydown, linkBridge, loadExecutedDom, localeTable, machineReceiptAdvanced, nextAt, pageHierarchyFindings, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptRawText, receiptText, rm, scratch, test, topbarFindings, vm, waitFor, writeFile, writeScratch } from "./ui-presence-support.mjs";
 
 // A fixed-size, stage-owned observer of requests the scenario already makes.
 // Response/value/error identity and json's invocation receiver are preserved, but
@@ -654,9 +654,8 @@ test("INIT-056 R5: host changes reject an old Save and an older specialized read
     page.hold((path) => path.startsWith("/api/model-policy?host="));
     selectHost("constructor");
     await waitFor(() => page.held() === 1, "the specialized constructor read");
-    document.querySelector('[data-page-target="settings"]').click();
-    document.querySelector('[data-setting-group="execution"]').click();
-    const concurrency = document.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
+    document.querySelector('[data-page-target="engine-model-policy"]').click();
+    const concurrency = document.querySelector('[data-machine-control="models.maxConcurrentSubagents"]');
     concurrency.value = "3";
     concurrency.dispatchEvent(new window.Event("change", { bubbles: true }));
     await waitFor(() => page.held() === 2, "the newer shared refresh policy read");
@@ -746,7 +745,7 @@ if (!MUTATION) {
   test("TCRN-CROSS-STORY-405 proves the fixed DS semantics, rejects structural mutations, and preserves coordination status", async () => {
     const page = await preparePage();
     try {
-      page.document.querySelector('[data-setting-group="execution"]')?.click();
+      page.document.querySelector('[data-setting-group="models"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 80));
       const layout = page.document.querySelector('[data-settings-layout-component="SettingsLayout"]');
       assert.ok(layout);
@@ -947,10 +946,10 @@ if (!MUTATION) {
       const settingsList = page.document.querySelector('[data-settings-layout-nav]');
       const general = settingsList.querySelector('[data-setting-group="general"]');
       keydown(general, "ArrowRight");
-      const models = settingsList.querySelector('[data-setting-group="models"]');
-      assert.equal(models.getAttribute("aria-selected"), "true", "ArrowRight selects the next settings group");
-      assert.equal(page.document.getElementById("settings-panel").getAttribute("aria-labelledby"), models.id);
-      keydown(models, "Home");
+      const knowledge = settingsList.querySelector('[data-setting-group="knowledge"]');
+      assert.equal(knowledge.getAttribute("aria-selected"), "true", "ArrowRight skips the standalone Models page");
+      assert.equal(page.document.getElementById("settings-panel").getAttribute("aria-labelledby"), knowledge.id);
+      keydown(knowledge, "Home");
       assert.equal(general.getAttribute("aria-selected"), "true", "Home selects the first settings group");
       const atelier = settingsList.querySelector('[data-setting-group="atelier"]');
       keydown(general, "End");
@@ -1028,42 +1027,41 @@ if (!MUTATION) {
 
 if (!MUTATION) {
 
-  test("TCRN-CROSS-STORY-409 R2 covers default, modified, reset, page-switch, disabled, and invalid-value lifecycle states", async () => {
+  test("STORY-011 generic model concurrency saves, resets and stays searchable", async () => {
     const page = await preparePage();
     try {
       const selectGroup = (group) => page.document.querySelector(`[data-setting-group="${group}"]`)?.click();
       const waitForReceiptChange = async (before, label) => waitFor(receiptAdvanced(page.document, before), label);
-      selectGroup("execution");
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
 
-      const defaultRow = page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]');
-      assert.equal(defaultRow?.dataset.modified, "false", "an unchanged open field starts in its default state");
-      const concurrency = defaultRow.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
-      const beforeModify = receiptText(page.document);
+      const defaultRow = page.document.querySelector('#device-model-settings [data-machine-row="models.maxConcurrentSubagents"]');
+      assert.ok(defaultRow, "generic model concurrency belongs to the standalone Models page");
+      const concurrency = defaultRow.querySelector('[data-machine-control="models.maxConcurrentSubagents"]');
+      assert.equal(concurrency?.value, "", "an unset machine value uses the declared default");
+      assert.equal(concurrency?.placeholder, "8");
+      const beforeModify = receiptRawText(page.document);
       concurrency.value = "7";
       concurrency.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-      await waitForReceiptChange(beforeModify, "the modified open-field receipt");
-      await waitFor(() => page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified === "true", "the modified field to read back");
-      const modifiedRow = page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]');
-      assert.equal(modifiedRow?.dataset.modified, "true");
-      assert.ok(modifiedRow?.querySelector("[data-reset-setting]"), "a modified field exposes reset");
+      await waitFor(machineReceiptAdvanced(page.document, beforeModify), "the generic device setting receipt");
+      assert.equal((await cli(["machine-settings-catalog"], page.deviceEnv)).settings.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, "7");
 
-      const beforeReset = receiptText(page.document);
-      modifiedRow.querySelector("[data-reset-setting]").click();
-      await waitForReceiptChange(beforeReset, "the open-field reset receipt");
-      await waitFor(() => page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified === "false", "the reset field to read back");
-      assert.equal(page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified, "false", "reset returns the field to the engine default");
-      assert.equal((await cli(["settings-catalog", "--workspace", page.workspace], page.deviceEnv)).settings.find((entry) => entry.key === "execution.maxConcurrentSubagents").currentValue, "8");
+      const beforeReset = receiptRawText(page.document);
+      const liveConcurrency = page.document.querySelector('#device-model-settings [data-machine-row="models.maxConcurrentSubagents"] [data-machine-control]');
+      liveConcurrency.value = "";
+      liveConcurrency.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+      await waitFor(machineReceiptAdvanced(page.document, beforeReset), "the generic device setting reset receipt");
+      assert.equal((await cli(["machine-settings-catalog"], page.deviceEnv)).settings.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, null);
 
       // A global-search jump uses the shared transient row treatment and ordinary
       // navigation clears it; the target isn't a portal-owned highlight class.
       const globalSearch = page.document.querySelector("#global-search");
-      globalSearch.value = "execution.maxConcurrentSubagents";
+      globalSearch.value = "models.maxConcurrentSubagents";
       globalSearch.dispatchEvent(new page.window.Event("input", { bubbles: true }));
       const searchTarget = page.document.querySelector("#search-results [data-search-index]");
       assert.ok(searchTarget, "the setting remains discoverable through global search");
       searchTarget.click();
-      const searchedRow = page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]');
-      assert.equal(searchedRow?.getAttribute("data-transient-target"), "true", "a settings search result marks its target row");
+      const searchedRow = page.document.querySelector('#device-model-settings [data-machine-row="models.maxConcurrentSubagents"]');
+      assert.equal(searchedRow?.getAttribute("data-transient-target"), "true", "a model-page search result marks its target row");
       assert.equal(searchedRow?.classList.contains("tcrn-highlight"), false, "the target treatment does not add a portal highlight class");
       page.document.querySelector('[data-page-target="dashboard"]')?.click();
       assert.equal(page.document.querySelectorAll('[data-transient-target="true"]').length, 0, "navigation clears a settings search target");
@@ -1159,10 +1157,10 @@ if (!MUTATION) {
       page.document.dispatchEvent(closeLong);
       assert.equal(long.layer.hidden, true);
 
-      page.document.querySelector('[data-setting-group="execution"]')?.click();
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 80));
       const shortTip = page.document.querySelector('[data-concept-tip="setting.execution.maxConcurrentSubagents"]');
-      assert.ok(shortTip, "the execution group must expose the short overlay consumer");
+      assert.ok(shortTip, "the Models page retains the compatibility setting's short overlay consumer");
       const short = inspect(shortTip);
       assert.equal(short.trigger.getAttribute("aria-describedby"), short.layer.getAttribute("id"));
       assert.equal(short.layer.getAttribute("role"), "tooltip");
@@ -1205,9 +1203,9 @@ if (!MUTATION) {
       await new Promise((resolve) => setTimeout(resolve, 60));
       const languageRow = page.document.querySelector('[data-setting-row="artifact.language"]');
       assert.ok(languageRow?.querySelector("[data-vocabulary-link]"), "a closed-enum setting keeps its dictionary link");
-      page.document.querySelector('[data-setting-group="execution"]')?.click();
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 60));
-      const planRow = page.document.querySelector('[data-setting-row="execution.claudeCodeSubagentPlan"]');
+      const planRow = page.document.querySelector('#device-model-settings [data-setting-row="execution.claudeCodeSubagentPlan"]');
       if (planRow) assert.equal(planRow.querySelector("[data-vocabulary-link]"), null, "a plan-sourced setting must not offer a link to an entry that does not exist");
     } finally { await page.cleanup(); }
   });

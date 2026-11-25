@@ -34,7 +34,7 @@ import { configurationContract, annotateConfigValue } from "../../core/src/confi
 import { evaluateExecutionQuota, resolveExecutionConcurrency } from "../../core/src/execution-policy.js";
 import { DOT_AGENTS_TEMPLATE_VERSION, DOT_INSTALLATION_TARGET, SETUP_EXECUTION_TARGETS, dotEnabledRuleSources } from "../../core/src/dot-agents.js";
 import type { SetupExecutionTarget } from "../../core/src/dot-agents.js";
-import { resolveEngineExecutionPolicy, engineModelPolicyCatalogFromSnapshot } from "../../core/src/engine-model-policy.js";
+import { resolveEngineExecutionPolicy, engineModelPolicyCatalogFromSnapshot, genericEngineConcurrencyFromValues } from "../../core/src/engine-model-policy.js";
 import { setConfigRecord, removeConfigRecord } from "../../core/src/config-records.js";
 import { coordinationCatalogRows } from "../../core/src/project-scope.js";
 import { chainIdentity, declareChainIdentity, resolveProjectTarget, workProjectContexts, effectiveProjectState, ensureProjectCoordination, settingsCatalogState, markUnresolvedCommonDefault } from "../../core/src/project-chain.js";
@@ -1768,7 +1768,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   { name: "execution-fallback-candidates", availability: "cli", mutates: false, flags: [{ name: "request", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }] },
   { name: "engine-model-policy-operation", availability: "cli", mutates: false, flags: [{ name: "id", required: true, valueKind: "string" }] },
   { name: "engine-model-policy-save", availability: "cli", mutates: true, flags: [{ name: "workspace", required: true, valueKind: "string" }, { name: "host", required: true, valueKind: "string" }, { name: "lock-timeout-ms", required: false, valueKind: "integer" }, { name: "changes", required: true, valueKind: "json" }, { name: "expected-host-revision", required: true, valueKind: "integer" }, { name: "expected-host-digest", required: true, valueKind: "string" }, { name: "operation-id", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: true, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }] },
-  { name: "engine-model-policy-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "host", required: true, valueKind: "string" }, { name: "policy", required: true, valueKind: "json" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: true, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }] },
+  { name: "engine-model-policy-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "host", required: true, valueKind: "string" }, { name: "policy", required: true, valueKind: "json" }, { name: "expected-store-revision", required: false, valueKind: "integer" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: true, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }] },
   { name: "engine-rollback", availability: "cli", mutates: true, flags: [{ name: "at", required: true, valueKind: "instant" }] },
   { name: "engine-update", availability: "cli", mutates: true, flags: [{ name: "from", required: true, valueKind: "string" }, { name: "sha256", required: true, valueKind: "string" }, { name: "version", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }] },
   { name: "event-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
@@ -3343,7 +3343,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     required(values, ["host", "category", "rejections"]);
     const resolution = await resolveEngineExecutionPolicy({ host: values.host!, category: values.category!, rejections: integerValue(values, "rejections") });
     const device = await readMachineSettings();
-    const concurrency = resolveExecutionConcurrency(Number(device.values["execution.maxConcurrentAgents"] ?? "8"), values["project-budget"] === undefined ? undefined : integerValue(values, "project-budget"));
+    const concurrency = resolveExecutionConcurrency(Number(device.values["execution.maxConcurrentAgents"] ?? "8"), values["project-budget"] === undefined ? undefined : integerValue(values, "project-budget"), genericEngineConcurrencyFromValues(device.values), resolution.hostConcurrencyLimit ?? undefined);
     const quotaDecision = evaluateExecutionQuota(resolution.quota, values.usage === undefined ? {} : argumentJsonValue(values.usage, "usage") as import("../../core/src/execution-policy.js").QuotaUsageObservation);
     io.write(canonicalJson({ reasonCode: "EXECUTION_POLICY_RESOLVED", ...resolution, concurrency, quotaDecision, observationSource: values.usage === undefined ? "unavailable" : "caller-supplied-unverified" }));
     return;
@@ -3376,7 +3376,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     return;
   }
   if (command === "engine-model-policy-set") {
-    const values = parseArguments(rest, ["workspace", "host", "policy", "at", "actor", "decided-in"]);
+    const values = parseArguments(rest, ["workspace", "host", "policy", "expected-store-revision", "at", "actor", "decided-in"]);
     required(values, ["workspace", "host", "policy", "at", "actor", "decided-in"]);
     let policy: unknown;
     try { policy = JSON.parse(values.policy ?? ""); } catch { fail("CLI_ARGUMENT_MALFORMED", "policy"); }
@@ -3390,6 +3390,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const written = await applyEngineModelPolicySet({
       host: values.host ?? "",
       policy,
+      ...(values["expected-store-revision"] === undefined ? {} : { expectedStoreRevision: integerValue(values, "expected-store-revision", 0) }),
       occurredAt: values.at ?? "",
       actor: values.actor ?? "",
       authorization,

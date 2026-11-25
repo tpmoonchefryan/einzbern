@@ -70,14 +70,14 @@ export const SETTINGS_DEVICE_LAYER = "device" as const satisfies SettingLayer;
 
 // TCRN-CROSS-STORY-508 R5 (MIN-236 D7): every row of settings-catalog and machine-settings-catalog
 // says how a configuration surface lays its key out. `shape` is `collection` for a key whose value
-// is a table of records, which Atelier edits on a page of its own, and `scalar` for every other key,
-// which the settings page files under its `group`. `order` is the key's place in that group: a
-// positive integer, unique within the group across both layers, so a group that holds keys of both
-// layers still has one display order. specs/settings-catalog-v1.md lists every key's group and order.
+// is a table of records, which Atelier edits on a page of its own, and `scalar` for every other key.
+// The `models` group routes to the standalone Models page; other scalar groups appear on Settings.
+// `order` is the key's place in its group: a positive integer, unique within the group across both
+// layers. specs/settings-catalog-v1.md lists every key's group and order.
 export type SettingShape = "collection" | "scalar";
-// The groups in the order the settings page shows them; a group's name is the text key
-// `settings.group.<id>`. `models` is the models and escalation group.
-export const SETTING_GROUPS = Object.freeze(["general", "models", "execution", "knowledge", "retrieval", "storage", "atelier"] as const);
+// Closed group ids and their labels. The standalone Models page consumes `models`; Settings uses
+// the remaining groups in this order. A group's name is the text key `settings.group.<id>`.
+export const SETTING_GROUPS = Object.freeze(["general", "models", "knowledge", "retrieval", "storage", "atelier"] as const);
 export type SettingGroup = typeof SETTING_GROUPS[number];
 
 // A catalog deletion must leave a replay-compatibility marker behind. Keep this
@@ -325,7 +325,7 @@ function assertAbsoluteArtifactsSettingPath(value: string, label: string, worksp
 // When a key is removed from this catalog, add it to RETIRED_SETTING_KEYS in the
 // same change so historical events remain legible without reopening new writes.
 // TCRN-CROSS-STORY-484 R4: an entry is model-writable only when it says so. No entry says so: every
-// key here is an Owner decision (models.tiers, the quota thresholds, the concurrency limit) or is
+// key here is an Owner decision (historical model tables, quota thresholds and concurrency limits) or is
 // written at setup rather than during work, so a model changing one through the CLI is the
 // unapproved change R4 refuses. A key that turns out to be routine model work gets
 // `modelWritable: true` here, with its reason.
@@ -440,8 +440,8 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     layerKind: SETTINGS_LAYER_KIND,
     defaultValue: "8",
     min: 1,
-    group: "execution",
-    order: 1,
+    group: "models",
+    order: 6,
   },
   {
     key: "injection.perPromptBytes",
@@ -469,7 +469,7 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
   {
     // TCRN-CROSS-STORY-508 R1 (MIN-236 D6): the model categories, records {id, name, description,
     // order}; models-category.ts owns the shape and the default table. A table of records, first in
-    // the models group (R5).
+    // the standalone Models page (R5).
     key: "models.category",
     type: "string",
     controlType: "text",
@@ -483,8 +483,8 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     // TCRN-CROSS-STORY-508 R3 (MIN-236 D5): the category an escalation stops in, at its record with
     // the smallest order: a category id, which a write may only set to a category models.category
     // holds (assertSettingWriteConsistent). The entries here stay in key order (S369); a key's place
-    // on the settings page is its group and order (R5), so the three escalation keys still show
-    // after the two tables, enabled, threshold, then ceiling.
+    // on the Models page is its group and order (R5), so the three escalation keys follow
+    // the two tables in enabled, threshold, then ceiling order.
     key: "models.escalation.ceiling",
     type: "string",
     controlType: "reference",
@@ -525,7 +525,7 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     // TCRN-CROSS-STORY-484 R3 (MIN-227 D11, D12): the model tiers; models-tiers.ts owns the shape and
     // the default table. It replaces execution.dispatchTiers (RENAMED_SETTING_KEYS).
     // TCRN-CROSS-STORY-508 R2 (MIN-236 D6): one table of records {order, category, runner, model,
-    // effort, note}, each filed under a category of models.category, and second in the models group
+    // effort, note}, each filed under a category of models.category, and second on the Models page
     // after the categories it refers to (R5).
     key: "models.tiers",
     type: "string",
@@ -549,8 +549,8 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     defaultValue: "75",
     min: 1,
     max: 100,
-    group: "execution",
-    order: 2,
+    group: "models",
+    order: 7,
   },
   {
     key: "quota.fiveHourWaitPercent",
@@ -560,8 +560,8 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     defaultValue: "90",
     min: 1,
     max: 100,
-    group: "execution",
-    order: 3,
+    group: "models",
+    order: 8,
   },
   {
     key: "quota.weeklyParallelOffPercent",
@@ -571,8 +571,8 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     defaultValue: "95",
     min: 1,
     max: 100,
-    group: "execution",
-    order: 4,
+    group: "models",
+    order: 9,
   },
   {
     key: "quota.weeklyWaitPercent",
@@ -582,8 +582,8 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     defaultValue: null,
     min: 1,
     max: 100,
-    group: "execution",
-    order: 5,
+    group: "models",
+    order: 10,
   },
   {
     // TCRN-CROSS-STORY-364: which prompt languages this workspace expects questions in. A
@@ -678,8 +678,8 @@ export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = Object.freeze(
  * writes it.
  */
 export function assertProjectSettingKey(key: unknown): void {
-  if (typeof key === "string" && /^(models|quota)\./u.test(key)) {
-    fail("SETTINGS_KEY_DEVICE_LEVEL", `${key} is historical compatibility data; edit the device host policy instead`);
+  if (typeof key === "string" && (/^(models|quota)\./u.test(key) || key === "execution.maxConcurrentSubagents")) {
+    fail("SETTINGS_KEY_DEVICE_LEVEL", `${key} is historical compatibility data; use device model settings or the host policy instead`);
   }
   if (typeof key === "string" && MACHINE_SETTINGS_CATALOG.some((entry) => entry.key === key)) {
     fail("SETTINGS_KEY_DEVICE_LEVEL", `${key} is a device-level setting: it stays in this device's directory; set it with machine-settings-set`, {
@@ -996,7 +996,7 @@ export function createWorkspaceSettingRecord(
   } catch {
     fail("SETTINGS_RECORD_INVALID", `${entry.key} updatedAt is invalid`);
   }
-  if (entry.key.startsWith("models.") || entry.key.startsWith("quota.")) fail("SETTINGS_KEY_DEVICE_LEVEL", `${entry.key} is historical compatibility data; edit the device host policy instead`);
+  if (entry.key.startsWith("models.") || entry.key.startsWith("quota.")) fail("SETTINGS_KEY_DEVICE_LEVEL", `${entry.key} is historical compatibility data; use device model settings or the host policy instead`);
   // Shared declarations must be portable even when authored on a different platform.
   // Keep this admission check out of historical record validation and replay.
   if (["workspace.generatedArtifactsPath", "knowledge.articlesPath"].includes(entry.key) && typeof value === "string" && (isAbsolute(value) || win32.isAbsolute(value) || /^[A-Za-z]:/u.test(value))) fail("SETTINGS_VALUE_INVALID", `${entry.key} requires a portable relative path or binding:paths.artifacts / binding:paths.knowledgeArticles; keep absolute locations in machine settings`);

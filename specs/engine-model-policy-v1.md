@@ -1,12 +1,13 @@
-# Engine Model Policy V1
+# Engine Model Policy V3
 
 ## Status and scope
 
 The model policy is engine/device state. There is one file at
 `<deviceHome>/engine-model-policy.json`; it is not copied into project or library settings.
-The top-level `hosts` object separates policy records by host id. A host policy contains its
-categories mother table, ordered tiers, and escalation `{enabled, threshold, ceiling}` tuple.
-An absent file is an empty store: the engine does not invent a model choice.
+The file has one shared `categoryCatalog`; the top-level `hosts` object keeps each host's
+ordered tiers, escalation `{enabled, threshold, ceiling}` tuple, and optional host-local
+concurrency/quota overrides. An absent file is an empty store: the engine does not invent a
+model choice.
 
 This contract covers storage, validation, provenance, runtime tier resolution, and the CLI/Atelier read and write surfaces.
 The catalogue identifies the policy source and preserves project `models.*` values as
@@ -38,60 +39,78 @@ single-conversation coordination. Dot is independent. Unknown host must not acti
 Codex mode. Missing required groups never trigger a project-policy or collector
 fallback. The coordination contract is in `docs/codex-native-controller.md`.
 
-## File schema
+## File schema and migration
 
 The closed file shape is:
 
 ```json
 {
-  "schemaVersion": "tcrn.engine-model-policy.v1",
+  "schemaVersion": "tcrn.engine-model-policy.v3",
   "revision": 1,
+  "categoryCatalog": [
+    { "id": "flagship", "name": "Flagship", "description": "", "order": 10 },
+    { "id": "main", "name": "Main", "description": "", "order": 20 },
+    { "id": "economy", "name": "Economy", "description": "", "order": 30 }
+  ],
   "hosts": {
     "codex": {
       "revision": 1,
-      "categories": [
-        { "id": "flagship", "name": "Flagship", "description": "", "order": 10 },
-        { "id": "main", "name": "Main", "description": "", "order": 20 },
-        { "id": "economy", "name": "Economy", "description": "", "order": 30 }
-      ],
       "tiers": [
         { "order": 10, "category": "economy", "runner": "codex", "model": "<owner-selected-model>", "effort": "max", "note": "" }
       ],
       "escalation": { "enabled": true, "threshold": 1, "ceiling": "main" },
+      "maxConcurrentSubagents": 3,
+      "quota": { "fiveHourWaitPercent": 85 },
       "digest": "<sha256 of the canonical policy fields>",
       "updatedAt": "2026-10-17T00:00:00Z",
       "actor": "agent:codex",
       "decidedIn": "minutes:<24-hex-id>#D1",
       "decidedInLibraryId": "library:<24-hex-id>"
     }
-  }
+  },
+  "operations": {}
 }
 ```
 
-`categories` and `tiers` use the existing closed record formats from
+`categoryCatalog` and `tiers` use the existing closed record formats from
 `specs/settings-catalog-v1.md`. Every tier's `runner` must equal its enclosing host, and each
-tier category and escalation ceiling must exist in that host's category table. The threshold is
-a safe positive integer no larger than the engine's existing models escalation bound. Host ids
+tier category and escalation ceiling must exist in the one shared category catalog. The threshold
+is a safe positive integer no larger than the engine's existing models escalation bound. Host ids
 are lowercase ids. The file rejects unknown fields, invalid host partitions, impossible revisions,
 invalid actor/decision/library identities, malformed UTC instants, and digest mismatches.
 
-A host entry may additionally declare `quota`, an exact object containing
+A host may set `maxConcurrentSubagents` to a positive safe integer or null; null inherits the
+device's generic value. The `quota` field may be a partial object with any of
 `fiveHourParallelOffPercent`, `fiveHourWaitPercent`, `weeklyParallelOffPercent`, and
-`weeklyWaitPercent`. Thresholds are integers from 1 through 100; `weeklyWaitPercent` also
-accepts null (no weekly wait). A wait threshold must not be below its parallel-off threshold.
-These are policy thresholds, never account usage or balances. Historical entries without quota
-remain valid and are not rewritten. The resolver reports separate engine defaults
-75 / 90 / 95 / null with `quotaOrigin: engine-default`; configured values report
-`quotaOrigin: device-host-policy`. Projects cannot override these host thresholds.
+`weeklyWaitPercent`. An omitted field inherits the device's generic threshold. Each supplied
+threshold is an integer from 1 through 100; `weeklyWaitPercent` also accepts null (explicitly no
+weekly wait). A wait threshold must not be below its parallel-off threshold after generic and host
+values are combined. These are policy thresholds, never account usage or balances.
 
-The digest is SHA-256 of canonical JSON for `{host, categories, tiers, escalation}` when
-quota is absent, preserving every existing digest. When quota is present, it is included as
-the `quota` member in that digest object. Each host
-revision increases on replacement of that host; the file revision increases on every successful
-write. Writers serialize through the device lock for `engine-model-policy.json`, replace the
-single file atomically, and validate the persisted file again before releasing the lock. A write
-receipt is built from that lock-held snapshot, so a later write cannot mix its host row or audit
-metadata into the earlier receipt.
+The device's generic settings are `models.maxConcurrentSubagents` (default 8) and
+`models.quota.*` (defaults 75 / 90 / 95 / null), all in `machine-settings.json` and shown on the
+standalone Models page. An unset generic value resolves to its catalog default. Quota provenance is
+`engine-default` when no generic or host value is configured, `device-generic` when a generic
+device value applies, and `device-host-policy` when the selected host overrides a quota field.
+`execution.maxConcurrentAgents` remains a separate device hard cap. Heavy-run slots
+(`execution.maxConcurrentHeavyRuns`) are also device-local and have no host override.
+
+V1 and V2 files remain readable. Reads promote them in memory and do not rewrite the device file.
+On the next authorized write the store is persisted as V3 with one root category catalog. Legacy
+built-in category rows are replaced with the canonical built-ins; custom ids and their tier and
+escalation references are unioned across hosts. Repeated custom ids with matching name and
+description are kept once; conflicting definitions fail for Owner reconciliation instead of
+discarding either record. Existing tiers, escalation, quotas, actors, decisions and operation
+receipts remain associated with their hosts.
+
+The digest is SHA-256 of canonical JSON for `{host, categories, tiers, escalation}` when no
+override fields are present, preserving existing digests. A present `quota` and/or
+`maxConcurrentSubagents` member is included in that digest. Each host revision increases on
+replacement of that host; the file revision increases on every successful write. Writers serialize
+through the device lock for `engine-model-policy.json`, replace the single file atomically, and
+validate the persisted file again before releasing the lock. A write receipt is built from that
+lock-held snapshot, so a later write cannot mix its host row or audit metadata into the earlier
+receipt.
 
 ## CLI and Atelier
 
@@ -99,7 +118,9 @@ metadata into the earlier receipt.
   either that host's configured record or an explicit `unconfigured` status.
 - `engine-model-policy-set [--workspace <library>] --host <id> --policy <json> --at <instant>
   --actor <id> --decided-in minutes:<id>#D<n>` validates an Owner decision naming
-  `models.engine-policy`, writes only that host record, and returns the stored policy readback.
+  `models.engine-policy`, writes that host record and the shared category catalog, and returns the
+  stored policy readback. The optional `--expected-store-revision` rejects a write based on a stale
+  shared catalog or another host's concurrent edit.
   The workspace locates the decision; if omitted, the device registry resolves it from the current
   directory under the CLI's existing rules. It does not scope the resulting policy.
 - `settings-catalog` keeps its existing project/library setting rows and adds `modelPolicy`, the
@@ -113,11 +134,15 @@ metadata into the earlier receipt.
   controls; saving requires a cited Owner decision and sends the portal's actual actor through the
   governed endpoint. Reads and writes do not require a selected project target.
 
+The generic concurrency, quota, device hard-cap and heavy-run controls are machine settings on the
+standalone **Models** page. The legacy Settings page has no Models group. The engine-host editor
+holds only nullable host concurrency and quota overrides; heavy-run concurrency has no host field.
+
 ## Portal interaction contract
 
-The settings compatibility rows for `models.category`, `models.tiers`, and the escalation keys
-identify their historical / non-Codex source and link to the engine-host editor. They do not render
-project-setting write controls for a compatible Codex policy. The category and tier pages use the
+The historical rows for `models.category`, `models.tiers`, and the escalation keys on the Models
+page identify their project compatibility source and link to the engine-host editor. They do not
+render project-setting write controls for a compatible Codex policy. The category and tier pages use the
 same editor, table, choice, numeric-entry, focus, keyboard, and receipt behaviors as the portal
 collections; they are projections of the selected engine host rather than copies of project
 configuration.
@@ -144,21 +169,21 @@ request if that library changed before the write begins.
 
 ## Compatibility
 
-Historical `settings.updated` events and existing `models.*` records stay readable through the
-ordinary settings catalogue and replay paths. This storage change does not migrate, delete, or
-re-emit them. The engine policy file is the only new global source. Consumers must report their
-effective source and may not substitute a project's old Codex value when the device policy for
-Codex is unconfigured or invalid. Other host behavior remains attached to its own host-specific
-policy and existing consumer until that consumer is explicitly connected.
+Historical `settings.updated` events and existing project `models.*`/`quota.*` records stay
+readable through the ordinary settings catalogue and replay paths. This storage change does not
+migrate, delete, or re-emit them. The V3 engine policy file and generic machine settings are the
+device-local authorities. Consumers must report their effective source and may not substitute a
+project's old Codex value when the device policy for Codex is unconfigured or invalid. Each host
+continues to use its own tiers, escalation and optional local overrides.
 
 ## Runtime resolution and evidence boundary
 
 `resolveEngineExecutionPolicy({host, category, rejections, home?})` reads the current device
-file and delegates to the same ordered tier/escalation algorithm used by
+policy and generic machine settings, then delegates to the same ordered tier/escalation algorithm used by
 `resolveEngineExecutionPolicyFromSnapshot(snapshot, input)`. The snapshot version validates
 its complete input and binds the selected tier and origin to that single revision. Both return
 `record`, `steps`, `atCeiling`, host/category/rejections, escalation, effective quota,
-`quotaOrigin`, and origin `{kind: device-engine, path, revision, storeRevision, digest}`.
+`quotaOrigin`, `hostConcurrencyLimit`, and origin `{kind: device-engine, path, revision, storeRevision, digest}`.
 The file and host revisions are separate. This is a runtime handoff, not a portable project
 configuration artifact, and does not alter a host application's default model.
 
@@ -181,8 +206,10 @@ Capability evidence is separate from policy validity. Without an adapter-supplie
 engine executed a live native tool. The resolver does not infer capabilities from a vendor roster.
 Historical model-plan and settings events remain unchanged and replayable.
 
-`resolveExecutionConcurrency(deviceLimit, projectLimit?)` computes the smaller positive
-integer and reports its origin; a project budget never raises the device cap.
+`resolveExecutionConcurrency(deviceLimit, projectLimit?, genericLimit?, hostLimit?)` combines the
+device hard cap, an optional project budget, the generic device limit, and the selected host's
+nullable override. It uses the smallest positive limit and reports its origin; no narrower budget
+can raise a broader cap.
 `evaluateExecutionQuota(policy, observation)` is a pure advisory decision with parallel,
 serial, wait, or unknown results. Observations are separately supplied percentages; missing
 windows are unknown, never zero. Known restrictions take priority in the order wait, serial, unknown, parallel; a missing
@@ -219,11 +246,13 @@ Shared AGENTS content points to this runtime contract rather than embedding a de
 models. These source-level integrations do not modify an external Skill repository, install a
 live release, or prove native tool support.
 
-Runtime project handoffs carry `executionConcurrency` resolved from the device cap and
-the target project budget. This is a bounded scheduling contract, not proof that an external
-host acquired a slot. Quota observations and restrictions remain separately identified.
+Runtime project handoffs carry `executionConcurrency` resolved from device and generic limits; an
+explicit host execution request can also apply that host's nullable override. Historical project
+concurrency rows remain visible for compatibility but do not set an active cap. This is a bounded
+scheduling contract, not proof that an external host acquired a slot. Quota observations and
+restrictions remain separately identified.
 
-## INIT065 separately governed exact saving (v2 transaction store)
+## INIT065 separately governed exact saving (operation receipts)
 
 Normal native execution does not call this path. `engine-model-policy-save --workspace <library> --host <id> --changes <json> --expected-host-revision <n> --expected-host-digest <digest|absent> --operation-id <nonsecret-id> --at <UTC> --actor <actual-actor> --decided-in <Owner-decision>` uses the same supported Owner decision verifier and models.engine-policy target as the existing setter. Existing saving authorization is reused; this command does not request repetitive approval or treat temporary execution permission as persistent-save authority.
 
@@ -231,11 +260,11 @@ For an existing host, changes is exactly `{tiers:[{order,model,effort},...]}`. O
 
 The writer validates actor/decision and patch, acquires the existing policy lock, reads the current valid store, checks an existing operation for exact idempotent replay, then compares expected **host** revision and digest. Other-host changes do not cause a false same-host conflict or get overwritten. After merging it validates the whole host policy, atomically writes and reads back under lock. No direct plugin projection write is supported. A same-host change returns ENGINE_MODEL_POLICY_CAS_CONFLICT and preserves bytes; reuse of an operation ID for different changes returns ENGINE_MODEL_POLICY_OPERATION_CONFLICT. There is no force-CAS bypass.
 
-The first transactional save upgrades the store envelope to `tcrn.engine-model-policy.v2`, retaining existing hosts and adding a closed `operations` map. Each operation stores id, host, changeDigest, expectedRevision/expectedDigest, committed storeRevision and exact result host entry (including actual actor/decision). All reside in the same atomic file: a crash after the write cannot commit policy without its replay receipt. The change digest binds host, expected snapshot, exact changes, actor and decision; retry time is not part of that identity. Digests establish consistency, not platform authentication.
+The first transactional save stores a closed `operations` map in the V3 envelope. Each operation stores id, host, changeDigest, expectedRevision/expectedDigest, committed storeRevision and exact result host entry (including actual actor/decision). All reside in the same atomic file: a crash after the write cannot commit policy without its replay receipt. The change digest binds host, expected snapshot, exact changes, actor and decision; retry time is not part of that identity. Digests establish consistency, not platform authentication.
 
-Repeated same operation/change returns `replayed` with its original operation result and the current store readback, without a write or revision increment, even if a later authorized write changed that host. Never mistake the original operation result for current configuration. An unknown result is reconciled by reading this receipt/current policy before retry. The legacy full setter preserves v2 receipts if used on a v2 store; it does not acquire the new command's CAS semantics implicitly.
+Repeated same operation/change returns `replayed` with its original operation result and the current store readback, without a write or revision increment, even if a later authorized write changed that host. Never mistake the original operation result for current configuration. An unknown result is reconciled by reading this receipt/current policy before retry. Legacy V1/V2 envelopes are promoted in memory; the next authorized write retains V2 operation receipts while persisting the V3 shared-catalog envelope.
 
-V1 stores remain readable and are not rewritten by reads or dispatch. V2 requires this reader; old engines with closed v1 schema correctly reject it. Downgrading a binary alone is not a successful configuration rollback. Any approved downgrade migration must preserve the operation evidence and explicitly produce an old-compatible store through a separately supported migration; this delivery does not invent a destructive ledger-stripping command. Configuration rollback uses a new operation and current host CAS, creating a new revision rather than falsifying history.
+V1 and V2 stores remain readable and are not rewritten by reads or dispatch. Old engines with closed V1 schemas reject the V2/V3 envelope. Downgrading a binary alone is not a successful configuration rollback. Any approved downgrade migration must preserve the operation evidence and explicitly produce an old-compatible store through a separately supported migration; this delivery does not invent a destructive ledger-stripping command. Configuration rollback uses a new operation and current host CAS, creating a new revision rather than falsifying history.
 
 Saving failure never revokes authorized temporary execution, unless the user explicitly required saving before execution. Saving tests/acceptance are recorded separately from core T01–T03. No real device configuration is changed by developing or testing this contract.
 

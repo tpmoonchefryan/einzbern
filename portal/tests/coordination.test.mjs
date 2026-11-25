@@ -82,7 +82,7 @@ const section = (text, id) => {
   return start < 0 || end < start ? null : text.slice(start, end);
 };
 
-test("540 GWT5: a coordination library selected in Atelier shows the container's AGENTS.md, writes a rule into it and renders it again after a variable or a setting, each write recorded with surface atelier", async (context) => {
+test("540 GWT5: a coordination library renders variable changes but keeps device model settings out of AGENTS.md and its event chain", async (context) => {
   const fixture = await coordinationFixture(context);
   const { boot, read, write } = await readBoot(fixture.url);
   assert.deepEqual([boot.library.chain.role, boot.proseRoot], ["coordination", fixture.container], "the coordination library's prose root is the container it is registered for");
@@ -119,12 +119,16 @@ test("540 GWT5: a coordination library selected in Atelier shows the container's
 
   // Settings remain queryable without creating a system-variable snapshot.
   assert.equal(section(text, "variables-system"), null);
-  const setting = await request(fixture.url, "/api/settings", write("POST", { key: "execution.maxConcurrentSubagents", value: "3" }));
+  from = await eventCount(fixture);
+  const setting = await request(fixture.url, "/api/machine-settings", write("POST", { key: "models.maxConcurrentSubagents", value: "3" }));
   assert.equal(setting.response.status, 200, JSON.stringify(setting.body));
-  assert.deepEqual([setting.body.ok, setting.body.render?.reasonCode, setting.body.render?.projectPath], [true, "AGENTS_RENDERED", fixture.container], "the write is followed by a render of the container's AGENTS.md");
+  assert.deepEqual([setting.body.reasonCode, setting.body.readback.currentValue], ["MACHINE_SETTINGS_WRITE_COMMITTED", "3"]);
+  assert.equal(Object.hasOwn(setting.body, "hostRender"), false, "device-local settings do not render shared output");
   text = await readFile(fixture.agents, "utf8");
   assert.equal(section(text, "variables-system"), null);
   assert.equal(setting.body.readback.currentValue, "3");
+  events = await eventsSince(fixture, from);
+  assert.deepEqual(events, [], "a device model setting is not recorded in the coordination library event chain");
 
   // The artifact language picks the sections' language (Q4), so a change of it renders them again.
   const language = await request(fixture.url, "/api/settings", write("POST", { key: "artifact.language", value: "zh-CN" }));

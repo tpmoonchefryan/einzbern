@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalDocumentBytes } from "../../scripts/lib/canonical-json.mjs";
 // Tests in this file run sequentially; Node isolates each file in a process.
-import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile } from "./ui-presence-support.mjs";
+import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, machineReceiptAdvanced, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptRawText, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile } from "./ui-presence-support.mjs";
 
 
 
@@ -154,14 +154,13 @@ if (!MUTATION) {
       // A settings write asks for a refresh while /api/work is held again: the setting reads back
       // while the work read is out, and the work view keeps what it showed until that read returns.
       page.hold(isWork);
-      document.querySelector('[data-page-target="settings"]')?.click();
-      document.querySelector('[data-setting-group="execution"]')?.click();
-      const control = document.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
-      const before = receiptText(document);
+      document.querySelector('[data-page-target="engine-model-policy"]')?.click();
+      const control = document.querySelector('#device-model-settings [data-machine-control="models.maxConcurrentSubagents"]');
+      const before = receiptRawText(document);
       control.value = "7";
       control.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-      await waitFor(receiptAdvanced(document, before), "the setting write receipt");
-      await waitFor(() => document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified === "true", "the setting to read back while /api/work is out");
+      await waitFor(machineReceiptAdvanced(document, before), "the setting write receipt");
+      assert.equal((await cli(["machine-settings-catalog"], fixture.deviceEnv)).settings.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, "7", "the device setting reads back while /api/work is out");
       assert.equal(page.held(), 1, "the refresh asked for /api/work, which is still out");
       assert.equal(content.getAttribute("aria-busy"), "true");
       assert.equal(workShown(), true, "the work view keeps what it showed");
@@ -292,13 +291,12 @@ if (!MUTATION) {
       // A settings write asks for a refresh while /api/work is held again: the line shows above the
       // list the view keeps, and goes when that read returns.
       page.hold(isWork);
-      document.querySelector('[data-page-target="settings"]')?.click();
-      document.querySelector('[data-setting-group="execution"]')?.click();
-      const control = document.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
-      const before = receiptText(document);
+      document.querySelector('[data-page-target="engine-model-policy"]')?.click();
+      const control = document.querySelector('#device-model-settings [data-machine-control="models.maxConcurrentSubagents"]');
+      const before = receiptRawText(document);
       control.value = "7";
       control.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-      await waitFor(receiptAdvanced(document, before), "the setting write receipt");
+      await waitFor(machineReceiptAdvanced(document, before), "the setting write receipt");
       await waitFor(() => page.held() === 1, "the refresh's read of /api/work");
       document.querySelector('[data-page-target="dashboard"]')?.click();
       assert.equal(line.hidden, false, "the reading line shows again while the refresh's read is out");

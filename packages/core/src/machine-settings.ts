@@ -29,12 +29,13 @@ import { mkdir, readFile, realpath, rm, stat } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 
 import { canonicalJson } from "../../protocol/src/index.js";
+import { resolveEngineQuotaPolicy } from "./execution-policy.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { DEVICE_HOME_ENTRIES, USER_CREST_PATH_SETTING, deviceHome, userCrestPath } from "./device-home.js";
 import { DIRECTORY } from "./names.js";
 import type { SettingGroup, SettingShape } from "./settings.js";
 
-export const MACHINE_SETTINGS_VERSION = "tcrn.machine-settings.v2" as const;
+export const MACHINE_SETTINGS_VERSION = "tcrn.machine-settings.v3" as const;
 export const MACHINE_SETTINGS_LAYER_KIND = "machine_configuration" as const;
 export const MACHINE_SETTINGS_FILE_NAME = DEVICE_HOME_ENTRIES.machineSettings;
 /** The machine-level engine home, as declared by install-manifest item machine.workflow-engine. */
@@ -53,6 +54,11 @@ export const MACHINE_SETTING_KEYS = Object.freeze([
   "paths.artifacts",
   "paths.knowledgeArticles",
   "execution.maxConcurrentAgents",
+  "models.maxConcurrentSubagents",
+  "models.quota.fiveHourParallelOffPercent",
+  "models.quota.fiveHourWaitPercent",
+  "models.quota.weeklyParallelOffPercent",
+  "models.quota.weeklyWaitPercent",
   USER_CREST_PATH_SETTING,
   HEAVY_RUNS_SETTING,
   "portal.defaultLocale",
@@ -92,8 +98,9 @@ export interface MachineSettingsCatalogEntry {
   readonly layer: "device";
   readonly layerKind: typeof MACHINE_SETTINGS_LAYER_KIND;
   readonly defaultValue: string | null;
-  // TCRN-CROSS-STORY-508 R5: how the settings page lays the key out, as for a project-level key
-  // (settings.ts SETTING_GROUPS). Every device-level key is one value, so its shape is `scalar`; a
+  // TCRN-CROSS-STORY-508 R5: how Atelier routes and lays the key out, as for a project-level key
+  // (settings.ts SETTING_GROUPS). The `models` group is rendered on its standalone page; other
+  // groups appear on Settings. Every device-level key is one value, so its shape is `scalar`; a
   // group may hold keys of both layers, and `order` is unique within the group across both.
   readonly shape: SettingShape;
   readonly group: SettingGroup;
@@ -118,7 +125,7 @@ export interface MachineSettingsCatalogEntry {
 
 export const MACHINE_SETTINGS_CATALOG: readonly MachineSettingsCatalogEntry[] = Object.freeze([
   Object.freeze({ key: MEMORY_POLICY_SETTING, type: "string", controlType: "text", layer: "device", layerKind: MACHINE_SETTINGS_LAYER_KIND,
-    defaultValue: null, shape: "scalar", group: "execution", order: 8, appliesOn: "next-open", valueSource: "settings-catalog" }),
+    defaultValue: null, shape: "scalar", group: "models", order: 18, appliesOn: "next-open", valueSource: "settings-catalog" }),
   // Local host integration only; shared AGENTS content follows project/library policy.
   Object.freeze({
     key: AGENTS_NAVIGATION_SETTING,
@@ -140,8 +147,21 @@ export const MACHINE_SETTINGS_CATALOG: readonly MachineSettingsCatalogEntry[] = 
     group: "storage" as const, order: 10 + index, appliesOn: "next-open" as const, valueSource: "settings-catalog" as const,
   })),
   Object.freeze({ key: "execution.maxConcurrentAgents", type: "integer", controlType: "number", layer: "device",
-    layerKind: MACHINE_SETTINGS_LAYER_KIND, defaultValue: "8", shape: "scalar", group: "execution", order: 7,
+    layerKind: MACHINE_SETTINGS_LAYER_KIND, defaultValue: "8", shape: "scalar", group: "models", order: 16,
     min: 1, max: Number.MAX_SAFE_INTEGER, appliesOn: "next-open", valueSource: "settings-catalog" }),
+  Object.freeze({ key: "models.maxConcurrentSubagents", type: "integer", controlType: "number", layer: "device",
+    layerKind: MACHINE_SETTINGS_LAYER_KIND, defaultValue: "8", shape: "scalar", group: "models", order: 11,
+    min: 1, max: Number.MAX_SAFE_INTEGER, appliesOn: "next-open", valueSource: "settings-catalog" }),
+  ...([
+    ["models.quota.fiveHourParallelOffPercent", "75", 12],
+    ["models.quota.fiveHourWaitPercent", "90", 13],
+    ["models.quota.weeklyParallelOffPercent", "95", 14],
+    ["models.quota.weeklyWaitPercent", null, 15],
+  ] as const).map(([key, defaultValue, order]) => Object.freeze({
+    key, type: "integer" as const, controlType: "number" as const, layer: "device" as const,
+    layerKind: MACHINE_SETTINGS_LAYER_KIND, defaultValue, shape: "scalar" as const,
+    group: "models" as const, order, min: 1, max: 100, appliesOn: "next-open" as const, valueSource: "settings-catalog" as const,
+  })),
   // TCRN-CROSS-STORY-476 R5: where this user's crest lives (device-home.ts userCrestPath). Unset,
   // it is `crest` in the device directory. A value is an absolute path and is stored as its real
   // path (applyMachineSettingSet), because the crest refuses a symbolic link on its way in and a
@@ -172,8 +192,8 @@ export const MACHINE_SETTINGS_CATALOG: readonly MachineSettingsCatalogEntry[] = 
     layerKind: MACHINE_SETTINGS_LAYER_KIND,
     defaultValue: String(HEAVY_RUNS_DEFAULT),
     shape: "scalar",
-    group: "execution",
-    order: 6,
+    group: "models",
+    order: 17,
     min: HEAVY_RUNS_MIN,
     max: HEAVY_RUNS_MAX,
     appliesOn: "next-open",
@@ -328,6 +348,16 @@ function orderedValues(values: Readonly<Record<string, string>>): Readonly<Recor
   return Object.freeze(ordered);
 }
 
+async function assertMachineQuotaCompatibleWithEnginePolicy(values: Readonly<Record<string, string>>, path: string): Promise<void> {
+  const { genericEngineQuotaFromValues, readEngineModelPolicyFile } = await import("./engine-model-policy.js");
+  const policy = await readEngineModelPolicyFile(dirname(path));
+  const generic = genericEngineQuotaFromValues(values).quota;
+  for (const [host, entry] of Object.entries(policy.hosts)) {
+    try { resolveEngineQuotaPolicy(generic, entry.quota); }
+    catch { fail("MACHINE_SETTING_VALUE_INVALID", `machine quota settings are incompatible with the ${host} host override`); }
+  }
+}
+
 // Preserve the existing nonempty-string read contract, including historical timestamps.
 function assertUpdatedAt(value: unknown): asserts value is string {
   if (typeof value !== "string" || value.length === 0) fail("MACHINE_SETTINGS_FILE_INVALID", "machine settings need an updatedAt");
@@ -336,7 +366,7 @@ function assertUpdatedAt(value: unknown): asserts value is string {
 export function validateMachineSettingsFile(value: unknown, base?: string): MachineSettingsFile {
   if (value === null || typeof value !== "object" || Array.isArray(value)) fail("MACHINE_SETTINGS_FILE_INVALID", "machine settings must be an object");
   const record = value as Record<string, unknown>;
-  if (record.schemaVersion !== MACHINE_SETTINGS_VERSION && record.schemaVersion !== "tcrn.machine-settings.v1") fail("MACHINE_SETTINGS_FILE_INVALID", `machine settings schemaVersion must be ${MACHINE_SETTINGS_VERSION}`);
+  if (record.schemaVersion !== MACHINE_SETTINGS_VERSION && record.schemaVersion !== "tcrn.machine-settings.v2" && record.schemaVersion !== "tcrn.machine-settings.v1") fail("MACHINE_SETTINGS_FILE_INVALID", `machine settings schemaVersion must be ${MACHINE_SETTINGS_VERSION}`);
   if (record.layerKind !== MACHINE_SETTINGS_LAYER_KIND) fail("MACHINE_SETTINGS_FILE_INVALID", `machine settings layerKind must be ${MACHINE_SETTINGS_LAYER_KIND}`);
   assertUpdatedAt(record.updatedAt);
   const values = record.values;
@@ -346,6 +376,12 @@ export function validateMachineSettingsFile(value: unknown, base?: string): Mach
     assertMachineSettingKey(key);
     validated[key] = validateMachineSettingValue(key, base !== undefined && BY_KEY.get(key)?.type === "path" && typeof raw === "string" ? loadPath(base, raw) : raw);
   }
+  const quota = (key: string, fallback: number | null): number | null => Object.hasOwn(validated, key) ? Number(validated[key]) : fallback;
+  const fiveHourOff = quota("models.quota.fiveHourParallelOffPercent", 75)!;
+  const fiveHourWait = quota("models.quota.fiveHourWaitPercent", 90)!;
+  const weeklyOff = quota("models.quota.weeklyParallelOffPercent", 95)!;
+  const weeklyWait = quota("models.quota.weeklyWaitPercent", null);
+  if (fiveHourOff > fiveHourWait || (weeklyWait !== null && weeklyOff > weeklyWait)) fail("MACHINE_SETTINGS_FILE_INVALID", "quota wait thresholds must not be below parallel-off thresholds");
   return Object.freeze({
     schemaVersion: MACHINE_SETTINGS_VERSION,
     layerKind: MACHINE_SETTINGS_LAYER_KIND,
@@ -417,10 +453,13 @@ export async function applyMachineSettingSet(input: {
   const value = BY_KEY.get(input.key)?.type === "path" ? await realSettingPath(input.key, validated) : validated;
   const path = input.path ?? machineSettingsPath();
   const current = await readMachineSettings(path);
+  const values = { ...current.values, [input.key]: value };
+  validateMachineSettingsFile({ schemaVersion: MACHINE_SETTINGS_VERSION, layerKind: MACHINE_SETTINGS_LAYER_KIND, values, updatedAt: input.occurredAt }, dirname(path));
+  if (input.key.startsWith("models.quota.")) await assertMachineQuotaCompatibleWithEnginePolicy(values, path);
   return write(path, Object.freeze({
     schemaVersion: MACHINE_SETTINGS_VERSION,
     layerKind: MACHINE_SETTINGS_LAYER_KIND,
-    values: orderedValues({ ...current.values, [input.key]: value }),
+    values: orderedValues(values),
     updatedAt: input.occurredAt,
   }));
 }
@@ -449,6 +488,8 @@ export async function applyMachineSettingRemove(input: {
     values: orderedValues(values),
     updatedAt: input.occurredAt,
   });
+  validateMachineSettingsFile(next, dirname(path));
+  if (input.key.startsWith("models.quota.")) await assertMachineQuotaCompatibleWithEnginePolicy(next.values, path);
   // The file is removed once nothing is set, so an untouched machine leaves no trace
   // and a fresh read takes the same absent-file path it would have taken before.
   if (Object.keys(next.values).length === 0) {
