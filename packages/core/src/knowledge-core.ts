@@ -392,6 +392,14 @@ export interface KnowledgeArticleRefreshInput {
   readonly summary: string;
 }
 
+export interface UpdateKnowledgeMetadataInput {
+  readonly expectedRevision: number;
+  readonly occurredAt: string;
+  readonly id: string;
+  readonly subject: string;
+  readonly tags: readonly string[];
+}
+
 export interface KnowledgeReadOptions {
   readonly beforeDescriptorReadForTest?: (path: string) => Promise<void>;
   readonly afterDescriptorOpenForTest?: (path: string) => Promise<void>;
@@ -6449,6 +6457,84 @@ async function updateLibraryCrestPolicy(workspaceRoot: string, input: {
     maximumAgeDays: metadata.stalenessPolicy.maximumAgeDays,
     unknownDisposition: metadata.stalenessPolicy.unknownDisposition,
     revision: metadata.revision,
+    version: scan.marker.version + 1,
+  };
+}
+
+// TCRN-INIT-003 R03: update only a card's retrieval labels. The content body, source bindings,
+// identity and links remain the same; a new metadata revision is appended to this device's stream.
+export async function updateKnowledgeMetadata(
+  workspaceRoot: string,
+  input: UpdateKnowledgeMetadataInput,
+  options: KnowledgeMutationOptions = {},
+): Promise<Readonly<Record<string, JsonValue>>> {
+  return optimisticCrestWrite(workspaceRoot, (commitUnderLock) => updateLibraryCrestMetadata(workspaceRoot, input, options, commitUnderLock));
+}
+
+async function updateLibraryCrestMetadata(
+  workspaceRoot: string,
+  input: UpdateKnowledgeMetadataInput,
+  options: KnowledgeMutationOptions,
+  commitUnderLock: CrestCommit,
+): Promise<Readonly<Record<string, JsonValue>>> {
+  try {
+    assertProtocolId(input.id);
+    assertStrictInstant(input.occurredAt);
+  } catch (error) {
+    fail("KNOWLEDGE_INPUT_INVALID", String(error));
+  }
+  if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1) {
+    fail("KNOWLEDGE_INPUT_INVALID", "metadata versions");
+  }
+  assertBoundedString(input.subject, RUNTIME_CAPACITY.stringCodeUnits, "subject");
+  assertSortedStrings(input.tags, KNOWLEDGE_LIMITS.maximumTags, "tags", /^[a-z0-9][a-z0-9-]*$/u);
+  if (input.subject.trim().length === 0 || input.tags.length === 0) {
+    fail("KNOWLEDGE_INPUT_INVALID", "subject and at least one tag are required");
+  }
+  await assertKnowledgeWritable(resolve(workspaceRoot));
+  const scan = await mutationAdmissionScan(workspaceRoot, options);
+  const unit = libraryCrestCard(scan, input.id);
+  if (unit.metadata.subject === input.subject && canonicalJson(unit.metadata.tags as unknown as JsonValue) === canonicalJson(input.tags as unknown as JsonValue)) {
+    return {
+      schemaVersion: "tcrn.knowledge-metadata-result.v1",
+      reasonCode: "KNOWLEDGE_METADATA_UNCHANGED",
+      id: unit.metadata.id,
+      subject: unit.metadata.subject,
+      tags: unit.metadata.tags as unknown as JsonValue,
+      revision: unit.metadata.revision,
+      bodySha256: unit.metadata.bodySha256,
+      bodyBytes: unit.metadata.bodyBytes,
+      version: scan.marker.version,
+    };
+  }
+  if (unit.metadata.revision !== input.expectedRevision) {
+    fail("KNOWLEDGE_CAS_MISMATCH", `${input.expectedRevision}:${unit.metadata.revision}`);
+  }
+  const metadata: KnowledgeUnitMetadata = {
+    ...unit.metadata,
+    subject: input.subject,
+    tags: [...input.tags],
+    revision: unit.metadata.revision + 1,
+    updatedAt: input.occurredAt,
+  };
+  const validated = validateExistingMetadataShape(metadata, scan.workspace);
+  const body = unit.metadata.lifecycle === "retired" ? null : await crestRecordBody(scan, unit, options);
+  if (body !== null) validateMetadataBody(validated, body, scan.workspace);
+  const projectedMetadata = indexRecords(crestRecords(scan).map((entry) => entry === unit ? metadata : entry.metadata), scan.removals);
+  await commitUnderLock(scan, async () => {
+    const head = await appendLibraryCrestEvent(scan, metadata, body, unit, options.faultAt);
+    await clearRemovedBodies(scan, head.deviceId, scan.removals.keys());
+    await projectViewAfterWrite(scan, projectedMetadata, options);
+  });
+  return {
+    schemaVersion: "tcrn.knowledge-metadata-result.v1",
+    reasonCode: "KNOWLEDGE_METADATA_UPDATED",
+    id: metadata.id,
+    subject: metadata.subject,
+    tags: metadata.tags as unknown as JsonValue,
+    revision: metadata.revision,
+    bodySha256: metadata.bodySha256,
+    bodyBytes: metadata.bodyBytes,
     version: scan.marker.version + 1,
   };
 }

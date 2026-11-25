@@ -106,17 +106,22 @@ import { AssignmentGateError, validateGateRecord } from "./assignment-gate.js";
 import {
   MINUTES_RECORDED_OPERATION,
   MINUTES_RECORD_VERSION,
+  MINUTES_SUPPLEMENTED_OPERATION,
+  MINUTES_SUPPLEMENT_VERSION,
   MinutesError,
   assertDeclarationsResolve,
   assertNoDecisionTopicConflict,
   decisionLookup,
   decisionLedger,
   declarationsFromInput,
+  minutesSupplementId,
+  minutesSupplementContentDigest,
   nextMinutesExternalKey,
   standBeside,
+  validateMinutesSupplement,
   validateMinutesRecord,
 } from "./minutes.js";
-import type { MinutesDecisionMetadata, MinutesDeclarationInput, MinutesRecord } from "./minutes.js";
+import type { MinutesDecisionMetadata, MinutesDeclarationInput, MinutesRecord, MinutesSupplement, MinutesSupplementSource } from "./minutes.js";
 import type { ConferenceMinutes, ConferencePosition, ConferenceRequest } from "./conference.js";
 import {
   EMPTY_EXECUTION_CONFIG,
@@ -465,6 +470,7 @@ export interface WorkspaceState {
   // extension collections. A conference's historical minutes stay in conferenceMinutes; minutesView
   // reads both.
   readonly minutes: readonly MinutesRecord[];
+  readonly minutesSupplements: readonly MinutesSupplement[];
   readonly gates: readonly GateRecord[];
   readonly settings: readonly WorkspaceSettingRecord[];
   readonly executionConfig: ExecutionConfigState;
@@ -494,6 +500,7 @@ interface ReplaySeed {
   readonly conferencePositions: readonly ConferencePosition[];
   readonly conferenceMinutes: readonly ConferenceMinutes[];
   readonly minutes: readonly MinutesRecord[];
+  readonly minutesSupplements: readonly MinutesSupplement[];
   readonly gates: readonly GateRecord[];
   readonly settings: readonly WorkspaceSettingRecord[];
   readonly executionConfig: ExecutionConfigState;
@@ -2318,6 +2325,7 @@ function materializeEvents(metadata: WorkspaceMetadata, events: readonly EventRe
   const conferencePositions = collection<string, ConferencePosition>((snapshot?.conferencePositions ?? []).map((record) => [positionKey(record), record]));
   const conferenceMinutes = collection<string, ConferenceMinutes>((snapshot?.conferenceMinutes ?? []).map((record) => [record.id, record]));
   const minutesRecords = collection<string, MinutesRecord>((snapshot?.minutes ?? []).map((record) => [record.id, record]));
+  const minutesSupplements = collection<string, MinutesSupplement>((snapshot?.minutesSupplements ?? []).map((record) => [record.id, record]));
   const gates = collection<string, GateRecord>((snapshot?.gates ?? []).map((record) => [record.id, record]));
   // TCRN-CROSS-INC-389 R2: a replay snapshot taken while a key was live still lists it after the key
   // retires, as a 1.1.0-1.2.0 snapshot listed fitness.windowDays. The device cache only reads a
@@ -2573,6 +2581,44 @@ function materializeEvents(metadata: WorkspaceMetadata, events: readonly EventRe
         extensionRecordOrCorrupt(() => assertDeclarationsResolve(record, decisionLookup(minutesRecords.values(), conferenceMinutes.values()), "replay"));
       }
       minutesRecords.set(record.id, record);
+      continue;
+    }
+    if (operation === MINUTES_SUPPLEMENTED_OPERATION) {
+      const record = extensionRecordOrCorrupt(() => validateMinutesSupplement(payloadRecord(payload, operation, actorRequired)));
+      requireEventBoundTimestamp(record.appendedAt, event, `minutes supplement ${record.id}`);
+      const minutes = minutesRecords.get(record.minutesId);
+      const conferenceMinutesRecord = conferenceMinutes.get(record.minutesId);
+      const conference = conferenceMinutesRecord === undefined ? undefined : conferences.get(conferenceMinutesRecord.conferenceId);
+      const source: MinutesSupplementSource | null = minutes !== undefined
+        ? {
+          id: minutes.id,
+          kind: "minutes",
+          projectId: minutes.projectId,
+          title: minutes.title,
+          summary: minutes.summary,
+          decisions: minutes.decisions,
+          recordedAt: minutes.recordedAt,
+        }
+        : conferenceMinutesRecord !== undefined
+          ? {
+            id: conferenceMinutesRecord.id,
+            kind: "conference-minutes",
+            projectId: conferenceMinutesRecord.projectId,
+            title: conference?.title ?? conferenceMinutesRecord.conferenceId,
+            summary: conferenceMinutesRecord.summary,
+            decisions: conferenceMinutesRecord.decisions,
+            recordedAt: conferenceMinutesRecord.updatedAt,
+          }
+          : null;
+      if (source === null || record.id !== minutesSupplementId(record.minutesId) ||
+        record.minutesId !== source.id || record.sourceKind !== source.kind || record.projectId !== source.projectId ||
+        record.decisionMetadata.length !== source.decisions.length || record.contentDigest !== minutesSupplementContentDigest(source) ||
+        (minutes !== undefined && minutes.decisionMetadata !== undefined) || minutesSupplements.has(record.id)) {
+        fail("WORKSPACE_EVENT_CORRUPT", `minutes supplement ${record.id} does not match an unsupplemented source record`);
+      }
+      requireLiveProject(projects, record.projectId, `minutes supplement ${record.id}`);
+      recordExtensionClosureValidation(2 + record.decisionMetadata.length);
+      minutesSupplements.set(record.id, record);
       continue;
     }
     if (gateOperations.has(operation)) {
@@ -2918,6 +2964,7 @@ function materializeEvents(metadata: WorkspaceMetadata, events: readonly EventRe
     conferencePositions: sortExtensionRecords(conferencePositions.values()),
     conferenceMinutes: sortExtensionRecords(conferenceMinutes.values()),
     minutes: sortExtensionRecords(minutesRecords.values()),
+    minutesSupplements: sortExtensionRecords(minutesSupplements.values()),
     gates: sortExtensionRecords(gates.values()),
     settings: settingRecords,
     executionConfig,
@@ -3469,6 +3516,7 @@ interface LibrarySnapshotState {
   readonly conferencePositions: readonly ConferencePosition[];
   readonly conferenceMinutes: readonly ConferenceMinutes[];
   readonly minutes: readonly MinutesRecord[];
+  readonly minutesSupplements: readonly MinutesSupplement[];
   readonly gates: readonly GateRecord[];
   readonly settings: readonly WorkspaceSettingRecord[];
   readonly executionConfig: ExecutionConfigState;
@@ -3479,7 +3527,7 @@ interface LibrarySnapshotState {
 }
 
 // A snapshot without one of these collections (one written before it existed) is not a seed.
-const SNAPSHOT_COLLECTIONS = ["projects", "work", "conferences", "conferencePositions", "conferenceMinutes", "minutes", "gates", "settings", "templates", "configRecords"] as const;
+const SNAPSHOT_COLLECTIONS = ["projects", "work", "conferences", "conferencePositions", "conferenceMinutes", "minutes", "minutesSupplements", "gates", "settings", "templates", "configRecords"] as const;
 
 function snapshotState(value: unknown): LibrarySnapshotState | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -3589,6 +3637,7 @@ async function refreshLibraryCache(
           conferencePositions: replay.state.conferencePositions,
           conferenceMinutes: replay.state.conferenceMinutes,
           minutes: replay.state.minutes,
+          minutesSupplements: replay.state.minutesSupplements,
           gates: replay.state.gates,
           settings: replay.state.settings,
           executionConfig: replay.replayExecutionConfig,
@@ -3818,6 +3867,7 @@ export interface MutationDelta {
   readonly conferencePositions?: readonly ConferencePosition[];
   readonly conferenceMinutes?: readonly ConferenceMinutes[];
   readonly minutes?: readonly MinutesRecord[];
+  readonly minutesSupplements?: readonly MinutesSupplement[];
   readonly gates?: readonly GateRecord[];
   readonly settings?: readonly WorkspaceSettingRecord[];
   readonly executionConfig?: ExecutionConfigState;
@@ -3862,6 +3912,7 @@ function committedFrom(
     conferencePositions: delta.conferencePositions ?? prior.conferencePositions,
     conferenceMinutes: delta.conferenceMinutes ?? prior.conferenceMinutes,
     minutes: delta.minutes ?? prior.minutes,
+    minutesSupplements: delta.minutesSupplements ?? prior.minutesSupplements,
     gates: delta.gates ?? prior.gates,
     settings: delta.settings ?? prior.settings,
     executionConfig: delta.executionConfig ?? prior.executionConfig,
@@ -5328,6 +5379,107 @@ export function recordMinutesDelta(input: RecordMinutesInput & { readonly occurr
 
 export async function recordMinutes(workspaceRoot: string, input: RecordMinutesInput & WorkspaceMutationOptions): Promise<WorkspaceState> {
   return appendEvent(workspaceRoot, recordMinutesDelta(input), input);
+}
+
+export interface RecordMinutesSupplementInput {
+  readonly minutesId: string;
+  readonly contentDigest: string;
+  readonly decisionMetadata: readonly MinutesDecisionMetadata[];
+}
+
+export interface RecordMinutesSupplementResult {
+  readonly state: WorkspaceState;
+  readonly status: "appended" | "already-applied";
+}
+
+function minutesSupplementSource(state: WorkspaceState, minutesId: string): MinutesSupplementSource | null {
+  const minutes = state.minutes.find((record) => record.id === minutesId && !record.tombstone);
+  if (minutes !== undefined) {
+    return {
+      id: minutes.id,
+      kind: "minutes",
+      projectId: minutes.projectId,
+      title: minutes.title,
+      summary: minutes.summary,
+      decisions: minutes.decisions,
+      recordedAt: minutes.recordedAt,
+    };
+  }
+  const conferenceMinutesRecord = state.conferenceMinutes.find((record) => record.id === minutesId && !record.tombstone);
+  if (conferenceMinutesRecord === undefined) return null;
+  const conference = state.conferences.find((record) => record.id === conferenceMinutesRecord.conferenceId);
+  return {
+    id: conferenceMinutesRecord.id,
+    kind: "conference-minutes",
+    projectId: conferenceMinutesRecord.projectId,
+    title: conference?.title ?? conferenceMinutesRecord.conferenceId,
+    summary: conferenceMinutesRecord.summary,
+    decisions: conferenceMinutesRecord.decisions,
+    recordedAt: conferenceMinutesRecord.updatedAt,
+  };
+}
+
+export function recordMinutesSupplementDelta(input: RecordMinutesSupplementInput & WorkspaceMutationOptions): (state: WorkspaceState) => MutationDelta {
+  return (state) => {
+    const source = minutesSupplementSource(state, input.minutesId);
+    if (source === null) fail("WORKSPACE_INPUT_INVALID", `minutes ${input.minutesId} is unavailable`);
+    if (source.kind === "minutes" && state.minutes.find((record) => record.id === source.id)?.decisionMetadata !== undefined) {
+      fail("WORKSPACE_INPUT_INVALID", `minutes ${input.minutesId} already carries decision metadata`);
+    }
+    if (state.minutesSupplements.some((record) => record.minutesId === input.minutesId)) {
+      fail("WORKSPACE_INPUT_INVALID", `minutes ${input.minutesId} already has a supplement`);
+    }
+    if (input.contentDigest !== minutesSupplementContentDigest(source)) {
+      fail("WORKSPACE_INPUT_INVALID", `minutes ${input.minutesId} changed after its inventory was read`);
+    }
+    if (input.decisionMetadata.length !== source.decisions.length) {
+      fail("WORKSPACE_INPUT_INVALID", `minutes ${input.minutesId} needs metadata for every decision`);
+    }
+    projectById(state, source.projectId);
+    const id = minutesSupplementId(input.minutesId);
+    const record = validateMinutesSupplement({
+      schemaVersion: MINUTES_SUPPLEMENT_VERSION,
+      id,
+      minutesId: input.minutesId,
+      sourceKind: source.kind,
+      projectId: source.projectId,
+      contentDigest: input.contentDigest,
+      decisionMetadata: input.decisionMetadata,
+      appendedAt: input.occurredAt,
+      revision: 1,
+      tombstone: false,
+    });
+    return {
+      payload: buildEventPayload(MINUTES_SUPPLEMENTED_OPERATION, record as unknown as JsonValue),
+      projects: state.projects,
+      work: state.work,
+      minutesSupplements: sortExtensionRecords([...state.minutesSupplements, record]),
+    };
+  };
+}
+
+export async function recordMinutesSupplement(
+  workspaceRoot: string,
+  input: RecordMinutesSupplementInput & WorkspaceMutationOptions,
+): Promise<RecordMinutesSupplementResult> {
+  const id = minutesSupplementId(input.minutesId);
+  const equivalent = (state: WorkspaceState): boolean => {
+    const prior = state.minutesSupplements.find((record) => record.id === id);
+    return prior !== undefined && prior.contentDigest === input.contentDigest &&
+      canonicalJson(prior.decisionMetadata as unknown as JsonValue) === canonicalJson(input.decisionMetadata as unknown as JsonValue);
+  };
+  const current = await validateWorkspace(workspaceRoot);
+  if (current.minutesSupplements.some((record) => record.id === id)) {
+    if (equivalent(current)) return { state: current, status: "already-applied" };
+    fail("WORKSPACE_INPUT_INVALID", `minutes ${input.minutesId} already has a different supplement`);
+  }
+  try {
+    return { state: await appendEvent(workspaceRoot, recordMinutesSupplementDelta(input), input), status: "appended" };
+  } catch (error) {
+    const after = await validateWorkspace(workspaceRoot);
+    if (equivalent(after)) return { state: after, status: "already-applied" };
+    throw error;
+  }
 }
 
 // WSE-2: the attestation.actor.enabled chain event is history now. Its write verb is

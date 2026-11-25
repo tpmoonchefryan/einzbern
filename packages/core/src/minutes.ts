@@ -31,7 +31,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // a card's are, so a record and a card name a family by the same sources: a work id, a minutes id, and
 // the external key of a work record this library holds.
 
-import { assertProtocolId, canonicalExternalKey, compareCanonicalText, deriveStableId, parseStrictInstant } from "../../protocol/src/index.js";
+import { assertProtocolId, canonicalExternalKey, canonicalSha256, compareCanonicalText, deriveStableId, parseStrictInstant } from "../../protocol/src/index.js";
 import type { ConferenceMinutes } from "./conference.js";
 import { recallTextTokens } from "./recall.js";
 import { familiesApart, referenceFamilies } from "./work-family.js";
@@ -40,6 +40,8 @@ import type { WorkspaceState } from "./workspace.js";
 
 export const MINUTES_RECORD_VERSION = "einzbern.minutes.v1" as const;
 export const MINUTES_RECORDED_OPERATION = "minutes.recorded" as const;
+export const MINUTES_SUPPLEMENT_VERSION = "einzbern.minutes-supplement.v1" as const;
+export const MINUTES_SUPPLEMENTED_OPERATION = "minutes.supplemented" as const;
 
 /** At most this many decisions in one record, and at most this many participants and linked records. */
 export const MINUTES_DECISIONS_LIMIT = RUNTIME_CAPACITY.arrayEntries;
@@ -95,6 +97,49 @@ export interface MinutesDeclarations {
 export interface MinutesDecisionMetadata {
   readonly title: string;
   readonly tags: readonly string[];
+}
+
+export interface MinutesSupplement {
+  readonly schemaVersion: typeof MINUTES_SUPPLEMENT_VERSION;
+  readonly id: string;
+  readonly minutesId: string;
+  readonly sourceKind: "minutes" | "conference-minutes";
+  readonly projectId: string;
+  readonly contentDigest: string;
+  readonly decisionMetadata: readonly MinutesDecisionMetadata[];
+  readonly appendedAt: string;
+  readonly revision: 1;
+  readonly tombstone: false;
+}
+
+/** The immutable source fields a supplemental metadata draft is bound to. */
+export interface MinutesSupplementSource {
+  readonly id: string;
+  readonly kind: "minutes" | "conference-minutes";
+  readonly projectId: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly decisions: readonly string[];
+  readonly recordedAt: string;
+}
+
+export function minutesSupplementId(minutesId: string): string {
+  assertProtocolId(minutesId);
+  return deriveStableId("minutes-supplement", minutesId.replace(":", "-"));
+}
+
+/** A digest of the original record text and identity, excluding any later supplement. */
+export function minutesSupplementContentDigest(source: MinutesSupplementSource): string {
+  return canonicalSha256({
+    schemaVersion: "tcrn.minutes-supplement-source.v1",
+    id: source.id,
+    kind: source.kind,
+    projectId: source.projectId,
+    title: source.title,
+    summary: source.summary,
+    decisions: source.decisions,
+    recordedAt: source.recordedAt,
+  });
 }
 
 export interface MinutesRecord {
@@ -169,6 +214,7 @@ export interface MinutesViewEntry {
 const RECORD_FIELDS = ["schemaVersion", "id", "externalKey", "projectId", "title", "summary", "decisions", "decidedBy", "linkedWorkIds", "recordedAt", "revision", "tombstone"];
 const DECLARATION_FIELDS = ["coexists", "supersedes", "withdraws"];
 const SUPERSESSION_FIELDS = ["by", "decision"];
+const SUPPLEMENT_FIELDS = ["schemaVersion", "id", "minutesId", "sourceKind", "projectId", "contentDigest", "decisionMetadata", "appendedAt", "revision", "tombstone"];
 
 /** A decision's number: its minutes id and its place in the record, minutes:<id>#D<n>. */
 export const DECISION_ADDRESS_PATTERN = /^(minutes:[a-z0-9][a-z0-9._-]*)#D([1-9][0-9]*)$/u;
@@ -241,6 +287,22 @@ function decisionNumbers(value: unknown, label: string): readonly string[] {
     previous = entry as string;
   }
   return [...(value as readonly string[])];
+}
+
+function validateDecisionMetadata(value: unknown, decisionCount: number, requireTags: boolean): readonly MinutesDecisionMetadata[] {
+  if (!Array.isArray(value) || value.length !== decisionCount) {
+    fail("MINUTES_RECORD_INVALID", "decisionMetadata must have one entry per decision in decision order");
+  }
+  return value.map((entry: unknown, index) => {
+    const label = `decision D${String(index + 1)}`;
+    const metadata = exactFields(entry, ["title", "tags"], `${label} metadata`);
+    if (!Array.isArray(metadata.tags) || metadata.tags.length > MINUTES_LIST_LIMIT || (requireTags && metadata.tags.length === 0)) {
+      fail("MINUTES_RECORD_INVALID", `${label} tags must be a ${requireTags ? "non-empty " : ""}list`);
+    }
+    const tags = metadata.tags.map((tag: unknown) => text(tag, `${label} tag`, MINUTES_TITLE_BYTES));
+    if (new Set(tags).size !== tags.length) fail("MINUTES_RECORD_INVALID", `${label} tags must be unique`);
+    return { title: text(metadata.title, `${label} title`, MINUTES_TITLE_BYTES), tags };
+  });
 }
 
 /**
@@ -334,19 +396,7 @@ export function validateMinutesRecord(value: unknown): MinutesRecord {
   const decisions = (document.decisions as readonly unknown[]).map((entry, index) => text(entry, `decision D${String(index + 1)}`, MINUTES_TEXT_BYTES));
   let decisionMetadata: readonly MinutesDecisionMetadata[] | undefined;
   if (Object.hasOwn(document, "decisionMetadata")) {
-    if (!Array.isArray(document.decisionMetadata) || document.decisionMetadata.length !== decisions.length) {
-      fail("MINUTES_RECORD_INVALID", "decisionMetadata must have one entry per decision in decision order");
-    }
-    decisionMetadata = document.decisionMetadata.map((entry: unknown, index) => {
-      const label = `decision D${String(index + 1)}`;
-      const metadata = exactFields(entry, ["title", "tags"], `${label} metadata`);
-      if (!Array.isArray(metadata.tags) || metadata.tags.length > MINUTES_LIST_LIMIT) {
-        fail("MINUTES_RECORD_INVALID", `${label} tags must be a list`);
-      }
-      const tags = metadata.tags.map((tag: unknown) => text(tag, `${label} tag`, MINUTES_TITLE_BYTES));
-      if (new Set(tags).size !== tags.length) fail("MINUTES_RECORD_INVALID", `${label} tags must be unique`);
-      return { title: text(metadata.title, `${label} title`, MINUTES_TITLE_BYTES), tags };
-    });
+    decisionMetadata = validateDecisionMetadata(document.decisionMetadata, decisions.length, false);
   }
   try {
     parseStrictInstant(document.recordedAt);
@@ -370,6 +420,45 @@ export function validateMinutesRecord(value: unknown): MinutesRecord {
     revision: 1,
     tombstone: false,
     ...(declarations === null ? {} : { declarations }),
+  };
+}
+
+/** Validate one immutable, append-only supplement for an existing minutes record. */
+export function validateMinutesSupplement(value: unknown): MinutesSupplement {
+  const document = exactFields(value, SUPPLEMENT_FIELDS, "minutes supplement");
+  if (document.schemaVersion !== MINUTES_SUPPLEMENT_VERSION) fail("MINUTES_RECORD_INVALID", `schemaVersion must be ${MINUTES_SUPPLEMENT_VERSION}`);
+  try { assertProtocolId(document.id); } catch { fail("MINUTES_RECORD_INVALID", "supplement id is not an id"); }
+  try { assertProtocolId(document.minutesId); } catch { fail("MINUTES_RECORD_INVALID", "minutesId is not an id"); }
+  try { assertProtocolId(document.projectId); } catch { fail("MINUTES_RECORD_INVALID", "projectId is not an id"); }
+  if (document.id !== minutesSupplementId(document.minutesId as string)) {
+    fail("MINUTES_RECORD_INVALID", "supplement id must be the one its minutes id derives");
+  }
+  if (document.sourceKind !== "minutes" && document.sourceKind !== "conference-minutes") {
+    fail("MINUTES_RECORD_INVALID", "sourceKind must be minutes or conference-minutes");
+  }
+  if (typeof document.contentDigest !== "string" || !/^[a-f0-9]{64}$/u.test(document.contentDigest)) {
+    fail("MINUTES_RECORD_INVALID", "contentDigest must be a SHA-256 digest");
+  }
+  let appendedAt: string;
+  try {
+    parseStrictInstant(document.appendedAt);
+    appendedAt = document.appendedAt as string;
+  } catch {
+    fail("MINUTES_RECORD_INVALID", "appendedAt is not a strict instant");
+  }
+  if (document.revision !== 1 || document.tombstone !== false) fail("MINUTES_RECORD_INVALID", "a minutes supplement is written once: revision 1, not a tombstone");
+  const decisionMetadata = validateDecisionMetadata(document.decisionMetadata, Array.isArray(document.decisionMetadata) ? document.decisionMetadata.length : -1, true);
+  return {
+    schemaVersion: MINUTES_SUPPLEMENT_VERSION,
+    id: document.id as string,
+    minutesId: document.minutesId as string,
+    sourceKind: document.sourceKind,
+    projectId: document.projectId as string,
+    contentDigest: document.contentDigest,
+    decisionMetadata,
+    appendedAt,
+    revision: 1,
+    tombstone: false,
   };
 }
 
@@ -514,7 +603,7 @@ export interface DecisionLedger {
   readonly records: ReadonlyMap<string, readonly DecisionState[]>;
 }
 
-type LedgerState = Pick<WorkspaceState, "minutes" | "conferenceMinutes">;
+type LedgerState = Pick<WorkspaceState, "minutes" | "conferenceMinutes"> & Partial<Pick<WorkspaceState, "minutesSupplements">>;
 
 /**
  * The state of every decision of the live minutes, new and historical: valid, unless a record
@@ -523,12 +612,15 @@ type LedgerState = Pick<WorkspaceState, "minutes" | "conferenceMinutes">;
  */
 export function decisionLedger(state: LedgerState): DecisionLedger {
   interface Mutable { status: DecisionStatus; supersededBy: string | null; declaredIn: string | null; readonly supersedes: string[] }
+  const supplementalMetadata = new Map((state.minutesSupplements ?? []).map((supplement) => [supplement.minutesId, supplement.decisionMetadata]));
   const base = [
     ...state.minutes.filter((record) => !record.tombstone),
     ...state.conferenceMinutes.filter((record) => !record.tombstone),
   ].map((record) => ({
     minutesId: record.id, projectId: record.projectId, decisions: record.decisions,
-    metadata: "decisionMetadata" in record ? record.decisionMetadata : undefined,
+    metadata: "decisionMetadata" in record && record.decisionMetadata !== undefined
+      ? record.decisionMetadata
+      : supplementalMetadata.get(record.id),
   }));
   const mutable = new Map<string, Mutable>();
   for (const record of base) {
