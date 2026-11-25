@@ -525,7 +525,6 @@
     "validateHostExecutionReceipt",
     "validateLibraryManifest",
     "validateMachineSettingsFile",
-    "validateMachineSettingValue",
     "validateModel",
     "validateModelPlanEffort",
     "validateModelPlanModel",

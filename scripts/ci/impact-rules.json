@@ -2124,7 +2124,7 @@
     "scripts/policy/adr-criteria.json": "25ab0ed073623c52169c20ab52aa5136bf318063eee727659e966a09655fdb6b",
     "scripts/policy/ceremony-cost-init048.json": "5661bba140b0d9779d40860e072567c370b4126e466dce7dd2ab2ff2e21a84d1",
     "scripts/policy/closeout-inc263-baseline.json": "746a1e02ac611376f95b1be098e6477e3ef6345a3069a74fa0bfea53266034c6",
-    "scripts/policy/core-export-consumers.json": "caf7f04c259a8b3ac517f3ea3b447a16fa22ecdaa2c67ef89fcac21e9cc290a8",
+    "scripts/policy/core-export-consumers.json": "9e823ea6223594432ee11d76b3ac5ce2ebd5e79a7feb0e85ba863393e3c1e9e9",
     "scripts/policy/dependency-policy.json": "caf34d84e872c68c34782774eb661fb14383a2ca29208b738fb95ed9ced37437",
     "scripts/policy/failure-pattern-register.json": "97d518a2028343d28c9a500d1c5b637fe19f07044b9e62389a52f969c6b65a53",
     "scripts/policy/gate-containment.json": "81b008ff59982c9e991bd3e17ced87bedbd1861dcbfc98952ae2dbf013c678e1",
