@@ -116,7 +116,7 @@ import {
   standBeside,
   validateMinutesRecord,
 } from "./minutes.js";
-import type { MinutesDeclarationInput, MinutesRecord } from "./minutes.js";
+import type { MinutesDecisionMetadata, MinutesDeclarationInput, MinutesRecord } from "./minutes.js";
 import type { ConferenceMinutes, ConferencePosition, ConferenceRequest } from "./conference.js";
 import {
   EMPTY_EXECUTION_CONFIG,
@@ -3733,7 +3733,7 @@ export async function materializeLibrary(libraryOrRoot: Library | string, option
   if (options.readFile !== undefined || options.timeoutMs !== undefined || options.archivedManifest !== undefined
     || heldWriteLocks.getStore()?.has(library.root) === true
     || (library.manifest.consolidation === undefined && (await listStreamDevices(library.root)).length === 0)
-    || (process.platform !== "linux" && (process.platform !== "darwin" || library.manifest.consolidation === undefined))) {
+    || (process.platform !== "linux" && process.platform !== "darwin")) {
     const read = await observeStage("authority-read", () => readAllStreams(library.root, options));
     const state = await observeStage("replay", () => replayLibraryThroughCache(library, read));
     observeCheckpoint(state.headEventHash);
@@ -5272,6 +5272,7 @@ export interface RecordMinutesInput extends MinutesDeclarationInput {
   readonly title: string;
   readonly summary: string;
   readonly decisions: readonly string[];
+  readonly decisionMetadata?: readonly MinutesDecisionMetadata[];
   readonly decidedBy: readonly string[];
   readonly linkedWorkIds: readonly string[];
 }
@@ -5300,6 +5301,7 @@ export function recordMinutesDelta(input: RecordMinutesInput & { readonly occurr
       title: input.title,
       summary: input.summary,
       decisions: [...input.decisions],
+      ...(input.decisionMetadata === undefined ? {} : { decisionMetadata: input.decisionMetadata }),
       decidedBy: [...input.decidedBy],
       linkedWorkIds: [...input.linkedWorkIds],
       recordedAt: input.occurredAt,

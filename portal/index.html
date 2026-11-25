@@ -4942,10 +4942,10 @@ const BOOT = __PORTAL_BOOT__;
     try {
       const [indexResponse, projectResponse] = await Promise.all([storybookFile(base, "index.json"), storybookFile(base, "project.json")]);
       const rejected = [indexResponse, projectResponse].find((response) => !response.ok);
-      if (rejected) return { status: "warning", message: "design.warnStatus", values: { status: rejected.status } };
+      if (rejected) return { status: "warning", warning: "http", httpStatus: rejected.status };
       const [index, project] = await Promise.all([indexResponse.json(), projectResponse.json()]).catch(() => []);
       if (!Number.isInteger(index?.v) || !index?.entries || typeof index.entries !== "object" || Array.isArray(index.entries) || typeof project?.storybookVersion !== "string" || !project.storybookVersion.trim()) {
-        return { status: "warning", message: "design.warnSchema" };
+        return { status: "warning", warning: "schema" };
       }
       const components = await storybookFile(base, "manifests/components.json").then(async (response) => {
         if (response.status === 404) return "missing";
@@ -4954,7 +4954,7 @@ const BOOT = __PORTAL_BOOT__;
         return manifest && typeof manifest === "object" ? "available" : "unverified";
       }).catch(() => "unverified");
       return { status: "available", url: base.href, count: Object.keys(index.entries).length, version: project.storybookVersion, components };
-    } catch { return { status: "warning", message: "design.warnUnreachable" }; }
+    } catch { return { status: "warning", warning: "unreachable" }; }
   };
   const fetchDesignAuthority = async () => {
     const context = designAuthorityContext();
@@ -4969,7 +4969,7 @@ const BOOT = __PORTAL_BOOT__;
       if (!base.pathname.endsWith("/")) base.pathname += "/";
     } catch {
       if (designAuthorityRead === request) {
-        designAuthorityRead = { context, status: "warning", message: "design.warnBadUrl" };
+        designAuthorityRead = { context, status: "warning", warning: "url" };
         renderDesignAuthority();
       }
       return;
@@ -4989,15 +4989,18 @@ const BOOT = __PORTAL_BOOT__;
     if (designAuthorityRead.context !== context) designAuthorityRead = { context, status: "idle" };
     host.hidden = !designAuthorityUrl() || state.settings?.chain?.role === "coordination" || state.settingGroup !== settingGroup("design.authority");
     if (host.hidden) { host.innerHTML = ""; return; }
-    const { status, url, count, version, components, message, values } = designAuthorityRead;
+    const { status, url, count, version, components, warning, httpStatus } = designAuthorityRead;
     const field = $("[data-setting-control='design.productionDocs']", $("#settings-rows"));
-    const action = (key, label, primary = false) => `<button type="button" class="tcrn-button tcrn-button--${primary ? "primary" : "quiet"} tcrn-button--sm" data-design-authority-action="${key}">${esc(t(label))}</button>`;
+    const action = (key, label, primary = false) => `<button type="button" class="tcrn-button tcrn-button--${primary ? "primary" : "quiet"} tcrn-button--sm" data-design-authority-action="${key}">${esc(label)}</button>`;
+    const componentLabels = { available: t("design.components.available"), missing: t("design.components.missing"), unverified: t("design.components.unverified") };
+    const warnings = { http: t("design.warnStatus", { status: httpStatus }), schema: t("design.warnSchema"), url: t("design.warnBadUrl"), unreachable: t("design.warnUnreachable") };
     const outcome = status === "available" || status === "staged"
-      ? `<p>${esc(t("design.storybook", { version, count }))} ${esc(t("design.components." + components))}</p><p><code>${esc(url)}</code></p><p>${esc(t("design.warnResolve"))}</p>`
-      : status === "warning" ? `<p>${esc(t(message, values))}</p>` : status === "loading" ? `<p>${esc(t("config.loading"))}</p>` : "";
-    const actions = status === "staged" ? action("save", "config.save", true) + action("cancel", "config.undo")
-      : status === "available" && field ? action("fill", "design.useDocs", true) + action("fetch", "design.fetch")
-        : status === "loading" ? "" : action("fetch", "design.fetch");
+      ? `<p>${esc(t("design.storybook", { version, count }))} ${esc(componentLabels[components])}</p><p><code>${esc(url)}</code></p><p>${esc(t("design.warnResolve"))}</p>`
+      : status === "warning" ? `<p>${esc(warnings[warning])}</p>` : status === "loading" ? `<p>${esc(t("config.loading"))}</p>` : "";
+    const fetchAction = action("fetch", t("design.fetch"));
+    const actions = status === "staged" ? action("save", t("config.save"), true) + action("cancel", t("config.undo"))
+      : status === "available" && field ? action("fill", t("design.useDocs"), true) + fetchAction
+        : status === "loading" ? "" : fetchAction;
     const declaration = state.settings?.design;
     const hint = declaration?.status === "conflicting" ? t("design.conflictingBindings")
       : declaration?.status === "unconfigured" ? t("design.missingBindings", { fields: declaration.missing.map(settingLabel).join(", ") }) : "";
@@ -6582,9 +6585,14 @@ const BOOT = __PORTAL_BOOT__;
       host.innerHTML = `<p class="tcrn-text">${esc(t(current.loading ? "config.loading" : "config.readUnavailable"))}</p>`;
       return;
     }
-    const visible = Object.entries(counts).filter(([, count]) => count === null || count > 0);
+    const labels = {
+      chainIdentity: t("pendingActions.chainIdentity"), gateProposals: t("pendingActions.gateProposals"),
+      managedSections: t("pendingActions.managedSections"), migratedGates: t("pendingActions.migratedGates"),
+      ruleProposals: t("pendingActions.ruleProposals"), workValidation: t("pendingActions.workValidation"),
+    };
+    const visible = Object.entries(counts).filter(([kind, count]) => Object.hasOwn(labels, kind) && (count === null || count > 0));
     host.innerHTML = visible.length
-      ? `<dl class="tcrn-definition-list tcrn-definition-list--dense">${visible.map(([kind, count]) => `<div class="tcrn-definition-list__item"><dt class="tcrn-definition-list__term">${esc(t("pendingActions." + kind))}</dt><dd class="tcrn-definition-list__definition" data-pending-count="${esc(kind)}">${esc(count ?? t("config.readUnavailable"))}</dd></div>`).join("")}</dl>`
+      ? `<dl class="tcrn-definition-list tcrn-definition-list--dense">${visible.map(([kind, count]) => `<div class="tcrn-definition-list__item"><dt class="tcrn-definition-list__term">${esc(labels[kind])}</dt><dd class="tcrn-definition-list__definition" data-pending-count="${esc(kind)}">${esc(count ?? t("config.readUnavailable"))}</dd></div>`).join("")}</dl>`
       : `<p class="tcrn-text">${esc(t("pendingActions.empty"))}</p>`;
   };
   const loadPendingActions = async () => {
@@ -7179,10 +7187,10 @@ const BOOT = __PORTAL_BOOT__;
     if (state.librarySwitching || workValidation?.writing) return;
     const { workValidationId: id, workValidationKey: key, workValidationRevision, workValidation: status } = button.dataset;
     const accepting = status === "validated";
-    const label = t(accepting ? "work.validation.accept" : "work.validation.return");
+    const label = accepting ? t("work.validation.accept") : t("work.validation.return");
     workValidation = { id, status, revision: Number(workValidationRevision), target: pageTarget(), writing: false };
     setText("#work-validation-title", label + " · " + key);
-    setText("#work-validation-label", t(accepting ? "work.validation.report" : "work.validation.reason"));
+    setText("#work-validation-label", accepting ? t("work.validation.report") : t("work.validation.reason"));
     validationSummary.value = "";
     validationSummary.required = accepting;
     validationConfirm.textContent = label;
@@ -7458,10 +7466,11 @@ const BOOT = __PORTAL_BOOT__;
     }
     const result = preview.result;
     if (result === null || result.ok !== true) {
-      root.innerHTML = `<p class="tcrn-text">${esc(t(result === null ? "recallPreview.loading" : "recallPreview.unavailable"))}</p>`;
+      const label = result === null ? t("recallPreview.loading") : t("recallPreview.unavailable");
+      root.innerHTML = `<p class="tcrn-text">${esc(label)}</p>`;
       return;
     }
-    const columns = ["key", "candidate", "score", "terms"].map(key => esc(t("recallPreview." + key)));
+    const columns = [t("recallPreview.key"), t("recallPreview.candidate"), t("recallPreview.score"), t("recallPreview.terms")].map(esc);
     const table = (label, rows, name) => rows.length === 0
       ? `<p class="tcrn-text">${esc(t("recallPreview.empty"))}</p>`
       : `<div class="tcrn-table-shell" role="table" data-recall-preview-table="${name}" aria-label="${esc(t(label))}">

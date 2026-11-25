@@ -144,7 +144,7 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   if (result.explanation !== undefined) {
     const { threshold, matchedTerms, nearMisses } = result.explanation;
     const candidate = (hit: RecallHit) => ({
-      id: hit.id, key: hit.key, title: hit.title, kind: hit.kind, score: String(hit.score),
+      id: hit.id, key: hit.key, title: hit.decision?.metadata?.title ?? hit.title, kind: hit.kind, score: String(hit.score),
       matchedTerms: matchedTerms.get(hit.id) ?? [],
       ...(hit.decision === undefined ? {} : { decisionReference: hit.decision.reference }),
     });

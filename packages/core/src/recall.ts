@@ -47,7 +47,7 @@ import { readProtectedProjection, writeProtectedProjection } from "./protected-p
 import { observeAuthorityWork, observeCacheRead, observeCacheReason } from "./recall-observation.js";
 import { writeFileAtomic } from "./atomic-file.js";
 
-import type { ObsoleteDecisionHint } from "./minutes.js";
+import type { MinutesDecisionMetadata, ObsoleteDecisionHint } from "./minutes.js";
 
 export type RecallKind = "card" | "minutes" | "work";
 
@@ -129,6 +129,7 @@ export interface RecallHit {
 export interface RecallDecision {
   readonly number: number;
   readonly text: string;
+  readonly metadata?: MinutesDecisionMetadata;
   readonly reference: string;
   readonly scope: string;
   readonly status: "valid" | "obsolete";
@@ -467,13 +468,18 @@ function hasWord(words: Uint32Array, id: number | undefined): boolean {
   return words[low] === id;
 }
 
+function decisionSearchText(decision: RecallDecision): string {
+  if (decision.metadata === undefined) return decision.text;
+  return [decision.metadata.title, ...decision.metadata.tags, decision.text].join(" ");
+}
+
 function documentLexicon(document: RecallDocument, vocabulary: Map<string, number>): DocumentLexicon {
   return {
     words: wordIds(recallQueryTokens(`${document.title} ${document.body} ${document.expansions}`), vocabulary),
-    identifiers: wordIds(recallTextTokens(document.decisions === undefined ? `${document.title} ${document.body} ${document.expansions}` : document.decisions.map(decision => decision.text).join(" ")), vocabulary),
+    identifiers: wordIds(recallTextTokens(document.decisions === undefined ? `${document.title} ${document.body} ${document.expansions}` : document.decisions.map(decisionSearchText).join(" ")), vocabulary),
     coverage: wordIds(recallQueryTokens(`${document.title} ${document.body} ${document.tags} ${document.expansions}`), vocabulary),
     anchor: wordIds(recallQueryTokens(`${document.title} ${document.summary} ${document.expansions}`), vocabulary),
-    clauses: (document.decisions ?? []).map(clause => ({ words: wordIds(recallQueryTokens(clause.text), vocabulary),
+    clauses: (document.decisions ?? []).map(clause => ({ words: wordIds(recallQueryTokens(decisionSearchText(clause)), vocabulary),
       passages: clause.text.split(/(?<=[。；;!?])\s*|(?<=\.)\s+/u).filter(part => part.trim().length > 0)
         .map(text => ({ text, words: wordIds(recallQueryTokens(text), vocabulary) })) })),
   };
@@ -1114,7 +1120,7 @@ export class RecallIndex {
         const clauseIds: number[] = [];
         for (const [position, decision] of (document.decisions ?? []).entries()) {
           const clauseId = this.#nextClauseId++;
-          const indexed = segmentForIndex(decision.text);
+          const indexed = segmentForIndex(decisionSearchText(decision));
           insertClause.run(clauseId, indexed);
           const cWords = wordIds(recallQueryTokens(indexed), this.#vocabulary);
           const oWords = lexicon.clauses[position]!.words;
@@ -1500,6 +1506,7 @@ export interface RecallMinutesInput {
   readonly conferenceType: string;
   readonly summary: string;
   readonly decisions: readonly string[];
+  readonly decisionMetadata?: readonly (MinutesDecisionMetadata | null)[];
   readonly outcomeClass: string;
   // TCRN-CROSS-STORY-475: a minutes record keeps its external key (a conference's minutes never had
   // one), and it is what an exact-key prompt names.
@@ -1600,6 +1607,8 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
     const key = minutes.externalKey ?? null;
     const first = minutes.decisions[0];
     const firstNumber = minutes.decisionNumbers?.[0] ?? 1;
+    const decisionTitles = (minutes.decisionMetadata ?? []).flatMap(metadata => metadata === null ? [] : [metadata.title]);
+    const decisionTags = (minutes.decisionMetadata ?? []).flatMap(metadata => metadata?.tags ?? []);
     documents.push({
       id: minutes.id,
       kind: "minutes",
@@ -1608,8 +1617,8 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       title: minutes.conferenceTitle,
       // Decision references are hyphen-joined identifiers; splitting them lets a prompt
       // naming one part of a ruling reach the minutes that carry it.
-      body: `${minutes.summary} ${minutes.decisions.join(" ").replace(/-/gu, " ")}`.trim(),
-      tags: `minutes ${minutes.conferenceType}`.trim(),
+      body: [minutes.summary, ...decisionTitles, minutes.decisions.join(" ").replace(/-/gu, " ")].join(" ").trim(),
+      tags: ["minutes", minutes.conferenceType, ...decisionTags].filter(Boolean).join(" "),
       expansions: "",
       summary: minutes.summary,
       recordKind: "minutes",
@@ -1618,6 +1627,7 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       decisions: minutes.decisions.map((text, index) => ({
         number: minutes.decisionNumbers?.[index] ?? index + 1,
         text,
+        ...(minutes.decisionMetadata?.[index] == null ? {} : { metadata: minutes.decisionMetadata[index] }),
         reference: `${minutes.id}#D${minutes.decisionNumbers?.[index] ?? index + 1}`,
         scope: minutes.projectId ?? "本纪要",
         status: minutes.decisionStatuses?.[index] ?? "valid",

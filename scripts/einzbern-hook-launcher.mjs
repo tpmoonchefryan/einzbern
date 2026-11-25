@@ -462,13 +462,148 @@ async function readInput() {
   return payload;
 }
 
+// Held equal to packages/core/src/devin-host.ts (devinConfigRoot) and host-hooks.ts (the devin
+// binding hostHookCommand writes). The stable launcher imports nothing from a versioned engine.
+const DEVIN_HOST_BINDING = "process.env.EINZBERN_HOST='devin'";
+const DEVIN_EVENT_NAMES = Object.freeze({
+  "user-prompt-submit": "UserPromptSubmit",
+  "pre-tool-use": "PreToolUse",
+  "post-tool-use": "PostToolUse",
+  "subagent-start": "SubagentStart",
+  "session-start": "SessionStart",
+  stop: "Stop",
+});
+
+function devinConfigFile(env, home = homedir()) {
+  const inside = (path) => {
+    if (typeof path !== "string" || !isAbsolute(path)) return false;
+    const absolute = resolve(path);
+    return absolute !== resolve(home) && within(absolute, resolve(home));
+  };
+  if (process.platform === "win32") return join(inside(env.APPDATA) ? resolve(env.APPDATA) : join(home, "AppData", "Roaming"), "devin", "config.json");
+  return join(inside(env.XDG_CONFIG_HOME) ? resolve(env.XDG_CONFIG_HOME) : join(home, ".config"), "devin", "config.json");
+}
+
+function stripJsonComments(text) {
+  let result = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (quoted) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') {
+      quoted = true;
+      result += char;
+    } else if (char === "/" && next === "/") {
+      result += "  ";
+      index += 1;
+      while (index + 1 < text.length && text[index + 1] !== "\n" && text[index + 1] !== "\r") { result += " "; index += 1; }
+    } else if (char === "/" && next === "*") {
+      result += "  ";
+      index += 1;
+      while (index + 1 < text.length && !(text[index] === "*" && text[index + 1] === "/")) {
+        result += text[index] === "\n" || text[index] === "\r" ? text[index] : " ";
+        index += 1;
+      }
+      if (index + 1 < text.length) { result += "  "; index += 1; }
+    } else result += char;
+  }
+  return result;
+}
+
+function stripJsonTrailingCommas(text) {
+  let result = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quoted) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') { quoted = true; result += char; continue; }
+    if (char === ",") {
+      let next = index + 1;
+      while (/\s/u.test(text[next] ?? "")) next += 1;
+      if (text[next] === "}" || text[next] === "]") { result += " "; continue; }
+    }
+    result += char;
+  }
+  return result;
+}
+
+function parseDevinConfig(text) {
+  return JSON.parse(stripJsonTrailingCommas(stripJsonComments(text)));
+}
+
+function commandMatchesDevinEvent(command, event) {
+  const word = Object.hasOwn(DEVIN_EVENT_NAMES, event) ? event : null;
+  if (word === null || !command.includes("/*einzbern-hook*/") || !command.includes(DEVIN_HOST_BINDING)) return false;
+  return new RegExp(`(?:^|\\s)${word}\\s*$`, "u").test(command.trim());
+}
+
+/** Whether Devin's configuration holds the matching Einzbern hook for this event. */
+export function devinRegistrationInstalled(env = process.env, home = homedir(), event) {
+  let text;
+  try {
+    text = readFileSync(devinConfigFile(env, home), "utf8");
+  } catch {
+    return false;
+  }
+  let hooks;
+  try {
+    hooks = parseDevinConfig(text)?.hooks;
+  } catch {
+    return false;
+  }
+  if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) return false;
+  const eventNames = event === undefined
+    ? Object.entries(DEVIN_EVENT_NAMES).map(([word, name]) => [name, word])
+    : Object.hasOwn(DEVIN_EVENT_NAMES, event) ? [[DEVIN_EVENT_NAMES[event], event]] : [];
+  return eventNames.some(([name, word]) => {
+    const groups = hooks[name];
+    return Array.isArray(groups) && groups.some((group) => Array.isArray(group?.hooks)
+      && group.hooks.some((hook) => typeof hook?.command === "string" && commandMatchesDevinEvent(hook.command, word)));
+  });
+}
+
+function noteDevinYield(device, event, payload) {
+  try {
+    const logDirectory = join(device, LOG_DIRECTORY);
+    try {
+      mkdirSync(logDirectory, { mode: 0o700 });
+    } catch (error) {
+      if (error?.code !== "EEXIST") return;
+    }
+    const line = { schemaVersion: LOG_SCHEMA_VERSION, at: new Date().toISOString(), event, cwd: promptDirectory(payload), reasonCode: "HOOK_DEVIN_IMPORT_YIELDED", host: "devin" };
+    appendFileSync(join(logDirectory, LOG_FILE), `${JSON.stringify(line)}\n`, { mode: 0o600 });
+  } catch {
+    // A line that cannot be written changes nothing the hook answers.
+  }
+}
+
 export async function launch(argv, env) {
   if (!meetsNodeFloor(process.versions.node)) return null;
   const event = argv[0];
   if (typeof event !== "string" || event.length === 0) throw new HookLaunchError("HOOK_EVENT_MISSING", "the hook command names no event");
   const payload = await readInput();
   const device = deviceDirectory(env);
-  const codex = env.EINZBERN_HOST === "codex" || (!env.EINZBERN_HOST && !env.CLAUDE_PROJECT_DIR);
+  // Devin runs the Claude Code registration it imports as well as its own. Yield only when this
+  // exact event already has a matching Devin-bound command, so a partial install cannot suppress
+  // recall for an event that Devin itself does not handle.
+  if (!env.EINZBERN_HOST && env.DEVIN_PROJECT_DIR && devinRegistrationInstalled(env, undefined, event)) {
+    if (event === "user-prompt-submit") noteDevinYield(device, event, payload);
+    return null;
+  }
+  const codex = env.EINZBERN_HOST === "codex" || (!env.EINZBERN_HOST && !env.CLAUDE_PROJECT_DIR && !env.DEVIN_PROJECT_DIR);
   const workerTool = typeof payload.tool_name === "string" && (/(?:^|__|\.)(?:create_thread|fork_thread)$/u.test(payload.tool_name) || ["collaboration.spawn_agent", "collaboration__spawn_agent", "multi_agent_v1.spawn_agent", "spawn_agent"].includes(payload.tool_name));
   const queryTool = ["mcp__codex_app__read_thread", "mcp__codex_app__wait_threads"].includes(payload.tool_name);
   const peerTool = workerTool || queryTool || payload.tool_name === "mcp__codex_app__send_message_to_thread";

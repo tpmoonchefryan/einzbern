@@ -48,9 +48,16 @@ export const AGENTS_NAVIGATION_SETTING = "agents.navigation" as const;
 export const AGENTS_NAVIGATION_CHOICES = Object.freeze(["written", "declined"] as const);
 export type AgentsNavigationChoice = typeof AGENTS_NAVIGATION_CHOICES[number];
 
+// Legacy device-wide managed-output root. New selection state lives in registry.json as
+// agentsProjectRoots keyed by libraryId. Readers accept this value only when the registered path
+// belongs to that library; setup and machine-settings-set migrate it into the per-library map.
+// Kept on device because the same project sits at a different path on another device.
+export const AGENTS_PROJECT_ROOT_SETTING = "agents.projectRoot" as const;
+
 export const MACHINE_SETTING_KEYS = Object.freeze([
   MEMORY_POLICY_SETTING,
   AGENTS_NAVIGATION_SETTING,
+  AGENTS_PROJECT_ROOT_SETTING,
   "paths.artifacts",
   "paths.knowledgeArticles",
   "execution.maxConcurrentAgents",
@@ -138,6 +145,21 @@ export const MACHINE_SETTINGS_CATALOG: readonly MachineSettingsCatalogEntry[] = 
     group: "general",
     order: 3,
     allowedValues: Object.freeze([...AGENTS_NAVIGATION_CHOICES]),
+    appliesOn: "next-open",
+    valueSource: "settings-catalog",
+  }),
+  // Legacy compatibility mirror for the per-library registry selection. An absolute path,
+  // stored as its real path like every path key.
+  Object.freeze({
+    key: AGENTS_PROJECT_ROOT_SETTING,
+    type: "path",
+    controlType: "text",
+    layer: "device",
+    layerKind: MACHINE_SETTINGS_LAYER_KIND,
+    defaultValue: null,
+    shape: "scalar",
+    group: "general",
+    order: 10,
     appliesOn: "next-open",
     valueSource: "settings-catalog",
   }),
@@ -433,6 +455,14 @@ export async function readUserCrestPath(device: string = deviceHome()): Promise<
 export async function readAgentsNavigation(device: string = deviceHome()): Promise<AgentsNavigationChoice | null> {
   const value = (await readMachineSettings(join(device, MACHINE_SETTINGS_FILE_NAME))).values[AGENTS_NAVIGATION_SETTING];
   return AGENTS_NAVIGATION_CHOICES.find((choice) => choice === value) ?? null;
+}
+
+/**
+ * The legacy device-wide project root, retained as a compatibility fallback for devices without a
+ * per-library registry selection, or null while unset.
+ */
+export async function readAgentsProjectRoot(device: string = deviceHome()): Promise<string | null> {
+  return (await readMachineSettings(join(device, MACHINE_SETTINGS_FILE_NAME))).values[AGENTS_PROJECT_ROOT_SETTING] ?? null;
 }
 
 async function write(path: string, file: MachineSettingsFile): Promise<MachineSettingsFile> {

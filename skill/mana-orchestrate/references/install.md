@@ -7,7 +7,8 @@ It is the wizard for a first installation, `setup --mode fresh`: one screen of q
 confirmation, then the apply. Run the engine verbs below the way SKILL.md says to invoke the
 engine. Supply two flags yourself: `--project <dir>`, the root of the project being set up (ask
 only when it is unclear which project), and `--at <UTC>`, the current instant written
-`YYYY-MM-DDTHH:MM:SSZ`.
+`YYYY-MM-DDTHH:MM:SSZ`. Where this device keeps the AGENTS.md Einzbern manages is a question of
+its own, the project root below, and the user answers it.
 
 ## Installation layers
 
@@ -56,6 +57,76 @@ native executables and `.cmd` or `.bat` shims. Kiro IDE discovery includes per-u
 and Program Files installations. Runner recovery files receive private NTFS
 permissions when created.
 
+## Two separate checks: install succeeded vs. host ready
+
+Report engine installation and host readiness as two distinct checks. Passing the engine smoke
+check proves only that the release archive installed and launches; it does not prove a project is
+registered, native host hooks executed, or Codex peer dispatch is admitted.
+
+### Check 1: Install succeeded (read-only engine smoke)
+
+Run a minimal read-only check that requires only Node.js and the installed launcher — no `jq`, no
+registered project, and no host admission file.
+
+POSIX shell (`sh` / `bash` / `zsh`):
+
+```sh
+EINZBERN_LAUNCHER="${EINZBERN_HOME:-$HOME/.einzbern}/engine/einzbern.mjs"
+node "$EINZBERN_LAUNCHER" engine-list
+node "$EINZBERN_LAUNCHER" commands
+```
+
+Windows PowerShell:
+
+```powershell
+$einzbernHome = if ($env:EINZBERN_HOME) { $env:EINZBERN_HOME } else { Join-Path $HOME ".einzbern" }
+$launcher = Join-Path $einzbernHome "engine\einzbern.mjs"
+node $launcher engine-list
+node $launcher commands
+```
+
+Pass criteria: both commands exit `0`, `engine-list` returns `ENGINE_LIST_READY` with
+`current.version` matching the installed release, and `commands` returns `CLI_CATALOG_READY`.
+
+### Check 2: Host ready (project doctor and host-specific observation)
+
+After `setup --mode fresh --yes true` (or `restore`) registers the project, verify host and
+project configuration separately:
+
+POSIX shell:
+
+```sh
+node "${EINZBERN_HOME:-$HOME/.einzbern}/engine/einzbern.mjs" doctor --project .
+```
+
+Windows PowerShell:
+
+```powershell
+$einzbernHome = if ($env:EINZBERN_HOME) { $env:EINZBERN_HOME } else { Join-Path $HOME ".einzbern" }
+node (Join-Path $einzbernHome "engine\einzbern.mjs") doctor --project .
+```
+
+`doctor` checks local files and configuration (`hooks-present`, `skill-copies`, `registry`,
+`managed-sections`, etc.). Discovering a host directory or writing its config files does **not**
+certify that the host's native runtime loaded or fired a hook in a live session (for example,
+Kiro and Antigravity config presence does not prove an IDE hook ran, and DSH plugin status is
+reported read-only).
+
+**Codex native observation (separate prerequisite and failure branch):**
+Do not run `doctor --project . --codex-admission codex-admission.json` as an out-of-the-box
+install smoke.
+- **Prerequisite:** the project is registered, and `codex-admission.json` was freshly
+  machine-assembled (within 5 minutes) from the owning Codex App Server's JSON-RPC `initialize` →
+  `hooks/list` for `$PWD` together with SHA-256 hashes of the hook `sourcePath` and config
+  (see `docs/codex-native-controller.md`).
+- **Pass:** `doctor --project . --codex-admission codex-admission.json` returns `ok=true` and
+  `hooks-present.detail.codexGuard.ready=true`.
+- **Failure branch:** if `codex-admission.json` is unavailable, stale, disabled, untrusted, or
+  mismatched, report **Codex host / peer dispatch not ready** while keeping Check 1 (install
+  succeeded) separate. Do not report an engine install failure and do not treat passing local file
+  reconciliation as Codex readiness; re-observe from the owning App Server before starting any
+  dependent worker batch.
+
 ## Questions (one screen)
 
 Ask the whole list at once, in one message. The list is the same on both hosts: Claude Code asks
@@ -80,6 +151,19 @@ never ask again for an answer the user already gave, and never guess an answer.
    `--navigation false`. The answer belongs to this device, not to the project, and each project
    registered here follows it only once it is repaired: when the answer changes, repair each
    other project `library-list` names with the same `--navigation` answer, as `update.md` says.
+5. Project root. The folder that keeps the AGENTS.md Einzbern manages for this library on this
+   device. The skill and the hooks live in the user's home; AGENTS.md is the only file that
+   lives with a project, so the user says where it is. One library has one such folder on a
+   device: another project of the same library is registered and recalled as usual and takes no
+   managed sections of its own. The plan suggests the root this device already holds, else the
+   project being set up when it is the library's first here. When the library already has other
+   projects registered on a device that holds no root, the plan has no suggestion and reports
+   `SETUP_ANSWER_REQUIRED`: the user must name it. An answer is the project being set up or a
+   project root this device registered; to keep one AGENTS.md for a folder of several projects,
+   set that folder up as the project (`--project`). Always ask this question on a first
+   installation and never take the current directory for the answer.
+   Flag: `--project-root <dir>`. The answer belongs to this device; it is changed later with
+   `machine-settings-set --key agents.projectRoot --value <dir> --at <UTC>`.
 
 ## Model groups for the selected host
 
@@ -117,6 +201,14 @@ any redundant unedited `"einzbern"` group from the current and registered worksp
 the global Skill copy under `${ANTIGRAVITY_CONFIG_DIR:-$HOME/.gemini/config}/skills/mana-orchestrate`.
 Unrelated hook groups, skills, rules and plugins are preserved; setup does not install `agy`,
 Antigravity IDE or Antigravity App.
+
+When Devin is selected by its existing user configuration directory
+(`${XDG_CONFIG_HOME:-$HOME/.config}/devin`, or `%APPDATA%\devin` on Windows), fresh setup also
+manages only the Einzbern commands in the `hooks` key of its `config.json` and renders one subagent
+profile per tier row of the device policy's `devin` host under `agents/`. Other keys, hooks and
+profiles are preserved. A `config.json` that is not strict JSON is refused and left unchanged.
+Devin reads the Skill copy under `~/.agents/skills`, so no further copy is installed. Setup does
+not install Devin. See `specs/devin-host-v1.md`.
 
 ## Plan, final confirmation, apply
 
@@ -158,6 +250,7 @@ Antigravity IDE or Antigravity App.
 | Cloud drive | `--cloud true` or `--cloud false` |
 | Language | `--language <tag>` |
 | Navigation section | `--navigation true` or `--navigation false` |
+| Project root of this device | `--project-root <dir>` |
 | Yes at the final confirmation | `--yes true` |
 
 Check the installation again at any time with `doctor --project <dir>`.

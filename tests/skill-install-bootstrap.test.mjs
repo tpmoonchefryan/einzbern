@@ -9,16 +9,19 @@
 
 import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { existsSync } from "node:fs";
 import { copyFile, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 import test, { after } from "node:test";
 
 import { FRAMEWORK_VERSION, computeInstallTreeDigest } from "../dist/build/packages/core/src/index.js";
+import { BRAND } from "../dist/build/packages/core/src/names.js";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const installScript = join(repositoryRoot, "skill/mana-orchestrate/scripts/install.mjs");
@@ -141,6 +144,20 @@ test("481-AC3, R3: a local archive installs while every fetch throws, and instal
   const commands = spawnSync(process.execPath, [join(engine, "einzbern.mjs"), "commands"], { cwd: base, encoding: "utf8", env: { ...process.env, EINZBERN_HOME: device } });
   assert.equal(commands.status, 0, commands.stderr);
   assert.equal(JSON.parse(commands.stdout).reasonCode, "CLI_CATALOG_READY");
+  const skill = await readFile(join(engine, FRAMEWORK_VERSION, "skill", BRAND.helper.id, "SKILL.md"), "utf8");
+  assert.match(skill, /`e <verb> --help`/u);
+  assert.match(skill, /`e engine-list`: `current\.version`/u);
+  const launch = (...args) => {
+    const result = spawnSync(process.execPath, [join(engine, "einzbern.mjs"), ...args], { cwd: base, encoding: "utf8", env: { ...process.env, EINZBERN_HOME: device } });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  const help = launch("recall", "--help");
+  assert.equal(help.reasonCode, "CLI_CATALOG_READY");
+  assert.equal(help.commands[0].name, "recall");
+  const versions = launch("engine-list");
+  assert.equal(versions.reasonCode, "ENGINE_LIST_READY");
+  assert.equal(versions.current.version, FRAMEWORK_VERSION);
   // The unpacked copy went to the trash, with the manifest it set aside; nothing is left beside it.
   const trashed = await readdir(join(device, "trash"));
   assert.equal(trashed.length, 1);
@@ -159,6 +176,51 @@ test("481-AC3, R3: a local archive installs while every fetch throws, and instal
   assert.ok((await readFile(join(engine, "hook.mjs"))).equals(await readFile(join(repositoryRoot, "scripts/einzbern-hook-launcher.mjs"))));
   assert.deepEqual(await listing(engine), engineBefore, "engine/ holds the same entries");
   assert.equal((await readdir(join(device, "trash"))).length, 2);
+});
+
+test("Windows installation tolerates a held unchanged launcher and reports a held changed launcher with a clean retry", { skip: process.platform !== "win32" }, async () => {
+  const { home, device } = await user("windows-held-launcher");
+  const options = { home };
+  const args = ["--archive", join(release, ARCHIVE)];
+  const first = install(args, options);
+  assert.equal(first.status, 0, first.stderr);
+  const engine = join(device, "engine");
+  const hook = join(engine, "hook.mjs");
+  const original = await readFile(hook);
+  const encoded = Buffer.from(hook).toString("base64");
+  async function withHeldHook(run) {
+    const holder = spawn(join(process.env.SystemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"), [
+      "-NoProfile", "-NonInteractive", "-Command", `
+        $ErrorActionPreference = 'Stop'
+        $path = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${encoded}'))
+        $file = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        try { [Console]::WriteLine('locked'); [void] [Console]::ReadLine() } finally { $file.Dispose() }
+      `,
+    ], { stdio: ["pipe", "pipe", "inherit"], windowsHide: true, timeout: 120_000 });
+    const closed = once(holder, "close");
+    const lines = createInterface({ input: holder.stdout });
+    try {
+      assert.equal(await Promise.race([once(lines, "line").then(([line]) => line), closed.then(() => "closed before locking")]), "locked");
+      return run();
+    } finally {
+      lines.close();
+      holder.stdin.end();
+      await closed;
+    }
+  }
+
+  const same = await withHeldHook(() => install(args, options));
+  assert.equal(same.status, 0, same.stderr);
+  assert.equal(JSON.parse(same.stdout).installed, "reused");
+  await writeFile(hook, Buffer.concat([original, Buffer.from("\n// older launcher\n")]));
+  const refused = refusal(await withHeldHook(() => install(args, options)));
+  assert.equal(refused.reasonCode, "INSTALL_LAUNCHER_UPDATE_FAILED");
+  assert.equal(refused.launcher, hook);
+  assert.deepEqual(refused.current, JSON.parse(await readFile(join(engine, "current"), "utf8")));
+  assert.deepEqual((await readdir(engine)).filter((name) => name.endsWith(".partial")), []);
+  const retry = install(args, options);
+  assert.equal(retry.status, 0, retry.stderr);
+  assert.deepEqual(await readFile(hook), original);
 });
 
 test("481-R3: --version downloads the archive and its .sha256 from that version's release, and nothing else", async () => {

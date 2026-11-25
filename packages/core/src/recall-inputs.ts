@@ -483,6 +483,9 @@ export function recallInputsFromState(
       conferenceType: entry.kind === "conference-minutes" && historical !== undefined ? conferenceTypes.get(historical.conferenceId) ?? "" : "",
       summary: entry.summary,
       decisions: entry.decisions.map((decision) => decision.text),
+      ...(entry.decisions.every(decision => decision.title === undefined) ? {} : {
+        decisionMetadata: entry.decisions.map(decision => decision.title === undefined ? null : { title: decision.title, tags: decision.tags ?? [] }),
+      }),
       outcomeClass: entry.kind === "conference-minutes" && historical !== undefined ? historical.outcomeClass : "recorded",
       externalKey: entry.externalKey,
       projectId: entry.projectId,
@@ -741,7 +744,7 @@ export function recallCandidateEntries(hits: readonly RecallHit[], perPromptByte
   const entries: { hit: RecallHit; line: string }[] = [];
   let used = 0;
   for (const hit of hits) {
-    const title = hit.title.replace(/\s+/gu, " ").trim();
+    const title = (hit.decision?.metadata?.title ?? hit.title).replace(/\s+/gu, " ").trim();
     if (title === "") continue;
     const line = [hit.kind === "work" ? hit.recordKind : hit.kind, hit.key, title, recallCandidateRef(hit)].join(" · ");
     const bytes = Buffer.byteLength(line, "utf8") + (entries.length === 0 ? 0 : 1);

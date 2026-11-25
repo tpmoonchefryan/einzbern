@@ -19,7 +19,7 @@ import {
   validateMachineSettingsFile,
 } from "../dist/build/packages/core/src/index.js";
 import { userCrestPath } from "../dist/build/packages/core/src/device-home.js";
-import { readUserCrestPath } from "../dist/build/packages/core/src/machine-settings.js";
+import { readAgentsProjectRoot, readUserCrestPath } from "../dist/build/packages/core/src/machine-settings.js";
 
 const at = "2026-01-01T00:00:00Z";
 const scratch = async () => machineSettingsPath(await mkdtemp(join(tmpdir(), "tcrn-s281-")));
@@ -213,4 +213,33 @@ test("configuration migration: path bindings and device agent cap validate and r
     }
     assert.equal((await readMachineSettings(path)).values["execution.maxConcurrentHeavyRuns"], undefined, "the agent cap does not mutate the heavy-run choice");
   } finally { await rm(join(path, "..", ".."), { recursive: true, force: true }); }
+});
+
+// The device's project root (agents.projectRoot, minutes:3fd5f6bdbc889992e2db015a D1-D2): the
+// directory that alone keeps its library's managed AGENTS.md on this device. A device-level
+// absolute path stored as its real path, like every path key; a device that names none reads null.
+test("agents.projectRoot is a device-level absolute path, stored as its real path, and null while unset", async () => {
+  const base = await realpath(await mkdtemp(join(tmpdir(), "einzbern-s281-root-")));
+  const path = machineSettingsPath(base);
+  const device = dirname(path);
+  try {
+    const entry = MACHINE_SETTINGS_CATALOG.find((candidate) => candidate.key === "agents.projectRoot");
+    assert.deepEqual([entry?.layer, entry?.type, entry?.controlType, entry?.defaultValue, entry?.group, entry?.order], ["device", "path", "text", null, "general", 10]);
+    assert.equal(await readAgentsProjectRoot(device), null);
+
+    await reason(applyMachineSettingSet({ key: "agents.projectRoot", value: "relative/project", occurredAt: at, path }), "MACHINE_SETTING_VALUE_INVALID");
+    await writeFile(join(base, "file"), "not a folder\n", "utf8");
+    await reason(applyMachineSettingSet({ key: "agents.projectRoot", value: join(base, "file"), occurredAt: at, path }), "MACHINE_SETTING_VALUE_INVALID");
+    await assert.rejects(stat(path), { code: "ENOENT" }, "a refused value writes nothing");
+
+    await mkdir(join(base, "projects"));
+    await symlink(join(base, "projects"), join(base, "Projects Link"), process.platform === "win32" ? "junction" : "dir");
+    const stored = await applyMachineSettingSet({ key: "agents.projectRoot", value: join(base, "Projects Link"), occurredAt: at, path });
+    assert.equal(stored.values["agents.projectRoot"], join(base, "projects"));
+    assert.equal(await readAgentsProjectRoot(device), join(base, "projects"));
+    assert.equal((await readMachineSettingsCatalog(path)).settings.find((setting) => setting.key === "agents.projectRoot")?.currentValue, join(base, "projects"));
+
+    await applyMachineSettingRemove({ key: "agents.projectRoot", occurredAt: at, path });
+    assert.equal(await readAgentsProjectRoot(device), null);
+  } finally { await rm(base, { recursive: true, force: true }); }
 });

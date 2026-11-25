@@ -75,12 +75,12 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Full text",
     verbs: ["work-show", "work-content-context", "minutes-show", "work-project-context", "execution-prepare", "execution-record", "execution-evidence"],
-    action: "Read `work-show --id <id>` or `minutes-show --id <id>`. Use each target's `handoff` for dispatch/gates (`EINZBERN_PROJECT_CONTEXT`). Unresolved targets block dependent work. `--execution-request` requires `dispatchAdmitted=true` and selected runner/model/effort. Keep that selection. Validate with `execution-evidence --from-file <json>`. Retain raw stdout/stderr/exit code. Evidence validation grants no execution permission. `specs/context-v1.md`, `specs/dispatch-admission-evidence-v1.md`.",
+    action: "Read `work-show --id <id>` or `minutes-show --id <id>`. Use each target's `handoff` for dispatch/gates (`EINZBERN_PROJECT_CONTEXT`). Unresolved targets block dependent work. `--execution-request` requires `dispatchAdmitted=true`, selected runner/model/effort. Keep that selection. Validate `execution-evidence --from-file <json>`. Keep raw stdout/stderr/exit code. Evidence validation grants no execution permission. `specs/context-v1.md`, `specs/dispatch-admission-evidence-v1.md`.",
   },
   {
-    moment: "Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity)",
+    moment: "Native dispatch (Codex, Claude, dot, Kiro CLI, Antigravity, Devin)",
     verbs: ["execution-policy-resolve", "execution-host-prepare", "execution-host-record", "execution-host-evidence", "execution-codex-peer-record", "execution-codex-peer-evidence", "execution-antigravity-swarm-record", "execution-antigravity-swarm-evidence"],
-    action: "Resolve policy; Class fallback, hard limits. Use normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports. Dot model selection is host-managed. Host Integrations/controller details: specs/kiro-host-v1.md, docs/antigravity-swarm-controller.md. attempt association and failure outcomes: --binding/--prior; unknown/cancel/finality/review: specs/host-fallback-v1.md.",
+    action: "Class fallback/hard limits. Use normal prompt reports. Parent reads before dispatch, child reads before work. scope/permission, targets=[], machine-assembled raw returns/reports. Dot model selection is host-managed. Host Integrations/controller details: specs/kiro-host-v1.md, docs/antigravity-swarm-controller.md, specs/devin-host-v1.md. attempt association and failure outcomes: --binding/--prior; unknown/cancel/finality/review: specs/host-fallback-v1.md.",
   },
   {
     moment: "Shared submit",
@@ -90,7 +90,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Done",
     verbs: ["work-transition", "work-annotate"],
-    action: "Actual actor/readback. Pending != complete. Compare original source, behavior and assertions; structure is not semantic acceptance. Dot/local consumption separately; unavailable remains unverified. specs/batch-execution-v1.md.",
+    action: "Actor/readback. Pending != complete. Compare original source, behavior and assertions; structure is not semantic acceptance. Dot/local consumption separately; unavailable remains unverified. specs/batch-execution-v1.md.",
   },
   {
     moment: "Decision",
@@ -110,7 +110,7 @@ export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
 ].map((entry) => Object.freeze({ ...entry, verbs: Object.freeze([...entry.verbs]) })));
 
 // Verbs the text names outside the table.
-const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "library-resolve", "setup", "work-list", "work-create", "work-batch"]);
+const OTHER_NAMED_VERBS: readonly string[] = Object.freeze(["commands", "engine-list", "library-resolve", "setup", "work-list", "work-create", "work-batch"]);
 
 /** Every engine verb SKILL.md names, the table's first and in its order, without repeats. */
 export function skillNamedVerbs(): readonly string[] {
@@ -159,7 +159,7 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "## Navigation",
     "",
-    `Root: nonempty absolute \`${DEVICE_HOME_ENVIRONMENT_VARIABLE}\`, else \`~/${DIRECTORY.device}\`. commands/<verb> --help: flags; --at UTC. Read engine bundle \`specs/\` beside \`scripts/\`, not this Skill.`,
+    `Root: absolute \`${DEVICE_HOME_ENVIRONMENT_VARIABLE}\` or \`~/${DIRECTORY.device}\`. Flags: \`e <verb> --help\`; --at UTC. Read engine bundle \`specs/\` beside \`scripts/\`, not this Skill.`,
     "",
     "Local writes queue together, not cross-device exclusion. Remote submission: serial handoff. Dot installs no native hook, lifecycle manager or sync service.",
     "",
@@ -169,11 +169,11 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "Coding: `specs/coding-style-v1.md`.",
     "",
-    "Version: patch fixes, minor adds, major breaks; --version.",
+    "Patch fixes, minor adds, major breaks. `e engine-list`: `current.version`.",
     "",
     "## Core commands",
     "",
-    "work-list summarizes; --full true shows content. work-create/work-transition/work-annotate/work-batch write. `minutes-record --decisions-file <json>` takes a JSON string array; verify verifiedReadback/localCommitted/remote delivery.",
+    "work-list summarizes; --full true shows content. work-create/work-transition/work-annotate/work-batch write. `minutes-record --decisions-file <json>` accepts {text,title,tags} entries or strings. Verify readback and delivery.",
     "",
     "Codex: owning App Server JSON-RPC `initialize` → `hooks/list` for `$PWD`; fresh project-bound `--codex-admission` from raw result; SHA-256 hook `sourcePath`/config hashes. docs/codex-native-controller.md. Reobserve within five minutes; require `ok=true` and `hooks-present.detail.codexGuard.ready`.",
     "",

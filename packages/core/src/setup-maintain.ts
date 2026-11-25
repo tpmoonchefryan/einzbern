@@ -53,7 +53,7 @@ import { readAgentsNavigation } from "./machine-settings.js";
 import type { AgentsNavigationChoice } from "./machine-settings.js";
 import { parseManagedFile } from "./managed-sections.js";
 import { BRAND, DIRECTORY } from "./names.js";
-import { readRegistry, unregisterLibrary } from "./registry.js";
+import { readAgentsProjectRootSelection, readRegistry, registeredAgentsProjectRoots, setAgentsProjectRoots, unregisterLibrary, validateAgentsProjectRoot } from "./registry.js";
 import { coordinationNamedBy, releasableSetupCoordination, releaseSetupCoordination } from "./project-chain.js";
 import type { Registry, RegistryEntry } from "./registry.js";
 import { SETUP_ACTOR, setupFail } from "./setup.js";
@@ -401,7 +401,7 @@ function appliedLibrary(plan: SetupPlan): SetupApplied["library"] {
   return library === null || library.libraryId === null ? null : { path: library.path, libraryId: library.libraryId, created: false };
 }
 
-function planResult(recorder: SetupRecorder, parts: Pick<SetupModePlan, "questions" | "resolved" | "engine" | "library" | "pendingSections" | "managedUpdates" | "engineSwitch" | "coordination" | "uninstallImpact">): SetupModePlan {
+function planResult(recorder: SetupRecorder, parts: Pick<SetupModePlan, "questions" | "resolved" | "engine" | "library" | "pendingSections" | "managedUpdates" | "agentsProjectRootSelections" | "engineSwitch" | "coordination" | "uninstallImpact">): SetupModePlan {
   return {
     ...parts,
     writes: recorder.writes,
@@ -410,6 +410,58 @@ function planResult(recorder: SetupRecorder, parts: Pick<SetupModePlan, "questio
     blockers: recorder.blockers,
     warnings: recorder.warnings,
   };
+}
+
+interface PlannedManagedRoots {
+  readonly currentRoot: string | null;
+  readonly roots: ReadonlyMap<string, string | null>;
+  readonly selections: readonly { readonly libraryId: string; readonly projectPath: string }[];
+  readonly questions: readonly SetupQuestion[];
+}
+
+/** Resolve old device-wide root state into one selected root per library before an update or repair. */
+async function planManagedRoots(input: SetupModeInput, recorder: SetupRecorder): Promise<PlannedManagedRoots> {
+  const registry = await readRegistry(input.context.deviceHome);
+  const ids = [...new Set(registry.entries.map(entry => entry.libraryId))].sort();
+  const selections: { libraryId: string; projectPath: string }[] = [];
+  const planned = new Map<string, string | null>();
+  const questions: SetupQuestion[] = [];
+  const currentEntry = input.context.registered;
+  const currentLibraryId = currentEntry?.libraryId ?? null;
+  let currentRoot: string | null = null;
+
+  for (const libraryId of ids) {
+    const registered = await registeredAgentsProjectRoots(libraryId, input.context.deviceHome);
+    const prior = await readAgentsProjectRootSelection(libraryId, input.context.deviceHome).catch(error => {
+      const reasonCode = reasonOf(error);
+      if (reasonCode === null) throw error;
+      return { libraryId, projectPath: null, source: "unset" as const };
+    });
+    let selected = prior.projectPath;
+    if (libraryId === currentLibraryId && input.answers.projectRoot !== undefined) {
+      const explicit = await validateAgentsProjectRoot(libraryId, resolve(input.context.projectRoot, input.answers.projectRoot), input.context.projectRoot, input.context.deviceHome);
+      if (explicit === null) {
+        recorder.block("registry", resolve(input.context.projectRoot, input.answers.projectRoot), "SETUP_ANSWER_INVALID",
+          `the managed-output root must be a registered project root of library ${libraryId}`);
+        selected = null;
+      } else selected = explicit;
+    } else if (selected === null && registered.length === 1) {
+      selected = registered[0]!;
+    } else if (selected === null && libraryId === currentLibraryId && registered.length > 1) {
+      questions.push({ id: "projectRoot", flag: "--project-root", default: null, choices: null });
+      recorder.block("registry", registryPath(input.context.deviceHome), "SETUP_ANSWER_REQUIRED",
+        `library ${libraryId} has multiple registered roots and no effective root; choose one with --project-root <dir>`);
+    }
+    planned.set(libraryId, selected);
+    if (selected !== null && (prior.source !== "registry" || prior.projectPath !== selected)) selections.push({ libraryId, projectPath: selected });
+    if (libraryId === currentLibraryId) currentRoot = selected;
+  }
+
+  if (input.answers.projectRoot !== undefined && currentLibraryId === null) {
+    recorder.block("registry", resolve(input.context.projectRoot, input.answers.projectRoot), "SETUP_ANSWER_INVALID",
+      "--project-root must name a registered project root of this device's current library");
+  }
+  return { currentRoot, roots: planned, selections, questions };
 }
 
 // ---- update and rollback ----
@@ -480,6 +532,8 @@ export async function planUpdateSetup(input: SetupModeInput): Promise<SetupModeP
   }
   const recorder = new SetupRecorder(deviceHome, input.at);
   const current = await currentEngine(recorder, deviceHome);
+  const managedRoots = await planManagedRoots(input, recorder);
+  if (managedRoots.selections.length > 0) recorder.write("registry", registryPath(deviceHome), "update");
   let target: EngineTarget | null = null;
   const questions: SetupQuestion[] = [];
   if (options.rollback === true) {
@@ -503,17 +557,21 @@ export async function planUpdateSetup(input: SetupModeInput): Promise<SetupModeP
     engine: target?.files ?? null,
     steps: ENGINE_STEPS,
   });
-  const managedUpdates = target === null ? [] : await planSetupManagedUpdates(recorder, deviceHome);
+  const managedUpdates = target === null ? [] : await planSetupManagedUpdates(recorder, deviceHome, managedRoots.roots);
   for (const output of managedUpdates.filter(output => output.status === "unavailable")) recorder.warnings.push({
     reasonCode: "MANAGED_SECTION_REFRESH_INCOMPLETE", file: join(output.projectPath, AGENTS_FILE), message: output.reasonCode ?? "Managed output unavailable",
   });
+  for (const output of managedUpdates.filter(output => output.status === "skipped" && output.reasonCode === "AGENTS_PROJECT_ROOT_REQUIRED")) recorder.warnings.push({
+    reasonCode: "MANAGED_SECTION_REFRESH_INCOMPLETE", file: join(output.projectPath, AGENTS_FILE), message: `library ${output.libraryId} needs a one-time --project-root selection before its managed sections can be refreshed`,
+  });
   return planResult(recorder, {
-    questions,
-    resolved: maintainedAnswers(context, answers, await registeredState(context.registered), deviceNavigation),
+    questions: [...managedRoots.questions, ...questions],
+    resolved: { ...maintainedAnswers(context, answers, await registeredState(context.registered), deviceNavigation), ...(managedRoots.currentRoot === null ? {} : { projectRoot: managedRoots.currentRoot }) },
     engine: target?.engine ?? { version: current?.version ?? null, directory: null },
     library: registeredLibrary(context),
     pendingSections: managedUpdates.flatMap(output => (output.pending ?? []).map(section => ({ ...section, file: join(output.projectPath, section.file) }))),
     managedUpdates,
+    agentsProjectRootSelections: managedRoots.selections,
     ...(target === null ? {} : { engineSwitch: target.engineSwitch }),
   });
 }
@@ -567,9 +625,13 @@ export async function applyUpdateSetup(plan: SetupPlan): Promise<SetupApplied> {
     engineDirectory: engineVersionDirectory(report.current.version, deviceHome),
     steps: ENGINE_STEPS,
   });
+  if ((plan.agentsProjectRootSelections?.length ?? 0) > 0) {
+    await setAgentsProjectRoots(plan.agentsProjectRootSelections!, deviceHome);
+    recorder.write("registry", registryPath(deviceHome), "update");
+  }
   const engineDirectory = engineVersionDirectory(report.current.version, deviceHome);
   const managedUpdates = await applySetupManagedUpdates(recorder, plan, engineDirectory);
-  for (const output of managedUpdates.filter(output => output.status === "unavailable" || output.status === "pending")) recorder.warnings.push({
+  for (const output of managedUpdates.filter(output => output.status === "unavailable" || output.status === "pending" || (output.status === "skipped" && output.reasonCode === "AGENTS_PROJECT_ROOT_REQUIRED"))) recorder.warnings.push({
     reasonCode: "MANAGED_SECTION_REFRESH_INCOMPLETE", file: join(output.projectPath, AGENTS_FILE), message: output.reasonCode ?? "User-modified sections need a decision",
   });
   const selfCheck = await runSetupEngineCommand<{ checks: SetupApplied["selfCheck"] }>(engineDirectory, plan, ["doctor", "--project", projectRoot]);
@@ -632,8 +694,9 @@ export async function planRepairSetup(input: SetupModeInput): Promise<SetupModeP
   const engine = await planEngineSource(recorder, deviceHome);
   const deviceNavigation = await readDeviceNavigation(recorder, deviceHome);
   const library = await repairLibrary(recorder, context);
+  const managedRoots = await planManagedRoots(input, recorder);
   await planDevice(recorder, deviceHome);
-  const resolved = maintainedAnswers(context, answers, library?.state ?? null, deviceNavigation);
+  const resolved = { ...maintainedAnswers(context, answers, library?.state ?? null, deviceNavigation), ...(managedRoots.currentRoot === null ? {} : { projectRoot: managedRoots.currentRoot }) };
   let pending = library === null ? [] : await planWiring(recorder, {
     ...(input.codexAdmission === undefined ? {} : { codexAdmission: input.codexAdmission }),
     projectRoot,
@@ -643,10 +706,11 @@ export async function planRepairSetup(input: SetupModeInput): Promise<SetupModeP
     cloud: resolved.cloud,
     navigation: navigationChoice(resolved.navigation),
     deviceNavigation,
+    ...(managedRoots.currentRoot === null ? {} : { agentsProjectRoot: managedRoots.currentRoot }),
     engine: engine.directory === null ? null : await readEngineFiles(recorder, engine.directory),
   });
   return planResult(recorder, {
-    questions: answerQuestions(input, resolved),
+    questions: [...answerQuestions(input, resolved), ...managedRoots.questions],
     resolved,
     engine,
     library: library === null ? registeredLibrary(context) : { path: library.path, action: "reuse", libraryId: library.libraryId },
@@ -678,6 +742,7 @@ export async function applyRepairSetup(plan: SetupPlan): Promise<SetupApplied> {
     library: { path: library.root, libraryId: planned.libraryId },
     cloud: resolved.cloud,
     navigation: navigationChoice(resolved.navigation),
+    ...(resolved.projectRoot === undefined ? {} : { agentsProjectRoot: resolved.projectRoot }),
     engineDirectory: directory,
     actorId: SETUP_ACTOR,
   });

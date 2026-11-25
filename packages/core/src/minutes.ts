@@ -92,6 +92,11 @@ export interface MinutesDeclarations {
   readonly coexists: readonly string[];
 }
 
+export interface MinutesDecisionMetadata {
+  readonly title: string;
+  readonly tags: readonly string[];
+}
+
 export interface MinutesRecord {
   readonly schemaVersion: typeof MINUTES_RECORD_VERSION;
   readonly id: string;
@@ -100,6 +105,7 @@ export interface MinutesRecord {
   readonly title: string;
   readonly summary: string;
   readonly decisions: readonly string[];
+  readonly decisionMetadata?: readonly MinutesDecisionMetadata[];
   readonly decidedBy: readonly string[];
   readonly linkedWorkIds: readonly string[];
   readonly recordedAt: string;
@@ -133,6 +139,8 @@ export interface MinutesDecisionSuccessor {
 export interface MinutesDecision {
   readonly number: number;
   readonly text: string;
+  readonly title?: string;
+  readonly tags?: readonly string[];
   readonly status?: DecisionStatus;
   readonly supersedes?: readonly string[];
   readonly supersededBy?: MinutesDecisionSuccessor | null;
@@ -300,9 +308,11 @@ export function validateMinutesRecord(value: unknown): MinutesRecord {
   if (value === null || typeof value !== "object" || Array.isArray(value)) fail("MINUTES_RECORD_INVALID", "a minutes record is an object");
   const document = value as Readonly<Record<string, unknown>>;
   const keys = Object.keys(document).sort(compareCanonicalText);
-  const fields = Object.hasOwn(document, "declarations") ? [...RECORD_FIELDS, "declarations"] : RECORD_FIELDS;
+  const fields = [...RECORD_FIELDS];
+  if (Object.hasOwn(document, "declarations")) fields.push("declarations");
+  if (Object.hasOwn(document, "decisionMetadata")) fields.push("decisionMetadata");
   if (keys.length !== fields.length || !fields.every((field) => keys.includes(field))) {
-    fail("MINUTES_RECORD_INVALID", `a minutes record has exactly the fields ${RECORD_FIELDS.join(", ")}, and declarations when it declares any`);
+    fail("MINUTES_RECORD_INVALID", `a minutes record has exactly the fields ${RECORD_FIELDS.join(", ")}, with optional declarations and decisionMetadata`);
   }
   if (document.schemaVersion !== MINUTES_RECORD_VERSION) fail("MINUTES_RECORD_INVALID", `schemaVersion must be ${MINUTES_RECORD_VERSION}`);
   let externalKey: string;
@@ -322,6 +332,22 @@ export function validateMinutesRecord(value: unknown): MinutesRecord {
     fail("MINUTES_RECORD_INVALID", `decisions must be a list of 1 to ${String(MINUTES_DECISIONS_LIMIT)} entries`);
   }
   const decisions = (document.decisions as readonly unknown[]).map((entry, index) => text(entry, `decision D${String(index + 1)}`, MINUTES_TEXT_BYTES));
+  let decisionMetadata: readonly MinutesDecisionMetadata[] | undefined;
+  if (Object.hasOwn(document, "decisionMetadata")) {
+    if (!Array.isArray(document.decisionMetadata) || document.decisionMetadata.length !== decisions.length) {
+      fail("MINUTES_RECORD_INVALID", "decisionMetadata must have one entry per decision in decision order");
+    }
+    decisionMetadata = document.decisionMetadata.map((entry: unknown, index) => {
+      const label = `decision D${String(index + 1)}`;
+      const metadata = exactFields(entry, ["title", "tags"], `${label} metadata`);
+      if (!Array.isArray(metadata.tags) || metadata.tags.length > MINUTES_LIST_LIMIT) {
+        fail("MINUTES_RECORD_INVALID", `${label} tags must be a list`);
+      }
+      const tags = metadata.tags.map((tag: unknown) => text(tag, `${label} tag`, MINUTES_TITLE_BYTES));
+      if (new Set(tags).size !== tags.length) fail("MINUTES_RECORD_INVALID", `${label} tags must be unique`);
+      return { title: text(metadata.title, `${label} title`, MINUTES_TITLE_BYTES), tags };
+    });
+  }
   try {
     parseStrictInstant(document.recordedAt);
   } catch {
@@ -337,6 +363,7 @@ export function validateMinutesRecord(value: unknown): MinutesRecord {
     title: text(document.title, "title", MINUTES_TITLE_BYTES),
     summary: text(document.summary, "summary", MINUTES_TEXT_BYTES),
     decisions,
+    ...(decisionMetadata === undefined ? {} : { decisionMetadata }),
     decidedBy: ids(document.decidedBy, "decidedBy", null),
     linkedWorkIds: ids(document.linkedWorkIds, "linkedWorkIds", "work"),
     recordedAt: document.recordedAt as string,
@@ -470,6 +497,7 @@ export interface DecisionState {
   readonly minutesId: string;
   readonly number: number;
   readonly text: string;
+  readonly metadata?: MinutesDecisionMetadata;
   readonly projectId: string;
   readonly status: DecisionStatus;
   // The decision that superseded this one; null while it is valid and when it was withdrawn.
@@ -495,10 +523,13 @@ type LedgerState = Pick<WorkspaceState, "minutes" | "conferenceMinutes">;
  */
 export function decisionLedger(state: LedgerState): DecisionLedger {
   interface Mutable { status: DecisionStatus; supersededBy: string | null; declaredIn: string | null; readonly supersedes: string[] }
-  const base: { readonly minutesId: string; readonly projectId: string; readonly decisions: readonly string[] }[] = [
+  const base = [
     ...state.minutes.filter((record) => !record.tombstone),
     ...state.conferenceMinutes.filter((record) => !record.tombstone),
-  ].map((record) => ({ minutesId: record.id, projectId: record.projectId, decisions: record.decisions }));
+  ].map((record) => ({
+    minutesId: record.id, projectId: record.projectId, decisions: record.decisions,
+    metadata: "decisionMetadata" in record ? record.decisionMetadata : undefined,
+  }));
   const mutable = new Map<string, Mutable>();
   for (const record of base) {
     record.decisions.forEach((_, index) => mutable.set(decisionAddress(record.minutesId, index + 1), { status: "valid", supersededBy: null, declaredIn: null, supersedes: [] }));
@@ -525,11 +556,13 @@ export function decisionLedger(state: LedgerState): DecisionLedger {
     const states = record.decisions.map((textValue, index): DecisionState => {
       const address = decisionAddress(record.minutesId, index + 1);
       const entry = mutable.get(address) as Mutable;
+      const metadata = record.metadata?.[index];
       return {
         decision: address,
         minutesId: record.minutesId,
         number: index + 1,
         text: textValue,
+        ...(metadata === undefined ? {} : { metadata }),
         projectId: record.projectId,
         status: entry.status,
         supersededBy: entry.supersededBy,
@@ -554,6 +587,7 @@ function decisionEntry(entry: DecisionState, ledger: DecisionLedger, explicit: b
   return {
     number: entry.number,
     text: entry.text,
+    ...entry.metadata,
     ...(explicit ? { status: entry.status } : {}),
     ...(entry.supersedes.length === 0 ? {} : { supersedes: entry.supersedes }),
     ...(explicit && entry.status === "obsolete" ? { supersededBy: successor(entry.supersededBy), declaredIn: entry.declaredIn ?? "" } : {}),
