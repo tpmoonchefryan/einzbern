@@ -3533,7 +3533,7 @@ window.PORTAL_LOCALES = {
     "health.ok": "correct",
     "health.failed": "échec",
     "health.unavailable": "Impossible de lire les contrôles. Actualisez pour réessayer et consultez les détails pour connaître la cause.",
-    "prose.lede": "Gérez les règles de la bibliothèque et modifiez l’AGENTS.md du projet sélectionné. Les règles ordonnées s’affichent en premier. La génération reste en attente tant que le dossier de sortie n’est pas choisi.",
+    "prose.lede": "Gérez les règles de la bibliothèque et modifiez l’AGENTS.md du projet sélectionné. Les règles dotées d’un ordre s’affichent en premier. La génération reste en attente tant que le dossier de sortie n’est pas choisi.",
     "prose.fileNote": "Fichier du projet",
     "prose.fullPath": "Chemin complet",
     "prose.copyPath": "Copier le chemin complet de {file}",

@@ -6171,15 +6171,19 @@ const BOOT = __PORTAL_BOOT__;
   const renderWorkTargetEditor = async () => {
     const epoch = ++workTargetEpoch;
     const library = BOOT.library?.libraryId;
-    const targets = await api("/api/project-targets");
+    const targets = await api("/api/project-targets").catch(() => null);
     if (epoch !== workTargetEpoch || library !== BOOT.library?.libraryId || unkept(targets)) return;
-    const records = (state.work?.records || []).filter(record => ["Initiative", "Story", "Subtask"].includes(record.kind));
     const root = $("#work-target-editor");
     workTargetMount?.destroy?.(); workTargetMount = null;
+    if (!Array.isArray(targets?.targets)) {
+      root.innerHTML = `<div class="tcrn-state-surface" role="alert">${readFailureContent(targets)}</div>`;
+      return;
+    }
+    const records = (state.work?.records || []).filter(record => ["Initiative", "Story", "Subtask"].includes(record.kind));
     // The filter and the selection list name each target the same way; complete identities are in
     // the Details under the filter, which follows the selected work item's references.
     const key = target => JSON.stringify({ libraryId: target.libraryId, projectId: target.projectId });
-    const available = Array.isArray(targets.targets) ? targets.targets : [];
+    const available = targets.targets;
     const availableLabels = distinctLabels(available);
     const scopeLabels = { undecided: t("projects.undecided"), "coordination-only": t("projects.coordination-only"), selected: t("projects.selected") };
     root.innerHTML = `<label class="tcrn-field"><span class="tcrn-field__label">${esc(t("projects.filter"))}</span><select class="tcrn-select" data-target-filter><option value="">${esc(t("projects.all"))}</option>${available.map((target, index) => `<option value="${esc(key(target))}">${esc(availableLabels[index])}</option>`).join("")}</select></label><div data-target-identity>${identityDetails("work-targets", available, availableLabels)}</div><h3 class="tcrn-heading tcrn-heading--3">${esc(t("projects.title"))}</h3><p class="tcrn-text">${esc(t("projects.help"))}</p><label class="tcrn-field"><span class="tcrn-field__label">${esc(t("projects.work"))}</span><select class="tcrn-select" data-target-work>${records.map(record => `<option value="${esc(record.id)}">${esc(record.title || record.externalKey)}</option>`).join("")}</select></label><div data-target-form></div>`;
