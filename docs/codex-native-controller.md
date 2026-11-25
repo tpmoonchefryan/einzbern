@@ -447,6 +447,10 @@ Model onboarding does not silently persist model choices or fake Owner provenanc
 
 ## Evidence and PR acceptance
 
+Use the [verification evidence workflow](verification-evidence.md) for implementation, merge checks and
+independent INIT acceptance. Place each `Gate-Evidence: <runId>` on its own line in the worker's final.
+The automatic report carries references verified against the member's actual work and library.
+
 Source/fixture regressions verify category routing, explicit host isolation,
 receipt reconciliation and legacy owned-hook retirement. They do not certify
 native scheduling, waiting or message delivery. Record source checks, upstream

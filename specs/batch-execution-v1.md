@@ -144,6 +144,18 @@ Record source/automated regression separately from native-host acceptance. The c
 
 ## Recording checks and reusing results
 
+For a batch's checks, use `gates-plan` before the first execution, again on the merged
+candidate, and in the independent INIT acceptance brief. `gates-run` verifies matching
+proofs again and starts only missing, failed or invalidated checks. Attach the run ID to the
+existing handoff. The independent validator checks the coverage, chooses the smallest
+additional test and executes any check that the contract requires to be performed independently.
+
+Use the project's declared gates where available. For batch-local checks pass the same
+`--checks-from` file to both commands with `--project`, `--base` and `--work-id`. Each entry
+names a check, its actual command as an argument array, an optional relative root and its reuse inputs.
+Batch-local receipts are evidence for review. Ordinary project gate execution records formal
+gate coverage under the current declarations. See the [check input and handoff contract](../docs/verification-evidence.md).
+
 ### Direct checks and independent reproduction
 
 For a local check, select the command that exercises the changed behavior through
@@ -187,6 +199,15 @@ observable, and wall time. Keep token use, cost and causes unknown when the
 measurements cannot establish them.
 
 ## 检查记录与结果复用
+
+首跑、合并候选和 INIT 独立验收都用 `gates-plan` 核对逐项证据，`gates-run` 再核实匹配，
+只执行缺失、失败或失效的检查。回执 ID 随本批现有交接返回。独立验收者核对判据覆盖，
+选择能消除疑点的最小补测，并执行契约要求独立实跑的检查。
+
+有项目正式门声明时按声明使用。批次局部检查给两个命令传同一份 `--checks-from` 文件、
+`--project`、`--base` 和 `--work-id`。每项绑定实际 argv、可选相对工作目录及复用输入。
+局部回执用于复核，正式转态从项目的有效门声明核对覆盖及证据。
+具体字段见[验证输入与交接](../docs/verification-evidence.md)。
 
 ### 局部检查与独立复现
 

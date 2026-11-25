@@ -54,6 +54,7 @@ export const P1_COVERAGE_LEG_REASONS = Object.freeze([
 ]);
 
 const strictUtf8 = new TextDecoder("utf-8", { fatal: true });
+const GATE_RUN_ID = /^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}$/u;
 const PNPM_VERSIONED = /^pnpm@\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u;
 
 function isText(value) {
@@ -62,8 +63,8 @@ function isText(value) {
 
 /**
  * Parse EINZBERN_GATE_RUN_PRIOR. Returns { ok: true, runId, gates } or { ok: false, reasonCode }.
- * Every gate must carry each field gates-run writes, with an absolute directory and an output file
- * inside the run's own directory of outputs.
+ * Every gate carries an absolute directory and an output file inside the run that produced it.
+ * A reused gate names that run with sourceRunId.
  */
 export function parseGateRunPrior(text) {
   let value;
@@ -77,12 +78,14 @@ export function parseGateRunPrior(text) {
   }
   const gates = [];
   for (const gate of value.gates) {
+    const sourceRunId = gate?.sourceRunId;
     const valid = gate !== null && typeof gate === "object" && !Array.isArray(gate)
       && isText(gate.name) && isText(gate.root)
       && isText(gate.directory) && isAbsolute(gate.directory)
       && Array.isArray(gate.command) && gate.command.length > 0 && gate.command.every((part) => typeof part === "string")
       && typeof gate.ok === "boolean" && typeof gate.truncated === "boolean"
-      && isText(gate.outputFile) && isAbsolute(gate.outputFile) && basename(dirname(gate.outputFile)) === value.runId;
+      && (sourceRunId === undefined || (typeof sourceRunId === "string" && GATE_RUN_ID.test(sourceRunId)))
+      && isText(gate.outputFile) && isAbsolute(gate.outputFile) && basename(dirname(gate.outputFile)) === (sourceRunId ?? value.runId);
     if (!valid) return { ok: false, reasonCode: "P1_COVERAGE_PRIOR_INVALID" };
     gates.push({ name: gate.name, root: gate.root, directory: gate.directory, command: [...gate.command], ok: gate.ok, truncated: gate.truncated, outputFile: gate.outputFile });
   }

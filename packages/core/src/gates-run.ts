@@ -2,10 +2,10 @@ import { acquireMemoryChild, memoryGateCommand } from "../../../scripts/lib/memo
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // SPDX-License-Identifier: Apache-2.0
 
-// TCRN-CROSS-STORY-485 R3 (MIN-235 D8; TCRN-CROSS-SUB-344): running a plan's gates. Every planned
-// gate runs, one after another, as its own process in its root, with no shell; a red gate does
-// not stop the ones after it, and the run reports every red at the end. Each gate's output
-// (stdout and stderr in the order they arrive, cut at a bound) goes to a file, and the run is
+// TCRN-CROSS-STORY-485 R3 (MIN-235 D8; TCRN-CROSS-SUB-344): running a plan's gates. Checks with a
+// current successful reuse receipt are carried into the run; every other due check runs as its own
+// process in its root, with no shell. A red gate does not stop the ones after it, and the run reports
+// every red at the end. Gate output goes to a file, and the run is
 // recorded in this device's cache of the library, at cache/<library>/gate-runs/<runId>.json
 // (einzbern.gate-run.v1), with its exact target work ids, path/id matches, declaration digest and
 // tree digest. The done check (gates-done.ts) accepts a run only for the same tree and declarations
@@ -26,25 +26,27 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // done check reads the recorded files again and compares their digests.
 //
 // TCRN-CROSS-STORY-537 (MIN-257 D6; TCRN-CROSS-SUB-487): a gate can see what the same run has already
-// done. Each gate process gets EINZBERN_GATE_RUN_PRIOR, the canonical JSON of the run id and, in the
-// order they ran, every gate of this run that ended before it started (GateRunPrior): its name, its
-// root as declared and the real directory it ran in, its command, whether it passed, whether its
-// output was cut, and the absolute path of its output file. The first gate gets an empty list. The
-// variable is laid over the caller's environment, so a variable of that name the caller passes is
-// replaced. It is not part of the run record. The push gate reads it to leave out verify:p1 when
-// the same run has already passed each of P1's legs (scripts/lib/push-gate-p1-coverage.mjs).
+// resolved. Each gate process gets EINZBERN_GATE_RUN_PRIOR, the canonical JSON of the run id and,
+// in order, the earlier checks' name, root, real directory, actual command, result, output state and
+// output path. Reused checks name the producing run with sourceRunId. The first gate gets an empty
+// list. The variable overrides any caller value and is not itself part of the run record. The push
+// gate reads it to leave out verify:p1 when the same run already passed each of P1's legs.
 
 import { spawnCommand as spawn } from "../../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import type { ChildProcess } from "node:child_process";
-import { createHash } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, readlink, realpath } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { lstat, mkdir, open, readdir, readFile, readlink, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
 import { assertStrictInstant, canonicalJson, canonicalSha256, compareCanonicalText, parseStrictInstant } from "../../protocol/src/index.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { cachePath } from "./device-home.js";
 import { GatesPlanError, changedFiles, gateRootBinding, gitHead, resolveGateRoot, storyCommitPaths } from "./gates-plan.js";
-import type { GateRepositoryScope, GateRootBinding, GatesPlan } from "./gates-plan.js";
+import type { GateRepositoryScope, GateRootBinding, GatesPlan, PlannedGate } from "./gates-plan.js";
+import type { NamedGate } from "./gates-config.js";
+import { withFileLock } from "./file-lock.js";
+import { gateArtifactsDigest, gateFileSha256, gateInputDigest, gateReuseDirectory, gateRunIdShape, inspectGateReuse, writeGateProof } from "./gate-reuse.js";
+import type { GateReuseContext, GateReuseInspection } from "./gate-reuse.js";
 
 import { GATE_RUN_SCHEMA_VERSION, compareGateRuns, isGateRunRecord } from "./gate-run-record.js";
 export { GATE_RUN_SCHEMA_VERSION } from "./gate-run-record.js";
@@ -150,6 +152,13 @@ export interface GateRunResult {
   readonly startedAt?: string;
   readonly finishedAt?: string;
   readonly durationMs?: number;
+  readonly verification?: {
+    readonly mode: "executed" | "reused";
+    readonly reason: string;
+    readonly inputDigest: string | null;
+    readonly outputSha256?: string;
+    readonly command?: readonly string[];
+  };
 }
 
 export interface GateRun {
@@ -159,6 +168,7 @@ export interface GateRun {
   readonly projectId?: string;
   readonly at: string;
   readonly release: boolean;
+  readonly evidenceOnly?: true;
   readonly base: string | null;
   readonly baseByRoot?: Readonly<Record<string, string>>;
   // The Stories the run was planned to cover; an unbound run cannot satisfy a Story's done check.
@@ -183,6 +193,8 @@ export interface GatePriorResult {
   readonly truncated: boolean;
   // The absolute path of the gate's output file (the run record keeps it relative).
   readonly outputFile: string;
+  // Present when outputFile belongs to a successful check reused from an earlier run.
+  readonly sourceRunId?: string;
 }
 
 /** TCRN-CROSS-STORY-537: what EINZBERN_GATE_RUN_PRIOR holds for one gate of a run. */
@@ -286,7 +298,7 @@ interface GateProcess {
   readonly truncated: boolean;
 }
 
-function runGateProcess(command: readonly string[], cwd: string, timeoutMs: number, outputBytes: number, env: NodeJS.ProcessEnv): Promise<GateProcess> {
+function runGateProcess(command: readonly string[], cwd: string, timeoutMs: number, outputBytes: number, env: NodeJS.ProcessEnv, outputFd?: number): Promise<GateProcess> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
@@ -321,7 +333,7 @@ function runGateProcess(command: readonly string[], cwd: string, timeoutMs: numb
         detached: process.platform !== "win32",
         env,
         shell: false,
-        stdio: ["ignore", "pipe", "pipe"],
+        stdio: ["ignore", outputFd ?? "pipe", outputFd ?? "pipe"],
         windowsHide: true,
       });
     } catch (error) {
@@ -352,13 +364,112 @@ function utcStamp(at: string): string {
   return new Date(Number(parseStrictInstant(at) / 1_000_000n)).toISOString().replace(/\.\d{3}Z$/u, "Z").replace(/[-:]/gu, "");
 }
 
-/**
- * Run every gate of a plan and record the run in this device's cache of the library. Every gate
- * runs, whatever the ones before it did; `reds` lists all that did not pass. The tree digest is
- * taken before the first gate starts. Each gate's environment is `env` (the process's when not
- * given) with EINZBERN_GATE_RUN_PRIOR set to the gates of this run that ended before it.
- */
-export async function runGates(plan: GatesPlan, options: {
+interface GateExecutionScope extends GateRepositoryScope {
+  readonly libraryId: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly rootBindings?: GatesPlan["rootBindings"];
+}
+
+async function reuseContext(plan: GatesPlan, gate: PlannedGate, scope: GateExecutionScope): Promise<GateReuseContext> {
+  const cwd = await resolveGateRoot(plan.projectRoot, gate.root, gateRootBinding(plan.rootBindings, gate.root), scope);
+  return {
+    gate,
+    cwd,
+    directory: gateRunsDirectory(scope.libraryId, scope.deviceHome),
+    base: plan.baseByRoot?.[gate.root] ?? plan.base,
+    release: plan.release,
+    ...(scope.projectId === undefined ? {} : { projectId: scope.projectId }),
+    environment: scope.env ?? process.env,
+  };
+}
+
+/** Show which checks have current successful evidence without executing them. */
+export async function gateVerificationPlan(plan: GatesPlan, scope: GateExecutionScope): Promise<readonly {
+  readonly name: string;
+  readonly action: "reuse" | "run";
+  readonly reason: string;
+  readonly source?: string;
+}[]> {
+  const decisions = [];
+  for (const gate of plan.gates) {
+    const inspection = await inspectGateReuse(await reuseContext(plan, gate, scope));
+    decisions.push({
+      name: gate.name,
+      reason: inspection.reason,
+      action: inspection.proof ? "reuse" as const : "run" as const,
+      ...(inspection.proof ? { source: inspection.proof.outputFile } : {}),
+    });
+  }
+  return decisions;
+}
+
+/** Read a handoff run from either the formal run directory or the isolated evidence-only directory. */
+export async function readGateEvidence(directory: string, runId: string, libraryId: string, workId?: string): Promise<GateRun | null> {
+  if (!gateRunIdShape.test(runId)) return null;
+  for (const where of [directory, join(directory, "evidence-only")]) {
+    try {
+      const run: unknown = JSON.parse(await readFile(join(where, runId + ".json"), "utf8"));
+      if (isGateRunRecord(run) && run.runId === runId && run.libraryId === libraryId && (!workId || run.workIds.includes(workId))) return run;
+    } catch {
+      // A missing or malformed record does not prove that a check ran.
+    }
+  }
+  return null;
+}
+
+/** A successful recorded check is current only while its declared inputs and output remain available. */
+export async function gateRunEvidenceCurrent(
+  run: GateRun,
+  result: GateRunResult,
+  declaration: NamedGate,
+  projectRoot: string,
+  scope: GateExecutionScope,
+): Promise<boolean> {
+  const verification = result.verification;
+  if (verification === undefined) return true;
+  if (!declaration.reuse || verification.inputDigest === null || verification.outputSha256 === undefined) return false;
+
+  const cwd = await resolveGateRoot(projectRoot, result.root, gateRootBinding(scope.rootBindings, result.root), scope);
+  const environment = scope.env ?? process.env;
+  let command: readonly string[];
+  try {
+    command = memoryGateCommand(declaration.command, cwd, environment);
+  } catch {
+    return false;
+  }
+  if (verification.command !== undefined && canonicalJson(command) !== canonicalJson(verification.command)) return false;
+  const gate: PlannedGate = {
+    name: declaration.name,
+    root: result.root,
+    command,
+    required: declaration.required,
+    releaseOnly: declaration.releaseOnly,
+    reuse: declaration.reuse,
+    reason: "required",
+    matched: result.matched,
+    matchedWorkIds: result.matchedWorkIds,
+  };
+  const inspection = await inspectGateReuse({
+    gate,
+    cwd,
+    directory: gateRunsDirectory(run.libraryId, scope.deviceHome),
+    base: run.baseByRoot?.[result.root] ?? run.base,
+    // Validation only verifies the recorded proof; release runs have already executed every gate.
+    release: false,
+    ...(run.projectId === undefined ? {} : { projectId: run.projectId }),
+    environment,
+    command,
+  });
+  return inspection.proof?.inputDigest === verification.inputDigest &&
+    inspection.proof.outputSha256 === verification.outputSha256 && inspection.proof.outputFile === result.outputFile;
+}
+
+interface RunGatesAdmission {
+  readonly env: NodeJS.ProcessEnv;
+  readonly release?: () => void;
+}
+
+interface RunGatesOptions {
   readonly libraryId: string;
   readonly projectId?: string;
   readonly at: string;
@@ -366,7 +477,16 @@ export async function runGates(plan: GatesPlan, options: {
   readonly timeoutMs?: number;
   readonly outputBytes?: number;
   readonly env?: NodeJS.ProcessEnv;
-}): Promise<{ readonly run: GateRun; readonly recordPath: string }> {
+  readonly admit?: () => Promise<RunGatesAdmission>;
+}
+
+/**
+ * Run every due gate of a plan and record the run in this device's cache of the library. Reuse is
+ * limited to declared, current successful evidence, and release runs always execute. The tree
+ * digest is taken before the first gate starts. Each gate's environment is `env` (the process's
+ * when not given) with EINZBERN_GATE_RUN_PRIOR set to the checks already resolved in this run.
+ */
+export async function runGates(plan: GatesPlan, options: RunGatesOptions): Promise<{ readonly run: GateRun; readonly recordPath: string }> {
   assertStrictInstant(options.at);
   const timeoutMs = options.timeoutMs ?? GATE_RUN_DEFAULT_TIMEOUT_MS;
   const outputBytes = options.outputBytes ?? GATE_RUN_DEFAULT_OUTPUT_BYTES;
@@ -394,46 +514,35 @@ export async function runGates(plan: GatesPlan, options: {
     ...(plan.baseByRoot === undefined ? {} : { baseByRoot: plan.baseByRoot }),
     workIds: plan.workIds,
     gates: plan.gates.map((gate) => gate.name),
+    nonce: randomUUID(),
   }).slice(0, 12)}`;
   await mkdir(join(directory, runId), { recursive: true });
   const results: GateRunResult[] = [];
   // TCRN-CROSS-STORY-537: the gates that have ended, handed to each gate after them.
-  const ended: GatePriorResult[] = [];
-  const environment = options.env ?? process.env;
+  const prior: GatePriorResult[] = [];
   for (const [index, gate] of plan.gates.entries()) {
-    const cwd = await resolveGateRoot(plan.projectRoot, gate.root, gateRootBinding(plan.rootBindings, gate.root), resolution);
-    const prior: GateRunPrior = { runId, gates: ended };
-    const startedAt = new Date().toISOString();
-    const started = performance.now();
-    const gateEnvironment = { ...environment, [GATE_RUN_PRIOR_VARIABLE]: canonicalJson(prior) };
-    const memory = gate.command.includes("--test") ? await acquireMemoryChild("gate:node-test", gateEnvironment) : null;
-    let outcome: GateProcess;
-    try {
-      const admittedCommand = memoryGateCommand(gate.command, cwd, gateEnvironment);
-      outcome = await runGateProcess(admittedCommand, cwd, timeoutMs, outputBytes, gateEnvironment);
-    } finally { memory?.release(); }
-    const durationMs = Math.max(0, Math.round(performance.now() - started));
-    const finishedAt = new Date().toISOString();
-    const outputFile = `${runId}/${index + 1}-${gate.name.replace(/[^A-Za-z0-9._-]/gu, "_")}.log`;
-    const outputPath = join(directory, ...outputFile.split("/"));
-    await writeFileAtomic(outputPath, outcome.output);
-    const ok = outcome.exitCode === 0 && !outcome.timedOut;
-    results.push({
+    const context = await reuseContext(plan, gate, { ...options, rootBindings: plan.rootBindings });
+    const execute = () => resolveGateCheck(context, { runId, index, prior, timeoutMs, outputBytes }, options.admit);
+    let result: GateRunResult;
+    if (gate.reuse !== undefined) {
+      const proofDirectory = gateReuseDirectory(context);
+      await mkdir(proofDirectory, { recursive: true });
+      result = await withFileLock(join(proofDirectory, "run.lock"), execute, { command: "einzbern gates-run" });
+    } else {
+      result = await execute();
+    }
+    results.push(result);
+    const sourceRunId = result.outputFile.split("/")[0]!;
+    prior.push({
       name: gate.name,
       root: gate.root,
-      required: gate.required,
-      matched: gate.matched,
-      matchedWorkIds: gate.matchedWorkIds,
-      ok,
-      exitCode: outcome.exitCode,
-      signal: outcome.signal,
-      timedOut: outcome.timedOut,
-      outputFile,
-      outputBytes: outcome.output.length,
-      truncated: outcome.truncated,
-      startedAt, finishedAt, durationMs,
+      directory: context.cwd,
+      command: result.verification?.command ?? gate.command,
+      ok: result.ok,
+      truncated: result.truncated,
+      outputFile: join(directory, result.outputFile),
+      ...(sourceRunId === runId ? {} : { sourceRunId }),
     });
-    ended.push({ name: gate.name, root: gate.root, directory: cwd, command: [...gate.command], ok, truncated: outcome.truncated, outputFile: outputPath });
   }
   const run: GateRun = {
     schemaVersion: GATE_RUN_SCHEMA_VERSION,
@@ -442,6 +551,7 @@ export async function runGates(plan: GatesPlan, options: {
     ...(options.projectId === undefined ? {} : { projectId: options.projectId }),
     at: options.at,
     release: plan.release,
+    ...(plan.evidenceOnly ? { evidenceOnly: true } : {}),
     base: plan.base,
     ...(plan.baseByRoot === undefined ? {} : { baseByRoot: plan.baseByRoot }),
     workIds: plan.workIds,
@@ -451,9 +561,137 @@ export async function runGates(plan: GatesPlan, options: {
     gates: results,
     reds: results.filter((result) => !result.ok).map((result) => result.name),
   };
-  const recordPath = join(directory, `${runId}.json`);
+  const recordDirectory = plan.evidenceOnly ? join(directory, "evidence-only") : directory;
+  await mkdir(recordDirectory, { recursive: true });
+  const recordPath = join(recordDirectory, `${runId}.json`);
   await writeFileAtomic(recordPath, canonicalJson(run));
   return { run, recordPath };
+}
+
+async function resolveGateCheck(
+  context: GateReuseContext,
+  settings: { readonly runId: string; readonly index: number; readonly prior: readonly GatePriorResult[]; readonly timeoutMs: number; readonly outputBytes: number },
+  admit: RunGatesOptions["admit"],
+): Promise<GateRunResult> {
+  const { gate, directory, cwd } = context;
+  const { runId, index, prior, timeoutMs, outputBytes } = settings;
+  const identity = { name: gate.name, root: gate.root, required: gate.required, matched: gate.matched, matchedWorkIds: gate.matchedWorkIds };
+
+  // An admission callback may supply values that affect a check, so inspect early only when it
+  // cannot change the execution environment.
+  if (admit === undefined) {
+    const initial = await inspectGateReuse(context);
+    if (initial.proof) {
+      return {
+        ...identity,
+        ok: true,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        outputFile: initial.proof.outputFile,
+        outputBytes: initial.proof.outputBytes,
+        truncated: false,
+        verification: {
+          mode: "reused",
+          reason: initial.reason,
+          inputDigest: initial.proof.inputDigest,
+          outputSha256: initial.proof.outputSha256,
+          command: initial.proof.command ?? gate.command,
+        },
+      };
+    }
+  }
+
+  const admitted = await admit?.();
+  const fingerprintEnvironment = { ...context.environment, ...admitted?.env };
+  const gateEnvironment = { ...fingerprintEnvironment, [GATE_RUN_PRIOR_VARIABLE]: canonicalJson({ runId, gates: prior }) };
+  let memory: Awaited<ReturnType<typeof acquireMemoryChild>> | null = null;
+  let raw: Awaited<ReturnType<typeof open>> | null = null;
+  let decision: GateReuseInspection = { inputDigest: null, reason: "undeclared-inputs" };
+  try {
+    if (gate.command.includes("--test")) memory = await acquireMemoryChild("gate:node-test", gateEnvironment);
+    const command = memoryGateCommand(gate.command, cwd, gateEnvironment);
+    const runContext: GateReuseContext = { ...context, environment: fingerprintEnvironment, command };
+    decision = await inspectGateReuse(runContext);
+    if (decision.proof) {
+      return {
+        ...identity,
+        ok: true,
+        exitCode: 0,
+        signal: null,
+        timedOut: false,
+        outputFile: decision.proof.outputFile,
+        outputBytes: decision.proof.outputBytes,
+        truncated: false,
+        verification: {
+          mode: "reused",
+          reason: decision.reason,
+          inputDigest: decision.proof.inputDigest,
+          outputSha256: decision.proof.outputSha256,
+          command: decision.proof.command ?? command,
+        },
+      };
+    }
+
+    const outputFile = `${runId}/${index + 1}-${gate.name.replace(/[^A-Za-z0-9._-]/gu, "_")}.log`;
+    const outputPath = join(directory, ...outputFile.split("/"));
+    const startedAt = new Date().toISOString();
+    const started = performance.now();
+    if (decision.inputDigest !== null) raw = await open(outputPath, "wx", 0o600);
+    const outcome = await runGateProcess(command, cwd, timeoutMs, outputBytes, gateEnvironment, raw?.fd);
+    if (raw && outcome.output.length > 0) await raw.writeFile(outcome.output);
+    const durationMs = Math.max(0, Math.round(performance.now() - started));
+    const finishedAt = new Date().toISOString();
+    if (!raw) await writeFileAtomic(outputPath, outcome.output);
+    const ok = outcome.exitCode === 0 && !outcome.timedOut;
+    const actualBytes = raw ? (await lstat(outputPath)).size : outcome.output.length;
+    const inputDigest = decision.inputDigest;
+    const outputSha256 = inputDigest === null ? undefined : await gateFileSha256(outputPath);
+    let recordedInput: string | null = null;
+    let reason = decision.reason;
+    if (inputDigest !== null && outputSha256 !== undefined) {
+      const stable = inputDigest === await gateInputDigest(runContext);
+      const artifactsDigest = ok && stable ? await gateArtifactsDigest(runContext) : null;
+      await writeGateProof(runContext, {
+        inputDigest,
+        ok: ok && stable && artifactsDigest !== null,
+        outputSha256,
+        outputFile,
+        outputBytes: actualBytes,
+        artifactsDigest,
+        command,
+      });
+      if (!stable) reason = "inputs-changed-during-run";
+      else if (ok && artifactsDigest === null) reason = "output-artifact-not-recorded";
+      else if (ok) recordedInput = inputDigest;
+    }
+    return {
+      ...identity,
+      ok,
+      exitCode: outcome.exitCode,
+      signal: outcome.signal,
+      timedOut: outcome.timedOut,
+      outputFile,
+      outputBytes: actualBytes,
+      truncated: outcome.truncated,
+      startedAt,
+      finishedAt,
+      durationMs,
+      ...(gate.reuse === undefined ? {} : {
+        verification: {
+          mode: "executed" as const,
+          reason,
+          inputDigest: recordedInput,
+          ...(outputSha256 === undefined ? {} : { outputSha256 }),
+          command,
+        },
+      }),
+    };
+  } finally {
+    memory?.release();
+    admitted?.release?.();
+    await raw?.close();
+  }
 }
 
 /**
@@ -492,7 +730,7 @@ export async function latestGateRun(input: {
     } catch {
       continue;
     }
-    if (!isGateRunRecord(run) || run.libraryId !== input.libraryId || run.projectId !== input.projectId) continue;
+    if (!isGateRunRecord(run) || run.evidenceOnly || run.libraryId !== input.libraryId || run.projectId !== input.projectId) continue;
     if (input.treeDigest !== undefined && run.treeDigest !== input.treeDigest) continue;
     if (input.declarationsDigest !== undefined && run.declarationsDigest !== input.declarationsDigest) continue;
     if (input.workIds !== undefined) {

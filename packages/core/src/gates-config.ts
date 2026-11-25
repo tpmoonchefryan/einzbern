@@ -51,6 +51,18 @@ export interface GateDeclaration {
   readonly enabled: boolean;
   readonly releaseOnly: boolean;
   readonly order?: number;
+  readonly reuse?: GateReuseInputs;
+}
+
+/** Inputs a check actually reads before its successful result can be reused. */
+export interface GateReuseInputs {
+  readonly source: readonly string[];
+  readonly files?: readonly string[];
+  readonly outputs?: readonly string[];
+  readonly environment?: readonly string[];
+  readonly tools?: readonly string[];
+  readonly portable?: boolean;
+  readonly gitHistory?: boolean;
 }
 
 export interface NamedGate extends GateDeclaration {
@@ -80,9 +92,9 @@ export function isProjectRelativeRoot(value: unknown): value is string {
 export function checkGateDeclaration(value: unknown, name = "the gate"): GateDeclaration {
   if (value === null || typeof value !== "object" || Array.isArray(value)) invalid("gate", `${name} is not a JSON object`, { name });
   const record = value as Readonly<Record<string, unknown>>;
-  const fields = Object.keys(record).filter((field) => field !== "order" && field !== "repository").sort().join(",");
+  const fields = Object.keys(record).filter((field) => !["order", "repository", "reuse"].includes(field)).sort().join(",");
   if (fields !== GATE_FIELDS.join(",")) {
-    invalid("gate", `${name} declares exactly ${GATE_FIELDS.join(", ")}, and may declare order and repository`, { name });
+    invalid("gate", `${name} declares ${GATE_FIELDS.join(", ")} with optional order, repository and reuse`, { name });
   }
   const command = record.command;
   if (!Array.isArray(command) || command.length === 0 || command.length > GATE_COMMAND_MAX_ARGUMENTS ||
@@ -122,6 +134,7 @@ export function checkGateDeclaration(value: unknown, name = "the gate"): GateDec
   if (order !== undefined && (typeof order !== "number" || !Number.isSafeInteger(order) || order < 1)) {
     invalid("order", `the order of ${name} is a positive integer`, { name });
   }
+  const reuse = record.reuse === undefined ? undefined : checkGateReuseInputs(record.reuse, name);
   return {
     command: [...(command as readonly string[])],
     root: record.root,
@@ -131,7 +144,46 @@ export function checkGateDeclaration(value: unknown, name = "the gate"): GateDec
     enabled: record.enabled as boolean,
     releaseOnly: record.releaseOnly as boolean,
     ...(order === undefined ? {} : { order }),
+    ...(reuse === undefined ? {} : { reuse }),
   };
+}
+
+function checkGateReuseInputs(value: unknown, name: string): GateReuseInputs {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) invalid("reuse", `${name}: reuse must describe the check's inputs`);
+  const row = value as Readonly<Record<string, unknown>>;
+  const arrayFields = ["source", "files", "outputs", "environment", "tools"] as const;
+  if (Object.keys(row).some((key) => ![...arrayFields, "portable", "gitHistory"].includes(key))) invalid("reuse", `${name}: unknown reuse input field`);
+  const lists: Partial<Record<typeof arrayFields[number], readonly string[]>> = {};
+  for (const key of arrayFields) {
+    const values = row[key];
+    if (values === undefined && key !== "source") continue;
+    if (!Array.isArray(values) || values.length > GATE_COVERS_MAX ||
+      values.some((item) => typeof item !== "string" || !item || item.length > 4096 || /[\u0000-\u001f\u007f]/u.test(item))) {
+      invalid("reuse", `${name}: reuse.${key} requires a list of strings`);
+    }
+    lists[key] = [...new Set(values as string[])].sort();
+  }
+  const source = lists.source!;
+  if (source.length === 0) invalid("reuse", `${name}: reuse.source needs at least one source glob`);
+  for (const glob of source) {
+    try { compileGlob(glob); } catch (error) {
+      if (error instanceof GatesPlanError) invalid("reuse", `${name}: invalid reuse source glob ${glob}`);
+      throw error;
+    }
+  }
+  if ([...(lists.files ?? []), ...(lists.outputs ?? [])].some((path) => path === "." || !isProjectRelativeRoot(path))) {
+    invalid("reuse", `${name}: reuse files and outputs are paths within the gate root`);
+  }
+  if (lists.environment?.some((key) => !/^[A-Za-z_][A-Za-z0-9_]*$/u.test(key) || key === "EINZBERN_GATE_RUN_PRIOR")) {
+    invalid("reuse", `${name}: invalid environment name for reuse`);
+  }
+  if (lists.tools?.some((key) => !/^[A-Za-z0-9._-]+$/u.test(key) || key === "." || key === "..")) {
+    invalid("reuse", `${name}: reuse.tools contains executable names`);
+  }
+  for (const key of ["portable", "gitHistory"] as const) {
+    if (row[key] !== undefined && typeof row[key] !== "boolean") invalid("reuse", `${name}: reuse.${key} requires a boolean`);
+  }
+  return { ...lists, source, ...(row.portable === true ? { portable: true } : {}), ...(row.gitHistory === true ? { gitHistory: true } : {}) };
 }
 
 /** The check the gate collection of config-records.ts applies to a record: its key is the gate's name. */

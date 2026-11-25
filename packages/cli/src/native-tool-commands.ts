@@ -9,6 +9,7 @@ import type { CodexPeerBatchInput } from "../../core/src/codex-peer-batch.js";
 import type { CodexPeerBatch } from "../../core/src/codex-peer-batch.js";
 import { recordAntigravitySwarmBatch, normalizeAntigravitySwarmBatch, stageAntigravitySwarmGuardFromBatch } from "../../core/src/antigravity-swarm-batch.js";
 import type { AntigravitySwarmBatch, AntigravitySwarmBatchInput } from "../../core/src/antigravity-swarm-batch.js";
+import { gateRunsDirectory, readGateEvidence } from "../../core/src/gates-run.js";
 import { persistCodexPeerRole, resolveCodexPeerHistoricalReceipt, resolveCodexPollingPolicy } from "../../core/src/codex-peer-hooks.js";
 import { codexNativeGuardHealth } from "../../core/src/codex-native-health.js";
 import type { CodexHookObservation } from "../../core/src/codex-native-health.js";
@@ -145,7 +146,22 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
     let result: unknown;
     const observationCutoff = new Date().toISOString();
     try {
-      result = recordAntigravitySwarmBatch({ observationCutoff, manifest, preparations, observations, policy, workRevisions, ...(prior === undefined ? {} : { prior }) });
+      const batch = recordAntigravitySwarmBatch({ observationCutoff, manifest, preparations, observations, policy, workRevisions, ...(prior === undefined ? {} : { prior }) });
+      const libraryId = workspace.state.metadata.workspaceId;
+      const directory = gateRunsDirectory(libraryId, context.home);
+      for (const entry of batch.observations.boardDeliverables ?? []) {
+        if (entry.gateRunIds === undefined) continue;
+        const workId = entry.author === "coordinator"
+          ? batch.manifest.workId
+          : batch.manifest.members.find(member => member.name === entry.author)?.workId;
+        if (!workId) throw new Error("gate evidence requires a bound swarm member or coordinator");
+        for (const id of entry.gateRunIds) {
+          if (!await readGateEvidence(directory, id, libraryId, workId)) {
+            throw new Error(`gate evidence unavailable for swarm member ${entry.author}: ${id}`);
+          }
+        }
+      }
+      result = batch;
     } catch (error) {
       result = { reasonCode: "ANTIGRAVITY_SWARM_RECORD_INVALID", observationCutoff, manifest, preparations, observations, ...(prior === undefined ? {} : { prior }), validation: { status: "invalid" }, problems: [String(error)] };
     }

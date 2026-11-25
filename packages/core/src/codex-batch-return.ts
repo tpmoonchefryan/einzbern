@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { type CodexCall } from "./codex-local-rpc.js";
 import type { CodexPeerBatch } from "./codex-peer-batch.js";
 import { recordHostNativeEvents, type HostNativeRecord, type HostNativeEvent } from "./native-tool-evidence.js";
+import { gateRunsDirectory, readGateEvidence } from "./gates-run.js";
 
 export interface NativeWorkerTurn { thread: string; turn: string; startedAt: string; endedAt: string | null; result: string | null }
 export interface RecipientReceipt { turnId: string; itemId: string; clientId: string | null; receivedAt: string; timeSource: string }
@@ -89,19 +90,36 @@ function retainedFinal(record: HostNativeRecord): string | null {
   return null;
 }
 
-export function batchReport(receipt: CodexPeerBatch, times: Record<string, NativeWorkerTurn>, source: string): string {
+export async function batchReport(
+  receipt: CodexPeerBatch,
+  times: Record<string, NativeWorkerTurn>,
+  source: string,
+  evidence: { readonly device: string; readonly libraryId: string },
+): Promise<string> {
   const lines = [receipt.reportPrefix.trimEnd(), "实施批次 " + receipt.manifest.batchId + " 已结束。尝试 " + receipt.manifest.attemptId + "。"];
+  const directory = gateRunsDirectory(evidence.libraryId, evidence.device);
   for (const r of receipt.records) {
     const a = r.preparation.attempt!, request = r.preparation.decision.request;
     const report = r.events.findLast(e => e.kind === "work-report")?.report;
     const observed = times[a.id];
     lines.push(request.workId + " r" + request.workRevision + " · " + r.execution + " · " + r.taskOutcome);
     const result = report?.summary || observed?.result || retainedFinal(r);
-    lines.push(result ? result.slice(0, 3000) : "成员终态已核实。宿主未返回成果正文，交付仍待核对。");
-    if (result && result.length > 3000) lines.push("完整成果正文见批次证据。");
+    const preview = result?.replace(/^Gate-Evidence:[^\r\n]*(?:\r?\n|$)/gmu, "");
+    lines.push(preview ? preview.slice(0, 3000) : "成员终态已核实。宿主未返回成果正文，交付仍待核对。");
+    if (preview && preview.length > 3000) lines.push("完整成果正文见批次证据。");
     if (report?.checks.length) lines.push("实施自测 " + report.checks.join("，"));
     if (report?.limitations.length) lines.push("缺口 " + report.limitations.join("，"));
     lines.push("证据 " + (report?.artifacts.join("，") || r.events.at(-1)?.sourceRef || a.id));
+    const markers = [result, observed?.result].filter(Boolean).join("\n")
+      .matchAll(/^Gate-Evidence: ([0-9]{8}T[0-9]{6}Z-[a-f0-9]{12})[ \t]*\r?$/gmu);
+    const refs = new Set(report?.artifacts ?? []);
+    for (const marker of markers) refs.add(marker[1]!);
+    for (const id of refs) {
+      const run = await readGateEvidence(directory, id, evidence.libraryId, request.workId);
+      if (!run) continue;
+      lines.push("Gate-Evidence: " + run.runId);
+      if (run.reds.length > 0) lines.push("验证缺项 " + run.reds.join("，"));
+    }
   }
   lines.push("完整批次证据 " + source, "请按证据接续实施；正式验收按 INIT 执行。");
   return lines.join("\n");

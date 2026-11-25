@@ -75,6 +75,7 @@ export interface AntigravitySwarmBoardDeliverable {
   readonly author: string;
   readonly summary: string;
   readonly commitSha?: string | null;
+  readonly gateRunIds?: readonly string[];
 }
 
 export interface AntigravitySwarmLanding {
@@ -363,11 +364,15 @@ function validateObservations(
   if (obs.boardDeliverables !== undefined) {
     if (!Array.isArray(obs.boardDeliverables)) fail("boardDeliverables must be an array");
     for (const d of obs.boardDeliverables) {
-      const item = hostObject(d, "boardDeliverable", ["seq", "author", "summary", "commitSha"]);
+      const item = hostObject(d, "boardDeliverable", ["seq", "author", "summary", "commitSha", "gateRunIds"]);
       positive(item.seq, "boardDeliverable seq");
       hostText(item.author, "boardDeliverable author");
       hostText(item.summary, "boardDeliverable summary");
       optionalNullableText(item.commitSha, "boardDeliverable commitSha");
+      if (item.gateRunIds !== undefined &&
+        (!Array.isArray(item.gateRunIds) || item.gateRunIds.length > 64 ||
+          item.gateRunIds.some(id => typeof id !== "string" || !/^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}$/u.test(id)) ||
+          new Set(item.gateRunIds).size !== item.gateRunIds.length)) fail("invalid boardDeliverable gate run references");
     }
   }
   if (obs.landings !== undefined) {

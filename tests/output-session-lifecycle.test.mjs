@@ -3499,6 +3499,7 @@ async function waitForFixtureReadiness(path, result) {
 test("the real gates-run child policy privately manages groups, registration races, and controller timeouts", async (context) => {
   const root = await taskEntrypointFixture(context, controllerManagedGateTestSource(), { includeEngineSources: true });
   await installGateTimeoutStartBarrier(root);
+  const privateHeavyDirectory = resolve(root, "managed-gate-heavy-locks");
   const common = {
     TCRN_MANAGED_GATE_DEVICE_HOME: resolve(root, "managed-gate-device"),
     TCRN_TEST_CONTROLLER_CHILD_RACE_PROBE_PATH: resolve(root, "managed-gate-race.json"),
@@ -3508,7 +3509,7 @@ test("the real gates-run child policy privately manages groups, registration rac
     TCRN_GATE_STRAY_PID_PATH: resolve(root, "managed-gate-stray.pid"),
   };
 
-  const managed = await startTaskEntrypoint(root, { ...common, TCRN_MANAGED_GATE_MODE: "managed" }).result;
+  const managed = await startTaskEntrypoint(root, { ...common, TCRN_MANAGED_GATE_MODE: "managed" }, privateHeavyDirectory).result;
   assert.equal(managed.code, 0, managed.stderr);
   assert.equal(managed.signal, null);
   assert.equal(managed.stderr, "");
@@ -3522,7 +3523,7 @@ test("the real gates-run child policy privately manages groups, registration rac
     ...common,
     TCRN_MANAGED_GATE_MODE: "registration-race",
     TCRN_TEST_CONTROLLER_CHILD_CRASH_AT: "after-spawn-before-bind",
-  }).result;
+  }, privateHeavyDirectory).result;
   assert.equal(race.code, 1, race.stderr);
   assert.equal(race.signal, null);
   assert.equal(race.stdout, "");
@@ -3540,7 +3541,7 @@ test("the real gates-run child policy privately manages groups, registration rac
     TCRN_MANAGED_GATE_MODE: "controller-timeout",
     TCRN_TEST_CONTROLLER_TIMEOUT_MS: "3000",
     TCRN_GATE_TIMEOUT_RELEASE_PATH: timeoutReleasePath,
-  });
+  }, privateHeavyDirectory);
   let timeout;
   try {
     await waitForFixtureReadiness(common.TCRN_GATE_STARTED_PATH, timeoutTask.result);

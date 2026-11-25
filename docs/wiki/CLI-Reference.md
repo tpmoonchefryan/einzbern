@@ -759,6 +759,7 @@
 | `--actor` | 必填 | `string` |
 | `--project-id` | 可选 | `string` |
 | `--timeout-ms` | 可选 | `integer` |
+| `--reuse` | 可选 | `json` |
 
 ## `gates-config-remove`
 
@@ -797,6 +798,7 @@
 | `--project-id` | 可选 | `string` |  |
 | `--decided-in` | 可选 | `string` | `minutes:<id>#D<n>` |
 | `--timeout-ms` | 可选 | `integer` |  |
+| `--reuse` | 可选 | `json` |  |
 
 ## `gates-plan`
 
@@ -812,6 +814,7 @@
 | `--release` | 可选 | `boolean` |
 | `--work-id` | 可选 | `list` |
 | `--project-id` | 可选 | `string` |
+| `--checks-from` | 可选 | `string` |
 
 ## `gates-run`
 
@@ -828,6 +831,8 @@
 | `--release` | 可选 | `boolean` |
 | `--work-id` | 可选 | `list` |
 | `--project-id` | 可选 | `string` |
+| `--checks-from` | 可选 | `string` |
+| `--gate-timeout-ms` | 可选 | `integer` |
 
 ## `host-probe`
 

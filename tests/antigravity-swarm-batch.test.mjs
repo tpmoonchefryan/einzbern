@@ -15,6 +15,7 @@ import {
   stageAntigravitySwarmGuardFromBatch,
 } from "../dist/build/packages/core/src/antigravity-swarm-batch.js";
 import { prepareHostNativeDispatch } from "../dist/build/packages/core/src/dispatch-workflow.js";
+import { runGates } from "../dist/build/packages/core/src/gates-run.js";
 import { applyEngineModelPolicySet, engineModelPolicyOnboarding } from "../dist/build/packages/core/src/engine-model-policy.js";
 import { nativeFixture } from "./helpers/host-native-fixture.mjs";
 import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
@@ -127,6 +128,13 @@ test("execution-antigravity-swarm-record and evidence roundtrip stages guard and
   t.after(() => rm(outDir, { recursive: true, force: true }));
   const outPath = join(outDir, "receipt.json");
   const outPath2 = join(outDir, "receipt-2.json");
+  const gate = await runGates({
+    projectRoot: f.root, release: true, base: null, workIds: [f.work.id], changed: null, roots: ["."],
+    declarationsDigest: "fixture", evidenceOnly: true, gates: [{
+      name: "fixture-check", root: ".", command: [process.execPath, "-e", "process.stdout.write('ok')"],
+      required: true, releaseOnly: false, reason: "release", matched: [], matchedWorkIds: [f.work.id],
+    }],
+  }, { libraryId: f.state.metadata.workspaceId, at: new Date().toISOString(), deviceHome: f.home });
 
   await writeFile(manifestPath, JSON.stringify(f.manifest));
   await writeFile(prepsPath, JSON.stringify([f.authorPrep, f.monitorPrep]));
@@ -146,7 +154,7 @@ test("execution-antigravity-swarm-record and evidence roundtrip stages guard and
       fromRequestedModel: "gemini-4-carbon-medium",
       toRequestedModel: "gemini-4-argon-medium",
     }],
-    boardDeliverables: [{ seq: 12, author: "author-1", summary: "Landed batch", commitSha: "abc1234" }],
+    boardDeliverables: [{ seq: 12, author: "author-1", summary: "Landed batch", commitSha: "abc1234", gateRunIds: [gate.run.runId] }],
     landings: [{
       name: "author-1",
       disposition: "merged",
@@ -175,6 +183,7 @@ test("execution-antigravity-swarm-record and evidence roundtrip stages guard and
   assert.equal(receipt.actual.model.status, "unknown");
   assert.equal(receipt.actual.effort.status, "unknown");
   assert.equal(receipt.actual.usage.status, "unknown");
+  assert.deepEqual(receipt.observations.boardDeliverables[0].gateRunIds, [gate.run.runId]);
 
   // Read-only evidence replay is idempotent.
   const replayed = invoke(["execution-antigravity-swarm-evidence", "--from-file", outPath]);

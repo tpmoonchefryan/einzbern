@@ -588,6 +588,18 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     order: 10,
   },
   {
+    key: "retrieval.metadataOnly",
+    type: "enum",
+    controlType: "boolean",
+    layerKind: SETTINGS_LAYER_KIND,
+    defaultValue: "false",
+    allowedValues: ["true", "false"],
+    trueValue: "true",
+    falseValue: "false",
+    group: "retrieval",
+    order: 5,
+  },
+  {
     // TCRN-CROSS-STORY-364: which prompt languages this workspace expects questions in. A
     // list in the one value shape this catalog has: comma-separated roster tags. Unset reads
     // as the artefact language alone, which is the default requirement 1 states.
@@ -627,18 +639,6 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     min: 0,
     group: "retrieval",
     order: 2,
-  },
-  {
-    key: "retrieval.metadataOnly",
-    type: "enum",
-    controlType: "boolean",
-    layerKind: SETTINGS_LAYER_KIND,
-    defaultValue: "false",
-    allowedValues: ["true", "false"],
-    trueValue: "true",
-    falseValue: "false",
-    group: "retrieval",
-    order: 5,
   },
   {
     key: "storage.segmentBytes",

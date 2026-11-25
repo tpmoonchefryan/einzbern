@@ -50,6 +50,11 @@ Resolve requested models and efforts from the device's `hosts.antigravity` parti
 
 ## Audit and evidence closed loop
 
+Use the shared [verification evidence workflow](verification-evidence.md) for the worker candidate,
+the merged checkout and independent INIT acceptance. Workers attach each `Gate-Evidence: <runId>`
+to the board post. In a recorded board deliverable, include those IDs in `gateRunIds` to bind them
+to the member's work and library. Use the engine's missing-check plan as the verification brief.
+
 1. Prepare each member dispatch with `execution-host-prepare` (`hostKind: "antigravity"`, `invocationKind: "native-tool"`, `toolName: "swarm"`), binding its `attempt.id` to `member.preparationAttemptId` in `tcrn.antigravity-swarm-manifest.v1`.
 2. Record batch state, `statusSnapshots`, `modelSwitches`, `switchPreparations`, `boardDeliverables`, and `landings` with:
    ```text

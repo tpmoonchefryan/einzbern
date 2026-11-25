@@ -274,6 +274,8 @@ import {
 } from "./cli-args.js";
 import type { CliIo } from "./cli-args.js";
 import { readRecallQuery, runRecallCli, runRecallCommand } from "./recall-fast.js";
+import { checkGateDeclaration, isGateName } from "../../core/src/gates-config.js";
+import { gateVerificationPlan } from "../../core/src/gates-run.js";
 import { RECALL_FIELD_WEIGHTS } from "../../core/src/recall.js";
 import { recallMetadataOnly } from "../../core/src/recall-inputs.js";
 
@@ -1128,6 +1130,75 @@ function optionalBoolean(value: string | undefined, name: string): boolean | und
   return value === undefined ? undefined : booleanValue(value, name);
 }
 
+async function verificationPlanFields(plan: Awaited<ReturnType<typeof planGates>>, options: Parameters<typeof gateVerificationPlan>[1]): Promise<{ readonly verification?: Awaited<ReturnType<typeof gateVerificationPlan>> }> {
+  if (!plan.evidenceOnly && !plan.gates.some(gate => gate.reuse !== undefined)) return {};
+  return { verification: await gateVerificationPlan(plan, options) };
+}
+
+function localGateExecution(values: Readonly<Record<string, string>>): typeof runGates {
+  const timeoutMs = boundedInteger(values, "gate-timeout-ms");
+  return async (plan, options) => {
+    const holdForRun = plan.release || !plan.gates.some(gate => gate.reuse !== undefined);
+    let slot: Awaited<ReturnType<typeof acquireHeavySlot>> | undefined;
+    try {
+      return await runGates(plan, {
+        ...options,
+        ...(timeoutMs === undefined ? {} : { timeoutMs }),
+        admit: async () => {
+          const active = slot ?? await acquireHeavySlot({ command: "gates-run" });
+          if (holdForRun) slot = active;
+          return {
+            env: {
+              [HEAVY_SLOT_VARIABLE]: `${active.token}:${active.path}`,
+              [MEMORY_LEASE_VARIABLE]: process.env[MEMORY_LEASE_VARIABLE],
+            },
+            ...(holdForRun ? {} : { release: () => active.release() }),
+          };
+        },
+      });
+    } finally { slot?.release(); }
+  };
+}
+
+async function packageVerificationPlan(values: Readonly<Record<string, string>>, native: Awaited<ReturnType<typeof validateWorkspace>>): Promise<{
+  readonly state: Awaited<ReturnType<typeof effectiveProjectState>>;
+  readonly projectId: string | undefined;
+  readonly plan: Awaited<ReturnType<typeof planGates>>;
+}> {
+  required(values, ["project", "base", "work-id", "checks-from"]);
+  if (booleanValue(values.release, "release") || values["base-by-root"] !== undefined) {
+    fail("CLI_ARGUMENT_MALFORMED", "a package check covers one candidate and an explicit base");
+  }
+  const workIds = listValue(values["work-id"]!);
+  const items = workIds.map(id => native.work.find(item => item.id === id && !item.tombstone));
+  const projectId = values["project-id"] ?? items[0]?.projectId;
+  if (workIds.length === 0 || items.some(item => item === undefined || item.projectId !== projectId)) {
+    fail("CLI_ARGUMENT_MALFORMED", "package checks require existing work items in the same project");
+  }
+  const state = await effectiveProjectState(native, projectId);
+  const source = argumentJsonValue(await readFile(values["checks-from"]!, "utf8"), "checks-from");
+  if (!Array.isArray(source) || source.length === 0 || source.length > 256) fail("CLI_ARGUMENT_MALFORMED", "checks-from is a nonempty array of checks");
+  const names = new Set<string>();
+  const gates = source.map((entry: unknown, index: number) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) fail("CLI_ARGUMENT_MALFORMED", "invalid package check");
+    const { name, ...check } = entry as Readonly<Record<string, unknown>>;
+    if (!isGateName(name) || names.has(name) || Object.keys(check).some(key => !["command", "root", "reuse"].includes(key))) {
+      fail("CLI_ARGUMENT_MALFORMED", "each package check needs a unique name and only command, root and reuse");
+    }
+    names.add(name);
+    return { ...checkGateDeclaration({ root: ".", ...check, covers: ["**"], required: true, enabled: true, releaseOnly: false, order: index + 1 }, name), name };
+  });
+  const plan = await planGates({
+    projectRoot: values.project!,
+    libraryId: native.metadata.workspaceId,
+    ...(projectId === undefined ? {} : { projectId }),
+    gates,
+    base: values.base!,
+    workIds,
+  });
+  return { state, projectId, plan: { ...plan, evidenceOnly: true as const } };
+}
+
 // TCRN-CROSS-STORY-525 (MIN-256; TCRN-CROSS-SUB-447): what binds each target Story to gates besides a
 // required declaration, read from the library's work records: the ids of its ancestors, whose work
 // covers cover it, and the gate names its gates field and its ancestors' give. A target the library
@@ -1194,7 +1265,7 @@ async function libraryGateResult(state: Awaited<ReturnType<typeof materializeWor
       subjects: gateSubjects(state.work, group.workIds),
       subjectKeys: workSubjectKeys(state.work, group.workIds),
     });
-    if (!execute) return { ...binding, projectRoot, ok: true, plan };
+    if (!execute) return { ...binding, projectRoot, ok: true, plan, ...await verificationPlanFields(plan, { libraryId: state.metadata.workspaceId, ...(group.projectId === undefined ? {} : { projectId: group.projectId }) }) };
     const { run, recordPath } = await executeRun(plan, { libraryId: state.metadata.workspaceId, ...(group.projectId === undefined ? {} : { projectId: group.projectId }), at: values.at ?? "" });
     return {
       ...binding, projectRoot, ok: run.reds.length === 0, reds: run.reds,
@@ -1260,7 +1331,9 @@ async function workGateTargets(state: Awaited<ReturnType<typeof materializeWorks
           if (execute) {
             const { run, recordPath } = await executeRun(plan, { libraryId: reference.libraryId, projectId: reference.projectId, at: values.at!, env: { ...process.env, EINZBERN_PROJECT_CONTEXT: canonicalJson(handoff) } });
             results.push({ ...binding, projectRoot, ok: run.reds.length === 0, handoff, run, recordPath });
-          } else results.push({ ...binding, projectRoot, ok: true, handoff, plan });
+          } else results.push({ ...binding, projectRoot, ok: true, handoff, plan, ...await verificationPlanFields(plan, {
+            libraryId: reference.libraryId, projectId: reference.projectId, env: { ...process.env, EINZBERN_PROJECT_CONTEXT: canonicalJson(handoff) },
+          }) });
           } catch (error) {
             results.push({ ...binding, projectRoot: repository.projectPath, ok: false, reasonCode: (error as { reasonCode?: string }).reasonCode ?? "PROJECT_OPERATION_REFUSED", error: String(error) });
           }
@@ -1285,27 +1358,11 @@ async function workGateTargets(state: Awaited<ReturnType<typeof materializeWorks
 // slot after planning; read-only plans never read heavy-run settings.
 async function prepareGates(values: Readonly<Record<string, string>>, execute: boolean): Promise<
   | { readonly targets: Record<string, unknown> }
-  | { readonly state: Awaited<ReturnType<typeof effectiveProjectState>>; readonly plan: Awaited<ReturnType<typeof planGates>> }
+  | { readonly state: Awaited<ReturnType<typeof effectiveProjectState>>; readonly projectId: string | undefined; readonly plan: Awaited<ReturnType<typeof planGates>> }
 > {
   const native = await validateWorkspace(values.workspace ?? "");
-  const execution: { slot: Awaited<ReturnType<typeof acquireHeavySlot>> | null } = { slot: null };
-  const executeRun: typeof runGates = async (plan, options) => {
-    execution.slot ??= await acquireHeavySlot({ command: "gates-run" });
-    // A target's context environment was copied before lazy acquisition. Carry the
-    // admitted slot into that copy so nested heavy commands inherit rather than wait.
-    const env = options.env === undefined ? undefined : {
-      ...options.env,
-      [HEAVY_SLOT_VARIABLE]: `${execution.slot.token}:${execution.slot.path}`,
-      [MEMORY_LEASE_VARIABLE]: process.env[MEMORY_LEASE_VARIABLE],
-    };
-    return runGates(plan, env === undefined ? options : { ...options, env });
-  };
-  let targets;
-  try {
-    targets = await workGateTargets(native, values, execute, executeRun);
-  } finally {
-    execution.slot?.release();
-  }
+  if (values["checks-from"] !== undefined) return packageVerificationPlan(values, native);
+  const targets = await workGateTargets(native, values, execute, localGateExecution(values));
   if (targets !== null) return { targets };
   const state = await effectiveProjectState(native, values["project-id"]);
   const workIds = values["work-id"] === undefined ? [] : listValue(values["work-id"]);
@@ -1321,7 +1378,7 @@ async function prepareGates(values: Readonly<Record<string, string>>, execute: b
     subjects: gateSubjects(native.work, workIds),
     subjectKeys: workSubjectKeys(native.work, workIds),
   });
-  return { state, plan };
+  return { state, plan, projectId: values["project-id"] };
 }
 
 type GatesLibrary = Awaited<ReturnType<typeof materializeWorkspace>>;
@@ -1903,11 +1960,11 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // TCRN-CROSS-STORY-527 (MIN-257 D6, Q6; TCRN-CROSS-SUB-478): a model proposes a gate declaration
   // (--action set, the default, with gates-config-set's flags) or a gate's removal (--action remove);
   // the proposal waits for Atelier and is not a declaration. A model's run is not refused.
-  { name: "gates-config-propose", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "action", required: false, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "gates-config-propose", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "action", required: false, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: true, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }, { name: "reuse", required: false, valueKind: "json" }] },
   { name: "gates-config-remove", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "gates-config-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
-  { name: "gates-plan", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }] },
-  { name: "gates-run", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }] },
+  { name: "gates-config-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "name", required: true, valueKind: "string" }, { name: "command", required: false, valueKind: "string" }, { name: "root", required: false, valueKind: "string" }, { name: "repository", required: false, valueKind: "string" }, { name: "covers", required: false, valueKind: "list" }, { name: "required", required: false, valueKind: "boolean" }, { name: "enabled", required: false, valueKind: "boolean" }, { name: "release-only", required: false, valueKind: "boolean" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }, { name: "reuse", required: false, valueKind: "json" }] },
+  { name: "gates-plan", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }, { name: "checks-from", required: false, valueKind: "string" }] },
+  { name: "gates-run", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "base", required: false, valueKind: "string" }, { name: "base-by-root", required: false, valueKind: "json" }, { name: "release", required: false, valueKind: "boolean" }, { name: "work-id", required: false, valueKind: "list" }, { name: "project-id", required: false, valueKind: "string" }, { name: "checks-from", required: false, valueKind: "string" }, { name: "gate-timeout-ms", required: false, valueKind: "integer" }] },
   { name: "host-probe", availability: "cli", mutates: false, flags: [{ name: "host", required: true, valueKind: "string" }, { name: "model", required: true, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "init", availability: "cli", mutates: true, flags: [{ name: "workspace", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project-name", required: false, valueKind: "string" }, { name: "git-remote", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "cloud-hosted", required: false, valueKind: "boolean" }] },
   { name: "install-manifest", availability: "cli", mutates: false, flags: [] },
@@ -4930,7 +4987,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // Atelier only; a model's run is refused with MODEL_WRITE_REFUSED once its arguments parse, before
   // the library is read, so a model cannot declare the gate its own Story is then held to.
   if (command === "gates-config-set") {
-    const values = parseArguments(rest, ["project-id", ...shared, "name", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "actor", "decided-in"]);
+    const values = parseArguments(rest, ["project-id", ...shared, "name", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "reuse", "actor", "decided-in"]);
     required(values, [...requiredShared, "name"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
@@ -4940,11 +4997,13 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const enabledValue = optionalBoolean(values.enabled, "enabled");
     const releaseOnlyValue = optionalBoolean(values["release-only"], "release-only");
     const orderValue = boundedInteger(values, "order");
+    const reuseValue = values.reuse === undefined ? undefined : argumentJsonValue(values.reuse, "reuse");
     const permit = assertModelWriteAllowed({ gate: name }, false, process.env, { decidedIn: values["decided-in"] });
     const state = await withWriteLock(workspace, at, async () => {
       const existing = listGates(scopedWorkspaceState(await materializeWorkspace(workspace), values["project-id"])).find((gate) => gate.name === name);
       if (commandValue === undefined && existing === undefined) fail("CLI_ARGUMENT_MISSING", "command");
       const order = orderValue ?? existing?.order;
+      const reuse = reuseValue === null ? undefined : reuseValue ?? existing?.reuse;
       const repository = values.repository === "" ? undefined : values.repository ?? existing?.repository;
       const authorized = await writeAuthorization(permit, workspace);
       return setGate(workspace, {
@@ -4959,6 +5018,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
           enabled: enabledValue ?? existing?.enabled ?? true,
           releaseOnly: releaseOnlyValue ?? existing?.releaseOnly ?? false,
           ...(order === undefined ? {} : { order }),
+          ...(reuse === undefined ? {} : { reuse: reuse as JsonValue }),
         },
         ...(values.actor ? { actorId: values.actor } : {}),
         ...authorized,
@@ -4987,14 +5047,14 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // takes none of them. The proposal waits for Atelier: gates-config-list, gates-plan and gates-run do
   // not see it, and gates-config-list --status pending lists it. A model's run is not refused.
   if (command === "gates-config-propose") {
-    const values = parseArguments(rest, ["project-id", ...shared, "name", "action", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "actor"]);
+    const values = parseArguments(rest, ["project-id", ...shared, "name", "action", "command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "reuse", "actor"]);
     required(values, [...requiredShared, "name", "actor"]);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
     const name = values.name ?? "";
     const action = values.action ?? "set";
     if (action !== "set" && action !== "remove") fail("CLI_ARGUMENT_MALFORMED", "action");
-    if (action === "remove" && ["command", "root", "repository", "covers", "required", "enabled", "release-only", "order"].some((flag) => values[flag] !== undefined)) {
+    if (action === "remove" && ["command", "root", "repository", "covers", "required", "enabled", "release-only", "order", "reuse"].some((flag) => values[flag] !== undefined)) {
       fail("CLI_ARGUMENT_MALFORMED", "a gate's removal takes no declaration flags");
     }
     const commandValue = values.command === undefined ? undefined : gateCommandValue(values.command);
@@ -5002,12 +5062,14 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const enabledValue = optionalBoolean(values.enabled, "enabled");
     const releaseOnlyValue = optionalBoolean(values["release-only"], "release-only");
     const orderValue = boundedInteger(values, "order");
+    const reuseValue = values.reuse === undefined ? undefined : argumentJsonValue(values.reuse, "reuse");
     const written = await withWriteLock(workspace, at, async () => {
       let payload: Readonly<Record<string, JsonValue>> = {};
       if (action === "set") {
         const existing = listGates(scopedWorkspaceState(await materializeWorkspace(workspace), values["project-id"])).find((gate) => gate.name === name);
         if (commandValue === undefined && existing === undefined) fail("CLI_ARGUMENT_MISSING", "command");
         const order = orderValue ?? existing?.order;
+        const reuse = reuseValue === null ? undefined : reuseValue ?? existing?.reuse;
         const repository = values.repository === "" ? undefined : values.repository ?? existing?.repository;
         payload = {
           // A command that is not an argv is refused by the declaration's check (GATES_CONFIG_INVALID).
@@ -5019,6 +5081,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
           enabled: enabledValue ?? existing?.enabled ?? true,
           releaseOnly: releaseOnlyValue ?? existing?.releaseOnly ?? false,
           ...(order === undefined ? {} : { order }),
+          ...(reuse === undefined ? {} : { reuse: reuse as JsonValue }),
         };
       }
       return proposeChange(workspace, { occurredAt: at, ...configurationOptions(values), kind: "gate", target: name, action, payload, proposedBy: values.actor ?? "", actorId: values.actor ?? "" });
@@ -5080,17 +5143,18 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // and each one whose covers name the Story or an ancestor; unknownGates lists a named gate the
   // project does not declare.
   if (command === "gates-plan") {
-    const values = parseArguments(rest, ["project-id", "workspace", "project", "base", "base-by-root", "release", "work-id"]);
+    const values = parseArguments(rest, ["project-id", "workspace", "project", "base", "base-by-root", "release", "work-id", "checks-from"]);
     required(values, ["workspace"]);
     const prepared = await prepareGates(values, false);
     if ("targets" in prepared) { io.write(canonicalJson(prepared.targets)); return; }
-    const { state, plan } = prepared;
+    const { state, plan, projectId } = prepared;
     io.write(canonicalJson({
       reasonCode: "GATES_PLAN_READY",
       workspaceId: state.metadata.workspaceId,
       version: state.version,
       headEventHash: state.headEventHash,
       ...plan,
+      ...await verificationPlanFields(plan, { libraryId: state.metadata.workspaceId, ...(projectId === undefined ? {} : { projectId }) }),
     }));
     return;
   }
@@ -5102,19 +5166,16 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // is held, and holds it until its last gate ends; the gates it starts inherit the slot through
   // EINZBERN_HEAVY_SLOT. gates-plan runs nothing and takes no slot.
   if (command === "gates-run") {
-    const values = parseArguments(rest, ["project-id", "workspace", "at", "project", "base", "base-by-root", "release", "work-id"]);
+    const values = parseArguments(rest, ["project-id", "workspace", "at", "project", "base", "base-by-root", "release", "work-id", "checks-from", "gate-timeout-ms"]);
     required(values, ["workspace", "at"]);
     const prepared = await prepareGates(values, true);
     if ("targets" in prepared) { io.write(canonicalJson(prepared.targets)); return; }
-    const { state, plan } = prepared;
-    const slot = await acquireHeavySlot({ command: "gates-run" });
-    let ran;
-    try {
-      ran = await runGates(plan, { libraryId: state.metadata.workspaceId, ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }), at: values.at ?? "" });
-    } finally {
-      slot.release();
-    }
-    const { run, recordPath } = ran;
+    const { state, plan, projectId } = prepared;
+    const { run, recordPath } = await localGateExecution(values)(plan, {
+      libraryId: state.metadata.workspaceId,
+      ...(projectId === undefined ? {} : { projectId }),
+      at: values.at!,
+    });
     io.write(canonicalJson({
       reasonCode: "GATES_RUN_COMPLETED",
       workspaceId: state.metadata.workspaceId,

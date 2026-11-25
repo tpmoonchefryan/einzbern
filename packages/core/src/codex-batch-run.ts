@@ -225,7 +225,8 @@ export async function advanceBatchRun(device: string, actor: string | undefined,
             await writeFileAtomic(e.receiptFile, JSON.stringify(batch) + "\n");
             if (!batch.reportEligible) { e.error = batch.blockedReasons.join(", ") || null; return; }
             const since = batch.records.map(r => r.preparation.attempt!.requestedAt).sort()[0]!;
-            const prompt = batchReport(batch,e.times,e.receiptFile) + "\n批次计时 " + join(dir,"ledger.json");
+            const report = await batchReport(batch, e.times, e.receiptFile, { device, libraryId: c.libraryId });
+            const prompt = report + "\n批次计时 " + join(dir, "ledger.json");
             e.delivered = await withFileLock(join(dir,"recipient.lock"),() => deliverBatch(call,c.main,batch.reportPrefix,prompt,since,e.intent,async intent => {
               e.intent = intent; e.phase = "unknown"; await persist();
             }));
