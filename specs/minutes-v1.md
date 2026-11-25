@@ -196,7 +196,7 @@ Incident or Story; no active card reaches 0.44.
 ## Commands
 
 `minutes-record` writes one record (`--project-id`, `--title`, `--summary`, the decisions as
-`--decisions <list>` or `--decisions-file <JSON array of strings>`, `--decided-by`,
+`--decisions <list>` or `--decisions-file <JSON array of strings or text/title/tags records>`, `--decided-by`,
 `--work-ids`, an optional `--external-key`, `--at`, `--actor`) and answers `MINUTES_RECORDED`
 with `id`, `externalKey`, `decisions`, the written `ids`, `version` and `headEventHash`, and
 `knowledgeHint` (`line`, `conflictCandidateIds`, `filteredByFamily`; see
@@ -209,14 +209,23 @@ decision of the record being written), `--withdraws <decision>,...` and `--coexi
 `declarations` as stored.
 `minutes-list` pages `minutesView` (`--project-id`; `--work-id` keeps the minutes that link the
 work record or that it names as decided-in; `--status valid|obsolete|all`, valid by default;
-`--limit`, `--offset`). `minutes-show` answers one entry, found with `--id` or `--external-key`,
+`--query` applies recall ranking; `--limit`, `--offset`). `minutes-show` answers one entry, found with `--id` or `--external-key`,
 with `decides`: the live work records that name it as decided-in; `--status` chooses its
 decisions, and a decision number given to `--id` (or `<key>#Dn` to `--external-key`) answers that
 decision with `decision` beside the entry, and takes no `--status`. Both reads work on an
 old-layout workspace, which takes no new minutes (`LEGACY_WORKSPACE_READ_ONLY`). A work record
 names its deciding minutes with `--decided-in` on `work-create` and `work-annotate`
-(specs/work-model-v1.md). No verb is added for the lifecycle: the minutes verbs remain
-`minutes-list`, `minutes-record` and `minutes-show`.
+(specs/work-model-v1.md).
+
+`minutes-supplement-inventory` lists coverage and the source digest of each current minutes
+record, including recorded conference minutes. `--project-id` selects one project.
+`minutes-supplement-batch --from-file <path> --at <instant>` reads a
+`tcrn.minutes-supplement-batch.v1` document. Each member names the `minutesId` and inventory
+`contentDigest` and supplies `decisionMetadata` with one `{title,tags}` entry per source decision
+in order. `--project-id` binds the batch to the same project as the inventory. The supplement adds
+titles and tags while preserving the original decisions. Repeating equivalent members appends no
+duplicate events. If a write stops mid-batch, the result reports the members already applied and
+the first refusal. Review the supplementation before enabling metadata-only recall.
 
 ## Reason codes
 

@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
 import { prepareHostNativeDispatch } from "../dist/build/packages/core/src/dispatch-workflow.js";
 import { recordHostNativeEvents } from "../dist/build/packages/core/src/native-tool-evidence.js";
+import { recordMinutes } from "../dist/build/packages/core/src/workspace.js";
 import { applyEngineModelPolicySet, engineModelPolicyOnboarding } from "../dist/build/packages/core/src/engine-model-policy.js";
 import { recordCodexPeerBatch, normalizeCodexPeerBatch } from "../dist/build/packages/core/src/codex-peer-batch.js";
 import { packDispatchRequired, resolvePackDispatchContext, validatePackDispatchContext } from "../dist/build/packages/core/src/pack-dispatch.js";
@@ -60,8 +61,19 @@ function withPack(f) {
 test("general host preparation retains the live Pack row and frozen native capacity", async t => {
   const f = await nativeFixture(t);
   const pack = withPack(f);
-  const context = { home: f.home, resolveWorkspace: async () => ({ root: f.workspace, state: pack.state }) };
-  const requestWork = pack.initiative;
+  const minutesKey = "DISPATCH-MIN-601";
+  const recorded = await recordMinutes(f.workspace, {
+    occurredAt: "2026-11-25T10:00:00Z", projectId: pack.initiative.projectId, externalKey: minutesKey, title: "Fixture relay",
+    summary: "Checkpoint review", decisions: ["An original decision passage to read separately."],
+    decisionMetadata: [{ title: "Checkpoint restart", tags: ["replay"] }], decidedBy: [], linkedWorkIds: [],
+  });
+  const reference = `${recorded.minutes[0].id}#D1`;
+  const requestWork = { ...pack.initiative, extensions: { ...pack.initiative.extensions,
+    "advisory:goal": { required: false, value: `Follow ${minutesKey}` },
+  } };
+  const state = { ...pack.state, minutes: recorded.minutes, headEventHash: recorded.headEventHash,
+    work: pack.state.work.map(row => row.id === requestWork.id ? requestWork : row) };
+  const context = { home: f.home, resolveWorkspace: async () => ({ root: f.workspace, state }) };
   const request = { ...f.request, workId: requestWork.id, workRevision: requestWork.revision, action: "implementation", phase: "dispatch", packBinding: pack.binding,
     authorization: { ...f.request.authorization, workIds: [requestWork.id] },
     sourceScope: { repository: "fixture:repository", writableRoots: [f.root], permission: "granted" },
@@ -94,6 +106,10 @@ test("general host preparation retains the live Pack row and frozen native capac
   assert.equal(prepared.decision.request.packBinding.assignmentId, pack.assignment.id);
   assert.match(prepared.attempt.argumentsValue.prompt, new RegExp(pack.assignment.id, "u"));
   assert.match(prepared.attempt.argumentsValue.prompt, new RegExp(pack.packRecord.externalKey, "u"));
+  assert.deepEqual(prepared.context.recallCandidates, { workspaceId: recorded.metadata.workspaceId, references: [reference] });
+  assert.ok(prepared.attempt.argumentsValue.prompt.includes(`minutes · ${minutesKey} · Checkpoint restart · ${reference}`));
+  assert.ok(prepared.attempt.argumentsValue.prompt.includes("You may continue without reading any."));
+  assert.ok(!prepared.attempt.argumentsValue.prompt.includes(recorded.minutes[0].decisions[0]));
 
   const nativeArguments = { task_name: "sub793-r05-native-message", message: "Synthetic Pack preparation fixture", fork_turns: "none" };
   const nativeArgumentsPath = join(f.root, "pack-native-arguments.json");
@@ -103,14 +119,14 @@ test("general host preparation retains the live Pack row and frozen native capac
   assert.ok(["HOST_PREPARATION_READY", "HOST_PREPARATION_NOT_EXECUTABLE"].includes(nativeResult.reasonCode));
   const nativePrepared = JSON.parse(await readFile(nativeOutput, "utf8"));
   assert.ok(nativePrepared.attempt, JSON.stringify(nativePrepared.decision.reasons));
-  const { message: boundMessage, ...otherNativeArguments } = nativePrepared.attempt.argumentsValue;
+  const { message: boundMessage, task_name: boundTaskName, ...otherNativeArguments } = nativePrepared.attempt.argumentsValue;
   assert.equal(boundMessage, prepared.attempt.argumentsValue.prompt, "the native message receives the same Pack delegation as the generic prompt path");
+  assert.match(boundTaskName, /^sub793_r05_native_message_[a-f0-9]{12}$/u);
   assert.deepEqual(otherNativeArguments, {
-    task_name: nativeArguments.task_name,
     fork_turns: nativeArguments.fork_turns,
     model: prepared.attempt.argumentsValue.model,
     reasoning_effort: prepared.attempt.argumentsValue.reasoning_effort,
-  }, "task_name, fork_turns and selection fields stay unchanged");
+  }, "fork_turns and selection fields stay unchanged");
   assert.equal(nativePrepared.context.packDispatch.digest, prepared.context.packDispatch.digest);
   assert.match(nativePrepared.attempt.argumentsValue.message, new RegExp(pack.assignment.id, "u"));
   assert.match(nativePrepared.attempt.argumentsValue.message, new RegExp(pack.packRecord.externalKey, "u"));
@@ -401,10 +417,9 @@ test("Codex peer receipts retain Pack outcomes across coordinator handoff and ne
 
   const nextFailed = recordHostNativeEvents(nextPreparation, [{
     id: "next-worker-failed", at: new Date().toISOString(), kind: "host-response", sourceTool: "collaboration.spawn_agent",
-    raw: { state: "failed", terminal: true, conversationId: "fixture-next-worker-failed" },
-    status: { pointer: "/state", mapping: { failed: "failed" } },
-    terminal: { pointer: "/terminal", values: ["true"], contract: "Synthetic spawn terminal receipt" },
-    providerId: { pointer: "/conversationId" },
+    raw: { error: "fixture pre-creation refusal" },
+    status: { pointer: "/error", mapping: { "fixture pre-creation refusal": "failed" } },
+    terminal: { pointer: "/error", values: ["fixture pre-creation refusal"], contract: "Synthetic refusal before native agent creation" },
   }], recoveredNextReceipt.records[0]);
   const settledNextReceipt = recordCodexPeerBatch({
     observationCutoff: new Date().toISOString(), ...input,
@@ -413,6 +428,9 @@ test("Codex peer receipts retain Pack outcomes across coordinator handoff and ne
   });
   assert.equal(settledNextReceipt.applicationHistory[0].receiptDigest, handedOff.digest);
   assert.equal(settledNextReceipt.records[0].execution, "failed", "same-application continuation records its actual result after recovery");
+  assert.equal(settledNextReceipt.records[0].occupancy, "released");
+  assert.equal(settledNextReceipt.records[0].providerId.status, "unknown");
+  assert.equal(settledNextReceipt.reportEligible, false, "a pre-creation refusal allows retry but cannot be reported as a completed batch");
   const retryBinding = { ...nextBinding, batchAttemptId: "candidate-attempt-04", capacity: { limit: 2, active: 1 } };
   const retryCoordinator = "fixture-economy-retry";
   const retryPreparation = await prepareHostNativeDispatch(nextState, {
@@ -472,6 +490,35 @@ test("Codex peer receipts retain Pack outcomes across coordinator handoff and ne
   assert.equal(failureReceipt.records[1].preparation.context.packDispatch.assignment.id, assignmentIds[1]);
   assert.equal(normalizeCodexPeerBatch(handedOff).digest, handedOff.digest);
   assert.equal(normalizeCodexPeerBatch(failureReceipt).digest, failureReceipt.digest);
+
+  const paths = Object.fromEntries(["manifest", "records", "capacity", "prior"].map(name => [name, join(f.root, "continuation-" + name + ".json")]));
+  await Promise.all([
+    writeFile(paths.manifest, JSON.stringify(manifest)),
+    writeFile(paths.records, JSON.stringify([completed, failed])),
+    writeFile(paths.capacity, JSON.stringify(input.capacity)),
+    writeFile(paths.prior, JSON.stringify(pendingReceipt)),
+  ]);
+  const { prior: priorPath, ...ordinary } = paths;
+  const advanced = { ...pack.state, work: pack.state.work.map(row => row.id === nextWork.id ? { ...row, revision: row.revision + 1 } : row) };
+  const recordIn = async (state, name, prior) => {
+    const output = join(f.root, name + ".json");
+    await runNativeToolCommand("execution-codex-peer-record", { workspace: f.workspace, output, ...ordinary, ...(prior ? { prior } : {}) },
+      { home: f.home, resolveWorkspace: async () => ({ root: f.workspace, state }) });
+    return JSON.parse(await readFile(output, "utf8"));
+  };
+  const newRecord = await recordIn(advanced, "unprepared-record", undefined);
+  assert.equal(newRecord.reasonCode, "CODEX_PEER_RECORD_INVALID");
+  const continued = await recordIn(advanced, "retained-record", priorPath);
+  assert.equal(continued.reportEligible, true);
+  assert.equal(continued.allTerminal, true);
+  assert.deepEqual(continued.records.map(row => row.preparation.attempt.id), [preparation.attempt.id, secondPreparation.attempt.id]);
+  const changedInitiative = { ...advanced, work: advanced.work.map(row => row.id === manifest.workId ? { ...row, revision: row.revision + 1 } : row) };
+  const drifted = await recordIn(changedInitiative, "advanced-initiative-record", priorPath);
+  assert.equal(drifted.reportEligible, false);
+  assert.ok(drifted.blockedReasons.includes("work-revision-drift:" + manifest.workId));
+  const anotherLibrary = { ...advanced, metadata: { ...advanced.metadata, workspaceId: "workspace:" + "0".repeat(24) } };
+  assert.equal((await recordIn(anotherLibrary, "foreign-retained-record", priorPath)).reasonCode, "CODEX_PEER_RECORD_INVALID");
+
   t.diagnostic(JSON.stringify({
     fixtureIdentity: candidatePackInput.fixtureIdentity,
     packId: pack.packRecord.id,

@@ -300,10 +300,8 @@ const shownTarget = (library, epoch) => ({ epoch, libraryId: library.libraryId, 
 function namedRead(token, target) { return { headers: { "x-portal-token": token, "x-configuration-target": JSON.stringify(target) } }; }
 const R46_AT = "2026-10-09T09:00:00Z";
 
-// TCRN-CROSS-INIT-053 R47 (c1-B; Owner 2026-10-09, round 7): on a coordination chain /api/settings lists its ten
-// runtime settings, each for the whole library, and a write from a selection that names the chain's project is
-// made at the library level, as the catalog's scope says; a model table stays refused by the engine.
-const R47_COORDINATION_KEYS = ["agents.generation", "agents.sharedNavigation", "artifact.language", "engine.requiredVersion", "execution.maxConcurrentSubagents", "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath"];
+// Coordination settings stay library-scoped; model concurrency and quota controls are device-local.
+const R47_COORDINATION_KEYS = ["agents.generation", "agents.sharedNavigation", "artifact.language", "engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath"];
 
 // TCRN-CROSS-STORY-526 GWT4 (MIN-256; TCRN-CROSS-SUB-454): Atelier writes as the actor it is started
 // with. Started with TCRN_PORTAL_ACTOR, a gate it saves is recorded with surface atelier and, on a

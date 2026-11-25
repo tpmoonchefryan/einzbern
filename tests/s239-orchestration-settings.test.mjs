@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-// INIT-027 S239: the orchestration settings are closed and semantic. TCRN-CROSS-STORY-484 R5 keeps
-// execution.maxConcurrentSubagents (MIN-229 D2) and retires execution.maxDispatchDepth, which nothing reads.
+// INIT-027 S239 checks the device orchestration limits and the historical workspace declarations.
 
 import "./helpers/device-home.mjs";
 import { standInForAtelier } from "./helpers/workspace-fixture.mjs";
@@ -47,29 +46,28 @@ test("S239: defaults, closed enum, and bounded numeric strings are catalog-backe
   const catalog = await json(["settings-catalog", "--workspace", workspace]);
   const entries = new Map(catalog.settings.map((entry) => [entry.key, entry]));
   assert.deepEqual(entries.get("execution.maxConcurrentSubagents"), {
-    key: "execution.maxConcurrentSubagents", type: "string", controlType: "number", layer: "project", defaultValue: "8", currentValue: "8", modelWritable: false, scope: "project", source: { kind: "default", projectId: null, projectName: null, inherited: false }, inheritedValue: "8", inheritedSource: { kind: "default", projectId: null, projectName: null, inherited: false }, declaredValue: null, min: 1, shape: "scalar", group: "execution", order: 1,
+    key: "execution.maxConcurrentSubagents", type: "string", controlType: "number", layer: "project", defaultValue: "8", currentValue: "8", modelWritable: false, scope: "project", source: { kind: "default", projectId: null, projectName: null, inherited: false }, inheritedValue: "8", inheritedSource: { kind: "default", projectId: null, projectName: null, inherited: false }, declaredValue: null, min: 1, shape: "scalar", group: "models", order: 6,
   });
   assert.equal(entries.has("execution.maxDispatchDepth"), false);
   assert.equal(entries.has("execution.personalessDispatch"), false);
 
+  const key = "models.maxConcurrentSubagents";
+  const read = async () => (await json(["machine-settings-catalog"])).settings.find(entry => entry.key === key);
+  const defaultRow = await read();
+  assert.deepEqual([defaultRow.layer, defaultRow.group, defaultRow.min, defaultRow.max], ["device", "models", 1, Number.MAX_SAFE_INTEGER]);
   for (const [index, value] of ["1", "65", String(Number.MAX_SAFE_INTEGER)].entries()) {
     const before = await version();
-    const written = await json(["settings-set", "--workspace", workspace, "--at", instant(index + 1),
-      "--key", "execution.maxConcurrentSubagents", "--value", value, "--actor", "agent:test"]);
-    assert.equal(written.setting.value, value);
-    assert.equal(await version(), before + 1);
-    const current = (await json(["settings-catalog", "--workspace", workspace])).settings.find((entry) => entry.key === "execution.maxConcurrentSubagents");
-    assert.equal(current.currentValue, value, "the shipped read consumer retains every permitted safe value");
-    assert.equal(Object.hasOwn(current, "max"), false, "the catalog does not invent an admission ceiling");
+    const written = await json(["machine-settings-set", "--at", instant(index + 1), "--key", key, "--value", value]);
+    assert.equal(written.values[key], value);
+    assert.equal(await version(), before);
+    assert.equal((await read()).currentValue, value, "the device catalog retains every permitted safe value");
   }
 });
 
 test("S239: semantic refusals identify the setting and leave the head unchanged", async (t) => {
   const { workspace, version } = await fixture(t);
   const cases = [
-    ["execution.maxConcurrentSubagents", "0", /1 to 9007199254740991/u, "SETTINGS_VALUE_INVALID"],
-    ["execution.maxConcurrentSubagents", "9007199254740992", /1 to 9007199254740991/u, "SETTINGS_VALUE_INVALID"],
-    ["execution.maxConcurrentSubagents", "1.0", /1 to 9007199254740991/u, "SETTINGS_VALUE_INVALID"],
+    ["execution.maxConcurrentSubagents", "3", /historical compatibility/u, "SETTINGS_KEY_DEVICE_LEVEL"],
     ["execution.maxDispatchDepth", "4", /maxDispatchDepth/u, "SETTINGS_KEY_UNREGISTERED"],
     ["execution.personalessDispatch", "unknown", /personalessDispatch/u, "SETTINGS_KEY_UNREGISTERED"],
   ];
@@ -81,6 +79,11 @@ test("S239: semantic refusals identify the setting and leave the head unchanged"
     assert.match(error.message, message);
     assert.equal(await version(), stable);
   }
+  for (const [value, message] of [["0", /at least 1/u], ["9007199254740992", /safe integer/u], ["1.0", /whole number/u]]) {
+    const error = await refusal(["machine-settings-set", "--at", instant(10), "--key", "models.maxConcurrentSubagents", "--value", value]);
+    assert.equal(error.reasonCode, "MACHINE_SETTING_VALUE_INVALID");
+    assert.match(error.message, message);
+  }
 });
 
 test("configuration migration: shared generation choices have closed enums and stable layout", async (t) => {
@@ -91,7 +94,7 @@ test("configuration migration: shared generation choices have closed enums and s
     ["agents.sharedNavigation", "written", "declined", 21],
   ]) {
     const entry = entries.get(key);
-    assert.deepEqual([entry.layer, entry.group, entry.order, entry.defaultValue, entry.currentValue], ["project", "general", order, defaultValue, defaultValue]);
+    assert.deepEqual([entry.layer, entry.group, entry.order, entry.defaultValue, entry.currentValue], ["library", "general", order, defaultValue, defaultValue]);
     assert.deepEqual(entry.allowedValues, [defaultValue, alternative]);
     const before = await version();
     const rejected = await refusal(["settings-set", "--workspace", workspace, "--at", instant(1), "--key", key, "--value", "automatic"]);

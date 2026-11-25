@@ -3,7 +3,7 @@ import { open, realpath } from "node:fs/promises";
 import { openPrivateWindowsFile } from "../../../scripts/lib/windows-system.mjs";
 import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
-import { parseStrictInstant } from "../../protocol/src/index.js";
+import { canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
 import { codexPeerReportDispatchProblem, readCodexPeerRole } from "./codex-peer-hooks.js";
 import { assertCodexPeerCoordinatorStartup, codexPackApplicationRecovery } from "./codex-peer-batch.js";
 import { codexNativeGuardHealth } from "./codex-native-health.js";
@@ -18,6 +18,7 @@ import { workProjectContexts } from "./project-chain.js";
 import type { WorkspaceState } from "./workspace.js";
 import type { ExecutionAdmissionRequest } from "./execution-admission.js";
 import { DISPATCH_EVIDENCE_VERSION, dispatchAdmissionDigest, normalizeDispatchAdmissionEvidence } from "./dispatch-evidence.js";
+import { dispatchRecallOffer } from "./dispatch-recall.js";
 
 export const DISPATCH_PREPARATION_VERSION = "tcrn.dispatch-preparation.v1";
 export const PROCESS_RETURN_VERSION = "tcrn.dispatch-process-return.v1";
@@ -167,9 +168,22 @@ import { sameHostSelection, validateHostExecutionRequest } from "./execution-fal
 import type { HostExecutionRequest, HostExecutionDecision } from "./execution-fallback.js";
 import { HOST_NATIVE_PREPARATION_VERSION, validateHostNativePreparation } from "./native-tool-evidence.js";
 import type { HostNativePreparation } from "./native-tool-evidence.js";
-import { bindPackDispatchToNativeArguments, packDispatchRequired, resolvePackDispatchContext } from "./pack-dispatch.js";
+import { bindPackDispatchToNativeArguments, nativeTaskPromptField, packDispatchRequired, resolvePackDispatchContext } from "./pack-dispatch.js";
+
+function bindCodexPackTaskName(args: Record<string, unknown>): Record<string, unknown> {
+  const name = args.task_name;
+  if (name === undefined) return args;
+  if (typeof name !== "string" || !/^[a-z0-9_-]+$/u.test(name)) {
+    throw new HostExecutionError("Codex Pack task_name must use lowercase letters, digits, underscores, or hyphens");
+  }
+  if (!name.includes("-")) return args;
+  // Distinct names can share an underscore spelling. Retain the original name in the
+  // suffix calculation while keeping the rest of the Pack scope and prompt unchanged.
+  return { ...args, task_name: `${name.replaceAll("-", "_")}_${canonicalSha256(name).slice(0, 12)}` };
+}
+
 /** Optional audit preparation; no adapter, save transaction or prior success receipt prerequisite. */
-export async function prepareHostNativeDispatch(state: WorkspaceState, requestValue: HostExecutionRequest, tool: { readonly argumentsValue: unknown; readonly selection: HostSelection; readonly peerWorker?: boolean; readonly nativeSessionId?: string; readonly codexCoordinatorStartup?: unknown; readonly codexSettingsIntent?: unknown; readonly codexObservation?: import("./codex-native-health.js").CodexHookObservation; readonly priorPeerReceipt?: unknown; readonly userHome?: string; readonly cwd?: string }, home?: string): Promise<HostNativePreparation> {
+export async function prepareHostNativeDispatch(state: WorkspaceState, requestValue: HostExecutionRequest, tool: { readonly argumentsValue: unknown; readonly selection: HostSelection; readonly peerWorker?: boolean; readonly nativeSessionId?: string; readonly codexCoordinatorStartup?: unknown; readonly codexSettingsIntent?: unknown; readonly codexObservation?: import("./codex-native-health.js").CodexHookObservation; readonly priorPeerReceipt?: unknown; readonly userHome?: string; readonly cwd?: string; readonly workspaceRoot?: string }, home?: string): Promise<HostNativePreparation> {
   let request = validateHostExecutionRequest(requestValue);
   if (tool.priorPeerReceipt !== undefined) {
     if (!tool.peerWorker || request.capabilities.hostKind !== "codex") throw new HostExecutionError("prior Pack application receipt recovery applies only to a Codex peer worker");
@@ -230,9 +244,30 @@ export async function prepareHostNativeDispatch(state: WorkspaceState, requestVa
   const decision = context.executionDecision as HostExecutionDecision;
   const executable = executionDecisionEligibility(decision) === "executable" && context.dispatchAdmitted === true;
   if (executable && !sameHostSelection(tool.selection, decision.requestedSelection)) throw new HostExecutionError("tool request selection differs from the resolved selection; construct arguments for the resolved request, not an invented actual model");
+  const requestedAt = new Date().toISOString();
+  let argumentsValue = executable && packDispatch !== undefined
+    ? bindPackDispatchToNativeArguments(tool.argumentsValue, packDispatch)
+    : tool.argumentsValue;
+  if (executable && packDispatch !== undefined && request.capabilities.hostKind === "codex" && isCodexNativeSpawn(request.capabilities.toolName)) {
+    argumentsValue = bindCodexPackTaskName(object(argumentsValue));
+  }
+  const args = object(argumentsValue);
+  const promptField = nativeTaskPromptField(args);
+  const offer = executable && request.phase === "dispatch" && request.action !== "coordination" && tool.workspaceRoot !== undefined && promptField !== undefined
+    ? await dispatchRecallOffer(state, tool.workspaceRoot, request.workId, requestedAt).catch(() => undefined)
+    : undefined;
+  if (offer !== undefined && promptField !== undefined) {
+    argumentsValue = { ...args, [promptField]: [
+      args[promptField], "",
+      "Optional recall candidates. Read any useful references with recall-read. You may continue without reading any.",
+      ...offer.lines,
+    ].join("\n") };
+  }
   const payload = {
-    schemaVersion: HOST_NATIVE_PREPARATION_VERSION, context, decision, ...(codexPeerWorker ? { codexPeerWorker } : {}),
-    attempt: executable ? { id: `local-attempt:${randomUUID()}`, identityKind: "local-correlation" as const, toolName: request.capabilities.toolName, argumentsValue: packDispatch === undefined ? tool.argumentsValue : bindPackDispatchToNativeArguments(tool.argumentsValue, packDispatch), requestedAt: new Date().toISOString() } : null,
+    schemaVersion: HOST_NATIVE_PREPARATION_VERSION,
+    context: offer === undefined ? context : { ...context, recallCandidates: { workspaceId: offer.workspaceId, references: offer.references } },
+    decision, ...(codexPeerWorker ? { codexPeerWorker } : {}),
+    attempt: executable ? { id: `local-attempt:${randomUUID()}`, identityKind: "local-correlation" as const, toolName: request.capabilities.toolName, argumentsValue, requestedAt } : null,
   };
   return validateHostNativePreparation({ ...payload, digest: dotDigest(payload) });
 }

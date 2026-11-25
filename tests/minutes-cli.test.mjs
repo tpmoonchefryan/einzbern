@@ -195,6 +195,26 @@ test("STORY-689 R01: numeric bracket labels with decision text remain explicit l
   }
 });
 
+test("INIT-003 records decision titles and tags without changing the numbered text", async (context) => {
+  const fixture = await library(context);
+  const file = join(fixture.base, "metadata.json");
+  const rows = [
+    { text: "Keep the configuration, including the optional fallback.", title: "Configuration baseline", tags: ["configuration"] },
+    { text: "Schedule the survey for spring.", title: "Estuary survey", tags: ["wetland", "egret"] },
+  ];
+  await writeFile(file, JSON.stringify(rows));
+  const workspace = ["--workspace", fixture.workspace];
+  const receipt = await cli(["minutes-record", ...workspace, "--at", at(5), "--project-id", fixture.projectId,
+    "--external-key", "MC-MIN-METADATA", "--title", "Two decisions", "--summary", "Minutes of the working session",
+    "--decisions-file", file]);
+  const expected = rows.map((row, index) => ({ number: index + 1, ...row }));
+  assert.deepEqual(receipt.decisions, expected);
+  const head = await cli(["minutes-show", ...workspace, "--id", receipt.id]);
+  assert.deepEqual(head.record.decisions, expected);
+  const candidates = await cli(["recall", ...workspace, "--at", at(6), "--view", "candidates", "--query", "wetland egret"]);
+  assert.ok(candidates.context.some((line) => line.includes("Estuary survey") && line.endsWith(receipt.id + "#D2")), JSON.stringify(candidates.context));
+});
+
 test("STORY-475 R2: decided-in on work-create names new minutes, and minutes-list and minutes-show read the relation from both ends", async (context) => {
   const fixture = await library(context);
   const linked = await cli(["minutes-record", "--workspace", fixture.workspace, "--at", at(5), "--project-id", fixture.projectId, "--external-key", "MC-MIN-1", "--title", "Linked", "--summary", "s", "--decisions", "one", "--work-ids", fixture.storyId]);
@@ -252,7 +272,7 @@ test("STORY-475 AC3, R3: conference-open answers CLI_COMMAND_UNKNOWN, and the ca
   const names = COMMAND_CATALOG.map((entry) => entry.name);
   assert.deepEqual(names.filter((name) => name.startsWith("conference-")), []);
   const mutates = Object.fromEntries(COMMAND_CATALOG.filter((entry) => entry.name.startsWith("minutes-")).map((entry) => [entry.name, entry.mutates]));
-  assert.deepEqual(mutates, { "minutes-list": false, "minutes-record": true, "minutes-show": false });
+  assert.deepEqual(mutates, { "minutes-list": false, "minutes-record": true, "minutes-show": false, "minutes-supplement-batch": true, "minutes-supplement-inventory": false });
 });
 
 test("666: comma-separated parameter fragments require a decisions file and complete short decisions remain valid", async (context) => {

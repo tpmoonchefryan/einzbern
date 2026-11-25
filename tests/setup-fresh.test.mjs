@@ -22,6 +22,7 @@ import { hostHookCommand, isEinzbernHookCommand } from "../dist/build/packages/c
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { FRAMEWORK_VERSION, chainIdentity, computeInstallTreeDigest, materializeWorkspace, readStorageLocation, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
 import { DOCTOR_CHECKS, runDoctor } from "../dist/build/packages/core/src/doctor.js";
+import { NAVIGATION_LINES } from "../dist/build/packages/core/src/navigation-lines.js";
 import { SETUP_MODES, applySetup, detectSetupContext, planSetup } from "../dist/build/packages/core/src/setup.js";
 import { SKILL_COPY_ROOTS, skillCopyPath } from "../dist/build/packages/core/src/skill-copies.js";
 
@@ -293,13 +294,17 @@ test("480-AC1: the default answers install the library, the registry entry, both
   for (const root of SKILL_COPY_ROOTS) assert.ok((await lstat(join(skillCopyPath(f.home, root), "SKILL.md"))).isFile(), root.host);
   const launcher = join(f.deviceHome, "engine", "hook.mjs");
   assert.deepEqual(await readFile(launcher), await readFile(join(repositoryRoot, "scripts/einzbern-hook-launcher.mjs")));
-  assert.deepEqual(await einzbernHooks(join(f.home, ".claude", "settings.json")), [["UserPromptSubmit", hostHookCommand(launcher, "UserPromptSubmit", f.home)], ["SubagentStart", hostHookCommand(launcher, "SubagentStart", f.home)], ["PreToolUse", hostHookCommand(launcher, "PreToolUse", f.home)]]);
-  assert.deepEqual(await einzbernHooks(join(f.home, ".codex", "hooks.json")), [["UserPromptSubmit", hostHookCommand(launcher, "UserPromptSubmit", f.home)], ["SubagentStart", hostHookCommand(launcher, "SubagentStart", f.home)], ["PreToolUse", hostHookCommand(launcher, "PreToolUse", f.home)], ["PostToolUse", hostHookCommand(launcher, "PostToolUse", f.home)], ["Stop", hostHookCommand(launcher, "Stop", f.home)]]);
+  const claudeEvents = ["UserPromptSubmit", "SubagentStart", "PreToolUse", "SessionStart"];
+  const codexEvents = ["UserPromptSubmit", "SubagentStart", "PreToolUse", "PostToolUse", "Stop", "SessionStart"];
+  assert.deepEqual(await einzbernHooks(join(f.home, ".claude", "settings.json")),
+    claudeEvents.map(event => [event, hostHookCommand(launcher, event, f.home)]));
+  assert.deepEqual(await einzbernHooks(join(f.home, ".codex", "hooks.json")),
+    codexEvents.map(event => [event, hostHookCommand(launcher, event, f.home)]));
   assert.match(await readFile(join(f.home, ".codex", "config.toml"), "utf8"), /^\[features\]\nhooks = true$/mu);
   const claude = await readFile(join(f.project, "CLAUDE.md"), "utf8");
   assert.match(claude, /<!-- einzbern:section id=claude-import rev=1 digest=[0-9a-f]{64} -->\n@AGENTS\.md\n<!-- einzbern:section-end id=claude-import -->/u);
   const agents = await readFile(join(f.project, "AGENTS.md"), "utf8");
-  assert.match(agents, /<!-- einzbern:section id=agents rev=1 digest=[0-9a-f]{64} -->\nThis workspace uses Einzbern\./u);
+  assert.match(agents, /<!-- einzbern:section id=agents rev=1 digest=[0-9a-f]{64} -->\nThis project is managed by Einzbern\./u);
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "written");
   // Nothing in the project names this machine's paths, and the project's own host settings are untouched.
   for (const file of ["AGENTS.md", "CLAUDE.md"]) assert.ok(!(await readFile(join(f.project, file), "utf8")).includes(f.base), file);
@@ -350,8 +355,8 @@ test("480-AC2: a second run with the same answers plans no write and writes noth
   assert.equal(second.library.libraryId, first.library.libraryId);
   assert.deepEqual(await Promise.all(files.map((path) => readFile(path, "utf8"))), before, "every file keeps its bytes");
   assert.deepEqual(await snapshot([join(f.home, ".claude", "skills"), join(f.home, ".agents", "skills")]), copies);
-  assert.equal((await einzbernHooks(join(f.home, ".claude", "settings.json"))).length, 3);
-  assert.equal((await einzbernHooks(join(f.home, ".codex", "hooks.json"))).length, 5);
+  assert.equal((await einzbernHooks(join(f.home, ".claude", "settings.json"))).length, 4);
+  assert.equal((await einzbernHooks(join(f.home, ".codex", "hooks.json"))).length, 6);
   assert.equal((before[3].match(/einzbern:section id=agents /gu) ?? []).length, 1);
   assertSelfCheckGreen(second);
 });
@@ -574,7 +579,7 @@ test("fresh defaults reuse one external library for different projects with sepa
   for (const root of [f.project, secondRoot]) assertSelfCheckGreen({ selfCheck: await check(root) });
   const document = join(f.project, "AGENTS.md");
   const original = await readFile(document, "utf8");
-  const changed = original.replace("Load and follow", "Owner edited");
+  const changed = original.replace("Load the Mana Orchestrate skill", "Owner edited");
   assert.notEqual(changed, original);
   await writeFile(document, changed);
   const edited = (await check(f.project)).find(entry => entry.check === "managed-sections");
@@ -723,8 +728,8 @@ test("fresh installation is portable: no device paths persist and a moved instal
   }
   await inspect(f.home); await inspect(f.deviceHome); await inspect(installed.library.path);
   const agents = await readFile(join(f.project, "AGENTS.md"), "utf8");
-  assert.match(agents, /Load and follow the Mana Orchestrate skill/u);
-  assert.doesNotMatch(agents, /Recall first|--query|settings-catalog|variables-system|variables-custom/u);
+  assert.ok(agents.includes(NAVIGATION_LINES.join("\n")));
+  assert.doesNotMatch(agents, /--query|settings-catalog|variables-system|variables-custom/u);
   const next = await plan(f);
   assert.deepEqual(next.writes, [], "an identical install is a no-op");
 
@@ -745,9 +750,13 @@ test("fresh installation is portable: no device paths persist and a moved instal
   assert.ok(JSON.parse(checked.stdout).checks.every(check => check.ok), checked.stdout);
   const hook = JSON.parse(await readFile(join(home, ".codex/hooks.json"), "utf8")).hooks.SubagentStart[0].hooks[0].command;
   delete env.EINZBERN_HOME;
-  const invoked = spawnSync(hook, { shell: true, cwd: project, env, input: JSON.stringify({ hook_event_name: "SubagentStart", cwd: project, agent_type: "portability" }), encoding: "utf8" });
-  assert.equal(invoked.status, 0, invoked.stderr);
-  assert.equal(invoked.stderr, "");
-  assert.match(JSON.parse(invoked.stdout).hookSpecificOutput.additionalContext, /Load and follow the Mana Orchestrate skill/u);
-  assert.doesNotMatch(invoked.stdout, /Recall first|--query/u);
+  function invokeHook() {
+    const invoked = spawnSync(hook, { shell: true, cwd: project, env, input: JSON.stringify({ hook_event_name: "SubagentStart", cwd: project, agent_type: "portability" }), encoding: "utf8" });
+    assert.equal(invoked.status, 0, invoked.stderr);
+    assert.equal(invoked.stderr, "");
+    return JSON.parse(invoked.stdout).hookSpecificOutput.additionalContext;
+  }
+  assert.equal(invokeHook(), "");
+  await setWorkspaceSetting(atMoved(installed.library.path), { key: "agents.sharedNavigation", value: "declined", occurredAt: at() });
+  assert.equal(invokeHook(), NAVIGATION_LINES.join("\n"));
 });

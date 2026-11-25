@@ -1010,7 +1010,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
   const sorted = (files) => [...new Set(files)].sort();
   const integrity = names("ci-artifact-transport ci-baseline-evidence ci-bootstrap ci-bootstrap-prerequisites ci-evidence-retention ci-git-source-blobs ci-impact-plan ci-selective-runner ci-test-roster");
   const common = names(`bootstrap bundle ci-light-contract ci-light-evidence config-backup-format configuration-contract dependency-materialization dependency-policy
-    dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify heavy-runs inc263-closeout inc275-mcp-absent memory-budget
+    dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify gate-evidence-reuse gate-run heavy-runs inc263-closeout inc275-mcp-absent memory-budget
     native-tool-evidence no-sibling-dependency node-floor offline-boundary operational-audit-boundaries output-session-lifecycle
     p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor privacy-boundary project-chain-model
     push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate release-tooling-audit-boundaries release-trust
@@ -1024,7 +1024,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
   expectedDocuments["docs/wiki/Glossary.md"] = sorted([...expectedDocuments["docs/wiki/Glossary.md"], ...names("names-alias-table")]);
   expectedDocuments["docs/wiki/Home.md"] = sorted([...expectedDocuments["docs/wiki/Home.md"], ...names("inc238-markdown-link-gate")]);
   const privacy = names(`bootstrap bundle ci-artifact-transport ci-baseline-evidence ci-bootstrap ci-bootstrap-prerequisites ci-evidence-retention ci-git-source-blobs ci-impact-plan ci-light-contract ci-light-evidence ci-selective-runner ci-test-roster
-    config-backup-format configuration-contract cross-repo-privacy dependency-materialization dependency-policy dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify
+    config-backup-format configuration-contract cross-repo-privacy dependency-materialization dependency-policy dispatch-admission-evidence final-gate-plan final-gate-plan-batch-verify gate-evidence-reuse gate-run
     heavy-runs inc263-closeout inc275-mcp-absent local-command-byte-fidelity memory-budget native-tool-evidence no-sibling-dependency node-floor offline-boundary
     operational-audit-boundaries otel-privacy-guard output-session-lifecycle p1-all-legs p1-roster p8-sbom-receipt-boundary p8-workflow-rc pack-release platform-doctor
     privacy-boundary privacy-git-metadata privacy-normalization project-chain-model push-gate-p1-coverage readme-render integration-release release-lockstep release-readiness release-tag-gate

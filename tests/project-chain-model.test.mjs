@@ -233,7 +233,7 @@ test("MIN291 D1: an optional design authority does not block development, while 
   const partial = await resolveProjectTarget(f.a.reference, f.home);
   assert.equal(partial.readiness.design.ready, false, "declaring authority activates companion requirements");
   assert.ok(partial.readiness.design.missing.includes("design.repository"));
-  assert.ok(partial.readiness.design.missing.includes("design.consumedVersion"));
+  assert.ok(!partial.readiness.design.missing.includes("design.consumedVersion"));
   assert.equal(partial.readiness.development.ready, false);
   assert.equal(partial.readiness.model.ready, true);
   await configure(f.a, "alpha");
@@ -540,12 +540,11 @@ test("R46 I03: unregistered, unavailable and cyclic common defaults are read per
   assert.equal(repaired.settings.some(row => row.source?.status === "unresolved"), false);
 });
 
-// TCRN-CROSS-INIT-053 R47 (c1-B; Owner 2026-10-09, round 7): a coordination chain keeps ten runtime settings
-// for itself, the four library settings with the artifact language and the orchestration limits of the work
-// dispatched from it. It lists and writes them for the whole library only; a project override of one refuses
-// in the library's words, and models.* and every development key keep the coordination refusal.
-const COORDINATION_RUNTIME_KEYS = ["agents.generation", "agents.sharedNavigation", "artifact.language", "engine.requiredVersion", "execution.maxConcurrentSubagents", "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath"];
-test("R47 c1-B: a coordination chain lists runtime settings but historical quota rows are read-only", async t => {
+// TCRN-CROSS-INIT-053 R47 (c1-B), updated for STORY-011: a coordination chain keeps only its
+// library-owned runtime settings. Model concurrency/quota are now device-local controls, while
+// recorded project rows remain history and cannot be edited through workspace settings.
+const COORDINATION_RUNTIME_KEYS = ["agents.generation", "agents.sharedNavigation", "artifact.language", "engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath"];
+test("R47 c1-B / STORY-011: coordination settings exclude device-local model policy and keep old rows as history", async t => {
   const f = await fixture(t);
   const own = ["--workspace", f.coordination.path];
   const targeted = [...own, "--project-id", f.coordination.reference.projectId];
@@ -555,19 +554,24 @@ test("R47 c1-B: a coordination chain lists runtime settings but historical quota
     assert.deepEqual([...new Set(catalog.settings.flatMap(row => [row.scope, row.layer]))], ["library"]);
     assert.equal(catalog.design, null);
   }
-  const written = [["artifact.language", "fr"], ["execution.maxConcurrentSubagents", "3"]];
+  const written = [["artifact.language", "fr"]];
   for (const [key, value] of written) await setWorkspaceSetting(f.coordination.path, { key, value, occurredAt: at });
+  await appendHistoricalSetting(f.coordination, "execution.maxConcurrentSubagents", "3");
+  await appendHistoricalSetting(f.coordination, "quota.fiveHourWaitPercent", "80");
   for (const args of [own, targeted]) {
     const catalog = await catalogAs(f, args);
     for (const [key, value] of written) assert.deepEqual([rowOf(catalog, key).currentValue, rowOf(catalog, key).declaredValue, rowOf(catalog, key).source.kind], [value, value, "library"], key);
-    assert.deepEqual([rowOf(catalog, "quota.fiveHourWaitPercent").currentValue, rowOf(catalog, "quota.fiveHourWaitPercent").declaredValue, rowOf(catalog, "quota.fiveHourWaitPercent").source.kind], ["90", null, "default"]);
+    assert.equal(catalog.settings.some(row => row.key === "execution.maxConcurrentSubagents" || row.key.startsWith("quota.")), false);
   }
   const native = await materializeWorkspace(f.coordination.path);
   assert.deepEqual(native.settings.filter(record => COORDINATION_RUNTIME_KEYS.includes(record.key)).map(record => [record.key, record.projectId ?? null]), written.map(([key]) => [key, null]));
   assert.deepEqual(scopedWorkspaceState(native, f.coordination.reference.projectId).settings.map(record => [record.key, record.value]), written);
   const projectOverride = /this setting belongs to the whole library and cannot have a project override/u;
-  for (const [key, value] of [["artifact.language", "ja"], ["execution.maxConcurrentSubagents", "2"], ["quota.fiveHourParallelOffPercent", "50"], ["quota.fiveHourWaitPercent", "50"], ["quota.weeklyParallelOffPercent", "50"], ["quota.weeklyWaitPercent", "50"], ["workspace.generatedArtifactsPath", "elsewhere"]]) {
-    await assert.rejects(setWorkspaceSetting(f.coordination.path, { key, value, configurationProjectId: f.coordination.reference.projectId, occurredAt: at }), key.startsWith("quota.") ? { reasonCode: "SETTINGS_KEY_DEVICE_LEVEL" } : projectOverride, key);
+  for (const [key, value] of [["artifact.language", "ja"], ["workspace.generatedArtifactsPath", "elsewhere"]]) {
+    await assert.rejects(setWorkspaceSetting(f.coordination.path, { key, value, configurationProjectId: f.coordination.reference.projectId, occurredAt: at }), projectOverride, key);
+  }
+  for (const [key, value] of [["execution.maxConcurrentSubagents", "2"], ["quota.fiveHourParallelOffPercent", "50"], ["quota.fiveHourWaitPercent", "50"], ["quota.weeklyParallelOffPercent", "50"], ["quota.weeklyWaitPercent", "50"]]) {
+    await assert.rejects(setWorkspaceSetting(f.coordination.path, { key, value, occurredAt: at }), { reasonCode: "SETTINGS_KEY_DEVICE_LEVEL" }, key);
   }
   await assert.rejects(removeWorkspaceSetting(f.coordination.path, { key: "artifact.language", configurationProjectId: f.coordination.reference.projectId, occurredAt: at }), /is not set/u);
   const runtimeOnly = /coordination chains expose runtime settings only/u;
@@ -576,12 +580,6 @@ test("R47 c1-B: a coordination chain lists runtime settings but historical quota
     await assert.rejects(setWorkspaceSetting(f.coordination.path, { key: "models.tiers", value: tiers, ...(projectId === undefined ? {} : { configurationProjectId: projectId }), occurredAt: at }), { reasonCode: "SETTINGS_KEY_DEVICE_LEVEL" });
     await assert.rejects(setWorkspaceSetting(f.coordination.path, { key: "knowledge.articlesPath", value: "articles", ...(projectId === undefined ? {} : { configurationProjectId: projectId }), occurredAt: at }), runtimeOnly);
   }
-  for (const key of COORDINATION_RUNTIME_KEYS.filter(key => key.startsWith("quota."))) {
-    await assert.rejects(setWorkspaceSetting(f.coordination.path, { key, value: "90", occurredAt: at }), { reasonCode: "SETTINGS_KEY_DEVICE_LEVEL" });
-  }
-  // Active library declarations still remove normally without opening historical quota writes.
-  await removeWorkspaceSetting(f.coordination.path, { key: "execution.maxConcurrentSubagents", occurredAt: at });
-  assert.equal(rowOf(await catalogAs(f, targeted), "execution.maxConcurrentSubagents").source.kind, "default");
   // A project chain's catalog is as before: every key, each with its static scope and layer.
   const project = await catalogAs(f, ["--workspace", f.a.path, "--project-id", f.a.reference.projectId]);
   const statics = readSettingsCatalog(f.a.reference.libraryId, []).settings;
@@ -591,26 +589,23 @@ test("R47 c1-B: a coordination chain lists runtime settings but historical quota
   assert.equal(rowOf(await catalogAs(f, ["--workspace", f.a.path, "--project-id", f.a.reference.projectId]), "artifact.language").declaredValue, "ja");
 });
 
-// R47 c1-B (approved contract items 7 and 10): a coordination chain's runtime settings are its own. An
-// involved project resolves its own values, and a project whose common default is the coordination chain
-// gets none of them (the coordination chain is not a development target).
-test("R47 c1-B: involved projects and common defaults never take the coordination chain's runtime settings", async t => {
+// R47 c1-B: a coordination chain's library settings do not become development defaults.
+// STORY-011 model controls live on this device and apply independently of coordination state.
+test("R47 c1-B / STORY-011: involved projects ignore coordination defaults and read device model limits", async t => {
   const f = await fixture(t);
   await setWorkspaceSetting(f.coordination.path, { key: "artifact.language", value: "fr", occurredAt: at });
-  await setWorkspaceSetting(f.coordination.path, { key: "execution.maxConcurrentSubagents", value: "3", occurredAt: at });
+  await applyMachineSettingSet({ key: "models.maxConcurrentSubagents", value: "3", occurredAt: at, path: join(f.home, "machine-settings.json") });
   const state = await createWork(f.coordination.path, { projectId: f.coordination.reference.projectId, externalKey: "R47-C1B", kind: "Initiative", parentId: null, title: "Coordinated work", involvedProjects: { state: "selected", targets: [f.a.reference] }, occurredAt: at });
   const contexts = await workProjectContexts(state, state.work[0].id, f.home);
   const value = key => contexts.contexts[0].settings.find(entry => entry.key === key);
   assert.deepEqual([value("artifact.language").value, value("artifact.language").source.kind, value("artifact.language").source.libraryId], ["en", "default", f.a.reference.libraryId]);
-  assert.deepEqual([value("execution.maxConcurrentSubagents").value, value("execution.maxConcurrentSubagents").source.kind], ["8", "default"]);
+  assert.deepEqual([contexts.contexts[0].executionConcurrency.genericLimit, contexts.contexts[0].executionConcurrency.effectiveLimit, contexts.contexts[0].executionConcurrency.origin], [3, 3, "generic"]);
   assert.equal(contexts.contexts[0].handoff.output.language, "en");
   await setConfigRecord(f.b.path, { collection: "chain", key: "common-default", projectId: f.b.reference.projectId, value: f.coordination.reference, occurredAt: at });
   const resolved = await resolveProjectTarget(f.b.reference, f.home);
   assert.deepEqual([resolved.status, resolved.reason, resolved.common.status, resolved.common.reason], ["conflicting", "common-default-unresolved", "unconfigured", "coordination-is-not-development"]);
   const catalog = await catalogAs(f, ["--workspace", f.b.path, "--project-id", f.b.reference.projectId]);
-  for (const key of ["artifact.language", "execution.maxConcurrentSubagents"]) {
-    assert.deepEqual([rowOf(catalog, key).currentValue, rowOf(catalog, key).source.kind, rowOf(catalog, key).source.status], [null, "common", "unresolved"], key);
-  }
+  assert.deepEqual([rowOf(catalog, "artifact.language").currentValue, rowOf(catalog, "artifact.language").source.kind, rowOf(catalog, "artifact.language").source.status], [null, "common", "unresolved"]);
   await assert.rejects(effectiveProjectState(await materializeWorkspace(f.b.path), f.b.reference.projectId, f.home), /effective configuration unavailable/u);
 });
 
@@ -670,25 +665,26 @@ test("552: projects with conflicting historical models consume one device policy
 });
 
 
-test("552: project handoff resolves device concurrency cap against each project budget using device-directory semantics", async t => {
+test("552 / STORY-011: handoff applies generic device concurrency while historical project caps remain inert", async t => {
   const f = await fixture(t);
   await applyMachineSettingSet({ key: "execution.maxConcurrentAgents", value: "3", occurredAt: at, path: join(f.home, "machine-settings.json") });
-  await setWorkspaceSetting(f.a.path, { key: "execution.maxConcurrentSubagents", value: "99", configurationProjectId: f.a.reference.projectId, occurredAt: at });
-  await setWorkspaceSetting(f.b.path, { key: "execution.maxConcurrentSubagents", value: "2", configurationProjectId: f.b.reference.projectId, occurredAt: at });
+  await applyMachineSettingSet({ key: "models.maxConcurrentSubagents", value: "2", occurredAt: at, path: join(f.home, "machine-settings.json") });
+  await appendHistoricalSetting(f.a, "execution.maxConcurrentSubagents", "99");
+  await appendHistoricalSetting(f.b, "execution.maxConcurrentSubagents", "1");
   const state = await createWork(f.coordination.path, { projectId: f.coordination.reference.projectId, externalKey: "DEVICE-CAP-HANDOFF", kind: "Initiative", parentId: null,
     involvedProjects: { state: "selected", targets: [f.a.reference, f.b.reference] }, occurredAt: at });
   const work = state.work.find(entry => entry.externalKey === "DEVICE-CAP-HANDOFF");
   const result = await workProjectContexts(state, work.id, f.home);
   for (const context of result.contexts) {
-    const alpha = context.reference.projectId === f.a.reference.projectId;
     assert.equal(context.executionConcurrency.deviceLimit, 3, "home names the device directory, not a user's parent home");
     assert.equal(context.deviceSettings.path, join(f.home, "machine-settings.json"));
     assert.equal(context.deviceSettings.settings.find(entry => entry.key === "execution.maxConcurrentAgents").currentValue, "3");
-    assert.equal(context.executionConcurrency.projectLimit, alpha ? 99 : 2);
-    assert.equal(context.executionConcurrency.effectiveLimit, alpha ? 3 : 2);
-    assert.equal(context.executionConcurrency.origin, alpha ? "device" : "project-budget");
+    assert.equal(context.executionConcurrency.genericLimit, 2);
+    assert.equal(context.executionConcurrency.projectLimit, null);
+    assert.equal(context.executionConcurrency.effectiveLimit, 2);
+    assert.equal(context.executionConcurrency.origin, "generic");
     assert.deepEqual(context.handoff.executionConcurrency, context.executionConcurrency);
-    assert.equal(context.handoff.settings.find(entry => entry.key === "execution.maxConcurrentSubagents").value, alpha ? "99" : "2", "declaration remains distinct from resolved cap");
+    assert.equal(context.handoff.settings.some(entry => entry.key === "execution.maxConcurrentSubagents"), false, "historical project caps do not enter handoff");
     assert.equal(context.writeAuthority, "not-granted");
   }
 });
@@ -696,7 +692,7 @@ test("552: project handoff resolves device concurrency cap against each project 
 test("552: work handoff consumes a request-bound policy decision, never treating read-only context as dispatch permission", async t => {
   const f = await fixture(t); await configureDevicePolicy(f);
   await applyMachineSettingSet({ key: "execution.maxConcurrentAgents", value: "3", occurredAt: at, path: join(f.home, "machine-settings.json") });
-  await setWorkspaceSetting(f.a.path, { key: "execution.maxConcurrentSubagents", value: "1", configurationProjectId: f.a.reference.projectId, occurredAt: at });
+  await applyMachineSettingSet({ key: "models.maxConcurrentSubagents", value: "1", occurredAt: at, path: join(f.home, "machine-settings.json") });
   const state = await createWork(f.coordination.path, { projectId: f.coordination.reference.projectId, externalKey: "ADMISSION-HANDOFF", kind: "Initiative", parentId: null,
     involvedProjects: { state: "selected", targets: [f.a.reference] }, occurredAt: at });
   const id = state.work.find(entry => entry.externalKey === "ADMISSION-HANDOFF").id;
@@ -726,7 +722,7 @@ test("552: work targets and common defaults share one captured engine/device vie
   const f = await fixture(t);
   const policy = await configureDevicePolicy(f);
   await applyMachineSettingSet({ key: "execution.maxConcurrentAgents", value: "3", occurredAt: at, path: join(f.home, "machine-settings.json") });
-  await setWorkspaceSetting(f.a.path, { key: "execution.maxConcurrentSubagents", value: "2", configurationProjectId: f.a.reference.projectId, occurredAt: at });
+  await applyMachineSettingSet({ key: "models.maxConcurrentSubagents", value: "2", occurredAt: at, path: join(f.home, "machine-settings.json") });
   await setConfigRecord(f.b.path, { collection: "chain", key: "common-default", projectId: f.b.reference.projectId, value: f.a.reference, occurredAt: at });
   const state = await createWork(f.coordination.path, { projectId: f.coordination.reference.projectId, externalKey: "CAPTURED-EXECUTION-VIEW", kind: "Initiative", parentId: null,
     involvedProjects: { state: "selected", targets: [f.a.reference, f.b.reference] }, occurredAt: at });

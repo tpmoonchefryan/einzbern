@@ -1,30 +1,28 @@
 <!-- SPDX-License-Identifier: Apache-2.0 -->
 # Engine hook events
 
-The installed engine owns UserPromptSubmit, SubagentStart and PreToolUse for
+The installed engine owns SessionStart, UserPromptSubmit, SubagentStart and PreToolUse for
 Claude Code and Codex, plus PostToolUse and Stop for Codex. Codex peer coordination does not register SubagentStop or
 a collector keepalive hook. Setup, update and
 host-render reconcile the same stable launcher commands; doctor compares the
-installed hooks with that same plan. SessionStart remains the navigation fallback
-when agents.navigation is declined. SSH and control-tree hooks remain retired.
-DSH's existing contract is unchanged.
+installed hooks with that same plan. SessionStart and SubagentStart use the matched
+library's `agents.sharedNavigation`. With `written`, managed AGENTS.md carries
+the three lines. With `declined`, the startup hooks supply those same lines.
+SSH and control-tree hooks remain retired.
 
 Devin has its own registration in its user configuration: UserPromptSubmit, a
-PreToolUse group matched to its `read` tool, and SessionStart when navigation is
-declined. Devin has no subagent-start event. It also runs the Claude Code
+PreToolUse group matched to its `read` tool, and SessionStart for library navigation.
+Devin has no subagent-start event. It also runs the Claude Code
 registration it imports; the launcher lets that run answer nothing while Devin's
 own registration is installed. See `specs/devin-host-v1.md`.
 
 ## Subagent first-work context (BL-34)
 
-The native SubagentStart envelope provides agent_type and agent_id, not the
-delegated task text. The engine therefore queries the normal registered-project
-recall pipeline with agent_type, applies its normal threshold and byte budget,
-and returns matching lines beside the navigation pointer in SubagentStart's
-hookSpecificOutput.additionalContext. It does not invent a prompt field, read
-arbitrary transcripts or claim that an agent-type query is task-specific recall.
-Without a match, the navigation pointer still tells the target to recall its task.
-The hook log records the actual recall outcome, including empty input and no hits.
+The native SubagentStart envelope carries agent_type and agent_id. The hook uses
+the library navigation setting and records the empty task query. The admitted
+dispatch preparation can offer recall candidates using the work's title and goal.
+The model chooses which candidates to read. UserPromptSubmit uses the actual
+prompt and logs its recall outcome, including empty input and no hits.
 
 Both hosts document context injection at subagent start. Repository tests verify
 real recall with native-shaped payloads and the output protocol. They cannot prove

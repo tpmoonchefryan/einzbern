@@ -6,8 +6,8 @@
       "semanticType": "enum",
       "storageType": "string",
       "controlType": "enum",
-      "registeredScope": "project",
-      "scope": "project",
+      "registeredScope": "library",
+      "scope": "library",
       "owner": "governed-owner",
       "schemaOwner": "installed-engine",
       "source": "library events bound to stable target identity",
@@ -71,8 +71,8 @@
       "semanticType": "enum",
       "storageType": "string",
       "controlType": "enum",
-      "registeredScope": "project",
-      "scope": "project",
+      "registeredScope": "library",
+      "scope": "library",
       "owner": "governed-owner",
       "schemaOwner": "installed-engine",
       "source": "library events bound to stable target identity",
@@ -205,7 +205,7 @@
       "inheritance": "explicit project parent chain and permitted public defaults; no implicit coordination-library inheritance",
       "sharing": "portable declarations sync with library",
       "export": "on-demand scoped settings query and project context; no AGENTS value snapshot",
-      "consumer": "project-chain.ts design context; project-scope.ts",
+      "consumer": "historical declaration retained for library replay",
       "effect": "next consumer read; managed outputs require explicit render",
       "compatibility": "historical string events preserved; typed readback does not rewrite events",
       "defaultValue": null
@@ -287,6 +287,52 @@
       "defaultValue": null
     },
     {
+      "key": "execution.codexAllowNonCoordinatorPolling",
+      "semanticType": "boolean",
+      "storageType": "string",
+      "controlType": "boolean",
+      "registeredScope": "device",
+      "scope": "device",
+      "owner": "device-user",
+      "schemaOwner": "installed-engine",
+      "source": "device machine-settings.json",
+      "storageSource": "device machine-settings.json",
+      "inheritance": "device declaration then consumer default",
+      "sharing": "device-local; not library synced",
+      "export": "local runtime only; no shared project export",
+      "consumer": "codex-peer-hooks.ts polling policy and codex-query-guard.ts continuation gate",
+      "effect": "next-open",
+      "compatibility": "catalog default may differ from consumer fallback; no global precedence chain",
+      "defaultValue": "false",
+      "allowedValues": [
+        "false",
+        "true"
+      ]
+    },
+    {
+      "key": "execution.codexDualConversation",
+      "semanticType": "boolean",
+      "storageType": "string",
+      "controlType": "boolean",
+      "registeredScope": "device",
+      "scope": "device",
+      "owner": "device-user",
+      "schemaOwner": "installed-engine",
+      "source": "device machine-settings.json",
+      "storageSource": "device machine-settings.json",
+      "inheritance": "device declaration then consumer default",
+      "sharing": "device-local; not library synced",
+      "export": "local runtime only; no shared project export",
+      "consumer": "codex-peer-hooks.ts Codex workflow-mode and polling-scope resolver",
+      "effect": "next-open",
+      "compatibility": "catalog default may differ from consumer fallback; no global precedence chain",
+      "defaultValue": "true",
+      "allowedValues": [
+        "false",
+        "true"
+      ]
+    },
+    {
       "key": "execution.maxConcurrentAgents",
       "semanticType": "integer",
       "storageType": "string",
@@ -334,17 +380,17 @@
       "storageType": "string",
       "controlType": "number",
       "registeredScope": "project",
-      "scope": "project",
+      "scope": "host",
       "owner": "governed-owner",
       "schemaOwner": "installed-engine",
-      "source": "library events bound to stable target identity",
+      "source": "device engine-model-policy.json hosts[host]",
       "storageSource": "library settings.updated events (historical string transport)",
-      "inheritance": "explicit project parent chain and permitted public defaults; no implicit coordination-library inheritance",
-      "sharing": "portable declarations sync with library",
-      "export": "consumer-specific whitelist; library config projection is not an authority",
-      "consumer": "execution-policy.ts project budget; orchestrator runtime handoff",
-      "effect": "next consumer read; managed outputs require explicit render",
-      "compatibility": "historical string events preserved; typed readback does not rewrite events",
+      "inheritance": "explicit host only; no project fallback",
+      "sharing": "historical declaration syncs with library; effective device policy does not sync",
+      "export": "runtime policy reference and handoff only; do not freeze device choices into shared AGENTS",
+      "consumer": "historical project concurrency compatibility only; use models.maxConcurrentSubagents device setting and nullable engine-model-policy.ts host override",
+      "effect": "next runtime resolution; historical declarations remain diagnostic",
+      "compatibility": "historical declaration preserved for replay/diagnostics; not engine policy authority",
       "defaultValue": "8",
       "min": 1
     },
@@ -486,6 +532,111 @@
       "compatibility": "historical declaration preserved for replay/diagnostics; not engine policy authority",
       "defaultValue": "1",
       "min": 1
+    },
+    {
+      "key": "models.maxConcurrentSubagents",
+      "semanticType": "integer",
+      "storageType": "string",
+      "controlType": "number",
+      "registeredScope": "device",
+      "scope": "device",
+      "owner": "device-user",
+      "schemaOwner": "installed-engine",
+      "source": "device machine-settings.json",
+      "storageSource": "device machine-settings.json",
+      "inheritance": "device declaration then consumer default",
+      "sharing": "device-local; not library synced",
+      "export": "local runtime only; no shared project export",
+      "consumer": "machine-settings.ts generic subagent concurrency cap; engine-model-policy.ts nullable host override",
+      "effect": "next-open",
+      "compatibility": "catalog default may differ from consumer fallback; no global precedence chain",
+      "defaultValue": "8",
+      "min": 1,
+      "max": 9007199254740991
+    },
+    {
+      "key": "models.quota.fiveHourParallelOffPercent",
+      "semanticType": "integer",
+      "storageType": "string",
+      "controlType": "number",
+      "registeredScope": "device",
+      "scope": "device",
+      "owner": "device-user",
+      "schemaOwner": "installed-engine",
+      "source": "device machine-settings.json",
+      "storageSource": "device machine-settings.json",
+      "inheritance": "device declaration then consumer default",
+      "sharing": "device-local; not library synced",
+      "export": "local runtime only; no shared project export",
+      "consumer": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
+      "effect": "next-open",
+      "compatibility": "catalog default may differ from consumer fallback; no global precedence chain",
+      "defaultValue": "75",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "models.quota.fiveHourWaitPercent",
+      "semanticType": "integer",
+      "storageType": "string",
+      "controlType": "number",
+      "registeredScope": "device",
+      "scope": "device",
+      "owner": "device-user",
+      "schemaOwner": "installed-engine",
+      "source": "device machine-settings.json",
+      "storageSource": "device machine-settings.json",
+      "inheritance": "device declaration then consumer default",
+      "sharing": "device-local; not library synced",
+      "export": "local runtime only; no shared project export",
+      "consumer": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
+      "effect": "next-open",
+      "compatibility": "catalog default may differ from consumer fallback; no global precedence chain",
+      "defaultValue": "90",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "models.quota.weeklyParallelOffPercent",
+      "semanticType": "integer",
+      "storageType": "string",
+      "controlType": "number",
+      "registeredScope": "device",
+      "scope": "device",
+      "owner": "device-user",
+      "schemaOwner": "installed-engine",
+      "source": "device machine-settings.json",
+      "storageSource": "device machine-settings.json",
+      "inheritance": "device declaration then consumer default",
+      "sharing": "device-local; not library synced",
+      "export": "local runtime only; no shared project export",
+      "consumer": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
+      "effect": "next-open",
+      "compatibility": "catalog default may differ from consumer fallback; no global precedence chain",
+      "defaultValue": "95",
+      "min": 1,
+      "max": 100
+    },
+    {
+      "key": "models.quota.weeklyWaitPercent",
+      "semanticType": "integer",
+      "storageType": "string",
+      "controlType": "number",
+      "registeredScope": "device",
+      "scope": "device",
+      "owner": "device-user",
+      "schemaOwner": "installed-engine",
+      "source": "device machine-settings.json",
+      "storageSource": "device machine-settings.json",
+      "inheritance": "device declaration then consumer default",
+      "sharing": "device-local; not library synced",
+      "export": "local runtime only; no shared project export",
+      "consumer": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
+      "effect": "next-open",
+      "compatibility": "catalog default may differ from consumer fallback; no global precedence chain",
+      "defaultValue": null,
+      "min": 1,
+      "max": 100
     },
     {
       "key": "models.tiers",
@@ -717,6 +868,29 @@
       "defaultValue": null,
       "min": 1,
       "max": 100
+    },
+    {
+      "key": "retrieval.metadataOnly",
+      "semanticType": "boolean",
+      "storageType": "string",
+      "controlType": "boolean",
+      "registeredScope": "library",
+      "scope": "library",
+      "owner": "governed-owner",
+      "schemaOwner": "installed-engine",
+      "source": "library events bound to stable target identity",
+      "storageSource": "library settings.updated events (historical string transport)",
+      "inheritance": "target library only",
+      "sharing": "portable declarations sync with library",
+      "export": "consumer-specific whitelist; library config projection is not an authority",
+      "consumer": "minutes search, recall and dispatch candidates after historical metadata review",
+      "effect": "next consumer read; managed outputs require explicit render",
+      "compatibility": "historical string events preserved; typed readback does not rewrite events",
+      "defaultValue": "false",
+      "allowedValues": [
+        "true",
+        "false"
+      ]
     },
     {
       "key": "retrieval.promptLanguages",
@@ -6871,6 +7045,45 @@
         "owner": "device-user",
         "source": "explicit invocation",
         "persistence": "invocation",
+        "sensitivity": "ordinary",
+        "pathBase": null,
+        "sharing": "private local invocation; only declared normalized evidence may be shared",
+        "export": "not a shared setting; no raw tool arguments, tokens, local paths or backup content promoted to governed evidence",
+        "restart": "one invocation only; no persistent target, policy, schedule or admission bypass",
+        "editing": "dedicated invocation only; not a generic settings-editor field",
+        "consumption": "wired",
+        "key": "cli:execution-codex-peer-record:timing",
+        "kind": "cli-argument",
+        "name": "--timing",
+        "command": "execution-codex-peer-record",
+        "catalogReference": "COMMAND_CATALOG[execution-codex-peer-record].flags[timing]",
+        "consumer": [
+          "packages/cli/src/index.ts dispatchCli",
+          "packages/cli/src/native-tool-commands.ts runNativeToolCommand"
+        ],
+        "precedence": [
+          "explicit execution-codex-peer-record --timing",
+          "absent; no fabricated evidence, identity, approval or revision"
+        ],
+        "semanticType": "string",
+        "validation": "string. Existing strict pair parser rejects unknown/duplicate flags. Owning typed validator remains authoritative.",
+        "defaultDescription": "absent; no fabricated evidence, identity, approval or revision",
+        "scope": "one fixed Codex peer batch receipt",
+        "effect": "Recomputes fixed membership, actual native results and report delivery; retained latest prior prevents blind redispatch/resend. Recording never launches peers, sends messages or grants authorization.",
+        "flag": {
+          "name": "timing",
+          "required": false,
+          "valueKind": "string"
+        }
+      },
+      {
+        "classification": "lifecycle-input",
+        "visibility": "public",
+        "transport": "argv-string",
+        "defaultValue": null,
+        "owner": "device-user",
+        "source": "explicit invocation",
+        "persistence": "invocation",
         "sensitivity": "context-may-contain-private-data",
         "pathBase": "process cwd for relative path; owning consumer validates",
         "sharing": "private local invocation; only declared normalized evidence may be shared",
@@ -8860,6 +9073,11 @@
             "valueKind": "json"
           },
           {
+            "name": "expected-store-revision",
+            "required": false,
+            "valueKind": "integer"
+          },
+          {
             "name": "at",
             "required": true,
             "valueKind": "instant"
@@ -8935,6 +9153,16 @@
             "name": "offset",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "search",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "newest-first",
+            "required": false,
+            "valueKind": "boolean"
           }
         ]
       },
@@ -9058,6 +9286,115 @@
         ]
       },
       {
+        "name": "execution-codex-batch-adopt",
+        "availability": "cli",
+        "mutates": true,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "from-file",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "timing",
+            "required": false,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
+        "name": "execution-codex-batch-arm",
+        "availability": "cli",
+        "mutates": true,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "initiative",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "coordinator",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "decided-in",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "existing",
+            "required": false,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
+        "name": "execution-codex-batch-observe",
+        "availability": "cli",
+        "mutates": true,
+        "flags": []
+      },
+      {
+        "name": "execution-codex-batch-prepare",
+        "availability": "cli",
+        "mutates": true,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "from-file",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "codex-admission",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "codex-capacity",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "codex-usage",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "output",
+            "required": true,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
+        "name": "execution-codex-batch-status",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "coordinator",
+            "required": true,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
         "name": "execution-codex-peer-evidence",
         "availability": "cli",
         "mutates": false,
@@ -9120,11 +9457,22 @@
             "valueKind": "string"
           },
           {
+            "name": "timing",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
             "name": "output",
             "required": true,
             "valueKind": "string"
           }
         ]
+      },
+      {
+        "name": "execution-codex-polling-policy",
+        "availability": "cli",
+        "mutates": false,
+        "flags": []
       },
       {
         "name": "execution-evidence",
@@ -9680,6 +10028,11 @@
             "name": "timeout-ms",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "reuse",
+            "required": false,
+            "valueKind": "json"
           }
         ]
       },
@@ -9806,6 +10159,11 @@
             "name": "timeout-ms",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "reuse",
+            "required": false,
+            "valueKind": "json"
           }
         ]
       },
@@ -9846,6 +10204,11 @@
           },
           {
             "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "checks-from",
             "required": false,
             "valueKind": "string"
           }
@@ -9895,6 +10258,16 @@
             "name": "project-id",
             "required": false,
             "valueKind": "string"
+          },
+          {
+            "name": "checks-from",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "gate-timeout-ms",
+            "required": false,
+            "valueKind": "integer"
           }
         ]
       },
@@ -11099,6 +11472,11 @@
             "name": "offset",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "query",
+            "required": false,
+            "valueKind": "string"
           }
         ]
       },
@@ -11210,6 +11588,82 @@
           },
           {
             "name": "status",
+            "required": false,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
+        "name": "minutes-supplement-batch",
+        "availability": "cli",
+        "mutates": true,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "from-file",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "at",
+            "required": true,
+            "valueKind": "instant"
+          },
+          {
+            "name": "actor",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "timeout-ms",
+            "required": false,
+            "valueKind": "integer"
+          }
+        ]
+      },
+      {
+        "name": "minutes-supplement-inventory",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
+        "name": "pending-actions",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project-id",
             "required": false,
             "valueKind": "string"
           }
@@ -11599,7 +12053,35 @@
             "name": "view",
             "required": false,
             "valueKind": "enum",
-            "valueShape": "agent (omit for the full tcrn.recall.v1 response)"
+            "valueShape": "agent, candidates, or preview (omit for the full tcrn.recall.v1 response)"
+          }
+        ]
+      },
+      {
+        "name": "recall-read",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "at",
+            "required": true,
+            "valueKind": "instant"
+          },
+          {
+            "name": "refs",
+            "required": true,
+            "valueKind": "list",
+            "valueShape": "comma-separated candidate references, optionally user/knowledge:<id> or minutes:<id>#D<n>"
+          },
+          {
+            "name": "full",
+            "required": false,
+            "valueKind": "boolean"
           }
         ]
       },
@@ -11617,6 +12099,64 @@
             "name": "at",
             "required": true,
             "valueKind": "instant"
+          },
+          {
+            "name": "timeout-ms",
+            "required": false,
+            "valueKind": "integer"
+          }
+        ]
+      },
+      {
+        "name": "rule-create",
+        "availability": "cli",
+        "mutates": true,
+        "flags": [
+          {
+            "name": "id",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "title",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "body",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "order",
+            "required": false,
+            "valueKind": "integer"
+          },
+          {
+            "name": "at",
+            "required": true,
+            "valueKind": "instant"
+          },
+          {
+            "name": "project",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "actor",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "decided-in",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "minutes:<id>#D<n>"
           },
           {
             "name": "timeout-ms",
@@ -11839,6 +12379,64 @@
             "name": "project-id",
             "required": false,
             "valueKind": "string"
+          },
+          {
+            "name": "timeout-ms",
+            "required": false,
+            "valueKind": "integer"
+          }
+        ]
+      },
+      {
+        "name": "rule-update",
+        "availability": "cli",
+        "mutates": true,
+        "flags": [
+          {
+            "name": "id",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "title",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "body",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "order",
+            "required": false,
+            "valueKind": "integer"
+          },
+          {
+            "name": "at",
+            "required": true,
+            "valueKind": "instant"
+          },
+          {
+            "name": "project",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "actor",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "decided-in",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "minutes:<id>#D<n>"
           },
           {
             "name": "timeout-ms",
@@ -13154,6 +13752,11 @@
         "availability": "cli",
         "mutates": true,
         "flags": [
+          {
+            "name": "expected-revision",
+            "required": false,
+            "valueKind": "integer"
+          },
           {
             "name": "blocked-criteria",
             "required": false,

@@ -333,20 +333,21 @@ test("489-R3, AC2 (fixture): after the cleanup each host's user file holds one E
   const userClaude = await readJson(join(m.home, CLAUDE));
   const userCodex = await readJson(join(m.home, CODEX));
   for (const [label, document] of [["claude", userClaude], ["codex", userCodex]]) {
-    assert.deepEqual(hookCommands(document).filter((hook) => isEinzbernHookCommand(hook.command)).sort((a, b) => a.event.localeCompare(b.event)), [...(label === "codex" ? [["PostToolUse", "post-tool-use"]] : []), ["PreToolUse", "pre-tool-use"], ...(label === "codex" ? [["Stop", "stop"]] : []), ["SubagentStart", "subagent-start"], ["UserPromptSubmit", "user-prompt-submit"]].map(([event, suffix]) => ({ event, command: launcherCommand(m.device).replace(/user-prompt-submit$/u, suffix) })), label);
+    assert.deepEqual(hookCommands(document).filter((hook) => isEinzbernHookCommand(hook.command)).sort((a, b) => a.event.localeCompare(b.event)), [...(label === "codex" ? [["PostToolUse", "post-tool-use"]] : []), ["PreToolUse", "pre-tool-use"], ["SessionStart", "session-start"], ...(label === "codex" ? [["Stop", "stop"]] : []), ["SubagentStart", "subagent-start"], ["UserPromptSubmit", "user-prompt-submit"]].map(([event, suffix]) => ({ event, command: launcherCommand(m.device).replace(/user-prompt-submit$/u, suffix) })), label);
     assert.deepEqual(hookCommands(document).filter((hook) => isLegacyHookCommand(hook.command)), [], label);
   }
   // Other tools' hooks and every other key stay.
   const einzbern = { hooks: [{ type: "command", command: launcherCommand(m.device) }] };
   const readGuard = { hooks: [{ type: "command", command: launcherCommand(m.device).replace(/user-prompt-submit$/u, "pre-tool-use") }] };
   const subagent = { hooks: [{ type: "command", command: launcherCommand(m.device).replace(/user-prompt-submit$/u, "subagent-start") }] };
+  const session = { hooks: [{ type: "command", command: launcherCommand(m.device).replace(/user-prompt-submit$/u, "session-start") }] };
   assert.deepEqual(userClaude, {
     env: files.userClaude.env,
     permissions: { deny: [] },
-    hooks: { UserPromptSubmit: [einzbern, OTHER_PROMPT], PreToolUse: [readGuard, OTHER_TOOL], SubagentStart: [subagent], ...OTHER_EVENT },
+    hooks: { UserPromptSubmit: [einzbern, OTHER_PROMPT], PreToolUse: [readGuard, OTHER_TOOL], SubagentStart: [subagent], SessionStart: [session], ...OTHER_EVENT },
     skipWorkflowUsageWarning: true,
   });
-  assert.deepEqual(userCodex, { description: "the user's own hooks", hooks: { PreToolUse: [OTHER_TOOL, readGuard], UserPromptSubmit: [einzbern], SubagentStart: [subagent], PostToolUse: [{ hooks: [{ type: "command", command: launcherCommand(m.device).replace(/user-prompt-submit$/u, "post-tool-use") }] }], Stop: [{ hooks: [{ type: "command", command: launcherCommand(m.device).replace(/user-prompt-submit$/u, "stop") }] }] } });
+  assert.deepEqual(userCodex, { description: "the user's own hooks", hooks: { PreToolUse: [OTHER_TOOL, readGuard], UserPromptSubmit: [einzbern], SubagentStart: [subagent], SessionStart: [session], PostToolUse: [{ hooks: [{ type: "command", command: launcherCommand(m.device).replace(/user-prompt-submit$/u, "post-tool-use") }] }], Stop: [{ hooks: [{ type: "command", command: launcherCommand(m.device).replace(/user-prompt-submit$/u, "stop") }] }] } });
   // The container and the project keep nothing of ours and everything else.
   assert.deepEqual(await readJson(join(m.container, CLAUDE)), { env: { CONTAINER: "1" }, hooks: {}, permissions: { deny: [] } });
   assert.deepEqual(await readJson(join(m.container, CODEX)), { description: "the old platform harness", hooks: {} });

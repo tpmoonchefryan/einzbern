@@ -26,6 +26,7 @@ import {
   initializeKnowledgeStore,
   initializeLibrary,
   listKnowledgeMetadata,
+  readKnowledgeBody,
   validateKnowledgeStore,
 } from "../dist/build/packages/core/src/index.js";
 import { canonicalSha256, deriveStableId } from "../dist/build/packages/protocol/src/index.js";
@@ -232,6 +233,84 @@ test("knowledge-batch: acting on an untouched card demands an explicit revision"
   } finally {
     await rm(fixture.base, { recursive: true, force: true });
   }
+});
+
+test("R03: knowledge metadata migration preserves card identity and body bytes", async (context) => {
+  const fixture = await workspaceWithStore();
+  context.after(() => rm(fixture.base, { recursive: true, force: true }));
+
+  await applyKnowledgeBatch(fixture.root, batch([card(fixture, 19)]), { occurredAt: at(2) });
+  const before = await listKnowledgeMetadata(fixture.root, { at: at(3), selection: "all", allowTrailing: true });
+  const existing = before.records.find((record) => record.externalKey === "KB-CARD-19");
+  const bodyBefore = await readKnowledgeBody(fixture.root, existing.id, { at: at(3) });
+
+  const result = await applyKnowledgeBatch(fixture.root, batch([{
+    verb: "knowledge-metadata",
+    id: existing.id,
+    expectedRevision: existing.revision,
+    subject: "Card 19 historical subject",
+    tags: ["history", "migration"],
+  }]), { occurredAt: at(4) });
+  assert.equal(result.applied[0].verb, "knowledge-metadata");
+
+  const after = await listKnowledgeMetadata(fixture.root, { at: at(5), selection: "all", allowTrailing: true });
+  const migrated = after.records.find((record) => record.id === existing.id);
+  const bodyAfter = await readKnowledgeBody(fixture.root, existing.id, { at: at(5) });
+  assert.equal(migrated.id, existing.id);
+  assert.equal(migrated.externalKey, existing.externalKey);
+  assert.equal(migrated.revision, existing.revision + 1);
+  assert.equal(migrated.subject, "Card 19 historical subject");
+  assert.deepEqual(migrated.tags, ["history", "migration"]);
+  assert.equal(bodyAfter.body, bodyBefore.body);
+  assert.equal(bodyAfter.bodySha256, bodyBefore.bodySha256);
+  const repeated = await applyKnowledgeBatch(fixture.root, batch([{
+    verb: "knowledge-metadata",
+    id: existing.id,
+    expectedRevision: existing.revision,
+    subject: "Card 19 historical subject",
+    tags: ["history", "migration"],
+  }]), { occurredAt: at(6) });
+  assert.equal(repeated.version, result.version, "resuming an applied member is a no-op even with the inventory's original revision");
+  await validateKnowledgeStore(fixture.root);
+});
+
+test("R03: a partially applied knowledge metadata batch resumes without revising completed cards", async (context) => {
+  const fixture = await workspaceWithStore();
+  context.after(() => rm(fixture.base, { recursive: true, force: true }));
+
+  await applyKnowledgeBatch(fixture.root, batch([card(fixture, 20), card(fixture, 21)]), { occurredAt: at(2) });
+  const before = await listKnowledgeMetadata(fixture.root, { at: at(3), selection: "all", allowTrailing: true });
+  const first = before.records.find((record) => record.externalKey === "KB-CARD-20");
+  const second = before.records.find((record) => record.externalKey === "KB-CARD-21");
+  const bodyBefore = await readKnowledgeBody(fixture.root, first.id, { at: at(3) });
+  const member = (record, subject) => ({
+    verb: "knowledge-metadata", id: record.id, expectedRevision: record.revision,
+    subject, tags: ["history", "migration"],
+  });
+
+  const interrupted = await refusal(() => applyKnowledgeBatch(fixture.root, batch([
+    member(first, "Card 20 historical subject"),
+    { ...member(second, "Card 21 historical subject"), expectedRevision: 9 },
+  ]), { occurredAt: at(4) }));
+  assert.equal(interrupted.reasonCode, "WORK_BATCH_REFUSED");
+  assert.equal(interrupted.payload.applied.length, 1);
+  assert.equal(interrupted.payload.failed.index, 1);
+
+  const partiallyMigrated = await listKnowledgeMetadata(fixture.root, { at: at(5), selection: "all", allowTrailing: true });
+  assert.equal(partiallyMigrated.records.find((record) => record.id === first.id).revision, first.revision + 1);
+  assert.equal(partiallyMigrated.records.find((record) => record.id === second.id).revision, second.revision);
+
+  const resumed = await applyKnowledgeBatch(fixture.root, batch([
+    member(first, "Card 20 historical subject"),
+    member(second, "Card 21 historical subject"),
+  ]), { occurredAt: at(6) });
+  assert.equal(resumed.reasonCode, "KNOWLEDGE_BATCH_APPLIED");
+  const after = await listKnowledgeMetadata(fixture.root, { at: at(7), selection: "all", allowTrailing: true });
+  assert.deepEqual([first, second].map((record) => after.records.find((candidate) => candidate.id === record.id).revision), [2, 2]);
+  const bodyAfter = await readKnowledgeBody(fixture.root, first.id, { at: at(7) });
+  assert.equal(bodyAfter.body, bodyBefore.body);
+  assert.equal(bodyAfter.bodySha256, bodyBefore.bodySha256);
+  await validateKnowledgeStore(fixture.root);
 });
 
 // Red leg: accept a foreign or empty document and a caller holds a receipt for nothing.

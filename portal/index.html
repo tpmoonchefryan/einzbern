@@ -3791,6 +3791,7 @@ body { margin: 0; min-width: 320px; background: var(--tcrn-color-surface-canvas)
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+[data-recall-preview-table] { --tcrn-table-column-count: 4; }
 .tcrn-app { min-height: 100dvh; display: grid; grid-template-rows: minmax(0, 1fr); }
 .tcrn-top-bar__actions { display: flex; align-items: center; gap: var(--tcrn-space-2); min-width: 0; }
 .tcrn-top-bar__actions .tcrn-select { width: auto; min-width: 92px; }
@@ -4190,6 +4191,7 @@ button:disabled { cursor: not-allowed; }
         <a class="tcrn-nav-item" href="#engine-model-policy" data-nav-item-has-icon="true" data-page-target="engine-model-policy" aria-label="Models" data-i18n-aria-label="settings.group.models"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10v10H3z"/><path d="M5.5 8h5M8 5.5v5"/></svg></span><span class="tcrn-nav-item__label" data-i18n="settings.group.models">Models and escalation</span></a>
         <a class="tcrn-nav-item" href="#variables" data-nav-item-has-icon="true" data-page-target="variables" aria-label="Variables" data-i18n-aria-label="nav.variables"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3.2h10M3 8h10M3 12.8h10"/><circle cx="5.2" cy="3.2" r="1.5" fill="currentColor"/><circle cx="10.8" cy="8" r="1.5" fill="currentColor"/><circle cx="7.2" cy="12.8" r="1.5" fill="currentColor"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.variables">Variables</span></a>
         <a class="tcrn-nav-item" href="#prose" data-nav-item-has-icon="true" data-page-target="prose" aria-label="Rules" data-i18n-aria-label="nav.prose"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2.5h10M3 5.5h10M3 8.5h6.5"/><path d="M3 12.5h4"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.prose">Rules</span></a>
+        <a class="tcrn-nav-item" href="#recall-preview" data-nav-item-has-icon="true" data-page-target="recall-preview" aria-label="Recall preview" data-i18n-aria-label="recallPreview.title"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg></span><span class="tcrn-nav-item__label" data-i18n="recallPreview.title">Recall preview</span></a>
         <a class="tcrn-nav-item" href="#vocabulary" data-nav-item-has-icon="true" data-page-target="vocabulary" aria-label="Vocabulary" data-i18n-aria-label="nav.vocabulary"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.8C6.6 1.9 4.4 1.7 2.2 2.2v10.6c2.2-.5 4.4-.3 5.8.6 1.4-.9 3.6-1.1 5.8-.6V2.2C11.6 1.7 9.4 1.9 8 2.8Z"/><path d="M8 2.8v10.6"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.vocabulary">Vocabulary</span></a>
         <a class="tcrn-nav-item" href="#gates" data-nav-item-has-icon="true" data-page-target="gates" aria-label="Gates" data-i18n-aria-label="nav.gates"><span class="tcrn-nav-item__content" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3h10v10H3z"/><path d="m5 8 2 2 4-4"/></svg></span><span class="tcrn-nav-item__label" data-i18n="nav.gates">Gates</span></a>
       </nav>
@@ -4238,18 +4240,51 @@ button:disabled { cursor: not-allowed; }
             <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="page.dashboard">Workspace status</h1><p class="tcrn-text tcrn-page__lede" data-i18n="dashboard.lede">Doctor's eight checks and the selected library state.</p></div><div class="tcrn-page-header__actions tcrn-page__actions"><span class="tcrn-badge tcrn-badge--positive" id="health-chip"><span id="health-chip-text" data-i18n="health.healthy">healthy</span></span></div></div></header>
           </div>
           <div class="tcrn-page-hierarchy__section-tabs" data-page-hierarchy-region="section-tabs" data-page-hierarchy-slot="section-tabs">
-            <div class="tcrn-section-tabs" role="tablist" data-ui="workspace-tabs" aria-label="Workspace views"><button class="tcrn-button" role="tab" aria-selected="true" data-selected="true" data-workspace-tab="overview" data-i18n="dashboard.overview">Status</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="work" data-i18n="dashboard.work">Work</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="knowledge" data-i18n="dashboard.knowledge">Knowledge</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="library" data-i18n="dashboard.libraryTab">Library</button></div>
+            <div class="tcrn-section-tabs" role="tablist" data-ui="workspace-tabs" aria-label="Workspace views"><button class="tcrn-button" role="tab" aria-selected="true" data-selected="true" data-workspace-tab="overview" data-i18n="dashboard.overview">Status</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="work" data-i18n="dashboard.work">Work</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="knowledge" data-i18n="dashboard.knowledge">Knowledge</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="minutes" data-i18n="minutes.title">Minutes</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="activity" data-i18n="activity.title">Activity</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="library" data-i18n="dashboard.libraryTab">Library</button></div>
           </div>
           <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content" data-page-hierarchy-slot="content">
         <div data-workspace-panel="overview">
+          <article class="tcrn-surface" aria-labelledby="pending-actions-heading"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="pending-actions-heading" data-i18n="pendingActions.title">Waiting for you</h2></div></div><div id="pending-actions-content" aria-live="polite"></div></article>
           <div class="tcrn-grid tcrn-grid--4"><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.chain">Chain version</span><strong class="tcrn-stat-card__value" id="stat-version">—</strong><span class="tcrn-stat-card__note" id="stat-head"></span></article><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.events">Events</span><strong class="tcrn-stat-card__value" id="stat-events">—</strong><span class="tcrn-stat-card__note" data-i18n="dashboard.eventsNote">materialized chain</span></article><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.engine">Engine</span><strong class="tcrn-stat-card__value" id="stat-engine">—</strong><span class="tcrn-stat-card__note" data-i18n="dashboard.engineNote">local loopback</span></article><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.healthCard">Health</span><strong class="tcrn-stat-card__value" id="stat-health">—</strong><span class="tcrn-stat-card__note" data-i18n="dashboard.healthCardNote">read-only checks</span></article></div>
           <div class="tcrn-grid tcrn-grid--2 tcrn-dashboard-grid">
             <article class="tcrn-surface"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.healthTitle">Doctor checks</h2><p class="tcrn-text" data-i18n="dashboard.healthNote">The eight checks returned by doctor for the selected project.</p></div><span class="tcrn-badge tcrn-badge--positive" id="validate-chip">doctor</span></div><div class="tcrn-definition-list tcrn-definition-list--dense" id="health-list"></div></article>
             <article class="tcrn-surface"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.libraryTitle">Selected library</h2><p class="tcrn-text" data-i18n="dashboard.libraryNote">Read from the selected library's status.</p></div></div><dl class="tcrn-definition-list" id="library-state"></dl></article>
           </div>
         </div>
-        <div data-workspace-panel="work" hidden><div class="tcrn-surface" data-ui="work-tree"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.workTitle">Work tree</h2><p class="tcrn-text" data-i18n="dashboard.workNote">Initiatives, Epics, and Stories read from the engine.</p></div><span class="tcrn-badge" id="work-count">—</span></div><div class="tcrn-state-surface" id="work-loading" role="status" data-i18n="dashboard.workLoading" hidden>Reading work records through the engine…</div><div id="work-tree-content"></div><div id="work-target-editor" class="tcrn-surface"></div><div id="work-content-editor" class="tcrn-surface"></div></div></div>
+        <div data-workspace-panel="work" hidden><div class="tcrn-surface" data-ui="work-tree"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.workTitle">Work tree</h2><p class="tcrn-text" data-i18n="dashboard.workNote">Initiatives, Epics, and Stories read from the engine.</p></div><span class="tcrn-badge" id="work-count">—</span></div><div class="tcrn-state-surface" id="work-loading" role="status" data-i18n="dashboard.workLoading" hidden>Reading work records through the engine…</div><div id="work-tree-content"></div>
+          <form id="work-validation-form" class="tcrn-surface" aria-labelledby="work-validation-title" hidden>
+            <h3 id="work-validation-title"></h3>
+            <label class="tcrn-field">
+              <span id="work-validation-label"></span>
+              <textarea id="work-validation-summary" class="tcrn-input tcrn-textarea" rows="3"></textarea>
+            </label>
+            <button id="work-validation-confirm" type="submit" class="tcrn-button tcrn-button--primary"></button>
+            <button id="work-validation-cancel" type="button" class="tcrn-button tcrn-button--secondary" data-i18n="action.cancel">Cancel</button>
+          </form>
+          <div id="work-target-editor" class="tcrn-surface"></div><div id="work-content-editor" class="tcrn-surface"></div></div></div>
         <div data-workspace-panel="knowledge" hidden><div class="tcrn-surface" data-ui="knowledge-view"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.knowledgeTitle">Knowledge inventory</h2><p class="tcrn-text" data-i18n="dashboard.knowledgeNote">Cards and article indexes, metadata only.</p></div><span class="tcrn-badge" id="knowledge-count">—</span></div><div id="knowledge-view-content"></div></div></div>
+        <div data-workspace-panel="minutes" hidden>
+          <article class="tcrn-surface" aria-labelledby="minutes-heading">
+            <div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="minutes-heading" data-i18n="minutes.title">Minutes</h2></div></div>
+            <form id="minutes-search" class="tcrn-action-row" role="search" data-i18n-aria-label="minutes.search">
+              <label class="tcrn-field"><span class="tcrn-sr-only" data-i18n="minutes.search">Search minutes</span><input id="minutes-query" class="tcrn-input" type="search" data-i18n-placeholder="minutes.search"></label>
+              <button type="submit" class="tcrn-button tcrn-button--primary tcrn-button--sm" data-i18n="activity.find">Search</button>
+            </form>
+            <div id="minutes-results" aria-live="polite"></div>
+            <div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="minutes-previous" data-i18n="activity.previous">Previous</button><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="minutes-next" data-i18n="activity.next">Next</button></div>
+          </article>
+        </div>
+        <div data-workspace-panel="activity" hidden>
+          <article class="tcrn-surface" aria-labelledby="activity-heading">
+            <div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="activity-heading" data-i18n="activity.title">Activity</h2></div></div>
+            <form id="activity-search" class="tcrn-action-row" role="search" data-i18n-aria-label="activity.search">
+              <label class="tcrn-field"><span class="tcrn-sr-only" data-i18n="activity.search">Search activity</span><input id="activity-query" class="tcrn-input" type="search" data-i18n-placeholder="activity.search"></label>
+              <button type="submit" class="tcrn-button tcrn-button--primary tcrn-button--sm" data-i18n="activity.find">Search</button>
+            </form>
+            <div id="activity-results" aria-live="polite"></div>
+            <div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="activity-previous" data-i18n="activity.previous">Previous</button><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="activity-next" data-i18n="activity.next">Next</button></div>
+          </article>
+        </div>
         <div data-workspace-panel="library" hidden>
           <article class="tcrn-surface" data-ui="chain-identity" aria-labelledby="chain-identity-title"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="chain-identity-title" data-i18n="chainIdentity.title">Chain identity</h2><p class="tcrn-text" data-i18n="chainIdentity.note">The library's role and the coordination library it belongs to.</p></div><span class="tcrn-badge" id="chain-identity-current" data-ui="chain-identity-current">—</span></div>
             <form id="chain-declare-form" data-ui="chain-declare-form">
@@ -4302,8 +4337,18 @@ button:disabled { cursor: not-allowed; }
         <div class="tcrn-page-hierarchy" data-page-hierarchy="true" data-page-hierarchy-depth="two" data-page-hierarchy-source="explicit-depth-prop" data-page-hierarchy-width-policy="container-only" data-page-hierarchy-shell-boundary="global-product-shell-external" data-page-hierarchy-valid="true" data-page-hierarchy-validation="valid">
           <div class="tcrn-page-hierarchy__header" data-page-hierarchy-region="header"><header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="settings.group.models">Models and escalation</h1><p class="tcrn-text tcrn-page__lede" data-i18n="settings.layer.device">This device</p></div><div class="tcrn-page-header__actions"><span class="tcrn-badge" id="engine-model-policy-source">device-engine</span></div></div></header></div>
           <div class="tcrn-page-hierarchy__section-tabs" data-page-hierarchy-region="section-tabs" data-page-hierarchy-slot="section-tabs"><p class="tcrn-text" data-i18n="modelTiers.scope">The engine stores this policy for the selected host.</p></div>
-          <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content"><div id="engine-model-policy-view" data-ui="engine-model-policy-view"></div></div>
+          <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content"><div id="device-model-settings" data-ui="device-model-settings"></div><div id="engine-model-policy-view" data-ui="engine-model-policy-view"></div></div>
         </div>
+      </section>
+      <section class="tcrn-page tcrn-product-shell-content-stack" data-page="recall-preview" hidden>
+        <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="recallPreview.title">Recall preview</h1></div></div></header>
+        <div class="tcrn-surface">
+          <form id="recall-preview-form">
+            <label class="tcrn-field"><span class="tcrn-field__label" data-i18n="recallPreview.query">Prompt</span><textarea class="tcrn-textarea" name="query" rows="4" required></textarea></label>
+            <button type="submit" class="tcrn-button tcrn-button--primary tcrn-button--md" data-i18n="recallPreview.submit">Preview candidates</button>
+          </form>
+        </div>
+        <div id="recall-preview-results" aria-live="polite"></div>
       </section>
       <section class="tcrn-page tcrn-product-shell-content-stack" data-page="variables" hidden>
         <div class="tcrn-page-hierarchy" data-page-hierarchy="true" data-page-hierarchy-depth="two" data-page-hierarchy-source="explicit-depth-prop" data-page-hierarchy-width-policy="container-only" data-page-hierarchy-shell-boundary="global-product-shell-external" data-page-hierarchy-valid="true" data-page-hierarchy-validation="valid">
@@ -4353,14 +4398,16 @@ button:disabled { cursor: not-allowed; }
       <section class="tcrn-page tcrn-product-shell-content-stack" data-page="prose" hidden>
         <div class="tcrn-page-hierarchy" data-page-hierarchy="true" data-page-hierarchy-depth="two" data-page-hierarchy-source="explicit-depth-prop" data-page-hierarchy-width-policy="container-only" data-page-hierarchy-shell-boundary="global-product-shell-external" data-page-hierarchy-valid="true" data-page-hierarchy-validation="valid">
           <div class="tcrn-page-hierarchy__header" data-page-hierarchy-region="header" data-page-hierarchy-slot="header">
-            <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="page.prose">Rules</h1><p class="tcrn-text tcrn-page__lede" data-i18n="prose.lede" data-order-purpose="rules">Manage built-in rules and edit the project's AGENTS.md. A rule's order sets the order AGENTS.md renders the rule sections in: rules with an order first, from the smallest, then the others in catalog order.</p></div><div class="tcrn-page-header__actions tcrn-page__actions"><button class="tcrn-button tcrn-button--secondary" id="pending-open" data-i18n="rule.pendingTitle">Pending</button><span class="tcrn-badge" id="reconcile-chip">—</span><button class="tcrn-button tcrn-button--primary" id="save-agents" data-i18n="prose.save" data-cli-action="rule-list">Save and check</button></div></div></header>
+            <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="page.prose">Rules</h1><p class="tcrn-text tcrn-page__lede" data-i18n="prose.lede" data-order-purpose="rules">Manage library rules, including custom rules, and edit this project's AGENTS.md.</p></div><div class="tcrn-page-header__actions tcrn-page__actions"><button class="tcrn-button tcrn-button--secondary" id="pending-open" data-i18n="rule.pendingTitle">Pending</button><span class="tcrn-badge" id="reconcile-chip">—</span><button class="tcrn-button tcrn-button--primary" id="save-agents" data-i18n="prose.save" data-cli-action="rule-list">Save and check</button></div></div></header>
           </div>
           <div class="tcrn-page-hierarchy__section-tabs" data-page-hierarchy-region="section-tabs" data-page-hierarchy-slot="section-tabs">
             <div id="rules-pending" class="tcrn-surface" data-ui="rules-pending" aria-label="Pending rule changes"><strong data-i18n="rule.pendingTitle">Pending</strong><label class="tcrn-sr-only" for="pending-section" data-i18n="rule.pendingSelect">Pending section</label><select class="tcrn-select" id="pending-section" data-ui="pending-section"></select><button class="tcrn-button tcrn-button--secondary" type="button" data-pending-action="keep" data-i18n="rule.keep">Keep my text</button><button class="tcrn-button tcrn-button--secondary" type="button" data-pending-action="overwrite" data-i18n="rule.overwrite">Overwrite</button><button class="tcrn-button tcrn-button--quiet" type="button" data-pending-action="unmanage" data-i18n="rule.unmanage">Unmanage</button></div>
             <p class="tcrn-text" id="prose-binding-note" data-ui="prose-binding-note" hidden></p>
+            <div class="tcrn-surface" data-ui="rules-navigation"><label class="tcrn-switch"><input class="tcrn-switch__control" id="rules-write-navigation" type="checkbox" role="switch"><span class="tcrn-switch__label" data-i18n="rules.navigation.label">Write navigation</span></label><p class="tcrn-text" data-i18n="rules.navigation.note">When enabled, navigation is written into shared AGENTS.md. When disabled, the hook supplies it on this device.</p></div>
           </div>
           <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content" data-page-hierarchy-slot="content">
-            <div data-ui="rules-layout"><section id="prose-directory" data-ui="rule-list" aria-label="Built-in rules"></section><div class="tcrn-editor-shell"><div class="tcrn-editor__bar"><span class="tcrn-text" id="agents-file">AGENTS.md</span><details class="tcrn-disclosure-panel" id="agents-path-details" data-identity-details="agents-path" hidden><summary class="tcrn-disclosure-panel__title" data-i18n="prose.fullPath">Full path</summary><code id="agents-path"></code> <button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--sm" data-copy-identity="" data-clipboard-copy-state="idle" aria-label="Copy the full path of AGENTS.md"><span data-copy-label>Copy</span><span class="tcrn-sr-only" role="status" aria-live="polite" data-copy-status></span></button></details><span class="tcrn-text tcrn-editor__status" id="agents-status" data-i18n="prose.fileNote">AGENTS.md</span></div><div class="tcrn-line-numbered-editor" id="prose-editor" data-line-numbered-editor="true"><ol class="tcrn-line-numbered-editor__gutter" id="prose-gutter" data-ui="prose-gutter" role="note" aria-label="Line numbers"></ol><div class="tcrn-line-numbered-editor__content"><textarea class="tcrn-input tcrn-textarea tcrn-line-numbered-editor__control" id="agents-md" spellcheck="false" aria-label="AGENTS.md"></textarea><ul class="tcrn-line-numbered-editor__findings" id="reconcile-findings" aria-label="Editor findings"></ul></div></div></div></div>
+            <div data-ui="rules-layout"><section id="prose-directory" data-ui="rule-list" data-i18n-aria-label="page.prose" aria-label="Rules"></section><div class="tcrn-editor-shell"><div class="tcrn-editor__bar"><span class="tcrn-text" id="agents-file">AGENTS.md</span><details class="tcrn-disclosure-panel" id="agents-path-details" data-identity-details="agents-path" hidden><summary class="tcrn-disclosure-panel__title" data-i18n="prose.fullPath">Full path</summary><code id="agents-path"></code> <button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--sm" data-copy-identity="" data-clipboard-copy-state="idle" aria-label="Copy the full path of AGENTS.md"><span data-copy-label>Copy</span><span class="tcrn-sr-only" role="status" aria-live="polite" data-copy-status></span></button></details><span class="tcrn-text tcrn-editor__status" id="agents-status" data-i18n="prose.fileNote">AGENTS.md</span></div><div class="tcrn-line-numbered-editor" id="prose-editor" data-line-numbered-editor="true"><ol class="tcrn-line-numbered-editor__gutter" id="prose-gutter" data-ui="prose-gutter" role="note" aria-label="Line numbers"></ol><div class="tcrn-line-numbered-editor__content"><textarea class="tcrn-input tcrn-textarea tcrn-line-numbered-editor__control" id="agents-md" spellcheck="false" aria-label="AGENTS.md"></textarea><ul class="tcrn-line-numbered-editor__findings" id="reconcile-findings" aria-label="Editor findings"></ul></div></div></div></div>
+            <article class="tcrn-surface" data-ui="custom-rule-form"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="rules.custom.heading">Custom rule</h2><p class="tcrn-text" data-i18n="rules.custom.note">Add or edit a rule shared by this library.</p></div></div><form id="custom-rule-form"><div class="tcrn-grid tcrn-grid--2"><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.id">Rule ID</span><input class="tcrn-input" id="custom-rule-id" name="id" required maxlength="64" pattern="custom-[a-z][a-z0-9-]*" autocomplete="off"></label><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.title">Title</span><input class="tcrn-input" id="custom-rule-title" name="title" required maxlength="120"></label></div><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.body">Rule text</span><textarea class="tcrn-input tcrn-textarea" id="custom-rule-body" name="body" required maxlength="4000" rows="4"></textarea></label><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.order">Order</span><input class="tcrn-input" id="custom-rule-order" name="order" type="number" min="1" step="1"></label><div class="tcrn-action-row"><button class="tcrn-button tcrn-button--primary" id="custom-rule-save" type="submit" data-i18n="rules.custom.create">Add rule</button><button class="tcrn-button tcrn-button--secondary" id="custom-rule-cancel" type="button" data-i18n="rules.custom.cancel" hidden>Cancel</button></div></form></article>
           </div>
         </div>
       </section>
@@ -4404,7 +4451,7 @@ const BOOT = __PORTAL_BOOT__;
   const systemTheme = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   let followSystemTheme = storedTheme === null && machineTheme === "system";
   if (storedTheme === null && machineTheme !== null) document.documentElement.dataset.tcrnTheme = machineTheme === "system" ? (systemTheme?.matches ? "dark" : "light") : machineTheme;
-  const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? "en", theme: document.documentElement.dataset.tcrnTheme, page: "dashboard", dashboardTab: "overview", settingGroup: "general", collections: { "models.category": { draft: null, dirty: false, findings: [], refusal: null }, "models.tiers": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: "codex", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: "", knowledgeStatus: "valid", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: "conferenceTypes", receipt: null, operationDetailsOpen: false, agentsText: "", reconciliation: null, rules: null, pendingSection: "", searchIndex: [], searchResults: [], searchSelection: 0 };
+  const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? "en", theme: document.documentElement.dataset.tcrnTheme, page: "dashboard", dashboardTab: "overview", settingGroup: "general", customRuleEditing: "", collections: { "models.category": { draft: null, dirty: false, findings: [], refusal: null }, "models.tiers": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: "codex", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: "", knowledgeStatus: "valid", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: "conferenceTypes", receipt: null, operationDetailsOpen: false, agentsText: "", reconciliation: null, rules: null, pendingSection: "", searchIndex: [], searchResults: [], searchSelection: 0 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   // DS Tabs is a behavior contract, not a role decoration. Every tablist below
@@ -4554,7 +4601,8 @@ const BOOT = __PORTAL_BOOT__;
   // moved to; the page says so above its pages and offers to switch back or to follow, and shows nothing
   // of the other target meanwhile. A write's answer always reaches its receipt.
   const api = async (path, options = {}) => {
-    const { anyTarget = false, retried = false, target = pageTarget(), ...request } = options;
+    const { anyTarget = false, retried = false, readOnly = false, target = pageTarget(), ...request } = options;
+    const read = readOnly || (request.method ?? "GET") === "GET";
     if (path === "/api/settings" && request.method === "POST") {
       if (state.librarySwitching) return { ok: false, reasonCode: "PORTAL_LIBRARY_CHANGED" };
       const sent = JSON.parse(request.body);
@@ -4569,12 +4617,11 @@ const BOOT = __PORTAL_BOOT__;
     } catch {
       // Read callers own their unavailable view/receipt and cleanup in catch/finally.
       // Preserve that contract without exposing raw transport errors or private URLs.
-      if ((request.method ?? "GET") === "GET") throw new Error("Unable to read the response.");
+      if (read) throw new Error("Unable to read the response.");
       // A lost write response does not establish whether the engine committed. Never retry it.
       return answered({ ok: false, reasonCode: "PORTAL_RESPONSE_UNAVAILABLE", outcome: "unknown", retrySafe: false }, target);
     }
     const served = servedTargetOf(response);
-    const read = (request.method ?? "GET") === "GET";
     const dropped = () => answered({ ok: false, reasonCode: "PORTAL_ANSWER_DISCARDED", discarded: true, httpStatus: response.status }, served);
     const moved = response.status === 409 && body?.reasonCode === "PORTAL_CONFIGURATION_TARGET_CHANGED" && body.target !== null && typeof body.target === "object" ? body.target : null;
     if (moved !== null && !anyTarget) {
@@ -4734,29 +4781,30 @@ const BOOT = __PORTAL_BOOT__;
     $("#search-results").hidden = true;
     if (previousPage?.hidden) $(`[data-page-target="${page}"]`)?.focus?.();
   };
-  // TCRN-CROSS-SUB-409 (TCRN-CROSS-STORY-508 R5; MIN-236 D7; contract C-R14-1): the settings page is
-  // laid out from what the two catalogs say about each key, and keeps no grouping of its own. A key's
-  // group and its place in that group are its row's `group` and `order`; its `shape` says whether it
-  // is one value (a control on this page) or a table of records (a page of its own); its `layer` says
-  // whether it travels with the library (project) or belongs to this device. What the page keeps is
-  // what a catalog row cannot carry: each group's name, a locale key, listed in the order the
-  // settings catalog specification shows the groups. A group this list does not know still shows,
-  // after these, under its id.
+  // TCRN-CROSS-SUB-409 (TCRN-CROSS-STORY-508 R5; MIN-236 D7; contract C-R14-1): Settings is laid out
+  // from the two catalogs and keeps no grouping of its own. A key's group/order is its catalog row;
+  // `shape` says whether it is one value or a table of records, and `layer` says where it is stored.
+  // The Models group has its standalone page; the remaining groups appear here in the documented
+  // order. What the page keeps is each group's localized name.
   const SETTING_GROUP_NAMES = Object.freeze([
     ["general", () => t("settings.group.general")],
     ["models", () => t("settings.group.models")],
-    ["execution", () => t("settings.group.execution")],
     ["knowledge", () => t("settings.group.knowledge")],
     ["retrieval", () => t("settings.group.retrieval")],
     ["storage", () => t("settings.group.storage")],
     ["atelier", () => t("settings.group.atelier")],
   ]);
   const settingGroupName = (group) => SETTING_GROUP_NAMES.find(([id]) => id === group)?.[1]() ?? group;
-  // Both catalogs' rows: the library's keys (settings-catalog) and this device's (machine-settings-catalog).
+  // Model settings have a standalone page. Settings consumes the other catalog groups; historical
+  // project model values and current device model controls are rendered together on the model page.
+  const modelPageEntries = () => [
+    ...(Array.isArray(state.settings?.settings) ? state.settings.settings.filter((entry) => entry.group === "models").map((entry) => ({ ...entry })) : []),
+    ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings.filter((entry) => entry.group === "models").map((entry) => ({ ...entry, layer: "device" })) : []),
+  ].sort((left, right) => entryOrder(left) - entryOrder(right) || String(left.key).localeCompare(String(right.key)));
   const settingEntries = () => [
-    ...(Array.isArray(state.settings?.settings) ? state.settings.settings : []).map((entry) => ({ ...entry })),
-    ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings : [])
-      .filter((entry) => entry.key !== "agents.projectRoot").map((entry) => ({ ...entry, layer: "device" })),
+    ...(Array.isArray(state.settings?.settings) ? state.settings.settings.filter((entry) => entry.group !== "models" && entry.key !== "design.consumedVersion" && entry.key !== "agents.sharedNavigation").map((entry) => ({ ...entry })) : []),
+    ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings
+      .filter((entry) => entry.group !== "models" && entry.key !== "agents.projectRoot" && entry.key !== "agents.navigation").map((entry) => ({ ...entry, layer: "device" })) : []),
   ];
   const settingEntry = (key) => settingEntries().find((entry) => entry.key === key);
   const entryGroup = (entry) => typeof entry?.group === "string" && entry.group.length > 0 ? entry.group : SETTING_GROUP_NAMES[0][0];
@@ -4771,6 +4819,7 @@ const BOOT = __PORTAL_BOOT__;
     .sort((left, right) => entryOrder(left) - entryOrder(right) || String(left.key).localeCompare(String(right.key)));
   const settingGroup = (key) => entryGroup(settingEntry(key));
   const settingLabel = (key) => t(`setting.${key}.label`);
+  const settingCopyKey = (key) => key === "models.maxConcurrentSubagents" ? "execution.maxConcurrentSubagents" : key.startsWith("models.quota.") ? key.replace("models.quota.", "quota.") : key;
   // Where a key lives (R5): a project-level key is stored in the library and travels with it to every
   // device that syncs it; a device key is kept by this device alone.
   const layerBadge = (layer) => layer === "device"
@@ -4789,8 +4838,16 @@ const BOOT = __PORTAL_BOOT__;
   const conceptTip = (key, placement = "top") => {
     const body = t(`concept.${key}`);
     if (body === `concept.${key}`) return "";
+    const scoring = key === "setting.retrieval.tau" ? state.settings?.recallScoring : null;
+    const weights = scoring ? `<table class="tcrn-text"><caption>${esc(t("recallScoring.weights"))}</caption><tbody>${[
+      [t("recallScoring.title"), scoring.title],
+      [t("recallScoring.tags"), scoring.tags],
+      [t("recallScoring.expansions"), scoring.expansions],
+      [t("recallScoring.externalKey"), scoring.externalKey],
+      [t("recallScoring.body"), scoring.body],
+    ].map(([label, value]) => `<tr><th scope="row">${esc(label)}</th><td>${esc(value ?? t("recallScoring.excluded"))}</td></tr>`).join("")}</tbody></table>` : "";
     const id = `concept-tip-${conceptTipSequence += 1}`;
-    const kind = key === "setting.design.authority" || body.length > 240 ? "popover" : "tooltip";
+    const kind = key === "setting.design.authority" || weights !== "" || body.length > 240 ? "popover" : "tooltip";
     const layerTag = kind === "popover" ? "section" : "span";
     const layerClass = kind === "popover" ? "tcrn-popover" : "tcrn-tooltip__content";
     const layerRole = kind === "popover" ? `role="dialog" aria-modal="false" aria-label="${esc(t("concept.explain"))}" data-overlay-scope="popover"` : `role="tooltip" data-tooltip-scope="supplemental" data-tooltip-interactive-content="forbidden"`;
@@ -4799,10 +4856,10 @@ const BOOT = __PORTAL_BOOT__;
       + `<button type="button" class="tcrn-button tcrn-button--quiet tcrn-icon-button" ${triggerRelation} data-static-overlay-trigger="true" data-static-overlay-kind="${kind}" aria-label="${esc(t("concept.explain"))}">`
       + `<svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v4"/><path d="M8 4.8h.01"/></svg>`
       + `</button>`
-      + `<${layerTag} id="${id}" ${layerRole} class="${layerClass}" data-static-overlay-layer="true" data-static-overlay-kind="${kind}" data-ds-overlay-candidate="TCRN-Design-System@d53f23055ddedc6e0881cd85d54e6ab79cd02f75" hidden>${esc(body)}</${layerTag}>`
+      + `<${layerTag} id="${id}" ${layerRole} class="${layerClass}" data-static-overlay-layer="true" data-static-overlay-kind="${kind}" data-ds-overlay-candidate="TCRN-Design-System@d53f23055ddedc6e0881cd85d54e6ab79cd02f75" hidden>${esc(body)}${weights}</${layerTag}>`
       + `</span>`;
   };
-  const settingDescription = (key) => t(`setting.${key}.description`);
+  const settingDescription = (key) => t(`setting.${settingCopyKey(key)}.description`);
   const currentSetting = (key) => state.settings?.settings?.find((entry) => entry.key === key);
   const controlId = (prefix, key) => `${prefix}-${String(key).replace(/[^a-zA-Z0-9_-]/gu, "-")}`;
   // The public, published DOM bridge is imported from this consumer's verified
@@ -4811,9 +4868,12 @@ const BOOT = __PORTAL_BOOT__;
   // mechanics remain the signed DS implementation.
   const DS_STATIC_OVERLAY_CANDIDATE = "TCRN-Design-System@48ded198a7148efdaa245271d1885e468f24f4a4";
   const staticOverlayMounts = new Set();
-  const destroyStaticOverlayMounts = () => {
-    for (const mounted of staticOverlayMounts) mounted.handle.destroy();
-    staticOverlayMounts.clear();
+  const destroyStaticOverlayMounts = (root = null) => {
+    for (const mounted of [...staticOverlayMounts]) {
+      if (root && mounted.trigger !== root && !root.contains?.(mounted.trigger)) continue;
+      mounted.handle.destroy();
+      staticOverlayMounts.delete(mounted);
+    }
   };
   const mountStaticOverlayMounts = (root = document) => {
     for (const trigger of $$('[data-static-overlay-trigger="true"]', root)) {
@@ -4876,8 +4936,12 @@ const BOOT = __PORTAL_BOOT__;
   const deviceControlFor = (entry) => {
     const current = entry.deviceValue ?? entry.currentValue ?? "";
     // Named `name`, not `label`: the design proof pins the project controls' own markup by its text.
-    const name = settingLabel(entry.key);
-    if (entry.controlType === "number") return `<label class="tcrn-field"><span class="tcrn-sr-only">${esc(name)}</span><input class="tcrn-input tcrn-number-input" type="number" min="${esc(entry.min)}" ${entry.max === undefined ? "" : `max="${esc(entry.max)}"`} step="1" value="${esc(current)}" data-machine-control="${esc(entry.key)}" data-number-input-component="NumberInput" data-number-input="true" data-number-input-semantic="numeric-entry" data-number-input-visibility="full-value" data-cli-action="machine-settings-set" aria-label="${esc(name)}"></label>`;
+    const name = settingLabel(settingCopyKey(entry.key));
+    if (entry.controlType === "boolean") {
+      const enabled = (entry.currentValue ?? entry.defaultValue) === "true";
+      return `<label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-machine-control="${esc(entry.key)}" data-cli-action="machine-settings-set" aria-label="${esc(name)}" ${enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(enabled ? t("config.enabled") : t("config.disabled"))}</span></label>`;
+    }
+    if (entry.controlType === "number") return `<label class="tcrn-field"><span class="tcrn-sr-only">${esc(name)}</span><input class="tcrn-input tcrn-number-input" type="number" min="${esc(entry.min)}" ${entry.max === undefined ? "" : `max="${esc(entry.max)}"`} step="1" value="${esc(current)}" placeholder="${esc(entry.defaultValue ?? "")}" data-machine-control="${esc(entry.key)}" data-number-input-component="NumberInput" data-number-input="true" data-number-input-semantic="numeric-entry" data-number-input-visibility="full-value" data-cli-action="machine-settings-set" aria-label="${esc(name)}"></label>`;
     if (entry.controlType === "text") return `<label class="tcrn-field"><span class="tcrn-sr-only">${esc(name)}</span><input class="tcrn-input" value="${esc(current)}" placeholder="${esc(t("config.unset"))}" aria-label="${esc(name)}" data-machine-control="${esc(entry.key)}" data-cli-action="machine-settings-set"></label>`;
     const values = ["", ...deviceOptions(entry)];
     return `<div class="tcrn-setting-choice" data-setting-choice-component="SettingChoice" ${settingChoiceAttrs(values, entry.key)}><label class="tcrn-setting-choice__select-label"><span class="tcrn-sr-only">${esc(name)}</span><select class="tcrn-select" data-machine-control="${esc(entry.key)}" data-cli-action="machine-settings-set" aria-label="${esc(name)}">${values.map((value) => `<option value="${esc(value)}" ${value === current ? "selected" : ""}>${esc(value || t("config.unset"))}</option>`).join("")}</select></label></div>`;
@@ -4895,56 +4959,107 @@ const BOOT = __PORTAL_BOOT__;
     if (entry.controlType === "enum" && values.length > 0) return `<div class="tcrn-setting-choice" data-setting-choice-component="SettingChoice" ${settingChoiceAttrs(values, entry.key)}><label class="tcrn-setting-choice__select-label" for="${esc(id)}"><span class="tcrn-sr-only">${esc(label)}</span><select class="tcrn-select" id="${esc(id)}" aria-label="${esc(label)}" data-setting-control="${esc(entry.key)}" data-cli-action="settings-set">${values.map((value) => `<option value="${esc(value)}" ${value === current ? "selected" : ""}>${esc(entry.key === "artifact.language" ? promptLanguageLabel(value) : value || t("config.unset"))}</option>`).join("")}</select></label></div>`;
     return `<label class="tcrn-field"><span class="tcrn-sr-only">${esc(label)}</span><input class="tcrn-input" id="${esc(id)}" value="${esc(current)}" placeholder="${esc(unconfiguredDevicePath ? t("config.unset") : entry.defaultValue ?? t("config.unset"))}" aria-label="${esc(label)}" data-setting-control="${esc(entry.key)}" data-cli-action="settings-set">${unconfiguredDevicePath ? `<span class="tcrn-field__hint" data-device-path-status="unconfigured">${esc(t("config.unset"))}</span>` : ""}</label>`;
   };
-  // INC-193: the design authority is a declaration, and what is behind it is an
-  // external fact. Verified-true is green, verified-false is red, and "cannot be
-  // verified here" is yellow — a distinct state rather than a soft red, so it never
-  // changes an exit code and never becomes a place to park a defect. Every yellow
-  // states what would turn it green. The fetch happens in the reader's browser: the
-  // engine is offline by construction and the portal server never reaches out either.
-  const DESIGN_AUTHORITY_CONTRACT = "/tcrn-design-authority.json";
-  const designAuthorityState = { key: null, status: "unset", detail: null, epoch: 0 };
-  const readDesignAuthority = async (url) => {
-    if (!url) return { status: "unset", detail: null };
-    let contract;
-    try { contract = new URL(DESIGN_AUTHORITY_CONTRACT, url).href; } catch { return { status: "warning", detail: t("design.warnBadUrl") }; }
+  const productionDocsKey = "design.productionDocs";
+  const designAuthorityUrl = () => currentSetting("design.authority")?.currentValue || "";
+  const designAuthorityContext = () => JSON.stringify([BOOT.library?.libraryId, state.libraryEpoch, state.settings?.projectId, designAuthorityUrl()]);
+  let designAuthorityRead = { context: null, status: "idle" };
+  const storybookFile = (base, path) => fetch(new URL(path, base).href, { mode: "cors", credentials: "omit", cache: "no-store" });
+  const standardStorybook = async (base) => {
     try {
-      const response = await fetch(contract, { mode: "cors", credentials: "omit", cache: "no-store" });
-      if (!response.ok) return { status: "warning", detail: t("design.warnStatus", { status: response.status }) };
-      const body = await response.json();
-      // The response is somebody else's bytes: it is checked for shape before anything
-      // from it reaches the page, and rendered escaped like any other untrusted input.
-      if (body?.schemaVersion !== "tcrn.design-authority.v1") return { status: "warning", detail: t("design.warnSchema") };
-      if (typeof body.name !== "string" || typeof body.version !== "string" || body.name.length === 0 || body.version.length === 0) {
-        return { status: "warning", detail: t("design.warnFields") };
+      const [indexResponse, projectResponse] = await Promise.all([storybookFile(base, "index.json"), storybookFile(base, "project.json")]);
+      const rejected = [indexResponse, projectResponse].find((response) => !response.ok);
+      if (rejected) return { status: "warning", warning: "http", httpStatus: rejected.status };
+      const [index, project] = await Promise.all([indexResponse.json(), projectResponse.json()]).catch(() => []);
+      if (!Number.isInteger(index?.v) || !index?.entries || typeof index.entries !== "object" || Array.isArray(index.entries) || typeof project?.storybookVersion !== "string" || !project.storybookVersion.trim()) {
+        return { status: "warning", warning: "schema" };
       }
-      return { status: "declared", detail: { name: body.name, version: body.version } };
-    } catch { return { status: "warning", detail: t("design.warnUnreachable") }; }
+      const components = await storybookFile(base, "manifests/components.json").then(async (response) => {
+        if (response.status === 404) return "missing";
+        if (!response.ok) return "unverified";
+        const manifest = await response.json();
+        return manifest && typeof manifest === "object" ? "available" : "unverified";
+      }).catch(() => "unverified");
+      return { status: "available", url: base.href, count: Object.keys(index.entries).length, version: project.storybookVersion, components };
+    } catch { return { status: "warning", warning: "unreachable" }; }
+  };
+  const fetchDesignAuthority = async () => {
+    const context = designAuthorityContext();
+    const request = designAuthorityRead = { context, status: "loading" };
+    renderDesignAuthority();
+    let base;
+    try {
+      base = new URL(designAuthorityUrl());
+      if (!["http:", "https:"].includes(base.protocol) || base.username || base.password) throw new Error("Expected an HTTP(S) site");
+      base.search = "";
+      base.hash = "";
+      if (!base.pathname.endsWith("/")) base.pathname += "/";
+    } catch {
+      if (designAuthorityRead === request) {
+        designAuthorityRead = { context, status: "warning", warning: "url" };
+        renderDesignAuthority();
+      }
+      return;
+    }
+    const first = await standardStorybook(base);
+    if (designAuthorityRead !== request || context !== designAuthorityContext()) return;
+    const result = first.status === "available" || base.pathname.endsWith("/storybook/")
+      ? first
+      : await standardStorybook(new URL("storybook/", base));
+    if (designAuthorityRead !== request || context !== designAuthorityContext()) return;
+    designAuthorityRead = { context, ...result };
+    renderDesignAuthority();
   };
   const renderDesignAuthority = () => {
     const host = $("#design-authority");
-    if (!host) return;
-    const { status, detail } = designAuthorityState;
-    if (status === "unset") { host.innerHTML = ""; host.hidden = true; return; }
-    host.hidden = false;
-    host.innerHTML = status === "declared"
-      ? `<div class="tcrn-inline-alert" data-design-authority-state="declared"><span>${esc(t("design.declared"))}: <strong>${esc(detail.name)}</strong> ${esc(detail.version)}. ${esc(t("design.warnResolve"))}</span></div>`
-      : `<div class="tcrn-inline-alert tcrn-inline-alert--warning" data-design-authority-state="${esc(status)}" role="status"><span>${esc(detail)} ${["unconfigured", "conflicting"].includes(status) ? "" : esc(t("design.warnResolve"))}</span></div>`;
-  };
-  const refreshDesignAuthority = async () => {
-    const url = currentSetting("design.authority")?.currentValue ?? null;
+    const context = designAuthorityContext();
+    if (designAuthorityRead.context !== context) designAuthorityRead = { context, status: "idle" };
+    host.hidden = !designAuthorityUrl() || state.settings?.chain?.role === "coordination" || state.settingGroup !== settingGroup("design.authority");
+    if (host.hidden) { host.innerHTML = ""; return; }
+    const { status, url, count, version, components, warning, httpStatus, saving } = designAuthorityRead;
+    const field = $("[data-setting-control='design.productionDocs']", $("#settings-rows"));
+    const action = (key, label, primary = false) => `<button type="button" class="tcrn-button tcrn-button--${primary ? "primary" : "quiet"} tcrn-button--sm" data-design-authority-action="${key}"${saving ? " disabled" : ""}>${esc(label)}</button>`;
+    const componentLabels = { available: t("design.components.available"), missing: t("design.components.missing"), unverified: t("design.components.unverified") };
+    const warnings = { http: t("design.warnStatus", { status: httpStatus }), schema: t("design.warnSchema"), url: t("design.warnBadUrl"), unreachable: t("design.warnUnreachable") };
+    const outcome = status === "available" || status === "staged"
+      ? `<p>${esc(t("design.storybook", { version, count }))} ${esc(componentLabels[components])}</p><p><code>${esc(url)}</code></p><p>${esc(t("design.warnResolve"))}</p>`
+      : status === "warning" ? `<p>${esc(warnings[warning])}</p>` : status === "loading" ? `<p>${esc(t("config.loading"))}</p>` : "";
+    const fetchAction = action("fetch", t("design.fetch"));
+    const actions = status === "staged" ? action("save", t("config.save"), true) + action("cancel", t("config.undo"))
+      : status === "available" && field ? action("fill", t("design.useDocs"), true) + fetchAction
+        : status === "loading" ? "" : fetchAction;
     const declaration = state.settings?.design;
-    const key = JSON.stringify([BOOT.library?.libraryId, state.settings?.projectId, declaration, state.locale]);
-    if (key === designAuthorityState.key) return;
-    const epoch = ++designAuthorityState.epoch;
-    designAuthorityState.key = key;
-    const result = !url ? { status: "unset", detail: null } : declaration?.status === "unconfigured"
-      ? { status: "unconfigured", detail: t("design.missingBindings", { fields: declaration.missing.map(settingLabel).join(", ") }) }
-      : declaration?.status === "conflicting"
-        ? { status: "conflicting", detail: t("design.conflictingBindings") }
-        : await readDesignAuthority(url);
-    if (epoch !== designAuthorityState.epoch || key !== designAuthorityState.key) return;
-    Object.assign(designAuthorityState, result);
-    renderDesignAuthority();
+    const hint = declaration?.status === "conflicting" ? t("design.conflictingBindings")
+      : declaration?.status === "unconfigured" ? t("design.missingBindings", { fields: declaration.missing.map(settingLabel).join(", ") }) : "";
+    host.innerHTML = `<div class="tcrn-inline-alert${status === "warning" ? " tcrn-inline-alert--warning" : ""}" data-design-authority-state="${status}"><div aria-live="polite">${hint ? `<p>${esc(hint)}</p>` : ""}${outcome}${status === "staged" ? `<p>${esc(t("design.staged"))}</p>` : ""}</div><div class="tcrn-action-row">${actions}</div></div>`;
+    if (status === "staged" && field) field.value = url;
+    $('[data-design-authority-action="fetch"]', host)?.addEventListener("click", () => void fetchDesignAuthority());
+    $('[data-design-authority-action="fill"]', host)?.addEventListener("click", () => {
+      designAuthorityRead.status = "staged";
+      renderDesignAuthority();
+      $('[data-design-authority-action="save"]', host)?.focus();
+    });
+    $('[data-design-authority-action="cancel"]', host)?.addEventListener("click", () => {
+      designAuthorityRead.status = "available";
+      renderSettings();
+    });
+    $('[data-design-authority-action="save"]', host)?.addEventListener("click", async () => {
+      if (state.librarySwitching || state.settingsWritePending || context !== designAuthorityContext()) return;
+      const staged = designAuthorityRead;
+      staged.saving = true;
+      renderDesignAuthority();
+      const sameDraft = () => designAuthorityRead === staged && context === designAuthorityContext();
+      try {
+        await mutateSetting(productionDocsKey, { value: url }, readback => {
+          if (!sameDraft() || readback?.key !== productionDocsKey || readback.currentValue !== url) return;
+          state.settings.settings = state.settings.settings.map(entry => entry.key === productionDocsKey ? readback : entry);
+          staged.status = "available";
+          renderDesignAuthority();
+        });
+      } finally {
+        staged.saving = false;
+        if (sameDraft()) renderDesignAuthority();
+      }
+    });
   };
   // A settings row for each shape and layer. A project-level key keeps the controls it always had; a
   // device key is written to this device's own file (machine-settings-set); a collection key is a
@@ -5009,7 +5124,7 @@ const BOOT = __PORTAL_BOOT__;
     const scope = extra.scope ?? contract.scope;
     return `${configurationOverview(scope, contract.sharing, t("configuration.editableDeclaration"))}<details class="tcrn-disclosure-panel" data-independent-configuration-contract="${esc(kind)}"><summary class="tcrn-disclosure-panel__title">${esc(t("configuration.details"))}</summary>${configurationFields({ target: configurationTarget(scope), scope, source: contract.source, storageSource: contract.source, sharing: contract.sharing, export: contract.export, effect: contract.effect, editing: contract.editing, compatibility: contract.compatibility, ...extra })}</details>`;
   };
-  const settingRowLabel = (entry, description) => `<div class="tcrn-setting-row__label"><code class="tcrn-setting-row__key">${esc(entry.key)}</code><span class="tcrn-setting-row__name">${esc(settingLabel(entry.key))}${conceptTip("setting." + entry.key)}</span><span class="tcrn-setting-row__description">${esc(description)}</span>${layerBadge(entry.layer)}<span class="tcrn-field__hint" data-effective-source="${esc(entry.source?.projectId ?? entry.source?.kind ?? entry.layer)}">${esc(settingSourceText(entry))}</span>${configurationMetadata(entry)}</div>`;
+  const settingRowLabel = (entry, description) => `<div class="tcrn-setting-row__label"><code class="tcrn-setting-row__key">${esc(entry.key)}</code><span class="tcrn-setting-row__name">${esc(settingLabel(settingCopyKey(entry.key)))}${conceptTip("setting." + settingCopyKey(entry.key))}</span><span class="tcrn-setting-row__description">${esc(description)}</span>${layerBadge(entry.layer)}<span class="tcrn-field__hint" data-effective-source="${esc(entry.source?.projectId ?? entry.source?.kind ?? entry.layer)}">${esc(settingSourceText(entry))}</span>${configurationMetadata(entry)}</div>`;
   const projectSettingRow = (entry) => {
     const modified = entry.declaredValue != null;
     const reset = modified ? `<button type="button" class="tcrn-setting-row__reset" data-reset-setting="${esc(entry.key)}" data-cli-action="settings-remove">${esc(t("config.reset"))}</button>` : "";
@@ -5074,7 +5189,31 @@ const BOOT = __PORTAL_BOOT__;
     const stateText = modelPolicyPendingFor(state.modelPolicyHost) ? t("modelPolicy.loading") : !catalog || catalog.ok === false || catalog.httpStatus >= 400 ? t("modelPolicy.unavailable") : configured ? t("modelPolicy.engineHostSource", { host: state.modelPolicyHost }) : t("modelPolicy.unconfigured");
     return `<div class="tcrn-setting-row" data-setting-row="${esc(entry.key)}" data-setting-shape="compatibility" data-model-policy-legacy="true">${settingRowLabel(entry, settingDescription(entry.key))}<div class="tcrn-setting-row__control"><span class="tcrn-field__hint" data-engine-policy-source="${esc(state.modelPolicyHost)}">${esc(t("modelPolicy.legacySource", { source: stateText }))}</span><pre data-model-policy-legacy-value>${esc(typeof entry.currentValue === "string" ? entry.currentValue : JSON.stringify(entry.currentValue ?? null))}</pre><button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-model-policy-link="engine-model-policy">${esc(t("modelPolicy.openEditor"))}</button></div><div class="tcrn-setting-row__tools"></div></div>`;
   };
-  const settingRow = (entry) => (entry.key.startsWith("models.") || entry.key.startsWith("quota.")) ? modelPolicyCompatibilityRow(entry) : entry.layer === "device" ? deviceSettingRow(entry) : entry.shape === "collection" ? collectionSettingRow(entry) : projectSettingRow(entry);
+  const settingRow = (entry) => entry.layer === "device" ? deviceSettingRow(entry) : (entry.key.startsWith("models.") || entry.key.startsWith("quota.") || entry.key === "execution.maxConcurrentSubagents") ? modelPolicyCompatibilityRow(entry) : entry.shape === "collection" ? collectionSettingRow(entry) : projectSettingRow(entry);
+  const wireMachineControls = (root) => $$('[data-machine-control]', root).forEach((control) => control.addEventListener("change", () => saveMachineSetting(
+    control.dataset.machineControl, control.type === "checkbox" ? String(control.checked) : control.value,
+  )));
+  const renderModelPageSettings = () => {
+    const root = $("#device-model-settings");
+    if (!root) return;
+    const focus = rememberFocus(root);
+    destroyStaticOverlayMounts(root);
+    const machineEntries = (Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings : []).filter((entry) => entry.group === "models").map((entry) => ({ ...entry, layer: "device" }));
+    const projectEntries = (Array.isArray(state.settings?.settings) ? state.settings.settings : []).filter((entry) => entry.group === "models").map((entry) => ({ ...entry }));
+    const machineLoading = state.machineSettings === null;
+    const machineUnavailable = !machineLoading && !Array.isArray(state.machineSettings?.settings);
+    const machinePhase = machineLoading ? "loading" : machineUnavailable ? "error" : machineEntries.length === 0 ? "empty" : "content";
+    const stateText = machinePhase === "loading" ? t("config.loading") : machinePhase === "error" ? t("config.readUnavailable") : t("config.empty");
+    const deviceRows = machinePhase === "content"
+      ? `<div class="tcrn-content-scope__content"><div class="tcrn-settings-layout__form"><div class="tcrn-setting-row-list" data-setting-row-list="true">${machineEntries.sort((left, right) => entryOrder(left) - entryOrder(right) || String(left.key).localeCompare(String(right.key))).map(deviceSettingRow).join("")}</div></div></div>`
+      : `<div class="tcrn-state-surface" data-settings-state="${machinePhase}">${esc(stateText)}</div>`;
+    const legacyRows = projectEntries.length === 0 ? "" : `<section class="tcrn-surface" data-model-policy-legacy-settings><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(t("modelPolicy.legacySettingsTitle"))}</h2><p class="tcrn-text">${esc(t("modelPolicy.compatibilityNote"))}</p></div></div><div class="tcrn-setting-row-list" data-setting-row-list="true">${projectEntries.sort((left, right) => entryOrder(left) - entryOrder(right) || String(left.key).localeCompare(String(right.key))).map(settingRow).join("")}</div></section>`;
+    root.innerHTML = `<section class="tcrn-surface tcrn-content-scope" data-content-scope="model-device-settings" data-content-group="models" data-content-source="engine.machine-settings" data-content-phase="${machinePhase}" data-content-valid="${machineUnavailable ? "false" : "true"}" data-content-shown-count="${machineEntries.length}" data-content-total-count="${machineEntries.length}" data-content-count-kind="total" data-content-stale="false"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(t("modelPolicy.genericSettingsTitle"))}</h2><p class="tcrn-text">${esc(t("modelPolicy.genericSettingsNote"))}</p></div></div>${deviceRows}</section>${legacyRows}`;
+    wireMachineControls(root);
+    $$('[data-model-policy-link]', root).forEach((button) => button.addEventListener("click", () => { navigate(button.dataset.modelPolicyLink); renderModelPolicy(); }));
+    mountStaticOverlayMounts(root);
+    restoreFocus(root, focus);
+  };
   // Target labels (TCRN-CROSS-INIT-053 R45 U14, F08) begin.
   // What a library or a project target is called on the page. The project's own name comes first; a
   // project the engine names nothing is "Unnamed project", never the word an unconfigured state uses;
@@ -5197,10 +5336,7 @@ const BOOT = __PORTAL_BOOT__;
       : `<div class="tcrn-state-surface" data-settings-state="${phase}">${esc(stateText)}</div>`;
     const valid = unavailable || deviceUnavailable ? "false" : "true";
     $("#settings-rows").innerHTML = `<section class="tcrn-surface tcrn-content-scope" data-content-scope="settings-group" data-content-group="${esc(state.settingGroup)}" data-content-source="engine.settings-catalog engine.machine-settings" data-content-phase="${phase}" data-content-valid="${valid}" data-content-shown-count="${entries.length}" data-content-total-count="${entries.length}" data-content-count-kind="total" data-content-stale="false"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(settingGroupName(state.settingGroup))}</h2><p class="tcrn-text">${esc(t("settings.groupNote"))}</p></div></div>${body}</section>`;
-    // The design authority's panel sits with the key, in whichever group the catalog files it.
-    const authorityGroup = settingGroup("design.authority");
-    $("#design-authority").hidden = state.settings?.chain?.role === "coordination" || state.settingGroup !== authorityGroup || designAuthorityState.status === "unset";
-    if (state.settings?.chain?.role !== "coordination" && state.settingGroup === authorityGroup) { renderDesignAuthority(); refreshDesignAuthority(); }
+    renderDesignAuthority();
     void renderProjectBindings();
     const rows = $("#settings-rows");
     $$('[data-setting-control]', rows).forEach((control) => {
@@ -5228,7 +5364,7 @@ const BOOT = __PORTAL_BOOT__;
         input.dispatchEvent(new Event("change", { bubbles: true }));
       }
     }));
-    $$('[data-machine-control]', rows).forEach((control) => control.addEventListener("change", () => saveMachineSetting(control.dataset.machineControl, control.value)));
+    wireMachineControls(rows);
     $$('[data-collection-link]', rows).forEach((button) => button.addEventListener("click", () => openCollection(button.dataset.collectionLink)));
     $$('[data-model-policy-link]', rows).forEach((button) => button.addEventListener("click", () => { navigate(button.dataset.modelPolicyLink); renderModelPolicy(); }));
     $$('[data-vocabulary-link]', rows).forEach((button) => button.addEventListener("click", () => { state.selectedVocabulary = button.dataset.vocabularyLink; navigate("vocabulary"); renderVocabulary(); }));
@@ -5361,9 +5497,8 @@ const BOOT = __PORTAL_BOOT__;
   };
   const openEscalationSettings = () => {
     clearTransientTarget();
-    state.settingGroup = settingGroup(ESCALATION_KEYS[0]);
-    navigate("settings");
-    renderSettings();
+    navigate("engine-model-policy");
+    renderModelPolicy();
   };
   const tierCounts = () => storedRecords("models.tiers").reduce((counts, record) => counts.set(record.category, (counts.get(record.category) ?? 0) + 1), new Map());
   const renderLegacyModelCategories = () => {
@@ -5492,7 +5627,7 @@ const BOOT = __PORTAL_BOOT__;
   };
   const copyPolicy = (entry) => entry === null || entry === undefined
     ? { categories: [], tiers: [], escalation: { enabled: false, threshold: 2, ceiling: "main" } }
-    : { categories: (Array.isArray(entry.categories) ? entry.categories : []).map((row) => ({ ...row })), tiers: (Array.isArray(entry.tiers) ? entry.tiers : []).map((row) => ({ ...row })), escalation: { enabled: false, threshold: 2, ceiling: "main", ...(entry.escalation || {}) }, ...(entry.quota ? { quota: { ...entry.quota } } : {}) };
+    : { categories: (Array.isArray(entry.categories) ? entry.categories : []).map((row) => ({ ...row })), tiers: (Array.isArray(entry.tiers) ? entry.tiers : []).map((row) => ({ ...row })), escalation: { enabled: false, threshold: 2, ceiling: "main", ...(entry.escalation || {}) }, ...(entry.quota ? { quota: { ...entry.quota } } : {}), ...(Object.hasOwn(entry, "maxConcurrentSubagents") ? { maxConcurrentSubagents: entry.maxConcurrentSubagents } : {}) };
   const policyDraft = (host) => {
     const drafts = modelPolicyDrafts();
     if (!drafts.has(host)) {
@@ -5531,7 +5666,7 @@ const BOOT = __PORTAL_BOOT__;
     if (!draft.policy.categories.some((category) => String(category.id ?? "") === current)) options.unshift(`<option value="${esc(current)}" selected>${esc(current || t("modelPolicy.unselectedCategory"))}</option>`);
     return `<div class="tcrn-setting-choice" data-setting-choice-component="SettingChoice" ${settingChoiceAttrs(draft.policy.categories.map((category) => String(category.id ?? "")), "models.category")} data-setting-choice-source="engine-model-policy.categories"><label class="tcrn-setting-choice__select-label"><span class="tcrn-sr-only">${esc(t("modelTiers.category"))}</span><select class="tcrn-select" aria-label="${esc(t("modelTiers.category"))}" data-engine-policy-field="category" data-engine-policy-kind="tiers" data-engine-policy-index="${index}">${options.join("")}</select></label></div>`;
   };
-  const modelPolicyTables = (host, draft, sections = ["categories", "tiers", "escalation", "quota"]) => {
+  const modelPolicyTables = (host, draft, sections = ["categories", "tiers", "escalation", "concurrency", "quota"]) => {
     const output = [`<p class="tcrn-text" data-engine-model-policy-onboarding>${esc(t("modelPolicy.onboarding"))}</p>`];
     if (host === "codex") {
       const readiness = state.modelPolicy?.selectedHost === host ? state.modelPolicy.peerReadiness : null;
@@ -5546,7 +5681,7 @@ const BOOT = __PORTAL_BOOT__;
         { field: "actions", label: t("collection.actions"), render: (_row, _invalid, index) => `<button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--md" data-engine-policy-remove="categories" data-engine-policy-index="${index}" aria-label="${esc(t("collection.removeRow", { order: draft.policy.categories[index]?.order ?? "" }))}">${esc(t("config.remove"))}</button>` },
       ];
       const empty = emptyGuide(t("modelCategories.emptyTitle"), t("modelPolicy.emptyCategories"), `<button type="button" class="tcrn-button tcrn-button--primary tcrn-button--md" data-engine-policy-add="categories">${esc(t("modelCategories.add"))}</button>`);
-      output.push(`<section class="tcrn-surface" data-engine-model-policy-section="categories"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h3>${esc(t("page.modelCategories"))}</h3><p class="tcrn-text">${esc(t("modelPolicy.engineHostSource", { host }))}</p></div></div>${collectionTable({ key: "engine-model-policy-categories", ui: "model-categories-table", label: t("modelCategories.title"), columns, rows: draft.policy.categories, findings: [], empty })}<div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-engine-policy-add="categories">${esc(t("modelCategories.add"))}</button></div></section>`);
+      output.push(`<section class="tcrn-surface" data-engine-model-policy-section="categories"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h3>${esc(t("page.modelCategories"))}</h3><p class="tcrn-text">${esc(t("modelPolicy.sharedCategories"))}</p></div></div>${collectionTable({ key: "engine-model-policy-categories", ui: "model-categories-table", label: t("modelCategories.title"), columns, rows: draft.policy.categories, findings: [], empty })}<div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-engine-policy-add="categories">${esc(t("modelCategories.add"))}</button></div></section>`);
     }
     if (sections.includes("tiers")) {
       const columns = [
@@ -5572,9 +5707,16 @@ const BOOT = __PORTAL_BOOT__;
       if (!categories.some((category) => String(category.id ?? "") === ceiling)) options.unshift(`<option value="${esc(ceiling)}" selected>${esc(ceiling || t("modelPolicy.unselectedCategory"))}</option>`);
       output.push(`<section class="tcrn-surface" data-engine-model-policy-section="escalation"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h3>${esc(t("modelTiers.escalationTitle"))}</h3><p class="tcrn-text">${esc(t("modelPolicy.engineHostSource", { host }))}</p></div></div><div class="tcrn-grid tcrn-grid--3"><label class="tcrn-switch" data-switch-state="${draft.policy.escalation.enabled ? "on" : "off"}"><input class="tcrn-switch__control" type="checkbox" role="switch" data-engine-policy-escalation="enabled" ${draft.policy.escalation.enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(t("setting.models.escalation.enabled.label"))}</span></label><label class="tcrn-field"><span class="tcrn-field__label">${esc(t("setting.models.escalation.threshold.label"))}</span><input class="tcrn-input tcrn-number-input" type="number" min="1" step="1" data-number-input-component="NumberInput" data-number-input="true" data-number-input-semantic="numeric-entry" data-number-input-visibility="full-value" aria-label="${esc(t("setting.models.escalation.threshold.label"))}" data-engine-policy-escalation="threshold" value="${esc(draft.policy.escalation.threshold)}"></label><div class="tcrn-setting-choice" data-setting-choice-component="SettingChoice" ${settingChoiceAttrs(categories.map((category) => String(category.id ?? "")), "models.escalation.ceiling")} data-setting-choice-source="engine-model-policy.categories"><label class="tcrn-setting-choice__select-label"><span class="tcrn-field__label">${esc(t("setting.models.escalation.ceiling.label"))}</span><select class="tcrn-select" aria-label="${esc(t("setting.models.escalation.ceiling.label"))}" data-engine-policy-escalation="ceiling" ${categories.length === 0 ? "disabled" : ""}>${options.join("")}</select></label></div></div></section>`);
     }
+    if (sections.includes("concurrency")) {
+      const generic = state.machineSettings?.settings?.find(entry => entry.key === "models.maxConcurrentSubagents");
+      const inherited = generic?.currentValue ?? generic?.defaultValue ?? "8";
+      output.push(`<section class="tcrn-surface" data-engine-model-policy-section="concurrency"><h3>${esc(t("setting.execution.maxConcurrentSubagents.label"))}</h3><p class="tcrn-text">${esc(t("modelPolicy.hostOverrideNote"))}</p><label class="tcrn-field"><span class="tcrn-field__label">${esc(t("modelPolicy.hostConcurrency"))}</span><input class="tcrn-input tcrn-number-input" type="number" min="1" step="1" data-number-input-component="NumberInput" data-number-input="true" data-number-input-semantic="numeric-entry" data-number-input-visibility="full-value" aria-label="${esc(t("modelPolicy.hostConcurrency"))}" data-engine-policy-concurrency value="${esc(draft.policy.maxConcurrentSubagents ?? "")}" placeholder="${esc(inherited)}"></label></section>`);
+    }
     if (sections.includes("quota")) {
-      const quota = draft.policy.quota ?? { fiveHourParallelOffPercent: 75, fiveHourWaitPercent: 90, weeklyParallelOffPercent: 95, weeklyWaitPercent: null };
-      output.push(`<section class="tcrn-surface" data-engine-model-policy-section="quota"><h3>${esc(t("modelPolicy.quota"))}</h3><p class="tcrn-text">${esc(t("modelPolicy.quotaNote"))}</p><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-engine-policy-quota-enabled ${draft.policy.quota ? "checked" : ""}><span class="tcrn-switch__label">${esc(t("modelPolicy.quotaOverride"))}</span></label><div class="tcrn-grid tcrn-grid--2">${Object.entries(quota).map(([key, value]) => `<label class="tcrn-field"><span class="tcrn-field__label">${esc(settingLabel("quota." + key))}</span><input class="tcrn-input tcrn-number-input" type="number" min="1" max="100" step="1" aria-label="${esc(settingLabel("quota." + key))}" data-number-input-component="NumberInput" data-number-input="true" data-number-input-semantic="numeric-entry" data-number-input-visibility="full-value" data-engine-policy-quota="${key}" value="${esc(value ?? "")}" ${draft.policy.quota ? "" : "disabled"}></label>`).join("")}</div></section>`);
+      const quotaFields = ["fiveHourParallelOffPercent", "fiveHourWaitPercent", "weeklyParallelOffPercent", "weeklyWaitPercent"];
+      const genericValue = key => { const entry = state.machineSettings?.settings?.find(item => item.key === `models.quota.${key}`); return entry?.currentValue ?? entry?.defaultValue ?? ""; };
+      const weeklyDisabled = Object.hasOwn(draft.policy.quota ?? {}, "weeklyWaitPercent") && draft.policy.quota.weeklyWaitPercent === null;
+      output.push(`<section class="tcrn-surface" data-engine-model-policy-section="quota"><h3>${esc(t("modelPolicy.quota"))}</h3><p class="tcrn-text">${esc(t("modelPolicy.quotaNote"))}</p><div class="tcrn-grid tcrn-grid--2">${quotaFields.map(key => { const override = draft.policy.quota ?? {}; const value = Object.hasOwn(override, key) ? override[key] : ""; return `<label class="tcrn-field"><span class="tcrn-field__label">${esc(settingLabel("quota." + key))}</span><input class="tcrn-input tcrn-number-input" type="number" min="1" max="100" step="1" aria-label="${esc(settingLabel("quota." + key))}" data-number-input-component="NumberInput" data-number-input="true" data-number-input-semantic="numeric-entry" data-number-input-visibility="full-value" data-engine-policy-quota="${key}" value="${esc(value ?? "")}" placeholder="${esc(genericValue(key))}" ${key === "weeklyWaitPercent" && weeklyDisabled ? "disabled" : ""}></label>`; }).join("")}</div><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-engine-policy-quota-weekly-disabled ${weeklyDisabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(t("modelPolicy.weeklyWaitDisabled"))}</span></label></section>`);
     }
     return output.join("");
   };
@@ -5624,12 +5766,13 @@ const BOOT = __PORTAL_BOOT__;
     const version = draft.version;
     const libraryId = BOOT.library?.libraryId ?? null;
     const libraryPath = BOOT.library?.libraryPath ?? null;
-    const request = Object.freeze({ version, libraryId, libraryPath });
+    const expectedStoreRevision = Number.isSafeInteger(state.modelPolicy?.storeRevision) ? state.modelPolicy.storeRevision : null;
+    const request = Object.freeze({ version, libraryId, libraryPath, expectedStoreRevision });
     modelPolicyWrites().set(host, request);
     render();
     let result;
     try {
-      result = await api("/api/model-policy", { method: "POST", anyTarget: true, body: JSON.stringify({ host, policy: copyPolicy(draft.policy), decidedIn, libraryId, libraryPath }) });
+      result = await api("/api/model-policy", { method: "POST", anyTarget: true, body: JSON.stringify({ host, policy: copyPolicy(draft.policy), expectedStoreRevision, decidedIn, libraryId, libraryPath }) });
     } catch (error) {
       result = { ok: false, reasonCode: "PORTAL_MODEL_POLICY_WRITE_UNAVAILABLE", error: String(error?.message ?? error) };
     } finally {
@@ -5668,19 +5811,29 @@ const BOOT = __PORTAL_BOOT__;
     });
     $$('[data-engine-policy-field]', view).forEach((input) => input.addEventListener(input.tagName === "SELECT" ? "change" : "input", (event) => { updateModelPolicyField(host, event.currentTarget); render(); }));
     $$('[data-engine-policy-escalation]', view).forEach((input) => input.addEventListener(input.tagName === "SELECT" || input.type === "checkbox" ? "change" : "input", (event) => { updateModelPolicyEscalation(host, event.currentTarget); render(); }));
-    $("[data-engine-policy-quota-enabled]", view)?.addEventListener("change", (event) => {
+    $("[data-engine-policy-concurrency]", view)?.addEventListener("input", (event) => {
       const draft = policyDraft(host);
-      if (event.currentTarget.checked) draft.policy.quota = { fiveHourParallelOffPercent: 75, fiveHourWaitPercent: 90, weeklyParallelOffPercent: 95, weeklyWaitPercent: null };
-      else delete draft.policy.quota;
+      if (event.currentTarget.value === "") delete draft.policy.maxConcurrentSubagents;
+      else draft.policy.maxConcurrentSubagents = orderValue(event.currentTarget.value);
       markPolicyDirty(draft); render();
     });
     $$('[data-engine-policy-quota]', view).forEach((input) => input.addEventListener("input", (event) => {
       const draft = policyDraft(host);
       const field = event.currentTarget.dataset.enginePolicyQuota;
-      if (!draft.policy.quota || !Object.hasOwn(draft.policy.quota, field)) return;
-      draft.policy.quota[field] = field === "weeklyWaitPercent" && event.currentTarget.value === "" ? null : orderValue(event.currentTarget.value);
+      draft.policy.quota ??= {};
+      if (event.currentTarget.value === "") delete draft.policy.quota[field];
+      else draft.policy.quota[field] = orderValue(event.currentTarget.value);
+      if (Object.keys(draft.policy.quota).length === 0) delete draft.policy.quota;
       markPolicyDirty(draft); render();
     }));
+    $("[data-engine-policy-quota-weekly-disabled]", view)?.addEventListener("change", (event) => {
+      const draft = policyDraft(host);
+      draft.policy.quota ??= {};
+      if (event.currentTarget.checked) draft.policy.quota.weeklyWaitPercent = null;
+      else delete draft.policy.quota.weeklyWaitPercent;
+      if (Object.keys(draft.policy.quota).length === 0) delete draft.policy.quota;
+      markPolicyDirty(draft); render();
+    });
     $("[data-engine-model-policy-decision]", view)?.addEventListener("input", (event) => { const draft = policyDraft(host); draft.decidedIn = event.currentTarget.value; markPolicyDirty(draft); render(); });
     $$('[data-engine-policy-add]', view).forEach((button) => button.addEventListener("click", () => {
       const draft = policyDraft(host);
@@ -5701,6 +5854,7 @@ const BOOT = __PORTAL_BOOT__;
     });
   };
   const renderModelPolicy = () => {
+    renderModelPageSettings();
     const view = $("#engine-model-policy-view");
     if (!view) return;
     const host = state.modelPolicyHost;
@@ -5747,7 +5901,7 @@ const BOOT = __PORTAL_BOOT__;
     const writing = modelPolicyWrites().has(host);
     const title = kind === "categories" ? t("modelCategories.title") : t("modelTiers.title");
     const failure = draft.failure ? `<div class="tcrn-inline-alert tcrn-inline-alert--danger" role="alert" data-engine-model-policy-write-error><code>${esc(draft.failure.reasonCode ?? "PORTAL_MODEL_POLICY_WRITE_FAILED")}</code><span>${esc(reasonHint(draft.failure.reasonCode) || t("receipt.failureMessage"))}</span></div>` : "";
-    view.innerHTML = `<section class="tcrn-surface" data-engine-model-policy-collection="${esc(kind)}" data-engine-policy-selected-host="${esc(host)}"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(title)}</h2><p class="tcrn-text">${esc(t("modelPolicy.engineHostSource", { host }))}</p></div><span class="tcrn-badge">v${esc(catalog.storeRevision)}</span></div><div class="tcrn-grid tcrn-grid--2">${modelPolicyHostControl(host, pending)}<label class="tcrn-field"><span class="tcrn-field__label">${esc(t("modelPolicy.decision"))}</span><input class="tcrn-input" data-engine-model-policy-decision aria-label="${esc(t("modelPolicy.decision"))}" value="${esc(draft.decidedIn)}" placeholder="minutes:&lt;id&gt;#D1" ${state.librarySwitching ? "disabled" : ""}></label></div>${modelPolicyAudit(catalog, host, entry)}${modelPolicyConfiguration(host, entry)}<p class="tcrn-text" data-engine-model-policy-compatibility>${esc(t("modelPolicy.compatibilityNote"))}</p>${failure}${modelPolicyTables(host, draft, kind === "categories" ? ["categories"] : ["tiers", "escalation", "quota"])}<div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-engine-model-policy-undo ${pending || state.librarySwitching ? "disabled" : ""}>${esc(t("config.undo"))}</button><button type="button" class="tcrn-button tcrn-button--primary tcrn-button--md" data-engine-model-policy-save data-cli-action="engine-model-policy-set" ${draft.dirty && !writing && !pending ? "" : "disabled"} aria-busy="${writing}">${esc(writing ? t("collection.saving") : t("config.save"))}</button></div></section>`;
+    view.innerHTML = `<section class="tcrn-surface" data-engine-model-policy-collection="${esc(kind)}" data-engine-policy-selected-host="${esc(host)}"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(title)}</h2><p class="tcrn-text">${esc(t("modelPolicy.engineHostSource", { host }))}</p></div><span class="tcrn-badge">v${esc(catalog.storeRevision)}</span></div><div class="tcrn-grid tcrn-grid--2">${modelPolicyHostControl(host, pending)}<label class="tcrn-field"><span class="tcrn-field__label">${esc(t("modelPolicy.decision"))}</span><input class="tcrn-input" data-engine-model-policy-decision aria-label="${esc(t("modelPolicy.decision"))}" value="${esc(draft.decidedIn)}" placeholder="minutes:&lt;id&gt;#D1" ${state.librarySwitching ? "disabled" : ""}></label></div>${modelPolicyAudit(catalog, host, entry)}${modelPolicyConfiguration(host, entry)}<p class="tcrn-text" data-engine-model-policy-compatibility>${esc(t("modelPolicy.compatibilityNote"))}</p>${failure}${modelPolicyTables(host, draft, kind === "categories" ? ["categories"] : ["tiers", "escalation", "concurrency", "quota"])}<div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-engine-model-policy-undo ${pending || state.librarySwitching ? "disabled" : ""}>${esc(t("config.undo"))}</button><button type="button" class="tcrn-button tcrn-button--primary tcrn-button--md" data-engine-model-policy-save data-cli-action="engine-model-policy-set" ${draft.dirty && !writing && !pending ? "" : "disabled"} aria-busy="${writing}">${esc(writing ? t("collection.saving") : t("config.save"))}</button></div></section>`;
     wireModelPolicyEditor(view, host, () => renderModelPolicyCollectionPage(kind)); restoreFocus(view, focus);
   };
   const renderModelCategories = () => renderModelPolicyCollectionPage("categories");
@@ -6027,15 +6181,19 @@ const BOOT = __PORTAL_BOOT__;
   const renderWorkTargetEditor = async () => {
     const epoch = ++workTargetEpoch;
     const library = BOOT.library?.libraryId;
-    const targets = await api("/api/project-targets");
+    const targets = await api("/api/project-targets").catch(() => null);
     if (epoch !== workTargetEpoch || library !== BOOT.library?.libraryId || unkept(targets)) return;
-    const records = (state.work?.records || []).filter(record => ["Initiative", "Story", "Subtask"].includes(record.kind));
     const root = $("#work-target-editor");
     workTargetMount?.destroy?.(); workTargetMount = null;
+    if (!Array.isArray(targets?.targets)) {
+      root.innerHTML = `<div class="tcrn-state-surface" role="alert">${readFailureContent(targets)}</div>`;
+      return;
+    }
+    const records = (state.work?.records || []).filter(record => ["Initiative", "Story", "Subtask"].includes(record.kind));
     // The filter and the selection list name each target the same way; complete identities are in
     // the Details under the filter, which follows the selected work item's references.
     const key = target => JSON.stringify({ libraryId: target.libraryId, projectId: target.projectId });
-    const available = Array.isArray(targets.targets) ? targets.targets : [];
+    const available = targets.targets;
     const availableLabels = distinctLabels(available);
     const scopeLabels = { undecided: t("projects.undecided"), "coordination-only": t("projects.coordination-only"), selected: t("projects.selected") };
     root.innerHTML = `<label class="tcrn-field"><span class="tcrn-field__label">${esc(t("projects.filter"))}</span><select class="tcrn-select" data-target-filter><option value="">${esc(t("projects.all"))}</option>${available.map((target, index) => `<option value="${esc(key(target))}">${esc(availableLabels[index])}</option>`).join("")}</select></label><div data-target-identity>${identityDetails("work-targets", available, availableLabels)}</div><h3 class="tcrn-heading tcrn-heading--3">${esc(t("projects.title"))}</h3><p class="tcrn-text">${esc(t("projects.help"))}</p><label class="tcrn-field"><span class="tcrn-field__label">${esc(t("projects.work"))}</span><select class="tcrn-select" data-target-work>${records.map(record => `<option value="${esc(record.id)}">${esc(record.title || record.externalKey)}</option>`).join("")}</select></label><div data-target-form></div>`;
@@ -6337,14 +6495,19 @@ const BOOT = __PORTAL_BOOT__;
     // and when the lease runs out, or ran out, as work-list reads it, with the button that releases it by
     // force (work-release --force true, as TCRN_PORTAL_ACTOR). Atelier's own writes are held by a lease too.
     const leaseMeta = (entry) => entry.lease ? `<span class="tcrn-text" data-work-lease="${entry.lease.active ? "active" : "expired"}">${esc(entry.lease.active ? t("dashboard.leaseHeld", { holder: entry.lease.holder, expiresAt: entry.lease.expiresAt }) : t("dashboard.leaseExpired", { holder: entry.lease.holder, expiresAt: entry.lease.expiresAt }))}</span><button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--sm" data-work-lease-release="${esc(entry.id)}">${esc(t("dashboard.leaseRelease"))}</button>` : "";
-    const recordRow = (entry) => `<div class="tcrn-record-row tcrn-record-row--dense${entry.kind === "Story" ? " tcrn-work-tree__story" : ""}" role="treeitem" data-work-id="${esc(entry.id)}" data-work-kind="${esc(entry.kind)}"${entry.kind === "Story" && records.some((child) => child.parentId === entry.id && child.kind === "Subtask") ? ` aria-owns="work-subtasks-${esc(tabIdPart(entry.id))}" aria-expanded="true"` : ""}><code class="tcrn-record-row__id tcrn-work-tree__key">${esc(entry.externalKey)}</code><div class="tcrn-record-row__summary tcrn-work-tree__text"><span class="tcrn-text tcrn-work-tree__title ${entry.summary || entry.title ? "" : "tcrn-work-tree__missing"}">${esc(summaryFor(entry))}</span></div><div class="tcrn-record-row__meta">${statusBadge(entry.status, statusTone(entry.status))}<span class="tcrn-text" data-work-involved>${esc(t("projects.title"))}: ${esc(involvedLabel(entry))}</span>${leaseMeta(entry)}</div></div>`;
+    const validationActions = (entry) => {
+      if (entry.status !== "pending-validate") return "";
+      const button = (status, label) => `<button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--sm" data-work-validation="${status}" data-work-validation-id="${esc(entry.id)}" data-work-validation-revision="${esc(entry.revision)}" data-work-validation-key="${esc(entry.externalKey)}">${esc(t(label))}</button>`;
+      return button("validated", "work.validation.accept") + button("active", "work.validation.return");
+    };
+    const recordRow = (entry) => `<div class="tcrn-record-row tcrn-record-row--dense${entry.kind === "Story" ? " tcrn-work-tree__story" : ""}" role="treeitem" data-work-id="${esc(entry.id)}" data-work-kind="${esc(entry.kind)}"${entry.kind === "Story" && records.some((child) => child.parentId === entry.id && child.kind === "Subtask") ? ` aria-owns="work-subtasks-${esc(tabIdPart(entry.id))}" aria-expanded="true"` : ""}><code class="tcrn-record-row__id tcrn-work-tree__key">${esc(entry.externalKey)}</code><div class="tcrn-record-row__summary tcrn-work-tree__text"><span class="tcrn-text tcrn-work-tree__title ${entry.summary || entry.title ? "" : "tcrn-work-tree__missing"}">${esc(summaryFor(entry))}</span></div><div class="tcrn-record-row__meta">${statusBadge(entry.status, statusTone(entry.status))}<span class="tcrn-text" data-work-involved>${esc(t("projects.title"))}: ${esc(involvedLabel(entry))}</span>${leaseMeta(entry)}${validationActions(entry)}</div></div>`;
     const subtaskRows = (story) => {
       const subtasks = records.filter((entry) => entry.parentId === story.id && entry.kind === "Subtask").sort(byKey);
       return subtasks.length === 0 ? "" : `<div class="tcrn-record-table tcrn-work-tree__children" role="group" id="work-subtasks-${esc(tabIdPart(story.id))}" data-work-subtasks="${esc(story.id)}">${subtasks.map(recordRow).join("")}</div>`;
     };
     const storyRows = (epic) => records.filter((entry) => entry.parentId === epic.id && entry.kind === "Story").sort(byKey).map((entry) => `${recordRow(entry)}${subtaskRows(entry)}`).join("") || `<div class="tcrn-text">${esc(t("dashboard.noStories"))}</div>`;
-    const epicRows = (initiative) => epicsFor(initiative).map((epic) => `<details class="tcrn-row-group tcrn-row-group--dense tcrn-work-tree__epic" open role="treeitem" data-work-id="${esc(epic.id)}"><summary class="tcrn-row-group__head tcrn-work-tree__summary"><span><code class="tcrn-record-row__id tcrn-work-tree__key">${esc(epic.externalKey)}</code><strong>${esc(summaryFor(epic))}</strong></span>${statusBadge(epic.status, statusTone(epic.status))}${leaseMeta(epic)}</summary><div class="tcrn-record-table tcrn-work-tree__children" role="group">${storyRows(epic)}</div></details>`).join("") || `<div class="tcrn-text">${esc(t("dashboard.noEpics"))}</div>`;
-    $("#work-tree-content").innerHTML = `<div class="tcrn-document-canvas tcrn-work-tree" role="tree" aria-label="${esc(t("dashboard.workTreeLabel"))}">${initiatives.map((initiative) => `<details class="tcrn-row-group tcrn-row-group--dense tcrn-work-tree__epic" open role="treeitem" data-work-id="${esc(initiative.id)}"><summary class="tcrn-row-group__head tcrn-work-tree__summary"><span><code class="tcrn-record-row__id tcrn-work-tree__key">${esc(initiative.externalKey)}</code><strong>${esc(summaryFor(initiative))}</strong></span>${statusBadge(initiative.status, statusTone(initiative.status))}${leaseMeta(initiative)}</summary><div class="tcrn-record-table tcrn-work-tree__children" role="group">${epicRows(initiative)}</div></details>`).join("")}</div>`;
+    const epicRows = (initiative) => epicsFor(initiative).map((epic) => `<details class="tcrn-row-group tcrn-row-group--dense tcrn-work-tree__epic" open role="treeitem" data-work-id="${esc(epic.id)}"><summary class="tcrn-row-group__head tcrn-work-tree__summary"><span><code class="tcrn-record-row__id tcrn-work-tree__key">${esc(epic.externalKey)}</code><strong>${esc(summaryFor(epic))}</strong></span>${statusBadge(epic.status, statusTone(epic.status))}${leaseMeta(epic)}${validationActions(epic)}</summary><div class="tcrn-record-table tcrn-work-tree__children" role="group">${storyRows(epic)}</div></details>`).join("") || `<div class="tcrn-text">${esc(t("dashboard.noEpics"))}</div>`;
+    $("#work-tree-content").innerHTML = `<div class="tcrn-document-canvas tcrn-work-tree" role="tree" aria-label="${esc(t("dashboard.workTreeLabel"))}">${initiatives.map((initiative) => `<details class="tcrn-row-group tcrn-row-group--dense tcrn-work-tree__epic" open role="treeitem" data-work-id="${esc(initiative.id)}"><summary class="tcrn-row-group__head tcrn-work-tree__summary"><span><code class="tcrn-record-row__id tcrn-work-tree__key">${esc(initiative.externalKey)}</code><strong>${esc(summaryFor(initiative))}</strong></span>${statusBadge(initiative.status, statusTone(initiative.status))}${leaseMeta(initiative)}${validationActions(initiative)}</summary><div class="tcrn-record-table tcrn-work-tree__children" role="group">${epicRows(initiative)}</div></details>`).join("")}</div>`;
   };
   // TCRN-CROSS-SUB-425 (MIN-239 D6): the list reads valid cards unless the viewer picks another status.
   // A removed card is shown as it is kept -- its subject, the removal's reason, basis, actor and
@@ -6453,6 +6616,120 @@ const BOOT = __PORTAL_BOOT__;
     const passed = outcomes.filter((gate) => gate.ok).length;
     runHost.innerHTML = `<div><div data-gate-run-row><span>${esc(t("gates.runAt"))}: <time datetime="${esc(run.at)}">${esc(new Date(run.at).toLocaleString(state.locale))}</time></span><span class="tcrn-text">${esc(t("gates.runId"))}: <code>${esc(run.runId)}</code></span><span class="tcrn-badge ${run.reds?.length ? "tcrn-badge--danger" : "tcrn-badge--positive"}">${passed}/${outcomes.length} · ${esc(run.reds?.length ? t("gates.runFailed") : t("gates.runOk"))}</span></div><div class="tcrn-definition-list tcrn-definition-list--dense">${outcomes.map((gate) => `<div class="tcrn-definition-list__item"><span>${esc(gate.name)}${gate.required ? ` · ${esc(t("gates.required"))}` : ""}</span><span class="tcrn-badge ${gate.ok ? "tcrn-badge--positive" : "tcrn-badge--danger"}">${esc(gate.ok ? t("gates.runOk") : t("gates.runFailed"))}</span></div>`).join("") || `<div class="tcrn-state-surface">${esc(t("gates.lastRunEmpty"))}</div>`}</div></div>`;
   };
+  const activity = { target: null, query: "", offset: 0, result: null, loading: false, serial: 0 };
+  let minutesRead = null;
+  let pendingActions = { target: null, loading: false, result: null };
+  const overviewTarget = () => JSON.stringify(pageTarget());
+  const renderPendingActions = () => {
+    const host = $("#pending-actions-content");
+    const current = pendingActions.target === overviewTarget() ? pendingActions : { loading: true };
+    const counts = current.result?.counts;
+    if (!counts) {
+      host.innerHTML = `<p class="tcrn-text">${esc(t(current.loading ? "config.loading" : "config.readUnavailable"))}</p>`;
+      return;
+    }
+    const labels = {
+      chainIdentity: t("pendingActions.chainIdentity"), gateProposals: t("pendingActions.gateProposals"),
+      managedSections: t("pendingActions.managedSections"), migratedGates: t("pendingActions.migratedGates"),
+      ruleProposals: t("pendingActions.ruleProposals"), workValidation: t("pendingActions.workValidation"),
+    };
+    const visible = Object.entries(counts).filter(([kind, count]) => Object.hasOwn(labels, kind) && (count === null || count > 0));
+    host.innerHTML = visible.length
+      ? `<dl class="tcrn-definition-list tcrn-definition-list--dense">${visible.map(([kind, count]) => `<div class="tcrn-definition-list__item"><dt class="tcrn-definition-list__term">${esc(labels[kind])}</dt><dd class="tcrn-definition-list__definition" data-pending-count="${esc(kind)}">${esc(count ?? t("config.readUnavailable"))}</dd></div>`).join("")}</dl>`
+      : `<p class="tcrn-text">${esc(t("pendingActions.empty"))}</p>`;
+  };
+  const loadPendingActions = async () => {
+    const target = overviewTarget();
+    if (pendingActions.target === target && pendingActions.loading) return;
+    const request = pendingActions = { target, loading: true, result: null };
+    renderPendingActions();
+    try {
+      const result = await api("/api/pending-actions");
+      if (request !== pendingActions || target !== overviewTarget() || unkept(result)) return;
+      request.result = result.ok ? result : null;
+    } catch { /* The panel renders a scoped read failure. */ }
+    finally {
+      request.loading = false;
+      renderPendingActions();
+    }
+  };
+  const renderActivity = () => {
+    const host = $("#activity-results");
+    const current = activity.target === overviewTarget() ? activity : { loading: true, offset: 0 };
+    const result = current.result;
+    $("#activity-previous").disabled = current.loading || !result?.ok || current.offset === 0;
+    $("#activity-next").disabled = current.loading || !result?.ok || !result.truncated;
+    if (!result?.ok || current.loading) {
+      host.innerHTML = `<p class="tcrn-state-surface">${esc(t(current.loading ? "config.loading" : "config.readUnavailable"))}</p>`;
+      return;
+    }
+    host.innerHTML = result.records.length > 0 ? `<ul class="tcrn-activity-feed">${result.records.map((event) => {
+      const detail = event.payload?.record;
+      const subject = detail?.title ?? detail?.name ?? detail?.externalKey ?? detail?.key ?? "";
+      const when = new Date(event.occurredAt).toLocaleString(state.locale);
+      return `<li class="tcrn-activity-feed__item"><div class="tcrn-activity-feed__head"><strong>${esc(event.payload?.operation ?? event.id)}</strong><time datetime="${esc(event.occurredAt)}">${esc(when)}</time></div><p class="tcrn-text">${esc(subject)} <code>${esc(event.id)}</code></p></li>`;
+    }).join("")}</ul>` : `<p class="tcrn-state-surface">${esc(t("activity.empty"))}</p>`;
+  };
+  const loadActivity = async (query = activity.query, offset = 0) => {
+    const target = overviewTarget();
+    const pageHead = offset > 0 && activity.target === target ? activity.result?.headEventHash : null;
+    const serial = ++activity.serial;
+    Object.assign(activity, { target, query: query.trim(), offset, result: null, loading: true });
+    renderActivity();
+    const parameters = new URLSearchParams({ q: activity.query, offset: String(offset) });
+    try {
+      const result = await api(`/api/activity?${parameters}`);
+      if (serial !== activity.serial || target !== overviewTarget() || unkept(result)) return;
+      if (result.ok && pageHead && pageHead !== result.headEventHash) {
+        void loadActivity(query);
+        return;
+      }
+      activity.result = result;
+    } catch { /* The page keeps its search and renders a read failure. */ }
+    finally {
+      if (serial === activity.serial) {
+        activity.loading = false;
+        renderActivity();
+      }
+    }
+  };
+  const renderMinutes = () => {
+    const host = $("#minutes-results");
+    const current = minutesRead?.target === overviewTarget() ? minutesRead : null;
+    const result = current?.result;
+    $("#minutes-previous").disabled = !result?.ok || current.offset === 0;
+    $("#minutes-next").disabled = !result?.ok || !result.truncated;
+    if (!result?.ok) {
+      host.innerHTML = `<p class="tcrn-state-surface">${esc(t(current === null || current.loading ? "config.loading" : "config.readUnavailable"))}</p>`;
+      return;
+    }
+    host.innerHTML = result.records.length === 0
+      ? `<p class="tcrn-state-surface">${esc(t("minutes.empty"))}</p>`
+      : result.records.map(record => `<details class="tcrn-disclosure-panel"><summary class="tcrn-disclosure-panel__title"><strong>${esc(record.title)}</strong> <span>${esc(record.externalKey ?? record.id)}</span></summary><p>${esc(record.summary)}</p>${record.decisions.map(decision => `<section><h3>${esc(decision.title ? `D${decision.number} ${decision.title}` : `D${decision.number}`)}</h3>${decision.tags?.length ? `<p>${esc(decision.tags.join(" · "))}</p>` : ""}<p>${esc(decision.text)}</p></section>`).join("")}</details>`).join("");
+  };
+  const loadMinutes = async (offset = 0) => {
+    const query = $("#minutes-query").value.trim();
+    const target = overviewTarget();
+    const expectedHead = offset > 0 && minutesRead?.target === target && minutesRead?.query === query ? minutesRead.result?.headEventHash : null;
+    const read = minutesRead = { target, query, offset, loading: true, result: null };
+    renderMinutes();
+    try {
+      const search = new URLSearchParams({ q: query, offset: String(offset) });
+      const result = await api(`/api/minutes?${search}`);
+      if (read !== minutesRead || target !== overviewTarget() || unkept(result)) return;
+      if (result.ok && expectedHead && expectedHead !== result.headEventHash) {
+        void loadMinutes();
+        return;
+      }
+      read.result = result;
+    } catch { /* Keep the query available for retry. */ }
+    finally {
+      if (read === minutesRead) {
+        read.loading = false;
+        renderMinutes();
+      }
+    }
+  };
   const renderDashboard = () => {
     const doctorFocus = rememberFocus($("#health-list"));
     const status = state.status || {};
@@ -6495,9 +6772,33 @@ const BOOT = __PORTAL_BOOT__;
     renderWorkView();
     renderKnowledgeView();
     renderLibraryView();
+    renderPendingActions();
+    renderActivity();
+    renderMinutes();
+    $("#activity-search").onsubmit = (event) => {
+      event.preventDefault();
+      void loadActivity($("#activity-query").value);
+    };
+    $("#activity-previous").onclick = () => void loadActivity(activity.query, Math.max(0, activity.offset - 24));
+    $("#activity-next").onclick = () => {
+      if (activity.result?.truncated) void loadActivity(activity.query, activity.offset + activity.result.records.length);
+    };
+    $("#minutes-search").onsubmit = (event) => {
+      event.preventDefault();
+      void loadMinutes();
+    };
+    $("#minutes-previous").onclick = () => void loadMinutes(Math.max(0, (minutesRead?.offset ?? 0) - 24));
+    $("#minutes-next").onclick = () => {
+      if (minutesRead?.result?.truncated) void loadMinutes(minutesRead.offset + minutesRead.result.records.length);
+    };
     bindTabList($('[data-ui="workspace-tabs"]'), {
       selected: state.dashboardTab,
-      onSelect: (tab) => { state.dashboardTab = tab.dataset.workspaceTab; },
+      onSelect: (tab) => {
+        state.dashboardTab = tab.dataset.workspaceTab;
+        if (state.dashboardTab === "activity") void loadActivity($("#activity-query").value);
+        if (state.dashboardTab === "minutes") void loadMinutes();
+        if (state.dashboardTab === "overview") void loadPendingActions();
+      },
       onSync: (tab) => {
         const selected = tab?.dataset.workspaceTab;
         $$('[data-workspace-panel]').forEach((panel) => { panel.hidden = panel.dataset.workspacePanel !== selected; });
@@ -6640,6 +6941,7 @@ const BOOT = __PORTAL_BOOT__;
     mountStaticOverlayMounts();
   };
   const lineFromText = (text) => text.split("\n");
+  const ruleDisplayTitle = (rule) => rule?.custom === true && typeof rule.title === "string" ? rule.title : ruleTitle(rule?.id ?? "");
   const ruleTitle = (id) => ({
     autonomy: t("rule.title.autonomy"),
     batch: t("rule.title.batch"),
@@ -6681,7 +6983,7 @@ const BOOT = __PORTAL_BOOT__;
     const editable = rule.state === "enabled" || rule.state === "disabled";
     const note = rule.state === "enabled" ? "" : `<span data-rule-order-note>${esc(editable ? t("rule.orderOnEnable") : t("rule.orderLocked"))}</span>`;
     const save = rule.state === "enabled" ? `<button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-rule-order-save="${esc(rule.id)}" data-cli-action="rule-enable">${esc(t("rule.saveOrder"))}</button>` : "";
-    return `<div data-rule-card-order><label class="tcrn-field" data-rule-order-field><span class="tcrn-field__label">${esc(t("collection.order"))}</span>${orderInput(rule.order ?? "", `aria-label="${esc(`${t("collection.order")} · ${ruleTitle(rule.id)}`)}" data-rule-order="${esc(rule.id)}"${editable ? "" : " disabled"}`)}</label>${save}${note}</div>`;
+    return `<div data-rule-card-order><label class="tcrn-field" data-rule-order-field><span class="tcrn-field__label">${esc(t("collection.order"))}</span>${orderInput(rule.order ?? "", `aria-label="${esc(`${t("collection.order")} · ${ruleDisplayTitle(rule)}`)}" data-rule-order="${esc(rule.id)}"${editable ? "" : " disabled"}`)}</label>${save}${note}</div>`;
   };
   const ruleOrderValue = (id) => $(`[data-rule-order="${CSS.escape(id)}"]`)?.value.trim() ?? "";
   // Proposals (TCRN-CROSS-STORY-527) begin.
@@ -6718,6 +7020,14 @@ const BOOT = __PORTAL_BOOT__;
     return `<article class="tcrn-surface" data-ui="${kind}-proposals-list" aria-label="${esc(title)}"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(title)}</h2></div></div>
       <div class="tcrn-table-shell" role="table" aria-label="${esc(title)}" data-ui="proposals-table" data-mobile-layout="stacked-cards"><div class="tcrn-table-shell__head" role="row"><span class="tcrn-table-shell__heading" role="columnheader">${esc(subject)}</span><span class="tcrn-table-shell__heading" role="columnheader">${esc(t("proposals.columnChange"))}</span><span class="tcrn-table-shell__heading" role="columnheader">${esc(t("proposals.columnStatus"))}</span></div><div role="rowgroup">${rows}</div></div></article>`;
   };
+  const renderRuleNavigation = () => {
+    const toggle = $("#rules-write-navigation");
+    if (!toggle) return;
+    const entry = currentSetting("agents.sharedNavigation");
+    const value = entry?.currentValue ?? entry?.defaultValue ?? "written";
+    toggle.checked = value === "written";
+    toggle.disabled = entry === undefined || state.settings?.ok === false || state.librarySwitching === true || state.settingsWritePending === true;
+  };
   // Proposals end.
   const renderProseDirectory = () => {
     // The cards follow the rule sections of AGENTS.md: rules with an order first, then in catalog order.
@@ -6726,9 +7036,26 @@ const BOOT = __PORTAL_BOOT__;
       const enabled = ruleIsEnabled(rule);
       const changed = ["user-modified", "pending"].includes(rule.state);
       const forceId = `rule-force-${rule.id}`;
+      const title = ruleDisplayTitle(rule);
+      const edit = rule.custom === true ? `<button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-custom-rule-edit="${esc(rule.id)}">${esc(t("rules.custom.edit"))}</button>` : "";
       const upgrade = rule.state === "update-available" ? `<button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-rule-upgrade="${esc(rule.id)}" data-cli-action="rule-enable">${esc(t("rule.upgrade", { version: rule.version }))}</button>` : "";
-      return `<article class="tcrn-surface" data-rule-card="${esc(rule.id)}"><div class="tcrn-surface__head" data-rule-card-head><h2 class="tcrn-heading tcrn-heading--3" data-rule-card-title>${esc(ruleTitle(rule.id))}</h2><span class="tcrn-badge" data-rule-state="${esc(rule.state)}">${esc(ruleStateLabel(rule.state))}</span></div><div class="tcrn-text" data-rule-card-meta>${esc(rule.section)} · v${esc(rule.version ?? "—")}</div>${ruleOrderField(rule)}<div data-rule-card-actions><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-rule-switch="${esc(rule.id)}" aria-label="${esc(ruleTitle(rule.id))}" ${enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(enabled ? t("config.enabled") : t("config.disabled"))}</span></label>${upgrade}${changed && enabled ? `<label class="tcrn-text" data-rule-force-label for="${forceId}"><input class="tcrn-checkbox" type="checkbox" id="${forceId}" data-rule-force="${esc(rule.id)}">${esc(t("rule.forceDisable"))}</label>` : ""}</div></article>`;
+      const customBody = rule.custom === true && typeof rule.body === "string" ? `<p class="tcrn-text" data-custom-rule-summary>${esc(rule.body)}</p>` : "";
+      return `<article class="tcrn-surface" data-rule-card="${esc(rule.id)}"${rule.custom === true ? ' data-custom-rule="true"' : ""}><div class="tcrn-surface__head" data-rule-card-head><h2 class="tcrn-heading tcrn-heading--3" data-rule-card-title>${esc(title)}</h2><span class="tcrn-badge" data-rule-state="${esc(rule.state)}">${esc(ruleStateLabel(rule.state))}</span></div><div class="tcrn-text" data-rule-card-meta>${esc(rule.section)} · v${esc(rule.version ?? "—")}</div>${customBody}${ruleOrderField(rule)}<div data-rule-card-actions><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-rule-switch="${esc(rule.id)}" aria-label="${esc(title)}" ${enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(enabled ? t("config.enabled") : t("config.disabled"))}</span></label>${edit}${upgrade}${changed && enabled ? `<label class="tcrn-text" data-rule-force-label for="${forceId}"><input class="tcrn-checkbox" type="checkbox" id="${forceId}" data-rule-force="${esc(rule.id)}">${esc(t("rule.forceDisable"))}</label>` : ""}</div></article>`;
     }).join("") : `<div class="tcrn-state-surface">${esc(t("config.loading"))}</div>`);
+    renderRuleNavigation();
+    $$('[data-custom-rule-edit]').forEach((button) => button.addEventListener("click", () => {
+      const rule = rules.find((entry) => entry.id === button.dataset.customRuleEdit && entry.custom === true);
+      if (!rule) return;
+      state.customRuleEditing = rule.id;
+      $("#custom-rule-id").value = rule.id;
+      $("#custom-rule-id").readOnly = true;
+      $("#custom-rule-title").value = rule.title ?? "";
+      $("#custom-rule-body").value = rule.body ?? "";
+      $("#custom-rule-order").value = rule.order ?? "";
+      $("#custom-rule-save").textContent = t("rules.custom.update");
+      $("#custom-rule-cancel").hidden = false;
+      $("#custom-rule-title").focus();
+    }));
     $$('[data-rule-switch]').forEach((input) => input.addEventListener("change", async () => {
       const id = input.dataset.ruleSwitch;
       const action = input.checked ? "enable" : "disable";
@@ -6812,10 +7139,8 @@ const BOOT = __PORTAL_BOOT__;
   // AGENTS.md again (portal.mjs), so the Rules page reads the file back after it.
   // TCRN-CROSS-STORY-540 GWT2 (Q4, Q5; TCRN-CROSS-SUB-508): on a coordination library its orchestration limits
   // take the model tables' place, and the artifact language picks the sections' language on every library.
-  const COORDINATION_SYSTEM_VARIABLE_KEYS = ["execution.maxConcurrentSubagents", "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent"];
-  const rendersSystemVariables = (key) => String(key) === "artifact.language" || String(key).startsWith("design.") || (state.settings?.chain?.role === "coordination"
-    ? COORDINATION_SYSTEM_VARIABLE_KEYS.includes(key)
-    : ["models.category", "models.tiers"].includes(key) || String(key).startsWith("models.escalation."));
+  const rendersSystemVariables = (key) => String(key) === "artifact.language" || String(key).startsWith("design.") || (state.settings?.chain?.role !== "coordination"
+    && (["models.category", "models.tiers"].includes(key) || String(key).startsWith("models.escalation.")));
   // An empty selection means "unset this key": the engine refuses an empty --value as a
   // missing argument, and the honest verb for clearing a setting is settings-remove.
   const saveSetting = async (key, value) => {
@@ -6836,7 +7161,7 @@ const BOOT = __PORTAL_BOOT__;
   const focusPromptLanguage = () => {
     $("[data-prompt-language-dropdown] .tcrn-multi-select-dropdown__trigger")?.focus?.();
   };
-  const mutateSetting = async (key, payload) => {
+  const mutateSetting = async (key, payload, onReadback) => {
     if (state.settingsWritePending || state.librarySwitching) return;
     const epoch = state.libraryEpoch || 0;
     const focus = rememberFocus($("#settings-rows"));
@@ -6849,8 +7174,10 @@ const BOOT = __PORTAL_BOOT__;
       if ((state.libraryEpoch || 0) !== epoch) return;
       state.promptLanguageDraft = null;
       showReceipt(result);
+      if (result.ok === true && !unkept(result)) onReadback?.(result.readback);
       await refresh();
       if (rendersSystemVariables(key)) await loadAgents();
+      return result;
     } catch (error) {
       if ((state.libraryEpoch || 0) === epoch) {
         state.promptLanguageDraft = null;
@@ -6911,6 +7238,7 @@ const BOOT = __PORTAL_BOOT__;
     const library = BOOT.library ? libraryLabel(BOOT.library) : "";
     const page = state.workspaceLabelPage;
     setText("#workspace-label", page ? `${library} / ${$(`[data-page-target="${page}"] .tcrn-nav-item__label`)?.textContent || page}` : library);
+    renderRecallPreview();
   };
   const renderConfigurationTargets = () => {
     const select = $("#configuration-project-select");
@@ -6961,6 +7289,57 @@ const BOOT = __PORTAL_BOOT__;
   };
   // A library switch leaves the work the page showed behind: the view is empty until the new library's read returns.
   const leaveWork = () => { state.work = null; state.workRead.library += 1; };
+  const validationForm = $("#work-validation-form");
+  const validationSummary = $("#work-validation-summary");
+  const validationConfirm = $("#work-validation-confirm");
+  let workValidation = null;
+  const clearWorkValidation = () => {
+    workValidation = null;
+    validationForm.hidden = true;
+    validationSummary.value = "";
+  };
+  $("#work-tree-content").addEventListener("click", (event) => {
+    const button = event.target.closest?.("[data-work-validation]");
+    if (!button) return;
+    event.preventDefault();
+    if (state.librarySwitching || workValidation?.writing) return;
+    const { workValidationId: id, workValidationKey: key, workValidationRevision, workValidation: status } = button.dataset;
+    const accepting = status === "validated";
+    const label = accepting ? t("work.validation.accept") : t("work.validation.return");
+    workValidation = { id, status, revision: Number(workValidationRevision), target: pageTarget(), writing: false };
+    setText("#work-validation-title", label + " · " + key);
+    setText("#work-validation-label", accepting ? t("work.validation.report") : t("work.validation.reason"));
+    validationSummary.value = "";
+    validationSummary.required = accepting;
+    validationConfirm.textContent = label;
+    validationConfirm.disabled = false;
+    validationForm.hidden = false;
+    validationSummary.focus();
+  });
+  $("#work-validation-cancel").addEventListener("click", () => {
+    if (!workValidation?.writing) clearWorkValidation();
+  });
+  validationForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const request = workValidation;
+    if (!request || request.writing || state.librarySwitching) return;
+    const summary = validationSummary.value.trim();
+    request.writing = true;
+    validationConfirm.disabled = true;
+    echo("work-transition", ["--id", request.id, "--status", request.status]);
+    const result = await api("/api/work/validation", { method: "POST", target: request.target,
+      body: JSON.stringify({ id: request.id, status: request.status, revision: request.revision, ...(summary ? { summary } : {}) }),
+    });
+    if (request !== workValidation) return;
+    showReceipt(result);
+    if (result.ok) {
+      clearWorkValidation();
+    } else {
+      request.writing = false;
+      validationConfirm.disabled = false;
+    }
+    await refreshWork();
+  });
   // TCRN-CROSS-STORY-528 (SUB-459): a lease button in the work tree releases that item's lease by force. The
   // release is a write like the others: its receipt shows, and the tree reads the library again.
   $("#work-tree-content").addEventListener("click", async (event) => {
@@ -6994,6 +7373,9 @@ const BOOT = __PORTAL_BOOT__;
       state.machineSettings = machine; state.settings = settings; renderConfigurationTargets(); state.vocabulary = vocabularyResult; state.status = status; state.knowledge = knowledge; state.variables = variables; state.commands = commandsResult.commands || [];
       for (const collection of Object.values(state.collections)) if (!collection.dirty) collection.draft = null;
       renderDashboard(); renderSettings(); renderCollections(); renderModelPolicy(); renderVariables(); renderVocabulary(); rebuildSearchIndex();
+      if (state.dashboardTab === "overview") void loadPendingActions();
+      if (state.dashboardTab === "activity" && activity.target !== overviewTarget()) void loadActivity($("#activity-query").value);
+      if (state.dashboardTab === "minutes" && minutesRead?.target !== overviewTarget()) void loadMinutes();
     } catch (error) {
       if ((state.libraryEpoch || 0) !== epoch || state.settingsRead !== read) return;
       if (modelPolicyReadCurrent(policyTarget)) acceptModelPolicyRead(policyTarget, { ok: false, httpStatus: 503, reasonCode: "PORTAL_MODEL_POLICY_READ_UNAVAILABLE", error: String(error?.message ?? error) });
@@ -7004,10 +7386,11 @@ const BOOT = __PORTAL_BOOT__;
   };
   const rebuildSearchIndex = () => {
     const rows = [];
-    // Every key of both catalogs; a collection key is found on its own page.
-    for (const entry of settingEntries()) {
-      const page = entry.shape === "collection" && Object.hasOwn(COLLECTION_PAGES, entry.key) ? COLLECTION_PAGES[entry.key] : "settings";
-      rows.push({ text: `${entry.key} ${settingLabel(entry.key)} ${settingDescription(entry.key)}`, label: entry.key, meta: t("search.settings"), page, key: entry.key });
+    // Every key of both catalogs. Model group values are routed to the standalone model page;
+    // collection keys still open their dedicated category or tier page.
+    for (const entry of [...settingEntries(), ...modelPageEntries()]) {
+      const page = entry.shape === "collection" && Object.hasOwn(COLLECTION_PAGES, entry.key) ? COLLECTION_PAGES[entry.key] : entryGroup(entry) === "models" ? "engine-model-policy" : "settings";
+      rows.push({ text: `${entry.key} ${settingLabel(settingCopyKey(entry.key))} ${settingDescription(entry.key)}`, label: entry.key, meta: t("search.settings"), page, key: entry.key });
     }
     for (const category of vocabularyCategories()) for (const term of vocabularyRows(category)) rows.push({ text: `${termValue(term)} ${vocabularyDefinition(category, term)}`, label: termValue(term), meta: t("search.vocabulary"), page: "vocabulary", vocabulary: category });
     state.searchIndex = rows;
@@ -7166,12 +7549,15 @@ const BOOT = __PORTAL_BOOT__;
   const chooseSearch = (index = 0) => {
     const result = state.searchResults[index]; if (!result) return;
     state.searchResults = []; renderSearchResults();
-    if (result.key && result.page !== "settings") { openCollection(result.page); return; }
+    if (result.key && Object.values(COLLECTION_PAGES).includes(result.page)) { openCollection(result.page); return; }
     navigate(result.page);
     if (result.vocabulary) { state.selectedVocabulary = result.vocabulary; renderVocabulary(); }
     if (result.key) {
-      state.settingGroup = settingGroup(result.key); renderSettings();
-      const target = $(`[data-setting-row="${CSS.escape(result.key)}"]`) ?? $(`[data-machine-row="${CSS.escape(result.key)}"]`);
+      const modelPage = result.page === "engine-model-policy";
+      if (modelPage) renderModelPolicy();
+      else { state.settingGroup = settingGroup(result.key); renderSettings(); }
+      const scope = modelPage ? $("#device-model-settings") : $("#settings-rows");
+      const target = $(`[data-setting-row="${CSS.escape(result.key)}"]`, scope) ?? $(`[data-machine-row="${CSS.escape(result.key)}"]`, scope);
       if (target) {
         target.setAttribute("data-transient-target", "true");
         target.scrollIntoView?.({ block: "center" });
@@ -7189,6 +7575,51 @@ const BOOT = __PORTAL_BOOT__;
     navigate(button.dataset.pageTarget);
     if (marked) renderCollections();
   }));
+  let recallPreview = null;
+  const renderRecallPreview = () => {
+    const root = $("#recall-preview-results");
+    const preview = recallPreview;
+    if (preview === null || !sameTarget(preview.target) || preview.target.epoch !== BOOT.epoch) {
+      root.replaceChildren();
+      return;
+    }
+    const result = preview.result;
+    if (result === null || result.ok !== true) {
+      const label = result === null ? t("recallPreview.loading") : t("recallPreview.unavailable");
+      root.innerHTML = `<p class="tcrn-text">${esc(label)}</p>`;
+      return;
+    }
+    const columns = [t("recallPreview.key"), t("recallPreview.candidate"), t("recallPreview.score"), t("recallPreview.terms")].map(esc);
+    const table = (label, rows, name) => rows.length === 0
+      ? `<p class="tcrn-text">${esc(t("recallPreview.empty"))}</p>`
+      : `<div class="tcrn-table-shell" role="table" data-recall-preview-table="${name}" aria-label="${esc(t(label))}">
+          <div class="tcrn-table-shell__head" role="row">${columns.map(column => `<span role="columnheader">${column}</span>`).join("")}</div>
+          ${rows.map(row => `<div class="tcrn-table-shell__row" role="row">${[row.key,row.title,row.score,row.matchedTerms.join(", ")].map((value,index) =>
+            `<span class="tcrn-table-shell__cell" role="cell" data-label="${columns[index]}">${esc(value)}</span>`).join("")}</div>`).join("")}
+        </div>`;
+    root.innerHTML = `<article class="tcrn-surface"><h2>${esc(t("recallPreview.candidates"))}</h2>
+        <p class="tcrn-text">${esc(t("recallPreview.threshold"))} <strong>${esc(result.threshold)}</strong></p>
+        ${table("recallPreview.candidates", result.candidates, "candidates")}</article>
+      ${result.nearMisses.length === 0 ? "" : `<article class="tcrn-surface"><h2>${esc(t("recallPreview.nearMisses"))}</h2>${table("recallPreview.nearMisses", result.nearMisses, "near-misses")}</article>`}`;
+  };
+  $("#recall-preview-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const query = event.currentTarget.querySelector('[name="query"]').value;
+    if (query.trim() === "") return;
+    const preview = { target: pageTarget(), result: null };
+    recallPreview = preview;
+    renderRecallPreview();
+    try {
+      const result = await api("/api/recall/preview", { method: "POST", readOnly: true, target: preview.target, body: JSON.stringify({ query }) });
+      if (recallPreview !== preview) return;
+      if (unkept(result)) { recallPreview = null; renderRecallPreview(); return; }
+      preview.target = result.servedTarget ?? preview.target;
+      preview.result = result;
+    } catch {
+      preview.result = { ok: false };
+    }
+    renderRecallPreview();
+  });
   const parseGateArgv = (value) => { try { const command = JSON.parse(value); return Array.isArray(command) && command.length > 0 && command.every((part) => typeof part === "string" && part.length > 0) ? command : null; } catch { return null; } };
   const gateCoversFrom = (container) => [...container.querySelectorAll("[data-gate-cover]")].map((input) => input.value.trim()).filter((cover) => cover.length > 0);
   $("#gate-add-form").addEventListener("submit", async (event) => {
@@ -7276,14 +7707,56 @@ const BOOT = __PORTAL_BOOT__;
     showReceipt(result);
     await loadAgents();
   }));
+  const resetCustomRuleEditor = () => {
+    state.customRuleEditing = "";
+    $("#custom-rule-form").reset();
+    $("#custom-rule-id").readOnly = false;
+    $("#custom-rule-save").textContent = t("rules.custom.create");
+    $("#custom-rule-cancel").hidden = true;
+  };
+  $("#custom-rule-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const id = $("#custom-rule-id").value.trim();
+    const title = $("#custom-rule-title").value.trim();
+    const body = $("#custom-rule-body").value.trim();
+    const order = $("#custom-rule-order").value.trim();
+    const action = state.customRuleEditing ? "update" : "create";
+    const payload = { action, title, body, ...(order === "" ? {} : { order }) };
+    echo(action === "create" ? "rule-create" : "rule-update", ["--id", id, "--title", title, "--body", body, ...(order === "" ? [] : ["--order", order])]);
+    const result = await api(`/api/rules/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(payload) });
+    showReceipt(result);
+    if (result.ok) {
+      resetCustomRuleEditor();
+      await loadAgents();
+    } else renderProseDirectory();
+  });
+  $("#custom-rule-cancel").addEventListener("click", resetCustomRuleEditor);
+  $("#rules-write-navigation").addEventListener("change", async (event) => {
+    const toggle = event.currentTarget;
+    const value = toggle.checked ? "written" : "declined";
+    toggle.disabled = true;
+    const result = await mutateSetting("agents.sharedNavigation", { value });
+    if (result?.ok) await loadAgents();
+    renderRuleNavigation();
+  });
   $("#receipt-chip").addEventListener("click", openReceipt); $("#receipt-details-trigger").addEventListener("click", toggleReceiptDetails); $("#drawer-button").addEventListener("click", openReceipt); $("#drawer-close").addEventListener("click", closeReceipt);
   // TCRN-CROSS-INIT-053 R46 (I10; U20 D3, D13): what a view shows for the target the page is leaving goes
-  // before any request for the next one is sent -- the design authority panel, the receipt (its badge back
-  // to idle, the drawer closed), the readiness and context results, an open knowledge body and a notice.
+  // before any request for the next one is sent. In-flight reads must not restore those results.
   const leaveTarget = () => {
-    designAuthorityState.epoch += 1;
-    Object.assign(designAuthorityState, { key: null, status: "unset", detail: null });
-    renderDesignAuthority();
+    designAuthorityRead = { context: null, status: "idle" };
+    const authorityPanel = $("#design-authority");
+    authorityPanel.hidden = true;
+    authorityPanel.replaceChildren();
+    recallPreview = null;
+    renderRecallPreview();
+    pendingActions = { target: null, loading: false, result: null };
+    renderPendingActions();
+    activity.target = null;
+    activity.serial += 1;
+    renderActivity();
+    minutesRead = null;
+    renderMinutes();
+    clearWorkValidation();
     state.receipt = null;
     state.operationDetailsOpen = false;
     const chip = $("#receipt-chip");

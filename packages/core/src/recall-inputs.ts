@@ -40,11 +40,19 @@ export const RECALL_LINE_MAX_BYTES = RUNTIME_CAPACITY.bufferBytes;
 export interface RecallInputOptions {
   readonly projectId?: string;
   readonly scopeExcerptBytes?: number;
+  readonly metadataOnly?: boolean;
   // TCRN-CROSS-SUB-426 R17 续作修订三 (C-R18-1; MIN-239 D6; STORY-514 R4): which decisions of each
   // minutes record recall indexes, as minutes-list reads them. Left out, the valid ones; "obsolete" the
   // obsolete ones alone and "all" every one, which only a recall asked for them gives (the recall verb's
   // --status obsolete or all). The prompt hook leaves it out.
   readonly decisions?: DecisionStatusFilter;
+}
+
+export function recallMetadataOnly(settings: WorkspaceState["settings"]): boolean {
+  return settings.some(setting =>
+    setting.key === "retrieval.metadataOnly" &&
+    (setting.projectId ?? null) === null &&
+    setting.value === "true");
 }
 
 function displayTitle(record: Pick<WorkRecord, "title" | "externalKey">): string {
@@ -430,7 +438,7 @@ export async function readRecallCards(workspaceRoot: string, options: RecallCard
  * a record with none not indexed, and "all" every decision of every record.
  */
 export function recallInputsFromState(
-  state: Pick<WorkspaceState, "work" | "minutes" | "conferenceMinutes" | "conferences">,
+  state: Pick<WorkspaceState, "work" | "minutes" | "conferenceMinutes" | "conferences"> & Partial<Pick<WorkspaceState, "minutesSupplements">>,
   cards: readonly RecallKnowledgeInput[],
   options: RecallInputOptions = {},
 ): RecallInputs {
@@ -439,6 +447,7 @@ export function recallInputsFromState(
     minutes: state.minutes.filter(entry => entry.projectId === options.projectId),
     conferenceMinutes: state.conferenceMinutes.filter(entry => entry.projectId === options.projectId),
     conferences: state.conferences.filter(entry => entry.projectId === options.projectId),
+    ...(state.minutesSupplements === undefined ? {} : { minutesSupplements: state.minutesSupplements.filter(entry => entry.projectId === options.projectId) }),
   };
   const byId = new Map(state.work.map((record) => [record.id, record]));
   const ledger = decisionLedger(state);
@@ -449,7 +458,7 @@ export function recallInputsFromState(
     const content = workContent(record);
     const fullText = record.kind === "Story" || record.kind === "Incident";
     const scope = record.extensions["advisory:scope"]?.value;
-    const currentDecisions = decisionsOfMinutes(ledger, decidedInOf(record))
+    const currentDecisions = options.metadataOnly ? [] : decisionsOfMinutes(ledger, decidedInOf(record))
       .map((reference) => ledger.decisions.get(reference))
       .filter((decision) => decision?.status === "valid")
       .map((decision) => decision!.text);
@@ -483,6 +492,9 @@ export function recallInputsFromState(
       conferenceType: entry.kind === "conference-minutes" && historical !== undefined ? conferenceTypes.get(historical.conferenceId) ?? "" : "",
       summary: entry.summary,
       decisions: entry.decisions.map((decision) => decision.text),
+      ...(entry.decisions.every(decision => decision.title === undefined) ? {} : {
+        decisionMetadata: entry.decisions.map(decision => decision.title === undefined ? null : { title: decision.title, tags: decision.tags ?? [] }),
+      }),
       outcomeClass: entry.kind === "conference-minutes" && historical !== undefined ? historical.outcomeClass : "recorded",
       externalKey: entry.externalKey,
       projectId: entry.projectId,
@@ -499,6 +511,7 @@ export function recallInputsFromState(
     knowledge: cards.map((card): RecallKnowledgeInput => (card.scope === undefined ? { ...card, scope: "project" } : card)),
     minutes,
     work,
+    ...(options.metadataOnly ? { metadataOnly: true } : {}),
     ...(options.scopeExcerptBytes === undefined ? {} : { scopeExcerptBytes: options.scopeExcerptBytes }),
   };
 }
@@ -729,20 +742,49 @@ function formatRecallLineWithin(hit: RecallHit, maximumBytes: number): string {
  * newline between lines counts). An overlong candidate never blocks a later line.
  */
 export function recallContextLines(hits: readonly RecallHit[], perPromptBytes: number): readonly string[] {
-  const lines: string[] = [];
+  return recallContextEntries(hits, perPromptBytes).map((entry) => entry.line);
+}
+
+export function recallCandidateRef(hit: RecallHit): string {
+  if (hit.decision !== undefined) return hit.decision.reference;
+  return hit.kind === "card" && hit.scope === "user" ? `user/${hit.id}` : hit.id;
+}
+
+export function formatRecallCandidateLine(hit: RecallHit): string {
+  const title = (hit.decision?.metadata?.title ?? hit.title).replace(/\s+/gu, " ").trim();
+  if (title === "") return "";
+  return [hit.kind === "work" ? hit.recordKind : hit.kind, hit.key, title, recallCandidateRef(hit)].join(" · ");
+}
+
+export function recallCandidateEntries(hits: readonly RecallHit[], perPromptBytes: number): readonly { hit: RecallHit; line: string }[] {
+  const entries: { hit: RecallHit; line: string }[] = [];
+  let used = 0;
+  for (const hit of hits) {
+    const line = formatRecallCandidateLine(hit);
+    if (line === "") continue;
+    const bytes = Buffer.byteLength(line, "utf8") + (entries.length === 0 ? 0 : 1);
+    if (used + bytes > perPromptBytes) continue;
+    entries.push({ hit, line });
+    used += bytes;
+  }
+  return entries;
+}
+
+export function recallContextEntries(hits: readonly RecallHit[], perPromptBytes: number): readonly { hit: RecallHit; line: string }[] {
+  const entries: { hit: RecallHit; line: string }[] = [];
   let used = 0;
   for (const hit of hits) {
     let line = formatRecallLine(hit);
     if (line.length === 0) continue;
-    const separator = lines.length === 0 ? 0 : 1;
+    const separator = entries.length === 0 ? 0 : 1;
     if (used + Buffer.byteLength(line, "utf8") + separator > perPromptBytes && hit.decision !== undefined && Buffer.byteLength(hit.decision.text, "utf8") > 480) {
       line = formatRecallLineWithin(hit, perPromptBytes - used - separator);
       if (line.length === 0) continue;
     }
     const cost = Buffer.byteLength(line, "utf8") + separator;
     if (used + cost > perPromptBytes) continue;
-    lines.push(line);
+    entries.push({ hit, line });
     used += cost;
   }
-  return lines;
+  return entries;
 }

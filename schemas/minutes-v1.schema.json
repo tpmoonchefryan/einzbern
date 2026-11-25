@@ -48,6 +48,32 @@
         "minLength": 1
       }
     },
+    "decisionMetadata": {
+      "type": "array",
+      "description": "Optional metadata written with each decision. Historical minutes receive this through an append-only supplement record.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "tags"
+        ],
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "tags": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
     "decidedBy": {
       "type": "array",
       "uniqueItems": true,

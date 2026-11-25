@@ -8,7 +8,8 @@ import { isCodexIndependentCreate, isCodexNativeSpawn } from "./codex-tool-ident
 import { isRecognizedEnrolledThreadReadSource } from "./codex-peer-batch.js";
 import type { CodexPeerBatch } from "./codex-peer-batch.js";
 import { canonicalJson, canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
-import { codexToolResult, runCodexQueryGuard } from "./codex-query-guard.js";
+import { readCodexConversationSettings } from "./machine-settings.js";
+import { codexToolResult, runCodexQueryGuard, type CodexPollingScope } from "./codex-query-guard.js";
 import { hasCodexReportSessionSetting, hasCodexSettingsOverride } from "./codex-peer-settings.js";
 
 type ObjectValue = Record<string, unknown>;
@@ -111,6 +112,40 @@ async function takeReceipt(file: string, sessionId: string): Promise<PeerTurn | 
   finally { await rm(claimed, { force: true }); }
 }
 
+/** Resolve polling from the actual caller, active enrollment and device settings. */
+export async function resolveCodexPollingPolicy(device: string, sessionId: string | undefined, agentId?: string): Promise<{
+  readonly mode: "single-conversation" | "dual-conversation" | "unknown";
+  readonly scope: CodexPollingScope;
+  readonly reasonCode: string;
+  readonly detail?: string;
+}> {
+  if (!sessionId) return { mode: "unknown", scope: "none", reasonCode: "CODEX_POLLING_SESSION_UNKNOWN" };
+
+  let settings;
+  try { settings = await readCodexConversationSettings(device); }
+  catch (error) { return { mode: "unknown", scope: "none", reasonCode: "CODEX_POLLING_SETTINGS_UNAVAILABLE", detail: String(error) }; }
+
+  if (!settings.dualConversation) {
+    if (agentId) return { mode: "single-conversation", scope: "none", reasonCode: "CODEX_POLLING_WORKER" };
+    const role = await readCodexPeerRole(device, sessionId);
+    if (role.status === "error") return { mode: "single-conversation", scope: "none", reasonCode: "CODEX_POLLING_ROLE_UNAVAILABLE", detail: role.reason };
+    if (role.status === "retired") return { mode: "single-conversation", scope: "none", reasonCode: "CODEX_POLLING_ROLE_RETIRED" };
+    if (role.status === "active") return { mode: "single-conversation", scope: "none", reasonCode: "CODEX_POLLING_DUAL_DISABLED_COORDINATOR" };
+    return { mode: "single-conversation", scope: "native-children", reasonCode: "CODEX_POLLING_SINGLE_CONVERSATION" };
+  }
+
+  if (!agentId) {
+    const role = await readCodexPeerRole(device, sessionId);
+    if (role.status === "error") return { mode: "dual-conversation", scope: "none", reasonCode: "CODEX_POLLING_ROLE_UNAVAILABLE", detail: role.reason };
+    if (role.status === "retired") return { mode: "dual-conversation", scope: "none", reasonCode: "CODEX_POLLING_ROLE_RETIRED" };
+    if (role.status === "active") return { mode: "dual-conversation", scope: "native-children", reasonCode: "CODEX_POLLING_COORDINATOR" };
+  }
+
+  return settings.allowNonCoordinatorPolling
+    ? { mode: "dual-conversation", scope: "authorized-conversations", reasonCode: "CODEX_POLLING_ENABLED" }
+    : { mode: "dual-conversation", scope: "none", reasonCode: "CODEX_POLLING_DISABLED" };
+}
+
 /** Receipt/cache observations grant no dispatch or messaging authority. */
 export async function runCodexPeerHook(event: string, payload: unknown, device: string): Promise<PeerHookResult> {
   const body = object(payload);
@@ -121,7 +156,23 @@ export async function runCodexPeerHook(event: string, payload: unknown, device: 
     const { observeCodexSettingsResult } = await import("./codex-peer-settings.js");
     await observeCodexSettingsResult(device, body);
   }
-  const query = await runCodexQueryGuard(event, body, device);
+  const sessionId = body.session_id;
+  const workerObservation = /^(?:(?:collaboration|multi_agent_v1)(?:__|\.))?(?:wait_agent|list_agents)$/u.test(String(tool)) || tool === WAIT || tool === READ;
+  if (!body.agent_id && (event === "Stop" || (event === "PostToolUse" && workerObservation))) {
+    if ((await resolveCodexPollingPolicy(device, sessionId)).scope === "native-children") {
+      const { advanceBatchRun } = await import("./codex-batch-run.js");
+      await advanceBatchRun(device, sessionId);
+    }
+  }
+  if (event === "PreToolUse" && tool === SEND && !body.agent_id) {
+    const prompt = object(body.tool_input)?.prompt;
+    const marker = typeof prompt === "string" ? /^Einzbern-Codex-Peer-Manifest-SHA256: ([a-f0-9]{64})\n/u.exec(prompt) : null;
+    if (marker && await (await import("./codex-batch-run.js")).automaticReturnPendingOrReceived(device, sessionId, marker[1]!)) {
+      return denyPeer("CODEX_BATCH_DELIVERY_RETAINED", "This batch already has a delivery attempt. Read its batch ledger and reconcile the recipient receipt.");
+    }
+  }
+  const query = await runCodexQueryGuard(event, body, device, async () =>
+    (await resolveCodexPollingPolicy(device, sessionId, text(body.agent_id) ? body.agent_id : undefined)).scope);
   if (query.reasonCode !== "HOOK_PEER_NOT_APPLICABLE") return query;
   if (event === "PreToolUse" && tool === SEND) {
     const problem = await codexPeerReportDispatchProblem(device, body.session_id, SEND, body.tool_input);
@@ -143,6 +194,9 @@ export async function runCodexPeerHook(event: string, payload: unknown, device: 
     const role = await readCodexPeerRole(device, body.session_id);
     if (role.status === "error") return denyPeer("HOOK_PEER_ROLE_RECOVERY_FAILED", `Load Mana Orchestrate. ${role.reason}; recover the enrolled role before dependent dispatch.`);
     if (role.status === "active" && isCodexIndependentCreate(tool)) return denyPeer("HOOK_PEER_WORKER_TOOL_DENIED", "This enrolled Codex coordinator must load Mana Orchestrate and dispatch workers with collaboration.spawn_agent. Independent create_thread/fork_thread cannot be used as workers.");
+    if (role.status === "active" && isCodexNativeSpawn(tool) && (await resolveCodexPollingPolicy(device, body.session_id)).mode === "single-conversation") {
+      return denyPeer("HOOK_PEER_DUAL_MODE_DISABLED", "Codex dual-conversation mode is disabled. The enrolled Economy coordinator cannot dispatch another worker; Main must coordinate its own native workers.");
+    }
   }
   if (!text(body.turn_id)) return unchanged;
   if (!["Stop", "UserPromptSubmit"].includes(event) && ![SEND, WAIT, READ, "Bash"].includes(String(tool))) return unchanged;
@@ -197,6 +251,8 @@ export async function runCodexPeerHook(event: string, payload: unknown, device: 
 
   if (event === "Stop" && body.session_id === state.coordinatorId && state.reportEligible && state.allTerminal &&
       state.deliveryStatus === "not-attempted" && !state.deliveryAttempted && !state.stopPrompted && body.stop_hook_active === false) {
+    if ((await resolveCodexPollingPolicy(device, sessionId)).scope !== "native-children") return unchanged;
+    if (await (await import("./codex-batch-run.js")).automaticReturnPendingOrReceived(device, sessionId, state.manifestDigest)) return unchanged;
     state.stopPrompted = true;
     await saveTurn(file, state);
     await saveTurn(`${file}.receipt`, { ...state, turnId: "pending" });
@@ -546,6 +602,8 @@ export async function persistCodexPeerRole(input: {
   readonly actor: string;
   readonly change?: { readonly operation: "retire" | "activate" | "recover"; readonly decidedIn: string | null };
 }): Promise<CodexPeerRole> {
+  const settings = await readCodexConversationSettings(input.device);
+  if (!settings.dualConversation && input.change?.operation !== "retire") throw new Error("Codex dual-conversation mode is disabled on this device");
   const { normalizeCodexPeerBatch } = await import("./codex-peer-batch.js");
   const receipt = normalizeCodexPeerBatch(input.receipt);
   const manifest = receipt.manifest;

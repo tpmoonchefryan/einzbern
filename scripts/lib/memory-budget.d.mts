@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 export const MEMORY_POLICY_SETTING: "execution.memoryPolicy";
+export const MACHINE_SETTINGS_SCHEMA_VERSION: "tcrn.machine-settings.v3";
 export const MEMORY_LEASE_VARIABLE: "EINZBERN_MEMORY_LEASE";
 export const MiB: number;
 export class MemoryBudgetError extends Error {
@@ -28,6 +29,7 @@ export interface MemoryLease {
   release(): void;
 }
 export function parseMemoryPolicy(text: string): MemoryPolicy;
+export function supportsMachineSettingsSchema(version: unknown): boolean;
 export function readMemoryPolicy(deviceHome: string): MemoryPolicy | null;
 export function memoryPhase(env?: NodeJS.ProcessEnv): { workers: number; bytes: number; token: string } | null;
 export function memoryTestArguments(args: readonly string[], env?: NodeJS.ProcessEnv): readonly string[];

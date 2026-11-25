@@ -140,7 +140,7 @@ test("SUB-484: the module's names are the engine's, and the slots sit in the dev
   const entry = MACHINE_SETTINGS_CATALOG.find((candidate) => candidate.key === KEY);
   assert.deepEqual(
     [entry.layer, entry.type, entry.controlType, entry.defaultValue, entry.min, entry.max, entry.group, entry.order, entry.shape, entry.valueSource],
-    ["device", "integer", "number", String(heavy.HEAVY_RUNS_DEFAULT), heavy.HEAVY_RUNS_MIN, heavy.HEAVY_RUNS_MAX, "execution", 6, "scalar", "settings-catalog"],
+    ["device", "integer", "number", String(heavy.HEAVY_RUNS_DEFAULT), heavy.HEAVY_RUNS_MIN, heavy.HEAVY_RUNS_MAX, "models", 17, "scalar", "settings-catalog"],
   );
   assert.deepEqual([heavy.HEAVY_RUNS_DEFAULT, heavy.HEAVY_RUNS_MIN, heavy.HEAVY_RUNS_MAX], [1, 1, 16]);
 });

@@ -9,7 +9,7 @@ import { pathToFileURL } from "node:url";
 import test from "node:test";
 
 import { runCli } from "../dist/build/packages/cli/src/index.js";
-import { FRAMEWORK_VERSION, computeInstallTreeDigest, materializeWorkspace, readRegistry, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
+import { FRAMEWORK_VERSION, computeInstallTreeDigest, materializeWorkspace, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
 import { DOCTOR_CHECKS } from "../dist/build/packages/core/src/doctor.js";
 import { parseManagedFile } from "../dist/build/packages/core/src/managed-sections.js";
 import { applySetup, planSetup } from "../dist/build/packages/core/src/setup.js";
@@ -106,15 +106,14 @@ test("fresh mode removes explicitly declined shared navigation, preserving user 
 
   const localOnlyPlan = await freshPlan(f, false);
   assert.ok(!localOnlyPlan.writes.some((entry) => entry.step === "managed-sections" || entry.step === "library"), "local preference does not rewrite shared navigation");
-  const binding = (await readRegistry(f.deviceHome)).entries.find((entry) => entry.projectPath === f.project);
   const setSharedNavigation = (value) => setWorkspaceSetting(join(f.project, ".ether"), {
-    key: "agents.sharedNavigation", value, occurredAt: at(), configurationProjectId: binding.projectId,
+    key: "agents.sharedNavigation", value, occurredAt: at(),
   });
   await setSharedNavigation("declined");
   const declinedPlan = await freshPlan(f, false);
   assert.ok(declinedPlan.writes.some((entry) => entry.step === "managed-sections" && entry.path === agentsPath && entry.action === "update"));
   assert.ok(declinedPlan.backups.some((entry) => entry.path === agentsPath));
-  assert.ok(declinedPlan.writes.some((entry) => entry.step === "host-hooks" && entry.path === join(f.home, ".claude", "settings.json")));
+  assert.ok(!declinedPlan.writes.some((entry) => entry.step === "host-hooks"), "changing the library setting keeps the registered startup hooks");
 
   const declined = await applySetup(declinedPlan);
   assert.equal(declined.reasonCode, "SETUP_APPLIED");
@@ -146,7 +145,7 @@ test("fresh mode removes explicitly declined shared navigation, preserving user 
   const beforeEdit = await readFile(agentsPath, "utf8");
   const managedNavigation = parseManagedFile(beforeEdit, "AGENTS.md").sections.find((section) => section.id === "agents");
   assert.ok(managedNavigation);
-  const editedText = beforeEdit.replace(managedNavigation.raw, managedNavigation.raw.replace("This workspace uses Einzbern.", "The team edited this navigation section."));
+  const editedText = beforeEdit.replace(managedNavigation.raw, managedNavigation.raw.replace("This project is managed by Einzbern.", "The team edited this navigation section."));
   await writeFile(agentsPath, editedText);
 
   await setSharedNavigation("declined");

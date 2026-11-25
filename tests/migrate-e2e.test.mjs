@@ -406,7 +406,7 @@ test("489-AC1, AC2, AC3, AC4 (fixture): setup --mode migrate --yes true on a mac
   // rule at either level; other tools' hooks and keys, and Codex's hooks switch, stay.
   for (const file of [CLAUDE, CODEX]) {
     const user = await readJson(join(m.home, file));
-    assert.deepEqual(hookCommands(user).filter((hook) => isEinzbernHookCommand(hook.command)).map((hook) => hook.event).sort(), [...(file === CODEX ? ["PostToolUse"] : []), "PreToolUse", ...(file === CODEX ? ["Stop"] : []), "SubagentStart", "UserPromptSubmit"], file);
+    assert.deepEqual(hookCommands(user).filter((hook) => isEinzbernHookCommand(hook.command)).map((hook) => hook.event).sort(), [...(file === CODEX ? ["PostToolUse"] : []), "PreToolUse", "SessionStart", ...(file === CODEX ? ["Stop"] : []), "SubagentStart", "UserPromptSubmit"], file);
     const container = await readJson(join(m.container, file));
     for (const document of [user, container]) assert.deepEqual(hookCommands(document).filter((hook) => isLegacyHookCommand(hook.command)), [], file);
     assert.deepEqual(hookCommands(container).filter((hook) => isEinzbernHookCommand(hook.command)), [], file);
@@ -512,7 +512,7 @@ test("489 (TCRN-CROSS-SUB-366, problems #4): a second device restores the migrat
   process.env.EINZBERN_HOME = m.device;
   try {
     const binding = (await readRegistry(m.device)).entries.find((entry) => entry.projectPath === m.container);
-    await setWorkspaceSetting(library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at(), actorId: SETUP_ACTOR, configurationProjectId: binding.projectId });
+    await setWorkspaceSetting(library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at(), actorId: SETUP_ACTOR });
   } finally {
     if (previousDevice === undefined) delete process.env.EINZBERN_HOME;
     else process.env.EINZBERN_HOME = previousDevice;

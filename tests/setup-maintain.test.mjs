@@ -236,8 +236,8 @@ test("480-R4: update installs a newer release, switches engine/current and lays 
   assert.equal((await current(f)).version, NEWER);
   assert.equal((await current(f)).previous, FRAMEWORK_VERSION);
   assert.deepEqual(await copyDigests(f), [release.skillDigest, release.skillDigest], "both copies are the new version's skill");
-  assert.deepEqual((await einzbernHooks(join(f.home, ".claude", "settings.json"))).map(([event]) => event).sort(), ["PreToolUse", "SubagentStart", "UserPromptSubmit"]);
-  assert.deepEqual((await einzbernHooks(join(f.home, ".codex", "hooks.json"))).map(([event]) => event).sort(), ["PostToolUse", "PreToolUse", "Stop", "SubagentStart", "UserPromptSubmit"]);
+  assert.deepEqual((await einzbernHooks(join(f.home, ".claude", "settings.json"))).map(([event]) => event).sort(), ["PreToolUse", "SessionStart", "SubagentStart", "UserPromptSubmit"]);
+  assert.deepEqual((await einzbernHooks(join(f.home, ".codex", "hooks.json"))).map(([event]) => event).sort(), ["PostToolUse", "PreToolUse", "SessionStart", "Stop", "SubagentStart", "UserPromptSubmit"]);
   assert.deepEqual(await Promise.all(["AGENTS.md", "CLAUDE.md"].map((file) => readFile(join(f.project, file)))), sections, "identical catalog content remains byte-for-byte unchanged");
   assert.equal(updated.managedUpdates.find(output => output.projectPath === f.project)?.status, "unchanged");
   assert.ok(await exists(join(staging, `einzbern-${NEWER}`, "scripts", "einzbern.mjs")), "the unpacked release stays in the device directory's trash");
@@ -259,8 +259,8 @@ test("480-R4: update installs a newer release, switches engine/current and lays 
   assert.equal((await current(f)).previous, NEWER);
   const original = (await computeInstallTreeDigest(join(f.deviceHome, "engine", FRAMEWORK_VERSION, "skill", "mana-orchestrate"))).sha256;
   assert.deepEqual(await copyDigests(f), [original, original]);
-  assert.deepEqual((await einzbernHooks(join(f.home, ".claude", "settings.json"))).map(([event]) => event).sort(), ["PreToolUse", "SubagentStart", "UserPromptSubmit"]);
-  assert.deepEqual((await einzbernHooks(join(f.home, ".codex", "hooks.json"))).map(([event]) => event).sort(), ["PostToolUse", "PreToolUse", "Stop", "SubagentStart", "UserPromptSubmit"]);
+  assert.deepEqual((await einzbernHooks(join(f.home, ".claude", "settings.json"))).map(([event]) => event).sort(), ["PreToolUse", "SessionStart", "SubagentStart", "UserPromptSubmit"]);
+  assert.deepEqual((await einzbernHooks(join(f.home, ".codex", "hooks.json"))).map(([event]) => event).sort(), ["PostToolUse", "PreToolUse", "SessionStart", "Stop", "SubagentStart", "UserPromptSubmit"]);
   assertSelfCheckGreen(rolled);
 
   // The unpacked release directory installs too: the version is already there, so it is reused.
@@ -321,11 +321,11 @@ test("update uses the selected catalog across registered outputs and preserves O
   }
   const backedUp = updated.backups.find(entry => entry.path === join(second.project, "AGENTS.md"));
   assert.equal(await readFile(join(backedUp.into, "AGENTS.md"), "utf8"), before.get(second.project));
-  await setWorkspaceSetting(second.library, { configurationProjectId: projectId(second.project), key: "agents.generation", value: "none", occurredAt: at() });
+  await setWorkspaceSetting(second.library, { key: "agents.generation", value: "none", occurredAt: at() });
   const again = await applySetup(await plan(f, "update", { archive: release.archive }));
   assert.equal(again.written.filter(entry => entry.step === "managed-sections").length, 0, "repeated update does not rewrite identical sections");
   assert.equal(again.managedUpdates.find(output => output.projectPath === second.project)?.reasonCode, "GENERATION_DISABLED");
-  await setWorkspaceSetting(second.library, { configurationProjectId: projectId(second.project), key: "agents.generation", value: "managed", occurredAt: at() });
+  await setWorkspaceSetting(second.library, { key: "agents.generation", value: "managed", occurredAt: at() });
   const absent = join(f.base, "temporarily-unavailable");
   const registryFile = join(f.deviceHome, "registry.json");
   const legacy = JSON.parse(await readFile(registryFile, "utf8"));
@@ -524,7 +524,7 @@ test("480-R4: repair puts back what is missing, and a second repair changes noth
   // R46 I08: repair names no coordination binding, in the plan or the receipt.
   assert.deepEqual([Object.hasOwn(planned, "coordination"), Object.hasOwn(repaired, "coordination")], [false, false]);
   assert.deepEqual(repaired.backups.map((entry) => entry.path), [settings, codexHooks], "both host files are backed up before replacement");
-  assert.deepEqual((await einzbernHooks(codexHooks)).map(([event]) => event).sort(), ["PostToolUse", "PreToolUse", "Stop", "SubagentStart", "UserPromptSubmit"]);
+  assert.deepEqual((await einzbernHooks(codexHooks)).map(([event]) => event).sort(), ["PostToolUse", "PreToolUse", "SessionStart", "Stop", "SubagentStart", "UserPromptSubmit"]);
   assertSelfCheckGreen(repaired);
 
   const files = [settings, join(f.home, ".codex", "hooks.json"), join(f.project, "AGENTS.md"), join(f.project, "CLAUDE.md"), join(f.deviceHome, "registry.json"), join(f.deviceHome, "skills.json")];
@@ -567,8 +567,7 @@ test("shared navigation survives a declined device preference and repair remains
 test("explicit shared navigation decline removes a managed section once, independent of device preference", async (context) => {
   const f = await installed(context);
   const agents = join(f.project, "AGENTS.md");
-  const entry = (await readRegistry(f.deviceHome)).entries.find((item) => item.projectPath === f.project);
-  await setWorkspaceSetting(f.library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at(), configurationProjectId: entry.projectId });
+  await setWorkspaceSetting(f.library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at() });
   const planned = await plan(f, "repair", { answers: { navigation: true } });
   assert.ok(planned.writes.some((item) => item.step === "managed-sections" && item.path === agents));
   const applied = await applySetup(planned);
@@ -667,7 +666,7 @@ test("480-AC4: uninstall with --managed-sections remove takes the section marker
   const applied = await applySetup(planned);
   const [after, claudeAfter] = await Promise.all([readFile(agents, "utf8"), readFile(claude, "utf8")]);
   assert.doesNotMatch(after, /einzbern:section/u);
-  assert.match(after, /This workspace uses Einzbern\./u, "the text stays, the user's from now on");
+  assert.match(after, /This project is managed by Einzbern\./u, "the text stays, the user's from now on");
   assert.doesNotMatch(claudeAfter, /einzbern:section/u);
   assert.match(claudeAfter, /^@AGENTS\.md$/mu);
   const backups = join(applied.backupDir, "managed-sections");

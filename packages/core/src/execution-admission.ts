@@ -2,7 +2,7 @@
 import { isAbsolute, join } from "node:path";
 import { parseStrictInstant } from "../../protocol/src/index.js";
 import { deviceHome } from "./device-home.js";
-import { readEngineModelPolicyFile, resolveEngineExecutionPolicyFromSnapshot, validateEngineModelPolicyFile } from "./engine-model-policy.js";
+import { genericEngineConcurrencyFromValues, genericEngineQuotaFromValues, readEngineModelPolicyFile, resolveEngineExecutionPolicyFromSnapshot, validateEngineModelPolicyFile } from "./engine-model-policy.js";
 import type { EngineExecutionPolicyResolution, EngineModelPolicyFile } from "./engine-model-policy.js";
 import { evaluateExecutionQuota, ExecutionPolicyError, resolveExecutionConcurrency } from "./execution-policy.js";
 import { MACHINE_SETTINGS_CATALOG, MACHINE_SETTINGS_FILE_NAME, readMachineSettings, validateMachineSettingsFile } from "./machine-settings.js";
@@ -133,14 +133,16 @@ export function resolveExecutionAdmissionFromSnapshot(snapshotValue: ExecutionAd
   if (typeof home !== "string" || !isAbsolute(home)) invalid("snapshot.home", "must be an absolute device directory");
   const machine = validateMachineSettingsFile(snapshotValue.machineSettings);
   const deviceLimit = Number(machine.values["execution.maxConcurrentAgents"] ?? MACHINE_SETTINGS_CATALOG.find(entry => entry.key === "execution.maxConcurrentAgents")!.defaultValue);
-  const concurrency = resolveExecutionConcurrency(deviceLimit, options.projectLimit);
   const reasons: string[] = [];
   let selection: EngineExecutionPolicyResolution | null = null;
   const snapshot = validateEngineModelPolicyFile(snapshotValue.enginePolicy);
   const hostPolicy = Object.hasOwn(snapshot.hosts, request.host) ? snapshot.hosts[request.host] : undefined;
+  const genericQuota = genericEngineQuotaFromValues(machine.values);
+  const genericLimit = genericEngineConcurrencyFromValues(machine.values);
+  const concurrency = resolveExecutionConcurrency(deviceLimit, options.projectLimit, genericLimit, hostPolicy?.maxConcurrentSubagents ?? undefined);
   const policy = hostPolicy === undefined ? null : { host: request.host, revision: hostPolicy.revision, storeRevision: snapshot.revision, digest: hostPolicy.digest };
   try {
-    selection = resolveEngineExecutionPolicyFromSnapshot(snapshot, { home, host: request.host, category: request.category, rejections: request.rejections });
+    selection = resolveEngineExecutionPolicyFromSnapshot(snapshot, { home, host: request.host, category: request.category, rejections: request.rejections, genericQuota: genericQuota.quota, genericQuotaConfigured: genericQuota.configured, genericConcurrencyLimit: genericLimit });
   } catch (error) {
     const code = (error as { readonly reasonCode?: string }).reasonCode;
     if (code !== "ENGINE_MODEL_POLICY_UNAVAILABLE" && code !== "MODELS_CATEGORY_UNKNOWN" && code !== "MODELS_CATEGORY_EMPTY") throw error;

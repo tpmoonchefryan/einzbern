@@ -235,7 +235,7 @@ export function renderDevinProfile(tier: DevinProfileTier): string {
   const body = [
     `You are a worker dispatched by a main conversation that uses ${BRAND.engine.name}.`,
     "",
-    `- ${NAVIGATION_LINES[0]} When no skill tool is available, read \`${DEVIN_SKILL_ENTRY}\`.`,
+    `- ${NAVIGATION_LINES[1]} When no skill tool is available, read \`${DEVIN_SKILL_ENTRY}\`.`,
     "- Follow the task prompt: it names your scope, the paths you may write and the report to return. Read your own work context before acting.",
     "- Finish with one complete report. Write long results to the file the task names and return a short summary with its path. The host delivers your final message to the main conversation; do not send it again.",
     "- Do not start subagents or message other sessions.",

@@ -8,6 +8,8 @@ export interface EngineQuotaPolicy {
   readonly weeklyWaitPercent: number | null;
 }
 
+export type EngineQuotaOverrides = Partial<EngineQuotaPolicy>;
+
 export const DEFAULT_ENGINE_QUOTA_POLICY: EngineQuotaPolicy = Object.freeze({
   fiveHourParallelOffPercent: 75,
   fiveHourWaitPercent: 90,
@@ -46,22 +48,57 @@ export function validateEngineQuotaPolicy(value: unknown): EngineQuotaPolicy {
   });
 }
 
+/** Host quota fields are optional; omitted values inherit the device's generic policy. */
+export function validateEngineQuotaOverrides(value: unknown): EngineQuotaOverrides {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) invalid("quota", "must be an object");
+  const input = value as Record<string, unknown>;
+  const keys = Object.keys(DEFAULT_ENGINE_QUOTA_POLICY);
+  for (const key of Object.keys(input)) if (!keys.includes(key)) invalid(`quota.${key}`, "is not a supported threshold");
+  const output: Partial<Record<keyof EngineQuotaPolicy, number | null>> = {};
+  for (const key of keys as (keyof EngineQuotaPolicy)[]) {
+    if (!Object.hasOwn(input, key)) continue;
+    const field = input[key];
+    if (key === "weeklyWaitPercent" && field === null) { output[key] = null; continue; }
+    if (typeof field !== "number" || !Number.isSafeInteger(field) || field < 1 || field > 100) invalid(`quota.${key}`, "must be an integer from 1 to 100");
+    output[key] = field;
+  }
+  if (keys.every(key => Object.hasOwn(input, key))) validateEngineQuotaPolicy(output);
+  return Object.freeze(output as EngineQuotaOverrides);
+}
+
+export function resolveEngineQuotaPolicy(genericValue: EngineQuotaPolicy, overrides?: EngineQuotaOverrides | null): EngineQuotaPolicy {
+  const generic = validateEngineQuotaPolicy(genericValue);
+  const host = overrides == null ? {} : validateEngineQuotaOverrides(overrides);
+  return validateEngineQuotaPolicy({ ...generic, ...host });
+}
+
 /** A project's requested concurrency may only tighten the device cap, never raise it. */
-export function resolveExecutionConcurrency(deviceLimit: number, projectLimit?: number): {
+export function resolveExecutionConcurrency(deviceLimit: number, projectLimit?: number, genericLimit?: number, hostLimit?: number): {
   readonly deviceLimit: number;
   readonly projectLimit: number | null;
+  readonly genericLimit: number | null;
+  readonly hostLimit: number | null;
   readonly effectiveLimit: number;
-  readonly origin: "device" | "project-budget";
+  readonly origin: "device" | "generic" | "host-policy" | "project-budget";
 } {
-  for (const [path, value] of [["deviceLimit", deviceLimit], ["projectLimit", projectLimit]] as const) {
-    if (path === "projectLimit" && value === undefined) continue;
+  for (const [path, value] of [["deviceLimit", deviceLimit], ["projectLimit", projectLimit], ["genericLimit", genericLimit], ["hostLimit", hostLimit]] as const) {
+    if (path !== "deviceLimit" && value === undefined) continue;
     if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) invalid(path, "must be a positive safe integer");
   }
+  const candidates = [
+    { value: deviceLimit, origin: "device" as const, precedence: 0 },
+    ...(genericLimit === undefined ? [] : [{ value: genericLimit, origin: "generic" as const, precedence: 1 }]),
+    ...(hostLimit === undefined ? [] : [{ value: hostLimit, origin: "host-policy" as const, precedence: 2 }]),
+    ...(projectLimit === undefined ? [] : [{ value: projectLimit, origin: "project-budget" as const, precedence: 3 }]),
+  ];
+  const limiting = candidates.sort((left, right) => left.value - right.value || right.precedence - left.precedence)[0]!;
   return Object.freeze({
     deviceLimit,
     projectLimit: projectLimit ?? null,
-    effectiveLimit: Math.min(deviceLimit, projectLimit ?? deviceLimit),
-    origin: projectLimit !== undefined && projectLimit < deviceLimit ? "project-budget" : "device",
+    genericLimit: genericLimit ?? null,
+    hostLimit: hostLimit ?? null,
+    effectiveLimit: limiting.value,
+    origin: limiting.origin,
   });
 }
 

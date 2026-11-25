@@ -40,18 +40,18 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
   "currentSources": [
     {
       "path": "portal/index.html",
-      "bytes": 502366,
-      "sha256": "58213f39c644969460011a175ad7066aff8e60997df6046ab7f80190dfb2e307"
+      "bytes": 537979,
+      "sha256": "a74f738b90e02b7afcf08eef813c0d345025f238a05557829bd3520af1a2205d"
     },
     {
       "path": "portal/locales.js",
-      "bytes": 292823,
-      "sha256": "90144b948ae146c9233546b2236d97e11fe53c542abaa45d5da6ce5bb509acb9"
+      "bytes": 322579,
+      "sha256": "e303e7c3f67268623314e2746ddeec480012f95a9b8efbbf105dde281a533a9a"
     },
     {
       "path": "portal/portal.mjs",
-      "bytes": 93297,
-      "sha256": "747c642f3fb7e9028745d0395a8eb61fcc71e49fe790725e44dd12af8cc738d7"
+      "bytes": 98987,
+      "sha256": "69bead63e7022502b305b1c4822afa31b7abf3d74818540a12fb12fa02604592"
     },
     {
       "path": "portal/scripts/i18n-proof.mjs",
@@ -65,23 +65,23 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/portal.test.mjs",
-      "bytes": 40424,
-      "sha256": "94927be497a479e3368694be29af2dc7bc04c478ef4263bac220f3ab11a50b3f"
+      "bytes": 40696,
+      "sha256": "cb1127f8938d5463ba973bf22cca8beae618ee7829b2663a7cf734ee345a6b33"
     },
     {
       "path": "portal/tests/ui-presence.test.mjs",
-      "bytes": 88607,
-      "sha256": "e239f01ebccb62e8a46cea42920b55fc119c1e219fcf4df08acff3da2ee0cccf"
+      "bytes": 85362,
+      "sha256": "52d5de5a8a29626be64fb30fe251c8da8b8ae4a04cc1d98021814e05c65a7f7d"
     },
     {
       "path": "portal/tests/ui-presence-support.mjs",
-      "bytes": 52227,
-      "sha256": "380ade7b16a4e29788a8bebc7c1e2f95102a9d287f00d3954f1de8a897aa56ee"
+      "bytes": 52055,
+      "sha256": "1fcbb4f719ba2a9ece3b940ee85f64e89f5191a5359c9da224f41fc518de83ed"
     },
     {
       "path": "portal/tests/portal-support.mjs",
-      "bytes": 20991,
-      "sha256": "3d5d6cb46536ebd82239bf1cf11ba8236745a78213e57d2f5899a62e8ff18c57"
+      "bytes": 20602,
+      "sha256": "fc0bd7a09516db26920932a241c7ccdad6aeec3d38dfd8ff3980e3bc9e702897"
     },
     {
       "path": "portal/tests/portal-work.test.mjs",
@@ -90,8 +90,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/portal-configuration.test.mjs",
-      "bytes": 58467,
-      "sha256": "010159848e464587ad3a18306f9ac34c63481fc7794e8a682e82b6d417e98d8b"
+      "bytes": 61983,
+      "sha256": "2c4d8f35d89b71bcd78d688015bafa97db3bc9b8e2160d9ef16c0e8ebe3dfb44"
     },
     {
       "path": "portal/tests/portal-library.test.mjs",
@@ -100,18 +100,18 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "portal/tests/ui-work.test.mjs",
-      "bytes": 62443,
-      "sha256": "39abbb40460d7a838c5093cc12cc705299aee430c0c5da95e2192030657730ef"
+      "bytes": 71765,
+      "sha256": "2f643a544db812ca3b1e676b2184d7683cd64ac0eb98187f68764d8c445bdad7"
     },
     {
       "path": "portal/tests/ui-configuration.test.mjs",
-      "bytes": 124969,
-      "sha256": "ba4e2d9e868674e98b84d34777df8029e27c68b2cbc6b1fa4edcd7231a4e23ae"
+      "bytes": 127128,
+      "sha256": "02924119d186939ae1016e20db5e369f7eb318f5f27e737c79f5bd6d91706ccb"
     },
     {
       "path": "portal/tests/ui-library.test.mjs",
-      "bytes": 38451,
-      "sha256": "c77da065d44a804203fef0ca8a345e97cf23c081ba61f6d90e9a901f7bee2eed"
+      "bytes": 38408,
+      "sha256": "10669b2c6f4f24c06795b8b6a9ccf770fa3b0cdf02f88a98ac894d5aceceb176"
     },
     {
       "path": "tests/helpers/register-portal-libraries.mjs",
@@ -145,8 +145,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
     },
     {
       "path": "packages/core/src/doctor.ts",
-      "bytes": 50449,
-      "sha256": "bcd2f3795f6827099b74118cab1a8ef4c4ecfaa77cefd111aa837ad1891717f7"
+      "bytes": 50334,
+      "sha256": "a52b55272a0cce9951a90813cd82ff0b222607076a9767a5d217f19671653dc7"
     },
     {
       "path": "tests/doctor.test.mjs",
@@ -177,9 +177,8 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
   "hostRoleScan": {
     "scan": "rg --no-line-number 'claude-code|codex|reviewer|role ===|host ===|host \\?' portal/index.html | sed 's/^ *//' | sort -u",
     "exitCode": 0,
-    "matchCount": 22,
+    "matchCount": 21,
     "matches": [
-      "$(\"#design-authority\").hidden = state.settings?.chain?.role === \"coordination\" || state.settingGroup !== authorityGroup || designAuthorityState.status === \"unset\";",
       ": `<section class=\"tcrn-surface\" data-content-scope=\"custom-variables\"><div class=\"tcrn-surface__head\"><div class=\"tcrn-surface__head-content\"><h2>${esc(t(\"variables.title\"))}</h2><p class=\"tcrn-text\">${esc(t(\"variables.note\"))}</p><p class=\"tcrn-text\">${esc(t(\"variables.replaceNote\"))}</p>${independentConfigurationMetadata(\"variable\", { scope: state.settings?.chain?.role === \"coordination\" ? \"library\" : \"project\" })}</div></div><div class=\"tcrn-table-shell tcrn-variable-table\" role=\"table\" aria-label=\"${esc(t(\"variables.title\"))}\" data-variable-table=\"true\"><div class=\"tcrn-table-shell__head\" role=\"row\">${headers.map((label) => `<span role=\"columnheader\">${esc(label)}</span>`).join(\"\")}</div>${variableRow({ name: \"\", type: \"string\", value: \"\", description: \"\" }, true)}${rows}</div></section>${source?.withheld?.length ? `<p class=\"tcrn-text\">${esc(t(\"variables.withheld\", { count: source.withheld.length }))}</p>` : \"\"}`;",
       ": target?.chain?.role === \"coordination\" ? t(\"projects.coordination\") : t(\"projects.unnamed\");",
       "const catalog = state.modelPolicy?.selectedHost === host ? state.modelPolicy : null;",
@@ -190,9 +189,9 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
       "const modelPolicyPendingFor = (host) => state.modelPolicyReadPending === true && state.modelPolicyReadTarget?.host === host && modelPolicyReadCurrent(state.modelPolicyReadTarget);",
       "const readiness = state.modelPolicy?.selectedHost === host ? state.modelPolicy.peerReadiness : null;",
       "const registered = (BOOT.libraries || []).filter((library) => library.chain?.role === \"coordination\" && library.libraryId !== own).map((library) => library.libraryId);",
-      "const rendersSystemVariables = (key) => String(key) === \"artifact.language\" || String(key).startsWith(\"design.\") || (state.settings?.chain?.role === \"coordination\"",
-      "const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? \"en\", theme: document.documentElement.dataset.tcrnTheme, page: \"dashboard\", dashboardTab: \"overview\", settingGroup: \"general\", collections: { \"models.category\": { draft: null, dirty: false, findings: [], refusal: null }, \"models.tiers\": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: \"codex\", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: \"\", knowledgeStatus: \"valid\", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: \"conferenceTypes\", receipt: null, operationDetailsOpen: false, agentsText: \"\", reconciliation: null, rules: null, pendingSection: \"\", searchIndex: [], searchResults: [], searchSelection: 0 };",
+      "const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? \"en\", theme: document.documentElement.dataset.tcrnTheme, page: \"dashboard\", dashboardTab: \"overview\", settingGroup: \"general\", customRuleEditing: \"\", collections: { \"models.category\": { draft: null, dirty: false, findings: [], refusal: null }, \"models.tiers\": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: \"codex\", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: \"\", knowledgeStatus: \"valid\", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: \"conferenceTypes\", receipt: null, operationDetailsOpen: false, agentsText: \"\", reconciliation: null, rules: null, pendingSection: \"\", searchIndex: [], searchResults: [], searchSelection: 0 };",
       "const template = state.modelPolicy?.selectedHost === host ? state.modelPolicy.onboarding : null;",
+      "host.hidden = !designAuthorityUrl() || state.settings?.chain?.role === \"coordination\" || state.settingGroup !== settingGroup(\"design.authority\");",
       "if (!state.chainDeclarePending) $(\"[data-chain-role]\", form).value = identity?.role === \"coordination\" ? \"coordination\" : \"project\";",
       "if (host === \"codex\") {",
       "if (role === \"coordination\") return own ? [own] : [];",
@@ -225,9 +224,9 @@ This record covers the current Portal tree. Historical INC-153 and INC-155 evide
         "leg": "key-coverage",
         "ok": true,
         "reasonCode": "EVERY_KEY_TRANSLATED",
-        "keyCount": 693,
+        "keyCount": 772,
         "localeCount": 5,
-        "expectedStrings": 3465,
+        "expectedStrings": 3860,
         "gaps": []
       },
       {

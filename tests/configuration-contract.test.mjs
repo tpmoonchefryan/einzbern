@@ -53,12 +53,18 @@ test("typed readback is strict, lossless about absence and raw transport, and us
 
 test("dictionary separates historical storage from effective host authority and device state from shared projections", () => {
   const rows = configurationContract().settings;
-  for (const row of rows.filter((entry) => entry.key.startsWith("models.") || entry.key.startsWith("quota."))) {
+  for (const row of rows.filter((entry) => entry.registeredScope !== "device" && (entry.key.startsWith("models.") || entry.key.startsWith("quota.") || entry.key === "execution.maxConcurrentSubagents"))) {
     assert.equal(row.scope, "host");
     assert.equal(row.registeredScope, "project");
     assert.match(row.source, /engine-model-policy/);
     assert.match(row.compatibility, /historical/);
     assert.match(row.inheritance, /no project fallback/);
+  }
+  for (const row of rows.filter((entry) => entry.key.startsWith("models.quota.") || entry.key === "models.maxConcurrentSubagents")) {
+    assert.equal(row.scope, "device");
+    assert.equal(row.registeredScope, "device");
+    assert.equal(row.source, "device machine-settings.json");
+    assert.match(row.consumer, /generic/);
   }
   assert.equal(rows.find((row) => row.key === "storage.segmentBytes").scope, "library");
   assert.equal(rows.find((row) => row.key === "portal.port").effect, "restart");
@@ -67,7 +73,7 @@ test("dictionary separates historical storage from effective host authority and 
 
 
 test("typed historical declarations never masquerade as resolved device-host runtime values", () => {
-  for (const [key, value] of [["models.escalation.enabled", "false"], ["quota.fiveHourWaitPercent", "80"], ["quota.weeklyWaitPercent", null]]) {
+  for (const [key, value] of [["models.escalation.enabled", "false"], ["quota.fiveHourWaitPercent", "80"], ["quota.weeklyWaitPercent", null], ["execution.maxConcurrentSubagents", "8"]]) {
     const annotated = annotateConfigValue(key, value, value === null ? "absent" : "stored");
     assert.equal(annotated.valueRole, "historical-declaration");
     assert.equal(annotated.valueSource, "project-compatibility");
@@ -79,6 +85,11 @@ test("typed historical declarations never masquerade as resolved device-host run
   assert.equal(current.valueRole, "resolved-setting");
   assert.equal(current.valueSource, "caller-supplied-setting");
   assert.equal(current.semanticValue, 3);
+  const generic = annotateConfigValue("models.maxConcurrentSubagents", "6", "stored");
+  assert.equal(generic.valueRole, "resolved-setting");
+  assert.equal(generic.valueSource, "caller-supplied-setting");
+  assert.equal(generic.contract.scope, "device");
+  assert.equal(generic.semanticValue, 6);
 });
 
 

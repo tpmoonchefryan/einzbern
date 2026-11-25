@@ -134,6 +134,9 @@ test("470-R1: a verb run without --workspace works on the library the current di
   assert.deepEqual(workspaceFlags.filter(([, isRequired]) => isRequired), [
     ["engine-model-policy-save", true],
     ["execution-antigravity-swarm-record", true],
+    ["execution-codex-batch-adopt", true],
+    ["execution-codex-batch-arm", true],
+    ["execution-codex-batch-prepare", true],
     ["execution-codex-peer-record", true],
     ["execution-host-prepare", true],
     ["execution-native-prepare", true],

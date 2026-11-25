@@ -17,6 +17,12 @@ export function principleLine(rule: BuiltInRule, language: string | null): strin
   return language === "zh-CN" ? rule.principle.zh : rule.principle.en;
 }
 
+/** A custom rule's compact line in the shared managed section. */
+export function customRuleLine(title: string, body: string): string {
+  const continuation = body.replace(/\r\n?/gu, "\n").split("\n").map(line => `  ${line}`).join("\n");
+  return `- **${title}**\n${continuation}`;
+}
+
 /** The bold labels are part of the published compact format in both supported languages. */
 export function ruleLine(body: string, rule: BuiltInRule): string | undefined {
   const prefixes = Object.values(rule.principle).map(line => line.slice(0, line.indexOf("**", 4) + 2));
@@ -33,9 +39,15 @@ export function configuredPrinciples(state: Configuration, catalog: readonly Bui
     if (record?.enabled !== true || typeof record.version !== "number" || record.version > rule.version) return [];
     const order = typeof record.order === "number" ? record.order : undefined;
     return [{ id: "rule:" + rule.id, body: principleLine(rule, language), order }];
-  }).sort(compareRecordOrder);
-  const entry = language === "zh-CN" ? "处理 Einzbern 相关任务时，加载 Mana Orchestrate 并遵循相应细则。" : NAVIGATION_LINES.join("\n");
-  return [...(navigation ? [{ id: "navigation", body: entry }] : []), ...enabled];
+  });
+  const custom = state.configRecords.flatMap(record => {
+    if (record.collection !== "rule" || record.value.custom !== true || record.value.enabled !== true ||
+      typeof record.value.title !== "string" || typeof record.value.body !== "string") return [];
+    const order = typeof record.value.order === "number" ? record.value.order : undefined;
+    return [{ id: "rule:" + record.key, body: customRuleLine(record.value.title, record.value.body), order }];
+  });
+  const orderedRules = [...enabled, ...custom].sort(compareRecordOrder);
+  return [...(navigation ? [{ id: "navigation", body: NAVIGATION_LINES.join("\n") }] : []), ...orderedRules];
 }
 
 export function blockBody(parts: readonly { id: string; body: string }[]): string {
@@ -83,6 +95,7 @@ export async function planPrinciples(projectRoot: string, state: Configuration, 
   const observed = new Map(probe.sections.map(decision => [decision.id, decision]));
   const catalog = options.catalog ?? BUILT_IN_RULES;
   const supported = new Set(["navigation", ...catalog.map(rule => "rule:" + rule.id)]);
+  for (const record of state.configRecords) if (record.collection === "rule" && record.value.custom === true) supported.add("rule:" + record.key);
   const declared = new Set(state.configRecords.filter(record => record.collection === "rule").map(record => "rule:" + record.key));
   for (const record of state.configRecords) {
     const rule = catalog.find(rule => rule.id === record.key);
@@ -108,7 +121,7 @@ export async function planPrinciples(projectRoot: string, state: Configuration, 
     return !old || (before === null && old.state === "managed");
   });
   // Preserve lines from a newer engine whose enabled rule this catalog cannot render.
-  const hasUnknownRule = state.configRecords.some(r => r.collection === "rule" && r.value.enabled === true && !catalog.some(rule => rule.id === r.key));
+  const hasUnknownRule = state.configRecords.some(r => r.collection === "rule" && r.value.enabled === true && r.value.custom !== true && !catalog.some(rule => rule.id === r.key));
   for (const line of group?.body.split(/\r?\n/u) ?? []) {
     if (!line.startsWith("- **")) continue;
     const rule = catalog.find(rule => ruleLine(line, rule));

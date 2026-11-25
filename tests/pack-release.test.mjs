@@ -376,7 +376,7 @@ test("481-R2: the archive is one einzbern-<version>/ directory in the release la
     "scripts/source-attestor-host.mjs", "scripts/build-source-lease.mjs", "native/linux-source-lease.c", "docs/design/continuous-source-attestor.md",
     "atelier/portal.mjs", "atelier/ds-static-bridges.snapshot.js", "atelier/atelier-brand-mark.svg", "atelier/index.html", "atelier/locales.js", "atelier/tokens.css",
     "skill/mana-orchestrate/SKILL.md", ...template.map((path) => `skill/mana-orchestrate/${path}`),
-    ...SPECIFICATIONS.map(name => `specs/${name}`), "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md",
+    ...SPECIFICATIONS.map(name => `specs/${name}`), "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md", "docs/verification-evidence.md",
     "scripts/lib/memory-budget.mjs", "scripts/lib/memory-worker-check.mjs", "scripts/lib/storage-location.mjs", "scripts/lib/windows-system.mjs", "scripts/lib/memory-executors.json",
     ...readmes, "CHANGELOG.md", "LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "manifest.json",
   ];

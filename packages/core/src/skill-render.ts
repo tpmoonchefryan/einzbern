@@ -63,8 +63,8 @@ export interface SkillNavigationEntry {
 export const SKILL_NAVIGATION: readonly SkillNavigationEntry[] = Object.freeze([
   {
     moment: "Starting work",
-    verbs: ["recall", "rule-list"],
-    action: "Use `recall --view agent --query \"<task>\" --at <UTC>`. Sessions read their live work. Enabled rules: `specs/work-practices-v1.md`; Kiro: `references/kiro-specs.md`; Dot blocker/privacy-publication: `specs/dot-rules-v1.md`.",
+    verbs: ["recall", "recall-read", "rule-list"],
+    action: "`recall --view candidates --query \"<task>\" --at <UTC>`. Rephrase if useful. `recall-read --refs` is optional. Sessions read their live work. Rules: `specs/work-practices-v1.md`; Kiro: `references/kiro-specs.md`; Dot blocker/privacy-publication: `specs/dot-rules-v1.md`.",
   },
 
   {
@@ -153,7 +153,7 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     `# ${BRAND.helper.name}`,
     "",
-    `Navigation for ${BRAND.engine.name} ${input.version}: engine-generated; do not hand-edit.`,
+    `Navigation for ${BRAND.engine.name} ${input.version}: generated.`,
     "",
     "Execution protocol: tcrn.host-execution-request.v1.",
     "",
@@ -173,7 +173,7 @@ export function renderSkillMarkdown(input: RenderSkillMarkdownInput): string {
     "",
     "## Core commands",
     "",
-    "work-list summarizes; --full true shows content. work-create/work-transition/work-annotate/work-batch write. `minutes-record --decisions-file <json>` takes a JSON string array; verify verifiedReadback/localCommitted/remote delivery.",
+    "work-list --full true shows content. work-create/work-batch write. `minutes-record --decisions-file <json>` accepts {text,title,tags} entries or strings. Check verifiedReadback/localCommitted, delivery.",
     "",
     "Codex: owning App Server JSON-RPC `initialize` → `hooks/list` for `$PWD`; fresh project-bound `--codex-admission` from raw result; SHA-256 hook `sourcePath`/config hashes. docs/codex-native-controller.md. Reobserve within five minutes; require `ok=true` and `hooks-present.detail.codexGuard.ready`.",
     "",

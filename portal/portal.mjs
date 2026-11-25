@@ -279,7 +279,7 @@ const libraryName = (library) => library.name ?? null;
 const settingsCatalog = (library = currentLibrary()) => cli(["settings-catalog", "--workspace", library.libraryPath, ...scopeArguments(library)]);
 const vocabulary = () => cli(["vocabulary"]);
 const commands = () => cli(["commands"]);
-const ruleListing = () => cliResult(["rule-list", "--workspace", currentLibrary().libraryPath, ...scopeArguments()]);
+const ruleListing = (library = currentLibrary()) => cliResult(["rule-list", "--workspace", library.libraryPath]);
 
 function readInstant() {
   return new Date().toISOString();
@@ -317,6 +317,7 @@ const WORK_PAGE_LIMIT = workReadBudget("TCRN_PORTAL_WORK_PAGE_RECORDS", 100);
 const WORK_PAGE_CONCURRENCY = workReadBudget("TCRN_PORTAL_WORK_PAGE_CONCURRENCY", 4);
 const WORK_READ_ATTEMPTS = workReadBudget("TCRN_PORTAL_WORK_READ_ATTEMPTS", 3);
 const WORK_PAGE_OVERSIZED = "CLI_WORK_LIST_OVERSIZED";
+const TRY_COMPLETE_WORK_READ = CLI === BUNDLED_CLI && process.env.TCRN_PORTAL_WORK_PAGE_RECORDS === undefined;
 
 function workPageIdentity(page) {
   return {
@@ -337,13 +338,17 @@ const sameWorkPage = (left, right) => left.workspaceId === right.workspaceId && 
 async function readWorkPage(libraryPath, offset, limit) {
   let size = limit;
   for (;;) {
-    const read = await cliResult(["work-list", "--workspace", libraryPath, "--limit", String(size), "--offset", String(offset)]);
+    const read = await cliResult([
+      "work-list", "--workspace", libraryPath,
+      ...(size === null ? [] : ["--limit", String(size)]),
+      "--offset", String(offset),
+    ]);
     if (read.ok) {
       const identity = workPageIdentity(read.body);
       if (identity.total === null) return { state: "failed", source: { ok: false, reasonCode: "PORTAL_WORK_PAGE_MALFORMED", offset } };
-      return { state: "read", size, identity, records: Array.isArray(read.body.records) ? read.body.records : [] };
+      return { state: "read", size: size ?? WORK_PAGE_LIMIT, identity, records: Array.isArray(read.body.records) ? read.body.records : [] };
     }
-    if (read.body?.reasonCode !== WORK_PAGE_OVERSIZED || size <= 1) return { state: "failed", source: read.body };
+    if (read.body?.reasonCode !== WORK_PAGE_OVERSIZED || size === null || size <= 1) return { state: "failed", source: read.body };
     size = Math.max(1, Math.floor(size / 2));
   }
 }
@@ -392,8 +397,8 @@ async function readWorkStretches(libraryPath, first, stretches) {
 // or unsettled (the pages did not add up to one version of the library: it moved, or a page
 // repeated or skipped a record). The answers are taken in offset order: the first stretch that did
 // not read is the one reported, and a record seen twice is found as the records are put together.
-async function readWorkPages(libraryPath) {
-  const head = await readWorkPage(libraryPath, 0, WORK_PAGE_LIMIT);
+async function readWorkPages(libraryPath, initialPage) {
+  const head = initialPage ?? await readWorkPage(libraryPath, 0, WORK_PAGE_LIMIT);
   if (head.state !== "read") return head;
   const first = head.identity;
   if (head.records.length === 0 && first.total > 0) return { state: "unsettled", cause: "short-page" };
@@ -421,8 +426,13 @@ async function readWorkPages(libraryPath) {
 async function workProjection() {
   const selected = currentLibrary();
   let outcome = { state: "unsettled", cause: "moved" };
+  // Each CLI invocation materializes the library. The bundled CLI can answer from one
+  // materialization when the whole inventory fits its output budget.
+  let initialPage = TRY_COMPLETE_WORK_READ ? await readWorkPage(selected.libraryPath, 0, null) : undefined;
+  if (initialPage?.state === "failed" && initialPage.source?.reasonCode === WORK_PAGE_OVERSIZED) initialPage = undefined;
   for (let attempt = 1; attempt <= WORK_READ_ATTEMPTS && outcome.state === "unsettled"; attempt += 1) {
-    outcome = await readWorkPages(selected.libraryPath);
+    outcome = await readWorkPages(selected.libraryPath, initialPage);
+    initialPage = undefined;
   }
   if (outcome.state === "failed") return { ok: false, reasonCode: "PORTAL_WORK_READ_FAILED", source: outcome.source, records: [], total: 0 };
   if (outcome.state === "unsettled") {
@@ -445,7 +455,7 @@ async function workProjection() {
 // another status; removed cards come back as each is kept, with no body to read.
 const KNOWLEDGE_STATUSES = Object.freeze(["valid", "removed", "all"]);
 
-async function knowledgeProjection(status = "valid") {
+async function knowledgeProjection(status = "valid", nativeInventory = false) {
   const selected = currentLibrary();
   const at = readInstant();
   // TCRN-CROSS-MIN-225 (TCRN-CROSS-SUB-259): the knowledge view never read the retire-proposals
@@ -453,11 +463,19 @@ async function knowledgeProjection(status = "valid") {
   const records = [];
   let listing;
   let total;
+  let snapshot;
+  let pageLimit = nativeInventory ? RUNTIME_CAPACITY.safeInteger : 100;
+  const args = ["knowledge-list", "--workspace", selected.libraryPath, "--at", at, "--selection", "all", "--status", status, "--allow-trailing", "true"];
   const seen = new Set();
   const digest = createHash("sha256").update("[", "utf8");
   // Page until the declared inventory is complete; never present a prefix as the inventory.
   do {
-    listing = await cliResult(["knowledge-list", "--workspace", selected.libraryPath, "--at", at, "--selection", "all", "--status", status, "--allow-trailing", "true", "--limit", "100", "--offset", String(records.length)]);
+    listing = await cliResult([...args, "--limit", String(pageLimit), "--offset", String(records.length),
+      ...(nativeInventory && snapshot !== undefined ? ["--snapshot", snapshot] : [])]);
+    if (!listing.ok && listing.body?.reasonCode === "INPUT_OVERSIZED" && pageLimit > 1) {
+      pageLimit = pageLimit === RUNTIME_CAPACITY.safeInteger ? 100 : Math.floor(pageLimit / 2);
+      continue;
+    }
     if (!listing.ok) break;
     if (listing.body?.knowledgeStore === "absent") {
       if (records.length > 0) listing = { ok: false, body: { ok: false, reasonCode: "PORTAL_KNOWLEDGE_PAGINATION_CHANGED" } };
@@ -467,6 +485,7 @@ async function knowledgeProjection(status = "valid") {
     const count = listing.body?.total;
     if (!Array.isArray(page) || !Number.isSafeInteger(count) || count < 0 ||
         (total !== undefined && total !== count) || records.length + page.length > count ||
+        (snapshot !== undefined && listing.body?.snapshot !== snapshot) ||
         (page.length === 0 && records.length < count) ||
         page.some((record) => typeof record?.id !== "string")) {
       listing = { ok: false, body: { ok: false, reasonCode: "PORTAL_KNOWLEDGE_PAGINATION_CHANGED" } };
@@ -481,12 +500,13 @@ async function knowledgeProjection(status = "valid") {
       break;
     }
     total = count;
+    if (typeof listing.body?.snapshot === "string") snapshot = listing.body.snapshot;
     for (const [index, entry] of entries.entries()) {
       if (records.length + index > 0) digest.update(",", "utf8");
       digest.update(entry, "utf8");
     }
     records.push(...page);
-  } while (records.length < total);
+  } while (total === undefined || records.length < total);
   if (listing.ok) listing = { ...listing, body: { ...listing.body, records, total: total ?? 0, offset: 0, truncated: false, resultDigest: digest.update("]\n", "utf8").digest("hex") } };
   return {
     ok: listing.ok,
@@ -553,13 +573,20 @@ async function governedWrite(build, environment = {}, selected = currentLibrary(
 
 async function projectWrite(build, environment = {}, selected = currentLibrary(), runtimeRule = false) {
   return targetWrite(selected, async () => {
-    const coordinationRule = runtimeRule && selected.chain?.role === "coordination";
-    // A coordination chain's runtime rule is written through its registration, by the same rule as
-    // a project's prose (TCRN-CROSS-INIT-053 R46 I06).
-    const binding = coordinationRule ? registrationBinding(selected) : proseBinding(selected);
+    if (runtimeRule) {
+      const binding = proseBinding(selected);
+      if (binding.status === "ambiguous") return { ok: false, body: bindingRefusal(binding, selected) };
+      const output = await ruleListing(selected);
+      if (!output.ok) return output;
+      const projectPath = output.body.projectPath ?? (selected.chain?.role === "coordination" ? selected.projectPath : null);
+      if (projectPath === null) return { ok: false, body: bindingRefusal(UNCONFIGURED_BINDING, selected) };
+      if (await realpath(projectPath) !== projectPath) throw startupError("PORTAL_PROSE_ROOT_UNSAFE", { projectPath });
+      const common = ["--project", projectPath, "--at", nextOccurredAt(), "--actor", ACTOR];
+      return cliResult(build(common), environment);
+    }
+    const binding = proseBinding(selected);
     if (binding.entry === null) return { ok: false, body: bindingRefusal(binding, selected) };
-    const bound = binding.entry;
-    const projectPath = coordinationRule ? bound.projectPath : proseRootFor(bound);
+    const projectPath = proseRootFor(binding.entry);
     if (await realpath(projectPath) !== projectPath) throw startupError("PORTAL_PROSE_ROOT_UNSAFE", { projectPath });
     const common = ["--project", projectPath, "--at", nextOccurredAt(), "--actor", ACTOR, ...scopeArguments(selected)];
     return cliResult(build(common), environment);
@@ -567,8 +594,13 @@ async function projectWrite(build, environment = {}, selected = currentLibrary()
 }
 
 // A render with no single output binding stays pending: the write it follows still stands.
-function renderManagedAgents(library = currentLibrary()) {
-  const binding = proseBinding(library);
+async function renderManagedAgents(library = currentLibrary(), libraryRule = false) {
+  if (libraryRule) {
+    const output = await ruleListing(library);
+    if (!output.ok) return output;
+    if (output.body.projectPath !== null) return projectWrite((common) => ["agents-render", ...common], {}, library, true);
+  }
+  const binding = libraryRule ? UNCONFIGURED_BINDING : proseBinding(library);
   if (binding.entry !== null) return projectWrite((common) => ["agents-render", ...common], {}, library);
   const ambiguous = binding.status === "ambiguous";
   return Promise.resolve({ ok: true, body: { ok: true, reasonCode: ambiguous ? AMBIGUOUS_BINDING : "PORTAL_PROJECT_BINDING_UNCONFIGURED", outputBindingStatus: binding.status, pending: true, projectId: library.configurationProjectId ?? null, ...(ambiguous ? { candidates: binding.candidates } : {}) } });
@@ -603,14 +635,11 @@ const removeSetting = (key, library) => governedWrite((common) => ["settings-rem
 // TCRN-CROSS-STORY-508 R8 (TCRN-CROSS-SUB-409, contract C-R14-6): the keys the system variables
 // section of AGENTS.md shows. A write of one, or its removal, renders the managed sections again, so
 // AGENTS.md follows the value; the escalation keys join the section under their prefix.
-// TCRN-CROSS-STORY-540 GWT2 (Q4, Q5; TCRN-CROSS-SUB-508): a coordination library's section shows its
-// orchestration limits and the design bindings instead of the model tables, and both variable sections are
-// written in the library's artifact language, so a write of one of those renders them again as well.
+// A coordination library keeps design bindings in the system section. Model policy and quota settings
+// are device-local and never trigger a shared AGENTS.md render.
 const SYSTEM_VARIABLE_KEYS = Object.freeze(["design.authority", "models.category", "models.tiers"]);
-const COORDINATION_SYSTEM_VARIABLE_KEYS = Object.freeze(["execution.maxConcurrentSubagents", "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent"]);
-const rendersSystemVariables = (key, library = currentLibrary()) => key === "artifact.language" || key.startsWith("design.") || (library.chain?.role === "coordination"
-  ? COORDINATION_SYSTEM_VARIABLE_KEYS.includes(key)
-  : SYSTEM_VARIABLE_KEYS.includes(key) || key.startsWith("models.escalation."));
+const rendersSystemVariables = (key, library = currentLibrary()) => key === "artifact.language" || key.startsWith("design.") || (library.chain?.role !== "coordination"
+  && (SYSTEM_VARIABLE_KEYS.includes(key) || key.startsWith("models.escalation.")));
 
 // TCRN-CROSS-SUB-409 (TCRN-CROSS-STORY-508 R5, R6; contracts C-R14-2, C-R14-6): a collection key is
 // a table of records, written whole, so the engine judges the whole table and refuses it with one
@@ -1178,6 +1207,20 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       const result = await governedWrite(common => ["work-annotate", ...common, "--id", String(body.id ?? ""), "--expected-revision", String(body.revision), "--involved-projects", JSON.stringify(body.involvedProjects)], {}, { ...selected, configurationProjectId: null });
       send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok }); return;
     }
+    if (request.method === "POST" && pathname === "/api/work/validation") {
+      const selected = currentLibrary();
+      const body = await readJsonBody(request);
+      if (typeof body.id !== "string" || !["validated", "active"].includes(body.status) ||
+          !Number.isSafeInteger(body.revision) || body.revision < 1 ||
+          (body.summary !== undefined && typeof body.summary !== "string")) {
+        send(response, 400, { ok: false, reasonCode: "CLI_ARGUMENT_MALFORMED" }); return;
+      }
+      const result = await governedWrite(common => ["work-transition", ...common,
+        "--id", body.id, "--status", body.status, "--expected-revision", String(body.revision),
+        ...(body.summary === undefined ? [] : ["--summary", body.summary]),
+      ], ATELIER_SURFACE, { ...selected, configurationProjectId: null });
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok }); return;
+    }
     // TCRN-CROSS-STORY-528 (MIN-256; TCRN-CROSS-SUB-459): Atelier releases a work item's lease by
     // force, another actor's running one included: work-release --force true, which runs for Atelier
     // only, written as TCRN_PORTAL_ACTOR. Atelier's own writes are held by a lease like any other
@@ -1193,15 +1236,56 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       send(response, 200, await workProjection());
       return;
     }
+    if (request.method === "GET" && pathname === "/api/activity") {
+      const args = ["event-list", "--workspace", currentLibrary().libraryPath, "--limit", "24", "--newest-first", "true"];
+      const search = url.searchParams.get("q");
+      if (search?.trim()) args.push("--search", search);
+      const offset = url.searchParams.get("offset");
+      if (offset !== null) args.push("--offset", offset);
+      const result = await cliResult(args);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
+      return;
+    }
+    if (request.method === "GET" && pathname === "/api/minutes") {
+      const args = ["minutes-list", "--workspace", currentLibrary().libraryPath, "--limit", "24", ...scopeArguments()];
+      const query = url.searchParams.get("q")?.trim();
+      if (query) args.push("--query", query);
+      const offset = url.searchParams.get("offset");
+      if (offset !== null) args.push("--offset", offset);
+      const result = await cliResult(args);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
+      return;
+    }
+    if (request.method === "GET" && pathname === "/api/pending-actions") {
+      const selected = currentLibrary();
+      const binding = proseBinding(selected);
+      const location = binding.entry === null ? [] : ["--project", binding.entry.projectPath];
+      const result = await cliResult(["pending-actions", "--workspace", selected.libraryPath, ...location, ...scopeArguments()]);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
+      return;
+    }
     if (request.method === "GET" && pathname === "/api/knowledge") {
       const status = url.searchParams.get("status") ?? "valid";
       if (!KNOWLEDGE_STATUSES.includes(status)) { send(response, 400, { ok: false, reasonCode: "PORTAL_KNOWLEDGE_STATUS_INVALID", status }); return; }
-      send(response, 200, await knowledgeProjection(status));
+      send(response, 200, await knowledgeProjection(status, CLI === BUNDLED_CLI));
       return;
     }
     if (request.method === "GET" && pathname === "/api/knowledge/body") {
       const result = await knowledgeBody(url.searchParams.get("id") ?? "");
       send(response, result.ok ? 200 : 409, result.body);
+      return;
+    }
+    if (request.method === "POST" && pathname === "/api/recall/preview") {
+      const selected = currentLibrary();
+      const body = await readJsonBody(request);
+      if (typeof body?.query !== "string" || body.query.trim() === "" || !body.query.isWellFormed() || body.query.includes("\0")) {
+        send(response, 400, { ok: false, reasonCode: "PORTAL_RECALL_QUERY_INVALID" });
+        return;
+      }
+      const result = await cliResult(["recall", "--workspace", selected.libraryPath, "--at", readInstant(),
+        "--query", body.query, "--view", "preview",
+        ...(selected.configurationProjectId ? ["--project-id", selected.configurationProjectId] : [])]);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
       return;
     }
     if (request.method === "GET" && pathname === "/api/vocabulary") {
@@ -1226,7 +1310,7 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
         "--action", action,
         ...(body.force === true ? ["--force", "true"] : []),
         ...common,
-      ]);
+      ], ATELIER_SURFACE, currentLibrary(), true);
       const payload = { ...result.body, ok: result.ok };
       if (result.ok) {
         const latest = await rulesProjection();
@@ -1238,10 +1322,16 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
     }
     const ruleRoute = /^\/api\/rules\/([^/]+)$/u.exec(pathname);
     if (request.method === "POST" && ruleRoute !== null) {
+      const selected = currentLibrary();
       const body = await readJsonBody(request);
       const id = decodeURIComponent(ruleRoute[1]);
       const action = String(body.action ?? "");
-      if (!["enable", "disable"].includes(action)) {
+      if (!["create", "update", "enable", "disable"].includes(action)) {
+        send(response, 400, { ok: false, reasonCode: "PORTAL_RULE_ACTION_INVALID", id, action });
+        return;
+      }
+      const editsDefinition = action === "create" || action === "update";
+      if (editsDefinition && [body.title, body.body].some(value => value !== undefined && typeof value !== "string")) {
         send(response, 400, { ok: false, reasonCode: "PORTAL_RULE_ACTION_INVALID", id, action });
         return;
       }
@@ -1249,12 +1339,14 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       // engine places the rule's section by it and keeps it through a later disable. Both run for
       // Atelier (TCRN-CROSS-SUB-422).
       const result = await projectWrite((common) => [
-        action === "enable" ? "rule-enable" : "rule-disable",
+        `rule-${action}`,
         "--id", id,
         ...(action === "disable" && body.force === true ? ["--force", "true"] : []),
-        ...(action === "enable" ? orderArguments(body.order) : []),
+        ...(action === "disable" ? [] : orderArguments(body.order)),
+        ...(editsDefinition && body.title !== undefined ? [`--title=${body.title}`] : []),
+        ...(editsDefinition && body.body !== undefined ? [`--body=${body.body}`] : []),
         ...common,
-      ], ATELIER_SURFACE, currentLibrary(), true);
+      ], ATELIER_SURFACE, selected, true);
       const payload = { ...result.body, ok: result.ok };
       if (result.ok) {
         const latest = await rulesProjection();
@@ -1392,7 +1484,8 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       const declaredScope = (await settingsCatalog(library)).settings.find((entry) => entry.key === key)?.scope;
       const writeTarget = declaredScope === "library" ? { ...library, configurationProjectId: null } : library;
       const result = reset ? await removeSetting(key, writeTarget) : await writeSetting(key, value, writeTarget);
-      const render = result.ok && rendersSystemVariables(key, library) ? await renderManagedAgents(library) : null;
+      const libraryRule = key === "agents.sharedNavigation" || key === "agents.generation";
+      const render = result.ok && (libraryRule || rendersSystemVariables(key, library)) ? await renderManagedAgents(library, libraryRule) : null;
       const collection = COLLECTION_KEYS.includes(key);
       const catalog = result.ok || collection ? await settingsCatalog(library) : null;
       const readback = result.ok ? catalog?.settings.find((entry) => entry.key === key) ?? null : null;
@@ -1508,6 +1601,7 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
         "--workspace", library.libraryPath,
         "--host", host,
         "--policy", JSON.stringify(body.policy ?? null),
+        ...(Number.isSafeInteger(body.expectedStoreRevision) ? ["--expected-store-revision", String(body.expectedStoreRevision)] : []),
         "--at", new Date().toISOString(),
         "--actor", ACTOR,
         "--decided-in", decidedIn,

@@ -32,7 +32,7 @@ import { canonicalJson, compareCanonicalText } from "../../protocol/src/index.js
 import { listGates } from "./gates-config.js";
 import type { NamedGate } from "./gates-config.js";
 import { gateAppliesTo, gateDeclarationsDigest, gateRootBinding, gateRootBindings, gateRootKey, resolveGateRoot, storyCommitPaths } from "./gates-plan.js";
-import { gateTreeState, latestGateRun } from "./gates-run.js";
+import { gateRunEvidenceCurrent, gateTreeState, latestGateRun } from "./gates-run.js";
 import type { GateRun, GateTreeState } from "./gates-run.js";
 import { effectiveWorkGates, workAncestorIds, workSubjectKeys } from "./work-gates.js";
 import type { WorkspaceState } from "./workspace.js";
@@ -229,17 +229,32 @@ export async function assertDoneGates(input: {
     });
   }
   // What each Story's run holds of the gates that apply to it: a release-only gate applies to a release run only.
-  const results = bound.map((entry) => {
+  const validated = new Map<string, Promise<boolean>>();
+  const results = await Promise.all(bound.map(async (entry) => {
     const run = runs.get(entry.id)!;
     const due = entry.applicable.filter((gate) => run.release || !gate.releaseOnly);
-    const missing = due.filter((gate) => !run.gates.some((result) => result.name === gate.name && result.matchedWorkIds.includes(entry.id))).map((gate) => gate.name);
+    const missing: string[] = [];
+    for (const gate of due) {
+      const result = run.gates.find((item) => item.name === gate.name && item.matchedWorkIds.includes(entry.id));
+      if (result === undefined) {
+        missing.push(gate.name);
+      } else if (result.ok) {
+        const key = `${run.runId}/${gate.name}`;
+        let check = validated.get(key);
+        if (check === undefined) {
+          check = gateRunEvidenceCurrent(run, result, gate, projectRoot, resolution);
+          validated.set(key, check);
+        }
+        if (!await check) missing.push(gate.name);
+      }
+    }
     const reds = run.gates.filter((result) => !result.ok && due.some((gate) => gate.name === result.name)).map((result) => result.name);
     return { id: entry.id, run, missing, reds };
-  });
+  }));
   const uncovered = results.filter((result) => result.missing.length > 0);
   if (uncovered.length > 0) {
     const missing = [...new Set(uncovered.flatMap((result) => result.missing))].sort(compareCanonicalText);
-    throw new GatesDoneError("WORK_DONE_GATES_NOT_COVERED", `the latest gate run bound to the Story does not hold these gates for it: ${missing.join(", ")}`, {
+    throw new GatesDoneError("WORK_DONE_GATES_NOT_COVERED", `the latest gate run bound to the Story lacks current evidence for: ${missing.join(", ")}`, {
       stories: uncovered.map((result) => result.id),
       gates: missing,
       runId: uncovered[0]!.run.runId,

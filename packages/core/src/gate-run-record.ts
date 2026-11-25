@@ -4,6 +4,18 @@ import { compareCanonicalText, parseStrictInstant } from "../../protocol/src/ind
 import type { GateRootTree, GateRun } from "./gates-run.js";
 
 export const GATE_RUN_SCHEMA_VERSION = "einzbern.gate-run.v1" as const;
+const digestShape = /^[a-f0-9]{64}$/u;
+
+function isGateVerification(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Readonly<Record<string, unknown>>;
+  const input = typeof row.inputDigest === "string" && digestShape.test(row.inputDigest);
+  const output = typeof row.outputSha256 === "string" && digestShape.test(row.outputSha256);
+  const command = row.command === undefined || (Array.isArray(row.command) && row.command.length > 0 && row.command.every((part) => typeof part === "string" && part.length > 0));
+  return command && typeof row.reason === "string" && (row.mode === "reused" ? input && output :
+    row.mode === "executed" && (row.inputDigest === null || input && output) && (row.outputSha256 === undefined || output));
+}
 
 // A path a run recorded under a root: relative, with forward slashes, and no empty, . or .. segment.
 function isRootPath(value: unknown): value is string {
@@ -43,7 +55,7 @@ export function isGateRunRecord(value: unknown): value is GateRun {
       Object.values(record.baseByRoot).every((value) => typeof value === "string"))) &&
     // These fields decide which gates are due and are consumed by run readers.
     // A malformed release flag must never silently become a non-release run.
-    typeof record.release === "boolean" && (record.base === null || typeof record.base === "string") &&
+    typeof record.release === "boolean" && (record.evidenceOnly === undefined || record.evidenceOnly === true) && (record.base === null || typeof record.base === "string") &&
     Array.isArray(record.reds) && record.reds.every((name: unknown) => typeof name === "string") &&
     Array.isArray(trees) && trees.every(isGateRootTree) &&
     (record.projectId === undefined || (typeof record.projectId === "string" && /^project:[a-f0-9]{24}$/u.test(record.projectId))) &&
@@ -62,7 +74,7 @@ export function isGateRunRecord(value: unknown): value is GateRun {
         typeof result.root === "string" && (result.exitCode === null || (typeof result.exitCode === "number" && Number.isSafeInteger(result.exitCode))) &&
         (result.signal === null || typeof result.signal === "string") && typeof result.timedOut === "boolean" &&
         typeof result.outputFile === "string" && typeof result.outputBytes === "number" && Number.isSafeInteger(result.outputBytes) && result.outputBytes >= 0 &&
-        typeof result.truncated === "boolean" &&
+        typeof result.truncated === "boolean" && isGateVerification(result.verification) &&
         Array.isArray(matched) && matched.every((path: unknown) => typeof path === "string") &&
         Array.isArray(matchedWorkIds) && matchedWorkIds.every((workId: unknown) => typeof workId === "string" && /^work:[0-9a-f]{24}$/u.test(workId));
     });

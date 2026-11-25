@@ -137,7 +137,7 @@ test("unknown verbs fail closed and every cataloged verb dispatches", async () =
     // library-list lists this device's registry, empty or not (TCRN-CROSS-STORY-470 R1), and
     // engine-list its engine versions, none or some (TCRN-CROSS-STORY-471 R2). doctor checks this
     // device with the current directory as the project (TCRN-CROSS-STORY-480 R4).
-    if (entry.name === "commands" || entry.name === "doctor" || entry.name === "engine-list" || entry.name === "engine-model-policy-catalog" || entry.name === "install-manifest" || entry.name === "library-list" || entry.name === "machine-settings-catalog" || entry.name === "vocabulary") {
+    if (entry.name === "commands" || entry.name === "doctor" || entry.name === "engine-list" || entry.name === "engine-model-policy-catalog" || entry.name === "execution-codex-polling-policy" || entry.name === "install-manifest" || entry.name === "library-list" || entry.name === "machine-settings-catalog" || entry.name === "vocabulary") {
       assert.equal(outcome.ok, true, `${entry.name} resolves with no flags`);
       continue;
     }
@@ -146,7 +146,7 @@ test("unknown verbs fail closed and every cataloged verb dispatches", async () =
   }
 });
 
-test("INIT-056: the engine policy catalog accepts no arguments and set requires audit fields while workspace may resolve from the registry", () => {
+test("INIT-056: engine policy reads can select a host and writes preserve audit fields with optional compare-and-set", () => {
   const entry = (name) => COMMAND_CATALOG.find((candidate) => candidate.name === name);
   const catalog = entry("engine-model-policy-catalog");
   assert.equal(catalog.mutates, false);
@@ -155,7 +155,8 @@ test("INIT-056: the engine policy catalog accepts no arguments and set requires 
   const set = entry("engine-model-policy-set");
   assert.equal(set.mutates, true);
   assert.deepEqual(set.flags.map((flag) => [flag.name, flag.required, flag.valueKind]), [
-    ["workspace", false, "string"], ["host", true, "string"], ["policy", true, "json"], ["at", true, "instant"],
+    ["workspace", false, "string"], ["host", true, "string"], ["policy", true, "json"],
+    ["expected-store-revision", false, "integer"], ["at", true, "instant"],
     ["actor", true, "string"], ["decided-in", true, "string"],
   ]);
   assert.equal(set.flags.find((flag) => flag.name === "decided-in")?.valueShape, "minutes:<id>#D<n>");
@@ -484,7 +485,7 @@ test("STORY-480/605: setup writes and takes the wizard's flags; doctor reads and
 // TCRN-CROSS-STORY-541 (TCRN-CROSS-SUB-510): twelve, with project-bindings-set and -remove,
 // work-gate-release and work-release. INIT-056 adds the engine-wide policy writer as the thirteenth.
 test("526 GWT5, 541 GWT1, INIT-056: the closed decided-in roster carries its documented valueShape", () => {
-  const optionalWrites = ["dot-extension-source-set", "config-restore-apply", "config-restore-plan", "gates-config-remove", "gates-config-set", "project-bindings-remove", "project-bindings-set", "rule-disable", "rule-enable", "settings-remove", "settings-set", "variable-remove", "variable-set", "work-gate-release", "work-release"];
+  const optionalWrites = ["dot-extension-source-set", "config-restore-apply", "config-restore-plan", "gates-config-remove", "gates-config-set", "project-bindings-remove", "project-bindings-set", "rule-create", "rule-disable", "rule-enable", "rule-update", "settings-remove", "settings-set", "variable-remove", "variable-set", "work-gate-release", "work-release"];
   const writes = ["engine-model-policy-save", "engine-model-policy-set", ...optionalWrites].sort();
   const shaped = COMMAND_CATALOG.flatMap((entry) => entry.flags.filter((flag) => flag.name === "decided-in" && flag.valueShape !== undefined).map((flag) => [entry.name, flag.name]));
   assert.deepEqual(shaped, writes.map((name) => [name, "decided-in"]));
@@ -545,7 +546,8 @@ test("integrated engine: non-decision valueShapes document projection selection,
     ["minutes-record", { name: "decisions-file", required: false, valueKind: "string", valueShape: "exactly-one-of(--decisions,--decisions-file)" }],
     ["minutes-show", { name: "id", required: false, valueKind: "string", valueShape: "exactly-one-of(--id,--external-key)" }],
     ["minutes-show", { name: "external-key", required: false, valueKind: "string", valueShape: "exactly-one-of(--id,--external-key)" }],
-    ["recall", { name: "view", required: false, valueKind: "enum", valueShape: "agent (omit for the full tcrn.recall.v1 response)" }],
+    ["recall", { name: "view", required: false, valueKind: "enum", valueShape: "agent, candidates, or preview (omit for the full tcrn.recall.v1 response)" }],
+    ["recall-read", { name: "refs", required: true, valueKind: "list", valueShape: "comma-separated candidate references, optionally user/knowledge:<id> or minutes:<id>#D<n>" }],
     ["settings-catalog", { name: "work-content-observation", required: false, valueKind: "json", valueShape: "Optional machine-assembled rollout observation JSON; read-only unauthenticated preview, never persisted or approval" }],
     ["work-annotate", { name: "content", required: false, valueKind: "json", valueShape: "tcrn.work-content.v1; cannot be combined with legacy scope/goal/acceptance/body" }],
     ["work-content-context", { name: "offset", required: false, valueKind: "integer", valueShape: "Nonnegative Unicode code-point offset within the document; default 0; nonzero requires digest" }],
@@ -576,7 +578,7 @@ test("527 Q6: the proposal verbs are cataloged with their required flags, and no
   assert.deepEqual(flags("gates-config-propose"), [
     ["workspace", false, "string"], ["at", true, "instant"], ["name", true, "string"], ["action", false, "string"], ["command", false, "string"], ["root", false, "string"],
     ["repository", false, "string"], ["covers", false, "list"], ["required", false, "boolean"], ["enabled", false, "boolean"], ["release-only", false, "boolean"], ["order", false, "integer"],
-    ["actor", true, "string"], ["project-id", false, "string"], ["timeout-ms", false, "integer"],
+    ["actor", true, "string"], ["project-id", false, "string"], ["timeout-ms", false, "integer"], ["reuse", false, "json"],
   ]);
   assert.deepEqual(flags("rule-propose"), [
     ["id", true, "string"], ["action", false, "string"], ["order", false, "integer"], ["at", true, "instant"], ["workspace", false, "string"], ["project", false, "string"],
@@ -594,8 +596,8 @@ test("529 GWT2 (TCRN-CROSS-SUB-480): every write that takes the library write lo
   const lockWrites = ["dot-extension-source-set", "config-backup-create", "config-backup-prepare", "config-backup-commit", "config-backup-resume", "config-backup-retire", "config-restore-apply", "shared-submit-advisory-write", "agents-render", "artifact-put", "chain-declare", "gates-config-propose", "gates-config-remove", "gates-config-set",
     "knowledge-article-create", "knowledge-article-refresh", "knowledge-batch", "knowledge-bodies-migrate", "knowledge-capture",
     "knowledge-create", "knowledge-init", "knowledge-rebase", "knowledge-recover", "knowledge-remove", "knowledge-reverify",
-    "minutes-record", "project-bindings-remove", "project-bindings-set", "project-create", "project-delete", "project-update",
-    "proposal-approve", "proposal-reject", "recover", "rule-disable", "rule-enable", "rule-propose", "rule-resolve", "settings-remove", "settings-set", "template-admit",
+    "minutes-record", "minutes-supplement-batch", "project-bindings-remove", "project-bindings-set", "project-create", "project-delete", "project-update",
+    "proposal-approve", "proposal-reject", "recover", "rule-create", "rule-disable", "rule-enable", "rule-propose", "rule-resolve", "rule-update", "settings-remove", "settings-set", "template-admit",
     "variable-remove", "variable-set", "work-annotate", "work-batch", "work-claim", "work-create", "work-delete",
     "work-gate-release", "work-release", "work-transition", "workspace-relocate"];
   const carriers = COMMAND_CATALOG.filter((entry) => entry.flags.some((flag) => flag.name === "timeout-ms")).map((entry) => entry.name);

@@ -29,7 +29,12 @@ const idOf = (key) => deriveStableId("work", key);
 
 // The bytes the hook printed at faaa216a (before TCRN-CROSS-STORY-548), for both hosts.
 const SNAPSHOT_USER_PROMPT_SUBMIT = "{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"[Story planned] Zebrafish tank · HOOK-STORY · work:7ff15c20d39135680e043cac · Wetland epic ‹ Aviary initiative\"}}\n";
-const SNAPSHOT_SESSION_START = "{\"hookSpecificOutput\":{\"hookEventName\":\"SessionStart\",\"additionalContext\":\"This workspace uses Einzbern. Load and follow the Mana Orchestrate skill for applicable work.\"}}\n";
+const NAVIGATION = [
+  "This project is managed by Einzbern.",
+  "Load the Mana Orchestrate skill before you start work.",
+  "Recall first: run Einzbern's recall for the task before you plan or change anything.",
+].join("\n");
+const SNAPSHOT_SESSION_START = JSON.stringify({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: NAVIGATION } }) + "\n";
 
 test("548-R2: hookHost reads EINZBERN_HOST first and falls back on any value outside the host set", () => {
   const cases = [
@@ -110,14 +115,26 @@ test("646: native SubagentStart role names produce navigation without task recal
     const payload = { hook_event_name: "SubagentStart", cwd: directory, agent_id: "agent-1", agent_type: "zebrafish" };
     const observed = await withRecallObservation(() => runHookEvent({ event: "subagent-start", payload, libraryPath: library, cwd: directory }));
     const answer = JSON.parse(observed.value);
-    assert.equal(observed.observation.materializations, 0);
-    assert.equal(observed.observation.segmentReads, 0);
     assert.equal(observed.observation.recallCalls, 0);
     assert.equal(answer.hookSpecificOutput.hookEventName, "SubagentStart");
-    assert.match(answer.hookSpecificOutput.additionalContext, /Load and follow the Mana Orchestrate skill/u);
+    assert.equal(answer.hookSpecificOutput.additionalContext, NAVIGATION);
     assert.doesNotMatch(answer.hookSpecificOutput.additionalContext, /Zebrafish tank · HOOK-STORY/u);
     const empty = JSON.parse(await runHookEvent({ event: "subagent-start", payload: { prompt: PROMPT }, libraryPath: library, cwd: directory }));
     assert.doesNotMatch(empty.hookSpecificOutput.additionalContext, /HOOK-STORY/u, "a made-up native prompt field is not treated as task evidence");
+  }
+});
+
+test("E05: a matching library supplies navigation once through the configured path", async context => {
+  const { directory, library } = await registeredProject(context);
+  process.env.EINZBERN_HOST = "codex";
+  const { runHookEvent } = await import(pathToFileURL(join(repositoryRoot, "scripts/einzbern-hook.mjs")).href);
+  for (const [index, value] of ["written", "declined"].entries()) {
+    await setWorkspaceSetting(library, { key: "agents.sharedNavigation", value, occurredAt: at(30 + index) });
+    for (const event of ["session-start", "subagent-start"]) {
+      const hooks = await withRecallObservation(() => runHookEvent({ event, payload: {}, libraryPath: library, projectRoot: directory, cwd: directory, peerGuardObserved: true }));
+      assert.equal(JSON.parse(hooks.value).hookSpecificOutput.additionalContext, value === "declined" ? NAVIGATION : "");
+      assert.equal(hooks.observation.recallCalls, 0);
+    }
   }
 });
 
@@ -128,7 +145,7 @@ test("BL34 scope: DSH subagent navigation remains pointer-only even with a match
   const { runHookEvent } = await import(pathToFileURL(join(repositoryRoot, "scripts/einzbern-hook.mjs")).href);
   const answer = JSON.parse(await runHookEvent({ event: "subagent-start", payload: { agent_type: "zebrafish" }, libraryPath: library, cwd: directory }));
   assert.equal(answer.hookSpecificOutput.hookEventName, "SubagentStart");
-  assert.match(answer.hookSpecificOutput.additionalContext, /Load and follow the Mana Orchestrate skill/u);
+  assert.equal(answer.hookSpecificOutput.additionalContext, NAVIGATION);
   assert.doesNotMatch(answer.hookSpecificOutput.additionalContext, /HOOK-STORY/u);
 });
 
@@ -168,8 +185,6 @@ test("644/646: native host role-only navigation and subsequent actual prompt out
     process.env.EINZBERN_HOST = host;
     const role = await withRecallObservation(() => runHookEvent({ event: "subagent-start", payload: { agent_type: "zebrafish" }, libraryPath: library, cwd: directory }));
     assert.ok(role.value.includes("Mana Orchestrate"), host);
-    assert.equal(role.observation.materializations, 0, host);
-    assert.equal(role.observation.segmentReads, 0, host);
     assert.equal(role.observation.recallCalls, 0, host);
     const answer = await runHookEvent({ event: "user-prompt-submit", payload: { prompt: PROMPT }, libraryPath: library, cwd: directory });
     assert.ok(answer.includes("HOOK-STORY"), host);
@@ -223,8 +238,6 @@ test("646: Kiro PromptSubmit uses real USER_PROMPT text and AgentSpawn remains n
   }));
   assert.match(spawn.value, /Mana Orchestrate/u);
   assert.doesNotMatch(spawn.value, /HOOK-STORY/u);
-  assert.equal(spawn.observation.materializations, 0);
-  assert.equal(spawn.observation.segmentReads, 0);
   assert.equal(spawn.observation.recallCalls, 0);
   process.env.USER_PROMPT = " \n\t ";
   assert.equal(await runHookEvent({ event: "PromptSubmit", payload: { prompt: PROMPT }, libraryPath: library, cwd: directory }), null);

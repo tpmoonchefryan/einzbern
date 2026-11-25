@@ -43,19 +43,21 @@ import {
   createKnowledgeUnit,
   rebaseKnowledgeStore,
   reverifyKnowledgeUnit,
+  updateKnowledgeMetadata,
   updateKnowledgeStalenessPolicy,
 } from "./knowledge-core.js";
 import type {
   CreateKnowledgeUnitInput,
   KnowledgeMutationOptions,
   KnowledgeStalenessPolicy,
+  UpdateKnowledgeMetadataInput,
 } from "./knowledge-core.js";
 import type { KnowledgeLanguageProvider } from "./knowledge-language.js";
 import { WorkspaceError } from "./workspace.js";
 
 export const KNOWLEDGE_BATCH_SCHEMA_VERSION = "tcrn.knowledge-batch.v1" as const;
 export const KNOWLEDGE_BATCH_VERBS = Object.freeze([
-  "knowledge-create", "knowledge-policy", "knowledge-reverify",
+  "knowledge-create", "knowledge-policy", "knowledge-reverify", "knowledge-metadata",
 ]);
 
 // The batch's own bound, not the store's: no ceiling on live records or on their bytes bounds a
@@ -138,6 +140,17 @@ function shapeProblems(members: readonly unknown[]): readonly KnowledgeBatchProb
         problems.push({ index, verb, rule: "policy-required", detail: "stalenessPolicy is an object" });
       } else if (!Object.hasOwn(member.stalenessPolicy, "maximumAgeDays") || !Object.hasOwn(member.stalenessPolicy, "unknownDisposition")) {
         problems.push({ index, verb, rule: "policy-fields-required", detail: "maximumAgeDays and unknownDisposition" });
+      }
+      if (!hasReference(member)) {
+        problems.push({ index, verb, rule: "reference-required", detail: "id or externalKey names the card to act on" });
+      }
+      return;
+    }
+    if (verb === "knowledge-metadata") {
+      if (!isNonEmptyString(member.subject)) problems.push({ index, verb, rule: "subject-required", detail: "subject is a non-empty string" });
+      if (!Array.isArray(member.tags) || member.tags.length === 0 || member.tags.some((tag) => !isNonEmptyString(tag)) ||
+        new Set(member.tags).size !== member.tags.length) {
+        problems.push({ index, verb, rule: "tags-required", detail: "tags is a non-empty list of unique strings" });
       }
       if (!hasReference(member)) {
         problems.push({ index, verb, rule: "reference-required", detail: "id or externalKey names the card to act on" });
@@ -242,7 +255,13 @@ export async function applyKnowledgeBatch(
           ...shared,
           stalenessPolicy: member.stalenessPolicy as KnowledgeStalenessPolicy,
         }, mutation)
-        : await reverifyKnowledgeUnit(workspaceRoot, shared, mutation);
+        : member.verb === "knowledge-metadata"
+          ? await updateKnowledgeMetadata(workspaceRoot, {
+            ...shared,
+            subject: member.subject as string,
+            tags: member.tags as UpdateKnowledgeMetadataInput["tags"],
+          }, mutation)
+          : await reverifyKnowledgeUnit(workspaceRoot, shared, mutation);
       version = result.version as number;
       if (typeof result.revision === "number") revisions.set(id, result.revision);
       applied.push({ index, verb: member.verb as string, id, version });

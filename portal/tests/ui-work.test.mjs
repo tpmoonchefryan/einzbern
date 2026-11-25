@@ -1,7 +1,155 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalDocumentBytes } from "../../scripts/lib/canonical-json.mjs";
 // Tests in this file run sequentially; Node isolates each file in a process.
-import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile } from "./ui-presence-support.mjs";
+import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, machineReceiptAdvanced, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptRawText, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile, writeScratch } from "./ui-presence-support.mjs";
+
+if (!MUTATION) test("INIT-003 validates and returns work through the same engine transition as the CLI", async () => {
+  const fixture = await scratch("einzbern-work-validation-");
+  const workspace = ["--workspace", fixture.workspace];
+  const run = (command, ...args) => cli([command, ...workspace, ...args], fixture.deviceEnv);
+  const show = async (id) => (await run("work-show", "--id", id)).record;
+  const pending = async (key) => {
+    const created = await run("work-create", "--project-id", fixture.projectId, "--at", nextAt(),
+      "--external-key", key, "--kind", "Initiative", "--title", key, "--status", "active");
+    await run("work-transition", "--at", nextAt(), "--id", created.record.id, "--status", "pending-validate");
+    return show(created.record.id);
+  };
+  let page;
+  try {
+    const accepted = await pending("ATELIER-ACCEPT");
+    const returned = await pending("ATELIER-RETURN");
+    page = await loadExecutedDom(fixture);
+    const { document, window } = page;
+    await openWorkEditor(page);
+    const summary = document.querySelector("#work-validation-summary");
+    const form = document.querySelector("#work-validation-form");
+    const action = (record, status) => document.querySelector(`[data-work-validation-id="${record.id}"][data-work-validation="${status}"]`);
+    await waitFor(() => action(accepted, "validated"), "the validation action");
+    action(accepted, "validated").click();
+    assert.equal(summary.required, true);
+    document.querySelector("#work-validation-cancel").click();
+    assert.equal(form.hidden, true);
+    assert.equal((await show(accepted.id)).status, "pending-validate");
+    const submit = async (text, refusal) => {
+      summary.value = text;
+      const before = receiptText(document);
+      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+      const received = refusal ? () => refusal.test(receiptRawText(document)) : receiptAdvanced(document, before);
+      await waitFor(received, "the transition receipt");
+    };
+    action(accepted, "validated").click();
+    await submit("Independent validation report");
+    assert.equal((await show(accepted.id)).status, "validated");
+    action(returned, "active").click();
+    await run("work-annotate", "--at", nextAt(), "--id", returned.id, "--summary", "A concurrent edit");
+    await submit("Missing evidence", /work revision changed/u);
+    assert.equal((await show(returned.id)).status, "pending-validate");
+    const updated = await show(returned.id);
+    await waitFor(() => action(returned, "active")?.dataset.workValidationRevision === String(updated.revision), "the refreshed work revision");
+    action(returned, "active").click();
+    await submit("Missing evidence");
+    assert.equal((await show(returned.id)).status, "active");
+  } finally {
+    if (page) await closePage(page, fixture);
+    else await rm(fixture.base, { recursive: true, force: true });
+  }
+});
+
+if (!MUTATION) test("INIT-003 Atelier activity and pending actions use the read-only engine views", async () => {
+  const page = await preparePage();
+  const { document, window } = page;
+  const ws = ["--workspace", page.workspace];
+  try {
+    await writeScratch(page.fixture, "project-create", ["--external-key", "ACTIVITY-NEEDLE", "--name", "Activity needle"]);
+    const before = await cli(["status", ...ws], page.deviceEnv);
+    document.querySelector('[data-page-target="dashboard"]').click();
+    document.querySelector('[data-workspace-tab="activity"]').click();
+    const query = document.querySelector("#activity-query");
+    const form = document.querySelector("#activity-search");
+    const results = document.querySelector("#activity-results");
+    const search = async (value, result) => {
+      query.value = value;
+      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+      await waitFor(() => results.textContent.includes(result), "activity search result", 30_000);
+    };
+    await search("ACTIVITY NEEDLE", "Activity needle");
+    assert.equal(results.querySelectorAll(".tcrn-activity-feed__item").length, 1);
+    await search("nothing matches this exact activity query", "No activity matches this search.");
+    assert.equal(results.querySelectorAll(".tcrn-activity-feed__item").length, 0);
+
+    document.querySelector('[data-workspace-tab="overview"]').click();
+    const pending = document.querySelector("#pending-actions-content");
+    const expected = await cli(["pending-actions", ...ws, "--project", page.fixture.proseRoot, "--project-id", page.fixture.projectId], page.deviceEnv);
+    const visible = Object.values(expected.counts).some(count => count === null || count > 0);
+    await waitFor(() => visible ? pending.querySelector("[data-pending-count]") : pending.textContent.includes("No pending actions."),
+      "overview pending actions", 30_000);
+    for (const [kind, count] of Object.entries(expected.counts)) {
+      const displayed = pending.querySelector(`[data-pending-count="${kind}"]`);
+      if (count === null) assert.ok(displayed?.textContent);
+      else if (count > 0) assert.equal(displayed?.textContent, String(count));
+      else assert.equal(displayed, null);
+    }
+    assert.equal((await cli(["status", ...ws], page.deviceEnv)).headEventHash, before.headEventHash);
+  } finally { await page.cleanup(); }
+});
+
+if (!MUTATION) test("INIT-003 minutes search shows the same scoped records as the engine", async () => {
+  const page = await preparePage();
+  try {
+    const { document, window, workspace, deviceEnv } = page;
+    const decisions = await writeScratch(page.fixture, "minutes-record", ["--project-id", page.fixture.projectId,
+      "--title", "Quartz relay", "--summary", "Seasonal review", "--external-key", "UI-MIN-801",
+      "--decisions", "Keep the original routing decision."]);
+    document.querySelector('[data-page-target="dashboard"]').click();
+    document.querySelector('[data-workspace-tab="minutes"]').click();
+    const form = document.querySelector("#minutes-search");
+    const query = document.querySelector("#minutes-query");
+    const results = document.querySelector("#minutes-results");
+    query.value = "UI-MIN-801";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    const expected = await cli(["minutes-list", "--workspace", workspace, "--project-id", page.fixture.projectId, "--query", query.value], deviceEnv);
+    assert.deepEqual(expected.records.map(row => row.id), [decisions.id]);
+    await waitFor(() => results.querySelector("summary")?.textContent.includes("UI-MIN-801"), "the scoped minutes result", 30_000);
+    assert.equal(results.querySelectorAll("details").length, 1);
+    assert.ok(results.textContent.includes("Keep the original routing decision."));
+    query.value = "no-such-zorbendar";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => results.textContent.includes("No minutes match this search."), "the empty minutes result", 30_000);
+  } finally { await page.cleanup(); }
+});
+
+if (!MUTATION) test("INIT-003 recall preview shows the same candidate and terms as the engine", async () => {
+  const page = await preparePage();
+  try {
+    const { document, window, workspace, deviceEnv } = page;
+    const { record } = await cli(["work-create", "--workspace", workspace, "--project-id", page.fixture.projectId,
+      "--at", nextAt(), "--kind", "Initiative", "--external-key", "PREVIEW-INIT-040", "--title", "Quartz route checks",
+      "--summary", "Read the current quartz route checks"], deviceEnv);
+    const args = ["recall", "--workspace", workspace, "--project-id", page.fixture.projectId, "--at", nextAt(), "--query", record.externalKey];
+    const normal = await cli(args, deviceEnv);
+    const preview = await cli([...args, "--view", "preview"], deviceEnv);
+    assert.equal(preview.candidates[0].id, record.id);
+    assert.ok(normal.context.some((line) => line.includes(record.externalKey)));
+    assert.deepEqual(preview.candidates[0].matchedTerms, [record.externalKey]);
+    document.querySelector('[data-page-target="recall-preview"]').click();
+    const panel = document.querySelector('[data-page="recall-preview"]');
+    assert.equal(panel.hidden, false);
+    const form = panel.querySelector("form");
+    const input = form.querySelector("textarea");
+    const submit = (query) => { input.value = query; form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); };
+    const row = () => panel.querySelector('[data-recall-preview-table="candidates"] .tcrn-table-shell__row');
+    submit(record.externalKey);
+    await waitFor(() => row()?.textContent.includes(record.externalKey), "the rendered recall candidate");
+    assert.deepEqual([...row().querySelectorAll('[role="cell"]')].map((cell) => cell.textContent), [record.externalKey, record.title, preview.candidates[0].score, record.externalKey]);
+    document.querySelector('[data-locale-option="fr"]').click();
+    assert.equal(panel.querySelector("h1").textContent, "Aperçu du rappel");
+    submit("unmatchedbrevity");
+    await waitFor(() => panel.textContent.includes("Aucun candidat correspondant."), "the empty recall preview");
+    assert.equal(row(), null);
+  } finally {
+    await page.cleanup();
+  }
+});
 
 
 
@@ -154,14 +302,13 @@ if (!MUTATION) {
       // A settings write asks for a refresh while /api/work is held again: the setting reads back
       // while the work read is out, and the work view keeps what it showed until that read returns.
       page.hold(isWork);
-      document.querySelector('[data-page-target="settings"]')?.click();
-      document.querySelector('[data-setting-group="execution"]')?.click();
-      const control = document.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
-      const before = receiptText(document);
+      document.querySelector('[data-page-target="engine-model-policy"]')?.click();
+      const control = document.querySelector('#device-model-settings [data-machine-control="models.maxConcurrentSubagents"]');
+      const before = receiptRawText(document);
       control.value = "7";
       control.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-      await waitFor(receiptAdvanced(document, before), "the setting write receipt");
-      await waitFor(() => document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified === "true", "the setting to read back while /api/work is out");
+      await waitFor(machineReceiptAdvanced(document, before), "the setting write receipt");
+      assert.equal((await cli(["machine-settings-catalog"], fixture.deviceEnv)).settings.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, "7", "the device setting reads back while /api/work is out");
       assert.equal(page.held(), 1, "the refresh asked for /api/work, which is still out");
       assert.equal(content.getAttribute("aria-busy"), "true");
       assert.equal(workShown(), true, "the work view keeps what it showed");
@@ -292,13 +439,12 @@ if (!MUTATION) {
       // A settings write asks for a refresh while /api/work is held again: the line shows above the
       // list the view keeps, and goes when that read returns.
       page.hold(isWork);
-      document.querySelector('[data-page-target="settings"]')?.click();
-      document.querySelector('[data-setting-group="execution"]')?.click();
-      const control = document.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
-      const before = receiptText(document);
+      document.querySelector('[data-page-target="engine-model-policy"]')?.click();
+      const control = document.querySelector('#device-model-settings [data-machine-control="models.maxConcurrentSubagents"]');
+      const before = receiptRawText(document);
       control.value = "7";
       control.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-      await waitFor(receiptAdvanced(document, before), "the setting write receipt");
+      await waitFor(machineReceiptAdvanced(document, before), "the setting write receipt");
       await waitFor(() => page.held() === 1, "the refresh's read of /api/work");
       document.querySelector('[data-page-target="dashboard"]')?.click();
       assert.equal(line.hidden, false, "the reading line shows again while the refresh's read is out");

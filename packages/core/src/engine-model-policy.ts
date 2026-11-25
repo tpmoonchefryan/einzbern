@@ -6,7 +6,7 @@
 // not become a second engine policy store.
 
 import { mkdir, readFile } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 import { assertStrictInstant, canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import { deviceHome, engineModelPolicyLockPath, engineModelPolicyPath } from "./device-home.js";
@@ -17,8 +17,9 @@ import { defaultModelsCategory, validateModelsCategory } from "./models-category
 import { validateModelsTiers } from "./models-tiers.js";
 import type { ModelsCategories } from "./models-category.js";
 import type { ModelsTiers } from "./models-tiers.js";
-import { DEFAULT_ENGINE_QUOTA_POLICY, validateEngineQuotaPolicy } from "./execution-policy.js";
-import type { EngineQuotaPolicy } from "./execution-policy.js";
+import { DEFAULT_ENGINE_QUOTA_POLICY, resolveEngineQuotaPolicy, validateEngineQuotaOverrides, validateEngineQuotaPolicy } from "./execution-policy.js";
+import type { EngineQuotaOverrides, EngineQuotaPolicy } from "./execution-policy.js";
+import { MACHINE_SETTINGS_FILE_NAME, readMachineSettings } from "./machine-settings.js";
 import type { ModelsTierResolution } from "./models-escalation.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import type { AtomicWriteOptions } from "./atomic-file.js";
@@ -26,6 +27,7 @@ import type { VerifiedWriteAuthorization } from "./write-authorization.js";
 
 export const ENGINE_MODEL_POLICY_SCHEMA_VERSION = "tcrn.engine-model-policy.v1" as const;
 export const ENGINE_MODEL_POLICY_TRANSACTION_VERSION = "tcrn.engine-model-policy.v2" as const;
+export const ENGINE_MODEL_POLICY_SHARED_VERSION = "tcrn.engine-model-policy.v3" as const;
 export const ENGINE_MODEL_POLICY_CATALOG_VERSION = "tcrn.engine-model-policy-catalog.v1" as const;
 export const ENGINE_MODEL_POLICY_WRITE_TARGET = "models.engine-policy" as const;
 
@@ -55,8 +57,10 @@ export class EngineModelPolicyError extends Error {
 }
 
 export interface EngineModelPolicyConfig {
-  /** Optional on historical entries; absence uses separately reported engine defaults. */
-  readonly quota?: EngineQuotaPolicy;
+  /** Optional host-local thresholds; omitted fields inherit the device's generic value. */
+  readonly quota?: EngineQuotaOverrides | null;
+  /** Host-local concurrency cap; null inherits the device's generic value. */
+  readonly maxConcurrentSubagents?: number | null;
   readonly categories: ModelsCategories;
   readonly tiers: ModelsTiers;
   readonly escalation: {
@@ -77,10 +81,12 @@ export interface EngineModelPolicyEntry extends EngineModelPolicyConfig {
 }
 
 export interface EngineModelPolicyFile {
-  readonly schemaVersion: typeof ENGINE_MODEL_POLICY_SCHEMA_VERSION | typeof ENGINE_MODEL_POLICY_TRANSACTION_VERSION;
+  readonly schemaVersion: typeof ENGINE_MODEL_POLICY_SCHEMA_VERSION | typeof ENGINE_MODEL_POLICY_TRANSACTION_VERSION | typeof ENGINE_MODEL_POLICY_SHARED_VERSION;
   /** Increments once per host write, giving the whole file a monotonic revision. */
   readonly revision: number;
   readonly hosts: Readonly<Record<string, EngineModelPolicyEntry>>;
+  /** One category table shared by all host tiers on this device. */
+  readonly categoryCatalog?: ModelsCategories;
   readonly operations?: Readonly<Record<string, EngineModelPolicyOperation>>;
 }
 
@@ -142,15 +148,22 @@ function safeRevision(value: unknown, path: string, minimum: number): number {
 }
 
 function policyDigest(host: string, config: EngineModelPolicyConfig): string {
-  return canonicalSha256({ host, categories: config.categories, tiers: config.tiers, escalation: config.escalation, ...(config.quota === undefined ? {} : { quota: config.quota }) });
+  return canonicalSha256({ host, categories: config.categories, tiers: config.tiers, escalation: config.escalation,
+    ...(config.quota === undefined ? {} : { quota: config.quota }),
+    ...(config.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: config.maxConcurrentSubagents }) });
 }
 
 /** Validate one closed host policy, including all category references and runner isolation. */
 export function validateEngineModelPolicy(hostValue: unknown, value: unknown): EngineModelPolicyConfig {
   const host = hostId(hostValue);
   const input = object(value, "policy");
-  exactFields(input, Object.hasOwn(input, "quota") ? "categories,escalation,quota,tiers" : CONFIG_FIELDS, "policy");
-  const quota = Object.hasOwn(input, "quota") ? validateEngineQuotaPolicy(input.quota) : undefined;
+  exactFields(input, ["categories,escalation,tiers", "categories,escalation,maxConcurrentSubagents,quota,tiers", "categories,escalation,quota,tiers", "categories,escalation,maxConcurrentSubagents,tiers"].includes(Object.keys(input).sort().join(","))
+    ? Object.keys(input).sort().join(",") : CONFIG_FIELDS, "policy");
+  const quota = Object.hasOwn(input, "quota") ? input.quota === null ? null : validateEngineQuotaOverrides(input.quota) : undefined;
+  const maxConcurrentSubagents = Object.hasOwn(input, "maxConcurrentSubagents") ? input.maxConcurrentSubagents : undefined;
+  if (maxConcurrentSubagents !== undefined && maxConcurrentSubagents !== null && (typeof maxConcurrentSubagents !== "number" || !Number.isSafeInteger(maxConcurrentSubagents) || maxConcurrentSubagents < 1)) {
+    fail("ENGINE_MODEL_POLICY_INVALID", "policy.maxConcurrentSubagents must be a positive safe integer or null", { path: "policy.maxConcurrentSubagents" });
+  }
   const categories = validateModelsCategory(input.categories);
   const tiers = validateModelsTiers(input.tiers);
   const escalation = object(input.escalation, "policy.escalation");
@@ -179,34 +192,46 @@ export function validateEngineModelPolicy(hostValue: unknown, value: unknown): E
     categories,
     tiers,
     ...(quota === undefined ? {} : { quota }),
+    ...(maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: maxConcurrentSubagents as number | null }),
     escalation: Object.freeze({ enabled: escalation.enabled, threshold: escalation.threshold, ceiling }),
   });
+}
+
+function nextModelRowOrder(rows: readonly { readonly order: number }[]): number {
+  const maximum = rows.reduce((max, row) => Math.max(max, row.order), 0);
+  if (maximum <= Number.MAX_SAFE_INTEGER - 10) return maximum + 10;
+  const used = new Set(rows.map(row => row.order));
+  let next = 1;
+  while (used.has(next)) next += 1;
+  return next;
 }
 
 /** INIT-076: additive onboarding draft, offered on fresh installs and subsequent repairs.
  * Existing groups, custom categories, quota and escalation remain untouched. Saving the draft
  * still goes through the normal actor/Owner-decision/CAS write path; reading never writes it.
  */
-export function engineModelPolicyOnboarding(hostValue: string, policy?: EngineModelPolicyConfig | null): EngineModelPolicyConfig {
+export function engineModelPolicyOnboarding(hostValue: string, policy?: EngineModelPolicyConfig | null, sharedCategories?: ModelsCategories): EngineModelPolicyConfig {
   const host = hostId(hostValue);
-  const current = policy == null ? null : validateEngineModelPolicy(host, { categories: policy.categories, tiers: policy.tiers, escalation: policy.escalation, ...(policy.quota === undefined ? {} : { quota: policy.quota }) });
+  const current = policy == null ? null : validateEngineModelPolicy(host, { categories: policy.categories, tiers: policy.tiers, escalation: policy.escalation, ...(policy.quota === undefined ? {} : { quota: policy.quota }), ...(policy.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: policy.maxConcurrentSubagents }) });
+  if (current === null && sharedCategories && sharedCategories.length > 0) {
+    const ceiling = sharedCategories.find(category => category.id === "main")?.id ?? sharedCategories[0]!.id;
+    return validateEngineModelPolicy(host, {
+      categories: sharedCategories,
+      tiers: sharedCategories.map(category => ({ order: category.order, category: category.id, runner: host, model: "", effort: "", note: "" })),
+      escalation: { enabled: false, threshold: 2, ceiling },
+    });
+  }
   const categories = [...(current?.categories ?? [])];
   const tiers = [...(current?.tiers ?? [])];
-  const nextOrder = (rows: readonly { readonly order: number }[]): number => {
-    const maximum = rows.reduce((max, row) => Math.max(max, row.order), 0);
-    if (maximum <= Number.MAX_SAFE_INTEGER - 10) return maximum + 10;
-    const used = new Set(rows.map(row => row.order));
-    let next = 1; while (used.has(next)) next += 1;
-    return next;
-  };
   for (const category of defaultModelsCategory()) {
-    if (!categories.some(row => row.id === category.id)) categories.push({ ...category, order: nextOrder(categories) });
-    if (!tiers.some(row => row.category === category.id)) tiers.push({ order: nextOrder(tiers), category: category.id, runner: host, model: "", effort: "", note: "" });
+    if (!categories.some(row => row.id === category.id)) categories.push({ ...category, order: nextModelRowOrder(categories) });
+    if (!tiers.some(row => row.category === category.id)) tiers.push({ order: nextModelRowOrder(tiers), category: category.id, runner: host, model: "", effort: "", note: "" });
   }
   return validateEngineModelPolicy(host, {
     categories, tiers,
     escalation: current?.escalation ?? { enabled: false, threshold: 2, ceiling: "main" },
     ...(current?.quota === undefined ? {} : { quota: current.quota }),
+    ...(current?.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: current.maxConcurrentSubagents }),
   });
 }
 
@@ -223,7 +248,7 @@ export interface CodexPeerReadiness {
 export function codexPeerReadiness(hostValue: string, policy?: EngineModelPolicyConfig | null): CodexPeerReadiness {
   const host = hostId(hostValue);
   if (host !== "codex") return Object.freeze({ applicable: false, ready: false, missingCategories: Object.freeze([]), invalidCeiling: null });
-  const current = policy == null ? null : validateEngineModelPolicy(host, { categories: policy.categories, tiers: policy.tiers, escalation: policy.escalation, ...(policy.quota === undefined ? {} : { quota: policy.quota }) });
+  const current = policy == null ? null : validateEngineModelPolicy(host, { categories: policy.categories, tiers: policy.tiers, escalation: policy.escalation, ...(policy.quota === undefined ? {} : { quota: policy.quota }), ...(policy.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: policy.maxConcurrentSubagents }) });
   const usable = (category: string, ceiling = false): boolean => {
     const rows = (current?.tiers ?? []).filter(row => row.category === category).sort((a, b) => a.order - b.order);
     const row = ceiling ? rows[0] : rows.at(-1);
@@ -235,69 +260,147 @@ export function codexPeerReadiness(hostValue: string, policy?: EngineModelPolicy
 }
 
 function emptyFile(): EngineModelPolicyFile {
-  return Object.freeze({ schemaVersion: ENGINE_MODEL_POLICY_SCHEMA_VERSION, revision: 0, hosts: Object.freeze({}) });
+  return Object.freeze({ schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION, revision: 0, categoryCatalog: defaultModelsCategory(), hosts: Object.freeze({}), operations: Object.freeze({}) });
 }
 
-/** Validate the on-disk closed schema and every host's revision, audit and content digest. */
-export function validateEngineModelPolicyFile(value: unknown): EngineModelPolicyFile {
-  const record = object(value, "engine model policy file");
+function sharedLegacyCategories(tables: readonly ModelsCategories[]): ModelsCategories {
+  const defaults = defaultModelsCategory();
+  const builtInIds = new Set(defaults.map(row => row.id));
+  const custom = new Map<string, { id: string; name: string; description: string; order: number }>();
+  for (const table of tables) for (const row of table) {
+    if (builtInIds.has(row.id)) continue;
+    const prior = custom.get(row.id);
+    if (prior && (prior.name !== row.name || prior.description !== row.description)) {
+      fail("ENGINE_MODEL_POLICY_INVALID", `legacy hosts disagree about custom category ${row.id}; preserve both source records for Owner reconciliation`, { category: row.id });
+    }
+    if (!prior || row.order < prior.order) custom.set(row.id, { ...row });
+  }
+  let order = defaults.reduce((maximum, row) => Math.max(maximum, row.order), 0);
+  const categories = [...defaults, ...[...custom.values()].sort((left, right) => left.order - right.order || left.id.localeCompare(right.id)).map(row => ({ ...row, order: (order += 10) }))];
+  return validateModelsCategory(categories);
+}
+
+function validateEntryMetadata(host: string, entry: Record<string, unknown>, revision: number): { revision: number; updatedAt: string; actor: string; decidedIn: string; decidedInLibraryId: string } {
+  const entryRevision = safeRevision(entry.revision, `hosts.${host}.revision`, 1);
+  if (entryRevision > revision) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.revision exceeds file revision`, { host });
+  if (typeof entry.updatedAt !== "string") fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.updatedAt must be an instant`, { host });
+  try { assertStrictInstant(entry.updatedAt); } catch { fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.updatedAt must be a strict UTC instant`, { host }); }
+  try { assertActorId(entry.actor); } catch { fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.actor is not an actor id`, { host }); }
+  if (typeof entry.decidedIn !== "string" || !DECISION_ID.test(entry.decidedIn)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.decidedIn must be a minutes decision address`, { host });
+  if (typeof entry.decidedInLibraryId !== "string" || !LIBRARY_ID.test(entry.decidedInLibraryId)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.decidedInLibraryId must be a library id`, { host });
+  return { revision: entryRevision, updatedAt: entry.updatedAt, actor: entry.actor, decidedIn: entry.decidedIn, decidedInLibraryId: entry.decidedInLibraryId };
+}
+
+function entryConfig(host: string, entry: Record<string, unknown>, categories: unknown): EngineModelPolicyConfig {
+  return validateEngineModelPolicy(host, {
+    categories,
+    tiers: entry.tiers,
+    escalation: entry.escalation,
+    ...(Object.hasOwn(entry, "quota") ? { quota: entry.quota } : {}),
+    ...(Object.hasOwn(entry, "maxConcurrentSubagents") ? { maxConcurrentSubagents: entry.maxConcurrentSubagents } : {}),
+  });
+}
+
+function validateOperations(value: unknown, revision: number): Readonly<Record<string, EngineModelPolicyOperation>> {
+  const operations: Record<string, EngineModelPolicyOperation> = {};
+  for (const [id, raw] of Object.entries(object(value, "operations"))) {
+    const operation = validatePolicyOperation(id, raw);
+    if (operation.storeRevision > revision) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "operation revision exceeds store");
+    operations[id] = operation;
+  }
+  return Object.freeze(operations);
+}
+
+function validateLegacyPolicySnapshot(record: Record<string, unknown>): EngineModelPolicyFile {
   const transactional = record.schemaVersion === ENGINE_MODEL_POLICY_TRANSACTION_VERSION;
   exactFields(record, transactional ? "hosts,operations,revision,schemaVersion" : STORE_FIELDS, "engine model policy file");
-  if (record.schemaVersion !== ENGINE_MODEL_POLICY_SCHEMA_VERSION && !transactional) {
-    fail("ENGINE_MODEL_POLICY_FILE_INVALID", `schemaVersion must be ${ENGINE_MODEL_POLICY_SCHEMA_VERSION}`);
-  }
   const revision = safeRevision(record.revision, "revision", 0);
+  const rawHosts = object(record.hosts, "hosts");
+  const hosts: Record<string, EngineModelPolicyEntry> = {};
+  for (const [rawHost, rawEntry] of Object.entries(rawHosts)) {
+    const host = hostId(rawHost), entry = object(rawEntry, `hosts.${host}`);
+    exactFields(entry, Object.hasOwn(entry, "quota") ? "actor,categories,decidedIn,decidedInLibraryId,digest,escalation,quota,revision,tiers,updatedAt" : ENTRY_FIELDS, `hosts.${host}`);
+    const metadata = validateEntryMetadata(host, entry, revision);
+    const config = entryConfig(host, entry, entry.categories);
+    const digest = policyDigest(host, config);
+    if (entry.digest !== digest) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.digest does not match its policy`, { host, expected: digest });
+    hosts[host] = Object.freeze({ ...config, ...metadata, digest });
+  }
+  if ((Object.keys(hosts).length === 0) !== (revision === 0)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "an empty store has revision zero and a configured store has a positive revision");
+  return Object.freeze({
+    schemaVersion: transactional ? ENGINE_MODEL_POLICY_TRANSACTION_VERSION : ENGINE_MODEL_POLICY_SCHEMA_VERSION,
+    revision, hosts: Object.freeze(hosts),
+    ...(transactional ? { operations: validateOperations(record.operations, revision) } : {}),
+  });
+}
+
+/** Validate the policy and host digests in the format retained by the receipt. */
+export function validateEngineModelPolicySnapshot(value: unknown): EngineModelPolicyFile {
+  const record = object(value, "engine model policy file");
+  if (record.schemaVersion === ENGINE_MODEL_POLICY_SCHEMA_VERSION || record.schemaVersion === ENGINE_MODEL_POLICY_TRANSACTION_VERSION) return validateLegacyPolicySnapshot(record);
+  if (record.schemaVersion !== ENGINE_MODEL_POLICY_SHARED_VERSION) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `schemaVersion must be ${ENGINE_MODEL_POLICY_SHARED_VERSION}`);
+  exactFields(record, "categoryCatalog,hosts,operations,revision,schemaVersion", "engine model policy file");
+  const revision = safeRevision(record.revision, "revision", 0);
+  const categories = validateModelsCategory(record.categoryCatalog);
   const hostsValue = object(record.hosts, "hosts");
   const hosts: Record<string, EngineModelPolicyEntry> = {};
   for (const [rawHost, rawEntry] of Object.entries(hostsValue)) {
-    const host = hostId(rawHost);
-    const entry = object(rawEntry, `hosts.${host}`);
-    exactFields(entry, Object.hasOwn(entry, "quota") ? "actor,categories,decidedIn,decidedInLibraryId,digest,escalation,quota,revision,tiers,updatedAt" : ENTRY_FIELDS, `hosts.${host}`);
-    const entryRevision = safeRevision(entry.revision, `hosts.${host}.revision`, 1);
-    if (entryRevision > revision) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.revision exceeds file revision`, { host });
-    if (typeof entry.updatedAt !== "string") fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.updatedAt must be an instant`, { host });
-    try { assertStrictInstant(entry.updatedAt); } catch { fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.updatedAt must be a strict UTC instant`, { host }); }
-    try { assertActorId(entry.actor); } catch { fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.actor is not an actor id`, { host }); }
-    if (typeof entry.decidedIn !== "string" || !DECISION_ID.test(entry.decidedIn)) {
-      fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.decidedIn must be a minutes decision address`, { host });
-    }
-    if (typeof entry.decidedInLibraryId !== "string" || !LIBRARY_ID.test(entry.decidedInLibraryId)) {
-      fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.decidedInLibraryId must be a library id`, { host });
-    }
-    const config = validateEngineModelPolicy(host, {
-      categories: entry.categories,
-      tiers: entry.tiers,
-      escalation: entry.escalation,
-      ...(Object.hasOwn(entry, "quota") ? { quota: entry.quota } : {}),
-    });
+    const host = hostId(rawHost), entry = object(rawEntry, `hosts.${host}`);
+    const expectedFields = ["actor", ...(Object.hasOwn(entry, "categories") ? ["categories"] : []), "decidedIn", "decidedInLibraryId", "digest", "escalation", ...(Object.hasOwn(entry, "quota") ? ["quota"] : []), ...(Object.hasOwn(entry, "maxConcurrentSubagents") ? ["maxConcurrentSubagents"] : []), "revision", "tiers", "updatedAt"].sort().join(",");
+    exactFields(entry, expectedFields, `hosts.${host}`);
+    if (Object.hasOwn(entry, "categories") && canonicalJson(validateModelsCategory(entry.categories)) !== canonicalJson(categories)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.categories must match the shared category catalog`, { host });
+    const metadata = validateEntryMetadata(host, entry, revision);
+    const config = entryConfig(host, entry, categories);
     const digest = policyDigest(host, config);
-    if (entry.digest !== digest) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.digest does not match its policy`, { host, expected: digest });
-    hosts[host] = Object.freeze({
-      ...config,
-      revision: entryRevision,
-      digest,
-      updatedAt: entry.updatedAt,
-      actor: entry.actor,
-      decidedIn: entry.decidedIn,
-      decidedInLibraryId: entry.decidedInLibraryId,
-    });
+    if (entry.digest !== digest) fail("ENGINE_MODEL_POLICY_FILE_INVALID", `hosts.${host}.digest does not match its shared category policy`, { host, expected: digest });
+    hosts[host] = Object.freeze({ ...config, ...metadata, digest });
   }
-  if ((Object.keys(hosts).length === 0) !== (revision === 0)) {
-    fail("ENGINE_MODEL_POLICY_FILE_INVALID", "an empty store has revision zero and a configured store has a positive revision");
-  }
-  const operations: Record<string, EngineModelPolicyOperation> = {};
-  if (transactional) {
-    for (const [id, value] of Object.entries(object(record.operations, "operations"))) {
-      const operation = validatePolicyOperation(id, value);
-      if (operation.storeRevision > revision) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "operation revision exceeds store");
-      operations[id] = operation;
-    }
-  }
-  return Object.freeze({ schemaVersion: transactional ? ENGINE_MODEL_POLICY_TRANSACTION_VERSION : ENGINE_MODEL_POLICY_SCHEMA_VERSION, revision, hosts: Object.freeze(hosts), ...(transactional ? { operations: Object.freeze(operations) } : {}) });
+  if ((Object.keys(hosts).length === 0) !== (revision === 0)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "an empty store has revision zero and a configured store has a positive revision");
+  const operations = validateOperations(record.operations, revision);
+  return Object.freeze({ schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION, categoryCatalog: categories, revision, hosts: Object.freeze(hosts), operations });
 }
 
-/** The current device's single file; an absent file means no engine policy has been configured yet. */
-export async function readEngineModelPolicyFile(home: string = deviceHome()): Promise<EngineModelPolicyFile> {
+/** Validate the on-disk closed schema, promoting old device files in memory without writing them. */
+export function validateEngineModelPolicyFile(value: unknown): EngineModelPolicyFile {
+  const snapshot = validateEngineModelPolicySnapshot(value);
+  if (snapshot.schemaVersion === ENGINE_MODEL_POLICY_SHARED_VERSION) return snapshot;
+  const categories = sharedLegacyCategories(Object.values(snapshot.hosts).map(entry => entry.categories));
+  const hosts: Record<string, EngineModelPolicyEntry> = {};
+  for (const [host, entry] of Object.entries(snapshot.hosts)) {
+    const shared = validateEngineModelPolicy(host, { categories, tiers: entry.tiers, escalation: entry.escalation,
+      ...(entry.quota === undefined ? {} : { quota: entry.quota }),
+      ...(entry.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: entry.maxConcurrentSubagents }) });
+    hosts[host] = Object.freeze({ ...entry, ...shared, digest: policyDigest(host, shared) });
+  }
+  return Object.freeze({ schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION, categoryCatalog: categories, revision: snapshot.revision,
+    hosts: Object.freeze(hosts), operations: snapshot.operations ?? Object.freeze({}) });
+}
+
+function persistedEngineModelPolicy(file: EngineModelPolicyFile): Record<string, unknown> {
+  const validated = validateEngineModelPolicyFile(file);
+  return {
+    schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION,
+    categoryCatalog: validated.categoryCatalog ?? defaultModelsCategory(),
+    revision: validated.revision,
+    hosts: Object.fromEntries(Object.entries(validated.hosts).map(([host, entry]) => [host, {
+      actor: entry.actor, decidedIn: entry.decidedIn, decidedInLibraryId: entry.decidedInLibraryId, digest: entry.digest,
+      escalation: entry.escalation, ...(entry.quota === undefined ? {} : { quota: entry.quota }),
+      ...(entry.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: entry.maxConcurrentSubagents }),
+      revision: entry.revision, tiers: entry.tiers, updatedAt: entry.updatedAt,
+    }])),
+    operations: validated.operations ?? {},
+  };
+}
+
+function assertPolicyQuotaCompatibility(file: EngineModelPolicyFile, values: Readonly<Record<string, string>>): void {
+  const generic = genericEngineQuotaFromValues(values).quota;
+  for (const [host, entry] of Object.entries(file.hosts)) {
+    try { resolveEngineQuotaPolicy(generic, entry.quota); }
+    catch { fail("ENGINE_MODEL_POLICY_INVALID", `hosts.${host}.quota is incompatible with generic device quota settings`, { host, path: "quota" }); }
+  }
+}
+
+async function readDevicePolicySnapshot(home: string): Promise<EngineModelPolicyFile> {
   let text: string;
   try {
     text = await readFile(engineModelPolicyPath(home), "utf8");
@@ -307,7 +410,19 @@ export async function readEngineModelPolicyFile(home: string = deviceHome()): Pr
   }
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { fail("ENGINE_MODEL_POLICY_FILE_INVALID", `${engineModelPolicyPath(home)} is not JSON`); }
-  return validateEngineModelPolicyFile(parsed);
+  return validateEngineModelPolicySnapshot(parsed);
+}
+
+/** The current device's single file; an absent file means no engine policy has been configured yet. */
+export async function readEngineModelPolicyFile(home: string = deviceHome()): Promise<EngineModelPolicyFile> {
+  return validateEngineModelPolicyFile(await readDevicePolicySnapshot(home));
+}
+
+/** Retain a receipt's encoding when the actual device policy still has the bound host digest. */
+export async function readEngineModelPolicyForReceipt(host: string, digest: string, home: string = deviceHome()): Promise<EngineModelPolicyFile> {
+  const snapshot = await readDevicePolicySnapshot(home);
+  if (snapshot.hosts[hostId(host)]?.digest === digest) return snapshot;
+  return validateEngineModelPolicyFile(snapshot);
 }
 
 /** Build a catalog from one validated snapshot, including a write's lock-held readback. */
@@ -334,7 +449,7 @@ export function engineModelPolicyCatalogFromSnapshot(
       selectedHost: host,
       selectedPolicy: hasSelectedHost ? file.hosts[host] : null,
       selectedStatus: hasSelectedHost ? "configured" as const : "unconfigured" as const,
-      onboarding: engineModelPolicyOnboarding(host, hasSelectedHost ? file.hosts[host] : null),
+      onboarding: engineModelPolicyOnboarding(host, hasSelectedHost ? file.hosts[host] : null, file.categoryCatalog),
       peerReadiness: codexPeerReadiness(host, hasSelectedHost ? file.hosts[host] : null),
     }),
   });
@@ -345,6 +460,17 @@ export async function readEngineModelPolicyCatalog(hostValue?: string, home: str
   return engineModelPolicyCatalogFromSnapshot(await readEngineModelPolicyFile(home), hostValue, home);
 }
 
+/** Older host writes could supply only their own category rows. Keep other declared rows. */
+function categoriesForHostWrite(supplied: ModelsCategories, existing: ModelsCategories): ModelsCategories {
+  const result = [...supplied];
+  for (const row of existing) {
+    if (result.some(category => category.id === row.id)) continue;
+    const order = result.some(category => category.order === row.order) ? nextModelRowOrder(result) : row.order;
+    result.push({ ...row, order });
+  }
+  return validateModelsCategory(result);
+}
+
 /**
  * Replace one host policy in the device store. The CLI supplies a verified Owner decision and the
  * actual actor; the core checks that receipt's shape again before writing and never touches another
@@ -353,6 +479,7 @@ export async function readEngineModelPolicyCatalog(hostValue?: string, home: str
 export async function applyEngineModelPolicySet(input: {
   readonly host: string;
   readonly policy: unknown;
+  readonly expectedStoreRevision?: number;
   readonly occurredAt: string;
   readonly actor: string;
   readonly authorization: VerifiedWriteAuthorization;
@@ -367,6 +494,7 @@ export async function applyEngineModelPolicySet(input: {
     fail("ENGINE_MODEL_POLICY_AUTHORIZATION_REQUIRED", "a verified Owner --decided-in authorization for models.engine-policy is required");
   }
   const config = validateEngineModelPolicy(host, input.policy);
+  if (input.expectedStoreRevision !== undefined) safeRevision(input.expectedStoreRevision, "expectedStoreRevision", 0);
   const home = input.home ?? deviceHome();
   const path = engineModelPolicyPath(home);
   const lock = engineModelPolicyLockPath(home);
@@ -374,23 +502,43 @@ export async function applyEngineModelPolicySet(input: {
   await mkdir(dirname(path), { recursive: true });
   return withFileLock(lock, async () => {
     const current = await readEngineModelPolicyFile(home);
+    if (input.expectedStoreRevision !== undefined && current.revision !== input.expectedStoreRevision) fail("ENGINE_MODEL_POLICY_CAS_CONFLICT", "shared categories or another host changed after the approved catalog snapshot", { expectedStoreRevision: input.expectedStoreRevision, actualStoreRevision: current.revision });
     const currentHost = Object.hasOwn(current.hosts, host) ? current.hosts[host] : undefined;
+    const hasOtherHosts = Object.keys(current.hosts).some(existingHost => existingHost !== host);
+    const categories = input.expectedStoreRevision === undefined && hasOtherHosts
+      ? categoriesForHostWrite(config.categories, current.categoryCatalog ?? [])
+      : config.categories;
+    const hosts: Record<string, EngineModelPolicyEntry> = {};
+    for (const [otherHost, prior] of Object.entries(current.hosts)) {
+      if (otherHost === host) continue;
+      const shared = validateEngineModelPolicy(otherHost, {
+        categories, tiers: prior.tiers, escalation: prior.escalation,
+        ...(prior.quota === undefined ? {} : { quota: prior.quota }),
+        ...(prior.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: prior.maxConcurrentSubagents }),
+      });
+      hosts[otherHost] = Object.freeze({ ...prior, ...shared, digest: policyDigest(otherHost, shared) });
+    }
+    const sharedConfig = validateEngineModelPolicy(host, { ...config, categories });
     const entry: EngineModelPolicyEntry = Object.freeze({
-      ...config,
+      ...sharedConfig,
       revision: (currentHost?.revision ?? 0) + 1,
-      digest: policyDigest(host, config),
+      digest: policyDigest(host, sharedConfig),
       updatedAt: input.occurredAt,
       actor,
       decidedIn: authorization.decidedIn,
       decidedInLibraryId: authorization.libraryId,
     });
+    hosts[host] = entry;
     const next = validateEngineModelPolicyFile({
-      schemaVersion: current.schemaVersion,
+      schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION,
+      categoryCatalog: categories,
       revision: current.revision + 1,
-      hosts: { ...current.hosts, [host]: entry },
-      ...(current.operations === undefined ? {} : { operations: current.operations }),
+      hosts,
+      operations: current.operations ?? {},
     });
-    await writeFileAtomic(path, `${canonicalJson(next)}\n`);
+    const machine = await readMachineSettings(join(home, MACHINE_SETTINGS_FILE_NAME));
+    assertPolicyQuotaCompatibility(next, machine.values);
+    await writeFileAtomic(path, `${canonicalJson(persistedEngineModelPolicy(next))}\n`);
     // Capture the committed bytes while this host transaction still owns the lock. The CLI uses
     // this snapshot for its receipt, so another same-host writer cannot splice a later policy into
     // this write's revision or audit metadata.
@@ -404,8 +552,9 @@ export interface EngineExecutionPolicyResolution extends ModelsTierResolution {
   readonly category: string;
   readonly rejections: number;
   readonly escalation: EngineModelPolicyConfig["escalation"];
+  readonly hostConcurrencyLimit: number | null;
   readonly quota: EngineQuotaPolicy;
-  readonly quotaOrigin: "device-host-policy" | "engine-default";
+  readonly quotaOrigin: "device-host-policy" | "device-generic" | "engine-default";
   readonly capabilityStatus: "verified-by-caller" | "unchecked";
   readonly origin: {
     readonly kind: "device-engine";
@@ -420,9 +569,30 @@ export interface EngineExecutionPolicyInput {
   /** Optional evidence supplied by a host adapter, not a baked-in vendor capability roster. */
   readonly availableCombinations?: readonly { readonly runner: string; readonly model: string; readonly effort: string }[];
   readonly host: string;
+  readonly genericConcurrencyLimit?: number;
+  readonly genericQuota?: EngineQuotaPolicy;
+  readonly genericQuotaConfigured?: boolean;
   readonly category: string;
   readonly rejections: number;
   readonly home?: string;
+}
+
+export function genericEngineQuotaFromValues(values: Readonly<Record<string, string>>): { readonly quota: EngineQuotaPolicy; readonly configured: boolean } {
+  const keys = ["models.quota.fiveHourParallelOffPercent", "models.quota.fiveHourWaitPercent", "models.quota.weeklyParallelOffPercent", "models.quota.weeklyWaitPercent"] as const;
+  const value = (key: typeof keys[number], fallback: number | null): number | null => Object.hasOwn(values, key) ? Number(values[key]) : fallback;
+  const quota = validateEngineQuotaPolicy({
+    fiveHourParallelOffPercent: value(keys[0], DEFAULT_ENGINE_QUOTA_POLICY.fiveHourParallelOffPercent),
+    fiveHourWaitPercent: value(keys[1], DEFAULT_ENGINE_QUOTA_POLICY.fiveHourWaitPercent),
+    weeklyParallelOffPercent: value(keys[2], DEFAULT_ENGINE_QUOTA_POLICY.weeklyParallelOffPercent),
+    weeklyWaitPercent: value(keys[3], DEFAULT_ENGINE_QUOTA_POLICY.weeklyWaitPercent),
+  });
+  return Object.freeze({ quota, configured: keys.some(key => Object.hasOwn(values, key)) });
+}
+
+export function genericEngineConcurrencyFromValues(values: Readonly<Record<string, string>>): number {
+  const configured = Object.hasOwn(values, "models.maxConcurrentSubagents") ? Number(values["models.maxConcurrentSubagents"]) : 8;
+  if (!Number.isSafeInteger(configured) || configured < 1) fail("ENGINE_MODEL_POLICY_INVALID", "generic maxConcurrentSubagents must be a positive safe integer");
+  return configured;
 }
 
 /** One validated snapshot drives selection, escalation and provenance, never project models.*. */
@@ -431,7 +601,7 @@ export function resolveEngineExecutionPolicyFromSnapshot(
   input: EngineExecutionPolicyInput,
 ): EngineExecutionPolicyResolution {
   const host = hostId(input.host);
-  const file = validateEngineModelPolicyFile(snapshot);
+  const file = validateEngineModelPolicySnapshot(snapshot);
   const policy = Object.hasOwn(file.hosts, host) ? file.hosts[host] : undefined;
   if (policy === undefined) {
     fail("ENGINE_MODEL_POLICY_UNAVAILABLE", `No device engine policy is configured for host ${host}; project model settings are not a fallback`, { host });
@@ -450,6 +620,9 @@ export function resolveEngineExecutionPolicyFromSnapshot(
   if (input.availableCombinations !== undefined && !input.availableCombinations.some((combination) => combination.runner === resolution.record.runner && combination.model === resolution.record.model && combination.effort === resolution.record.effort)) {
     fail("ENGINE_MODEL_POLICY_UNAVAILABLE", `Selected combination is unavailable for host ${host}`, { host, model: resolution.record.model, effort: resolution.record.effort });
   }
+  const genericQuota = input.genericQuota === undefined ? DEFAULT_ENGINE_QUOTA_POLICY : validateEngineQuotaPolicy(input.genericQuota);
+  const quota = resolveEngineQuotaPolicy(genericQuota, policy.quota);
+  const hostQuotaConfigured = policy.quota !== undefined && policy.quota !== null && Object.keys(policy.quota).length > 0;
   return Object.freeze({
     ...resolution,
     capabilityStatus: input.availableCombinations === undefined ? "unchecked" : "verified-by-caller",
@@ -457,8 +630,9 @@ export function resolveEngineExecutionPolicyFromSnapshot(
     category: input.category,
     rejections: input.rejections,
     escalation: policy.escalation,
-    quota: policy.quota ?? DEFAULT_ENGINE_QUOTA_POLICY,
-    quotaOrigin: policy.quota === undefined ? "engine-default" : "device-host-policy",
+    hostConcurrencyLimit: policy.maxConcurrentSubagents ?? null,
+    quota,
+    quotaOrigin: hostQuotaConfigured ? "device-host-policy" : input.genericQuotaConfigured ? "device-generic" : "engine-default",
     origin: Object.freeze({
       kind: "device-engine",
       path: engineModelPolicyPath(input.home ?? deviceHome()),
@@ -471,7 +645,10 @@ export function resolveEngineExecutionPolicyFromSnapshot(
 
 /** Real device consumer; unavailable and corrupt policies fail rather than choosing a model. */
 export async function resolveEngineExecutionPolicy(input: EngineExecutionPolicyInput): Promise<EngineExecutionPolicyResolution> {
-  return resolveEngineExecutionPolicyFromSnapshot(await readEngineModelPolicyFile(input.home), input);
+  const home = input.home ?? deviceHome();
+  const [policy, machine] = await Promise.all([readEngineModelPolicyFile(home), readMachineSettings(join(home, MACHINE_SETTINGS_FILE_NAME))]);
+  const genericQuota = genericEngineQuotaFromValues(machine.values);
+  return resolveEngineExecutionPolicyFromSnapshot(policy, { ...input, home, genericQuota: genericQuota.quota, genericQuotaConfigured: genericQuota.configured, genericConcurrencyLimit: genericEngineConcurrencyFromValues(machine.values) });
 }
 
 /** Native execution reads intent without turning absence/unsupported combinations into a ban.
@@ -515,7 +692,14 @@ function validatePolicyOperation(id: string, value: unknown): EngineModelPolicyO
   if (o.expectedDigest !== null && (typeof o.expectedDigest !== "string" || !/^[a-f0-9]{64}$/u.test(o.expectedDigest))) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "invalid expected policy digest");
   if ((expectedRevision === 0) !== (o.expectedDigest === null)) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "absent host expectation requires revision zero and null digest");
   const storeRevision = safeRevision(o.storeRevision, "operation storeRevision", 1);
-  const result = validateEngineModelPolicyFile({ schemaVersion: ENGINE_MODEL_POLICY_SCHEMA_VERSION, revision: storeRevision, hosts: { [host]: o.result } }).hosts[host]!;
+  const rawResult = object(o.result, "operation.result");
+  const resultFields = ["actor", "categories", "decidedIn", "decidedInLibraryId", "digest", "escalation", ...(Object.hasOwn(rawResult, "quota") ? ["quota"] : []), ...(Object.hasOwn(rawResult, "maxConcurrentSubagents") ? ["maxConcurrentSubagents"] : []), "revision", "tiers", "updatedAt"].sort().join(",");
+  exactFields(rawResult, resultFields, "operation.result");
+  const metadata = validateEntryMetadata(host, rawResult, storeRevision);
+  const config = entryConfig(host, rawResult, rawResult.categories);
+  const digest = policyDigest(host, config);
+  if (rawResult.digest !== digest) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "operation result digest does not match its policy");
+  const result: EngineModelPolicyEntry = Object.freeze({ ...config, ...metadata, digest });
   if (result.revision !== expectedRevision + 1) fail("ENGINE_MODEL_POLICY_FILE_INVALID", "operation result revision does not follow expected host revision");
   return Object.freeze({ id, host, changeDigest: o.changeDigest, expectedRevision, expectedDigest: o.expectedDigest as string | null, storeRevision, result });
 }
@@ -596,12 +780,18 @@ export async function applyEngineModelPolicySave(input: EngineModelPolicySaveInp
     if ((held?.revision ?? 0) !== expectedRevision || (held?.digest ?? null) !== input.expectedDigest) fail("ENGINE_MODEL_POLICY_CAS_CONFLICT", "host changed after the approved snapshot; preserve current policy and reconcile", { host, expectedRevision, actualRevision: held?.revision ?? 0, expectedDigest: input.expectedDigest, actualDigest: held?.digest ?? null });
     if (!initial && !held) fail("ENGINE_MODEL_POLICY_UNAVAILABLE", "absent host requires an explicitly approved complete initialPolicy");
     if (tiers?.some(tier => !held?.tiers.some(row => row.order === tier.order))) fail("ENGINE_MODEL_POLICY_INVALID", "a selected tier no longer exists; do not invent rows");
-    const config = initial ?? validateEngineModelPolicy(host, { categories: held!.categories, tiers: held!.tiers.map(row => { const patch = tiers!.find(tier => tier.order === row.order); return patch ? { ...row, model: patch.model, effort: patch.effort } : row; }), escalation: held!.escalation, ...(held!.quota === undefined ? {} : { quota: held!.quota }) });
+    const candidate = initial ?? validateEngineModelPolicy(host, { categories: held!.categories, tiers: held!.tiers.map(row => { const patch = tiers!.find(tier => tier.order === row.order); return patch ? { ...row, model: patch.model, effort: patch.effort } : row; }), escalation: held!.escalation, ...(held!.quota === undefined ? {} : { quota: held!.quota }), ...(held!.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: held!.maxConcurrentSubagents }) });
+    const nextCategories = current.revision === 0 && Object.keys(current.hosts).length === 0 ? candidate.categories : current.categoryCatalog ?? candidate.categories;
+    if (Object.keys(current.hosts).length > 0 && canonicalJson(candidate.categories) !== canonicalJson(nextCategories)) fail("ENGINE_MODEL_POLICY_INVALID", "a new host must use the current shared category catalog");
+    const config = validateEngineModelPolicy(host, { ...candidate, categories: nextCategories });
     const result: EngineModelPolicyEntry = { ...config, revision: expectedRevision + 1, digest: policyDigest(host, config), updatedAt: input.occurredAt, actor: input.actor, decidedIn: a.decidedIn, decidedInLibraryId: a.libraryId };
     const operation: EngineModelPolicyOperation = { id, host, changeDigest, expectedRevision, expectedDigest: input.expectedDigest, storeRevision: current.revision + 1, result };
-    const next = validateEngineModelPolicyFile({ schemaVersion: ENGINE_MODEL_POLICY_TRANSACTION_VERSION, revision: current.revision + 1, hosts: { ...current.hosts, [host]: result }, operations: { ...current.operations, [id]: operation } });
+    const storedResult = result;
+    const next = validateEngineModelPolicyFile({ schemaVersion: ENGINE_MODEL_POLICY_SHARED_VERSION, categoryCatalog: nextCategories, revision: current.revision + 1, hosts: { ...current.hosts, [host]: storedResult }, operations: { ...current.operations, [id]: operation } });
+    const machine = await readMachineSettings(join(home, MACHINE_SETTINGS_FILE_NAME));
+    assertPolicyQuotaCompatibility(next, machine.values);
     phase = "prewrite"; await faults.beforeAtomicWrite?.();
-    phase = "atomic-write"; await writeFileAtomic(path, `${canonicalJson(next)}\n`, faults.atomicWriteOptions);
+    phase = "atomic-write"; await writeFileAtomic(path, `${canonicalJson(persistedEngineModelPolicy(next))}\n`, faults.atomicWriteOptions);
     await faults.afterAtomicWriteBeforeAcknowledgement?.();
     phase = "committed"; await faults.afterCommitBeforeReadback?.();
     const readback = await readEngineModelPolicyFile(home);

@@ -13,7 +13,7 @@ import { materializeWorkspace, removeWorkspaceSetting, setWorkspaceSetting } fro
 import type { WorkspaceMutationOptions } from "./workspace.js";
 import {
   CONFIG_BACKUP_MAPPING_VERSION, CONFIG_BACKUP_RESERVED_ROOTS, safeConfigBackupHostname, assertConfigBackupDirectory, assertConfigBackupSource, collectConfigBackupPayloads,
-  configBackupCanonical, configBackupDigest, configBackupFail, configBackupInstant,
+  configBackupCanonical, configBackupDeclarationScope, configBackupDigest, configBackupFail, configBackupInstant,
   configBackupObject, planConfigBackup, readConfigBackupFile,
   validateConfigBackupPayload, verifyConfigBackup,
 } from "./config-backup.js";
@@ -50,6 +50,11 @@ export interface ConfigRestorePlan {
   readonly permissionDigest: string; readonly items: readonly ConfigRestorePlanItem[]; readonly planDigest: string;
 }
 interface CurrentValue { readonly payload: ConfigBackupPayload; readonly digest: string | null; readonly fileDigest: string | null }
+type GovernedPayload = Extract<ConfigBackupPayload, { kind: "setting" | "variable" | "rule" }>;
+function restoreDeclarationScope(source: ConfigBackupSource, payload: GovernedPayload): ConfigBackupSource["declarationScope"] {
+  const key = payload.kind === "rule" ? payload.id : payload.kind === "variable" ? payload.name : payload.key;
+  return configBackupDeclarationScope(source, payload.kind, key);
+}
 async function currentValue(payload: ConfigBackupPayload, target: ConfigRestoreTarget): Promise<CurrentValue> {
   if (payload.kind === "agents-user-fragment") {
     try {
@@ -63,7 +68,7 @@ async function currentValue(payload: ConfigBackupPayload, target: ConfigRestoreT
   }
   if (payload.kind === "rule") {
     const state = await materializeWorkspace(target.source.libraryRoot);
-    const scopeId = target.source.declarationScope === "project" ? target.source.projectRef.projectId : undefined;
+    const scopeId = restoreDeclarationScope(target.source, payload) === "project" ? target.source.projectRef.projectId : undefined;
     if (!state.configRecords.some(record => record.projectId === scopeId && record.collection === "rule" && record.key === payload.id)) return { payload, digest: null, fileDigest: null };
   }
   const key = payload.kind === "variable" ? payload.name : payload.kind === "rule" ? payload.id : payload.key;
@@ -108,7 +113,7 @@ export async function planConfigRestore(input: { readonly packageRoot: string; r
     const governed = payload.kind === "setting" || payload.kind === "variable" || payload.kind === "rule";
     if (!compatible || (payload.kind === "rule" && BUILT_IN_RULES.find(rule => rule.id === payload.id)?.version !== payload.version)) classification = "incompatible";
     else if (independentDot && (payload.kind === "agents-user-fragment" || payload.kind === "rule")) classification = "unmappable";
-    else if (governed && "source" in payload && payload.source !== (target.source.declarationScope === "project" ? "project-declaration" : "library-declaration")) classification = "unmappable";
+    else if (governed && payload.source !== `${restoreDeclarationScope(target.source, payload)}-declaration`) classification = "unmappable";
     else if (payload.kind === "path-remapping" || (payload.kind === "device-preference" && payload.key === "portal.defaultPartition" && payload.value !== null && !target.availablePartitions.includes(payload.value))) classification = "unmappable";
     else if (!target.permittedKeys.includes(file.logicalKey) || (governed && target.authorizations[file.logicalKey] === undefined)) classification = "permission-denied";
     else {
@@ -120,7 +125,7 @@ export async function planConfigRestore(input: { readonly packageRoot: string; r
         // this item instead of leaking it into the recovery package or overwriting it.
         if (current.digest !== null) validateConfigBackupPayload(current.payload);
         if (payload.kind === "rule" && current.payload.kind === "rule") {
-          const effective = await effectiveProjectState(native, target.source.declarationScope === "project" ? target.source.projectRef.projectId : undefined);
+          const effective = await effectiveProjectState(native, restoreDeclarationScope(target.source, payload) === "project" ? target.source.projectRef.projectId : undefined);
           const inheritedOrLocal = effective.configRecords.find(record => record.collection === "rule" && record.key === payload.id);
           // The real setters retain existing order, and disable retains the existing version.
           // A plan must not promise an unset or an implicit enable/disable workaround.
@@ -188,7 +193,6 @@ export async function applyConfigRestore(input: { readonly packageRoot: string; 
       const current = await currentValue(payload, input.target);
       if (current.digest !== item.targetDigest || (payload.kind === "agents-user-fragment" && current.fileDigest !== userFileDigest) || !input.target.permittedKeys.includes(item.logicalKey)) { results.push({ ...base, status: "refused", reason: "target-or-permission-changed" }); continue; }
       const authorization = input.target.authorizations[item.logicalKey];
-      const options: WorkspaceMutationOptions = { occurredAt: input.at, actorId: input.target.actorId, ...(input.target.source.declarationScope === "project" ? { configurationProjectId: input.target.source.projectRef.projectId } : {}), ...(authorization === undefined ? {} : { authorization }) };
       let projection: "not-applicable" | "rendered" | "pending" = "not-applicable";
       let authority: "engine" | "machine-settings" | "user-file" = "engine";
       if (payload.kind === "agents-user-fragment") {
@@ -207,6 +211,9 @@ export async function applyConfigRestore(input: { readonly packageRoot: string; 
         else await applyMachineSettingSet({ key: payload.key, value: payload.value, occurredAt: input.at, path: input.target.source.machineSettingsPath });
         await readMachineSettings(input.target.source.machineSettingsPath);
       } else if (payload.kind === "setting" || payload.kind === "variable" || payload.kind === "rule") {
+        const projectId = input.target.source.projectRef.projectId;
+        const scope = restoreDeclarationScope(input.target.source, payload);
+        const options: WorkspaceMutationOptions = { occurredAt: input.at, actorId: input.target.actorId, ...(scope === "project" ? { configurationProjectId: projectId } : {}), ...(authorization === undefined ? {} : { authorization }) };
         if (options.authorization === undefined) configBackupFail("CONFIG_RESTORE_PERMISSION_DENIED");
         mutationStarted = true;
         if (payload.kind === "setting") {
@@ -216,12 +223,12 @@ export async function applyConfigRestore(input: { readonly packageRoot: string; 
           if (payload.declaration === null) await removeVariable(input.target.source.libraryRoot, { ...options, name: payload.name });
           else await setVariable(input.target.source.libraryRoot, { ...options, name: payload.name, ...payload.declaration });
         } else {
-          const common = { ...options, id: payload.id, libraryRoot: input.target.source.libraryRoot, projectRoot: input.target.source.projectRoot };
+          const common = { ...options, configurationProjectId: projectId, id: payload.id, libraryRoot: input.target.source.libraryRoot, projectRoot: input.target.source.projectRoot };
           const change = payload.enabled ? await enableRule({ ...common, ...(payload.order === undefined ? {} : { order: payload.order }) }) : await disableRule(common);
           projection = change.result === "refused-user-modified" || change.status.state === "pending" ? "pending" : "rendered";
         }
         {
-          const rendered = await refreshConfigurationProjections({ libraryId: input.target.source.projectRef.libraryId, ...(input.target.source.declarationScope === "project" ? { projectId: input.target.source.projectRef.projectId } : {}) }, options);
+          const rendered = await refreshConfigurationProjections({ libraryId: input.target.source.projectRef.libraryId, ...(scope === "project" ? { projectId } : {}) }, options);
           projection = projection === "pending" || rendered.plan.gaps.length || !rendered.outcomes.length || rendered.outcomes.some(outcome => outcome.status !== "refreshed") ? "pending" : "rendered";
         }
       } else configBackupFail("CONFIG_RESTORE_UNMAPPABLE");

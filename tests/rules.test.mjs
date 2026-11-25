@@ -10,11 +10,12 @@
 
 import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { asPinnedDevice } from "./helpers/device-home.mjs";
 import { dotEnabledRuleSources, renderDotAgents } from "../dist/build/packages/core/src/dot-agents.js";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { createProject, initializeLibrary, materializeWorkspace, scopedWorkspaceState } from "../dist/build/packages/core/src/index.js";
@@ -22,7 +23,9 @@ import { renderAgentsSections, resolveAgentsSection } from "../dist/build/packag
 import { configRecord, setConfigRecord } from "../dist/build/packages/core/src/config-records.js";
 import { managedSectionRecordsFor, parseManagedFile, renderSection, sectionDigest } from "../dist/build/packages/core/src/managed-sections.js";
 import { BUILT_IN_RULES, builtInRule } from "../dist/build/packages/core/src/rules-catalog.js";
-import { RULE_STATES, checkRuleRecordValue, disableRule, enableRule, listRules, ruleState } from "../dist/build/packages/core/src/rules.js";
+import { RULE_STATES, checkRuleRecordValue, createCustomRule, deactivateCustomRule, disableRule, enableRule, listRules, ruleState, setCustomRuleEnabled, updateCustomRule } from "../dist/build/packages/core/src/rules.js";
+import { NAVIGATION_LINES } from "../dist/build/packages/core/src/agents-sections.js";
+import { navigationPointerAnswer } from "../dist/build/packages/core/src/hook-recall.js";
 import { setWorkspaceSetting } from "../dist/build/packages/core/src/workspace.js";
 import { registerLibrary } from "../dist/build/packages/core/src/registry.js";
 
@@ -531,4 +534,142 @@ test("historical v2 and same-version v3 revisions migrate in both languages and 
       assert.equal((await render(paths)).recorded, 0);
     }
   }
+});
+
+test("INIT003 custom rules create, edit, order, disable and re-enable inside the protected library-managed section", async context => {
+  const paths = await scratch(context);
+  const input = { libraryRoot: paths.library, projectRoot: paths.project, configurationProjectId: paths.projectId,
+    backupRoot: paths.backups, occurredAt: at() };
+  const created = await createCustomRule({ ...input, id: "custom-privacy", title: "Protect private values",
+    body: "Keep credentials out of logs.\nAsk before sharing private data.", order: 2 });
+  assert.deepEqual([created.action, created.status.id, created.status.state, created.status.section, created.status.order],
+    ["create", "custom-privacy", "enabled", "agents", 2]);
+  const initialText = await readFile(paths.agents, "utf8");
+  assert.ok(sectionOf(initialText, "agents").body.includes("- **Protect private values**\n  Keep credentials out of logs.\n  Ask before sharing private data."));
+  assert.deepEqual((await ruleRecord(paths, "custom-privacy")), {
+    custom: true, enabled: true, version: 1, title: "Protect private values", body: "Keep credentials out of logs.\nAsk before sharing private data.", order: 2,
+  });
+  assert.deepEqual((await materializeWorkspace(paths.library)).configRecords.filter(record => record.collection === "rule"), [
+    { collection: "rule", key: "custom-privacy", value: { custom: true, enabled: true, version: 1,
+      title: "Protect private values", body: "Keep credentials out of logs.\nAsk before sharing private data.", order: 2 } },
+  ], "the custom rule is stored once without a projectId");
+
+  const updated = await updateCustomRule({ ...input, id: "custom-privacy", title: "Protect secrets",
+    body: "Never copy secrets into logs.", order: 4 });
+  assert.deepEqual([updated.action, updated.status.state, updated.status.title, updated.status.order], ["update", "enabled", "Protect secrets", 4]);
+  const updatedText = await readFile(paths.agents, "utf8");
+  assert.ok(sectionOf(updatedText, "agents").body.includes("- **Protect secrets**\n  Never copy secrets into logs."));
+  assert.ok(!updatedText.includes("Protect private values"));
+
+  const disabled = await deactivateCustomRule({ ...input, id: "custom-privacy" });
+  assert.deepEqual([disabled.action, disabled.status.state, (await ruleRecord(paths, "custom-privacy")).enabled], ["disable", "disabled", false]);
+  assert.ok(!sectionOf(await readFile(paths.agents, "utf8"), "agents"), "disabled custom text is removed from managed output");
+
+  const enabled = await setCustomRuleEnabled({ ...input, id: "custom-privacy", enabled: true });
+  assert.deepEqual([enabled.action, enabled.status.state, enabled.status.order], ["enable", "enabled", 4]);
+});
+
+test("INIT003 rule records consolidate across project roots and remain isolated by library", async context => {
+  const paths = await scratch(context);
+  const otherRoot = join(paths.base, "other-project");
+  await mkdir(otherRoot);
+  await writeFile(join(otherRoot, "AGENTS.md"), USER_TEXT);
+  const secondProject = await createProject(paths.library, { externalKey: "RULES-SECOND-PROJECT", name: "Second rules fixture", occurredAt: at() });
+  const secondProjectId = secondProject.projects.find(project => project.externalKey === "RULES-SECOND-PROJECT").id;
+  await setWorkspaceSetting(paths.library, { configurationProjectId: secondProjectId, key: "artifact.language", value: "zh-CN", occurredAt: at() });
+  await setConfigRecord(paths.library, { projectId: paths.projectId, collection: "rule", key: "batch", value: { enabled: false, version: 3, order: 7 }, occurredAt: at() });
+  await setConfigRecord(paths.library, { projectId: secondProjectId, collection: "rule", key: "batch", value: { enabled: true, version: 3, order: 3 }, occurredAt: at() });
+
+  const firstEnable = await enable(paths, "batch", { order: 5 });
+  assert.deepEqual([firstEnable.status.state, firstEnable.status.order], ["enabled", 5]);
+  let rules = (await materializeWorkspace(paths.library)).configRecords.filter(record => record.collection === "rule" && record.key === "batch");
+  assert.deepEqual(rules, [{ collection: "rule", key: "batch", value: { enabled: true, version: 3, order: 5 } }],
+    "the first rule write replaces all old project values with one library value");
+
+  const secondEnable = await enableRule({ libraryRoot: paths.library, projectRoot: otherRoot, configurationProjectId: secondProjectId,
+    id: "batch", backupRoot: paths.backups, occurredAt: at() });
+  assert.deepEqual([secondEnable.status.state, secondEnable.status.order], ["enabled", 5]);
+  const firstView = await listRules({ libraryRoot: paths.library, projectRoot: paths.project, configurationProjectId: paths.projectId });
+  const secondView = await listRules({ libraryRoot: paths.library, projectRoot: otherRoot, configurationProjectId: secondProjectId });
+  assert.deepEqual(firstView.find(rule => rule.id === "batch"), secondView.find(rule => rule.id === "batch"));
+  assert.equal(sectionOf(await readFile(paths.project + "/AGENTS.md", "utf8"), "agents").body.includes(builtInRule("batch").principle.zh), true);
+  assert.equal(sectionOf(await readFile(join(otherRoot, "AGENTS.md"), "utf8"), "agents").body.includes(builtInRule("batch").principle.zh), true);
+
+  const otherLibrary = join(paths.base, "other-library");
+  await initializeLibrary({ root: otherLibrary, createdAt: at() });
+  const isolatedProject = join(paths.base, "isolated-project");
+  await mkdir(isolatedProject);
+  await writeFile(join(isolatedProject, "AGENTS.md"), USER_TEXT);
+  const isolated = await createProject(otherLibrary, { externalKey: "ISOLATED-RULES", name: "Isolated rules fixture", occurredAt: at() });
+  const isolatedId = isolated.projects.find(project => project.externalKey === "ISOLATED-RULES").id;
+  assert.equal((await listRules({ libraryRoot: otherLibrary, projectRoot: isolatedProject, configurationProjectId: isolatedId })).some(rule => rule.id === "custom-privacy"), false);
+});
+
+test("INIT003 a second device reads the library custom rule and renders the same selected rule locally", async context => {
+  const firstDeviceId = "c".repeat(32);
+  const secondDeviceId = "e".repeat(32);
+  await asPinnedDevice(async () => {
+    const paths = await scratch(context);
+    const secondLibrary = join(paths.base, "device-two-library");
+    await cp(paths.library, secondLibrary, { recursive: true });
+    const secondProject = join(paths.base, "device-two-project");
+    await mkdir(secondProject);
+    await writeFile(join(secondProject, "AGENTS.md"), USER_TEXT);
+
+    await createCustomRule({ libraryRoot: paths.library, projectRoot: paths.project, configurationProjectId: paths.projectId,
+      id: "custom-portable", title: "Portable custom rule", body: "Keep this definition in the shared library.", order: 6, occurredAt: at() });
+    await writeFile(join(secondProject, "AGENTS.md"), await readFile(paths.agents, "utf8"));
+
+    // A sync client copies this device's append-only stream into the other device's library copy.
+    const sourceStream = join(paths.library, "akasha", firstDeviceId);
+    await cp(sourceStream, join(secondLibrary, "akasha", firstDeviceId), { recursive: true });
+
+    await asPinnedDevice(async home => {
+      await registerLibrary({ projectPath: secondProject, projectId: paths.projectId, libraryPath: secondLibrary, agentsProjectRoot: secondProject, registeredAt: at(), gitRemote: null }, home);
+      const readback = await listRules({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId });
+      const shared = readback.find(rule => rule.id === "custom-portable");
+      assert.deepEqual([shared?.custom, shared?.title, shared?.body, shared?.order, shared?.state], [true, "Portable custom rule", "Keep this definition in the shared library.", 6, "enabled"]);
+      const rendered = await setCustomRuleEnabled({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId,
+        id: "custom-portable", enabled: true, occurredAt: at() });
+      assert.deepEqual([rendered.status.state, rendered.status.order, rendered.written], ["enabled", 6, false]);
+      assert.match(await readFile(join(secondProject, "AGENTS.md"), "utf8"), /Portable custom rule/u);
+
+      const edited = await updateCustomRule({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId,
+        id: "custom-portable", title: "Edited on device two", body: "The edit syncs back with the library record.", order: 8, occurredAt: at() });
+      assert.deepEqual([edited.status.title, edited.status.order, edited.status.state], ["Edited on device two", 8, "enabled"]);
+      const disabled = await setCustomRuleEnabled({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId,
+        id: "custom-portable", enabled: false, occurredAt: at() });
+      assert.equal(disabled.status.state, "disabled");
+    }, secondDeviceId);
+
+    await cp(join(secondLibrary, "akasha", secondDeviceId), join(paths.library, "akasha", secondDeviceId), { recursive: true });
+    await writeFile(paths.agents, await readFile(join(secondProject, "AGENTS.md"), "utf8"));
+    const backOnFirst = await listRules({ libraryRoot: paths.library, projectRoot: paths.project, configurationProjectId: paths.projectId });
+    const syncedBack = backOnFirst.find(rule => rule.id === "custom-portable");
+    assert.deepEqual([syncedBack?.custom, syncedBack?.title, syncedBack?.body, syncedBack?.order, syncedBack?.state],
+      [true, "Edited on device two", "The edit syncs back with the library record.", 8, "disabled"]);
+    assert.doesNotMatch(await readFile(paths.agents, "utf8"), /Edited on device two/u);
+  }, firstDeviceId);
+});
+
+test("INIT003 migration refuses conflicting custom definitions and leaves the managed file unchanged", async context => {
+  const paths = await scratch(context);
+  const secondProject = await createProject(paths.library, { externalKey: "RULES-CONFLICT-PROJECT", name: "Conflict rules fixture", occurredAt: at() });
+  const secondProjectId = secondProject.projects.find(project => project.externalKey === "RULES-CONFLICT-PROJECT").id;
+  await setConfigRecord(paths.library, { projectId: paths.projectId, collection: "rule", key: "custom-conflict",
+    value: { custom: true, enabled: true, version: 1, title: "First definition", body: "First body" }, occurredAt: at() });
+  await setConfigRecord(paths.library, { projectId: secondProjectId, collection: "rule", key: "custom-conflict",
+    value: { custom: true, enabled: true, version: 1, title: "Other definition", body: "Other body" }, occurredAt: at() });
+  const before = await readFile(paths.agents, "utf8");
+  await assert.rejects(setCustomRuleEnabled({ libraryRoot: paths.library, projectRoot: paths.project, configurationProjectId: paths.projectId,
+    id: "custom-conflict", enabled: false, occurredAt: at() }), error => error.reasonCode === "RULE_SCOPE_CONFLICT");
+  assert.equal(await readFile(paths.agents, "utf8"), before);
+  assert.equal((await materializeWorkspace(paths.library)).configRecords.filter(record => record.collection === "rule" && record.key === "custom-conflict").length, 2);
+});
+
+test("INIT003 navigation pointer uses the shared lines only when the library setting selects hook fallback", () => {
+  assert.deepEqual(navigationPointerAnswer("codex", "SessionStart").lines, NAVIGATION_LINES, "the legacy default includes navigation");
+  assert.deepEqual(navigationPointerAnswer("codex", "SessionStart", true).lines, NAVIGATION_LINES);
+  assert.deepEqual(navigationPointerAnswer("codex", "SessionStart", false).lines, []);
+  assert.match(navigationPointerAnswer("codex", "SessionStart", false).output, /"additionalContext":""/u);
 });

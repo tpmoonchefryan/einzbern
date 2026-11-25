@@ -9,16 +9,21 @@ old SubagentStop/collector-wait design is superseded history, not an alternate
 mode. Historical work records, commits and failure evidence remain intact.
 
 Only an explicitly selected **Codex** host uses this contract. Unknown host is
-not Codex admission. Claude Code, DSH and Devin keep a single main
-conversation coordinating workers with native completion notifications. Dot
-policy and generic collection/conference behavior are unchanged.
+not Codex admission. The device setting `execution.codexDualConversation`
+defaults to `true`: when enabled, Main hands implementation to an independent
+Economy coordinator and receives its report. When disabled, Main keeps the
+implementation work and coordinates its own native workers. Claude Code, DSH
+and Devin keep their existing single-main-conversation workflow. Dot policy and
+generic collection/conference behavior are unchanged.
 
 ## Roles and model policy
 
 - **Main decision conversation (`main`)**: sets the bounded batch, package goals,
   dependencies and acceptance responsibilities; decides on the returned batch and
-  authorizes the next stage. After handoff it stops idle polling. It does not use
-  `/goal` or `/loop` merely to wait; substantive governance rounds remain valid.
+  authorizes the next stage. In dual-conversation mode, after handoff it waits for
+  the Economy coordinator's report. In single-conversation mode, Main remains the
+  worker coordinator and reads its own native children. It does not use `/goal` or
+  `/loop` merely to wait; substantive governance rounds remain valid.
 - **Independent coordinator conversation (`economy`)**: directly dispatches fresh
   workers, waits for and reads their native results, reconciles the batch and
   reports it once to main. It is not a child collector, read-only summarizer, or
@@ -234,18 +239,44 @@ This reconciles an attempt; it does not consume or exhaust the Owner's existing
 authorization. Prepare any further covered adjustment from the actual current
 state and record it separately. Unbound ordinary chats gain no global model ban.
 
-For `read_thread` and `wait_threads`, only confirmed native subagents whose
-returned latest turn is still in progress permit another bounded query. An
-independent economy conversation is an independent target. After its first
-query returns, end the loop: the next actual read/wait is denied before execution,
-including changed targets/cursors, mixed waits, code-mode inner calls and summary
-continuations. This applies without a prior model change, receipt or role.
-A new actual UserPromptSubmit can obtain a new result and follows the same exit
-rule; no query-intent JSON or additional approval is required. Native spawn or
-SubagentStart evidence supplies identity; model/category/title/old cache does not.
-PostToolUse feedback and stopping the whole model turn are separate host facts.
-See `specs/engine-hook-events-v2.md`; actual Desktop consumption needs its own
-native execution counts and version evidence.
+### Conversation polling
+
+`execution.codexDualConversation` is device-local and defaults to `true`. Its
+current value selects the workflow described above. Turning it off returns to
+Main coordinating its own confirmed native workers; it does not enroll an
+Economy peer. The `execution.codexAllowNonCoordinatorPolling` control appears
+only while dual-conversation mode is on and defaults to `false`.
+
+Without the polling setting, an enrolled coordinator may continue bounded
+queries for confirmed native children whose returned latest turn is still in
+progress. Other conversations may make one status check after a user request or
+new event, then wait for a result. Setting
+`execution.codexAllowNonCoordinatorPolling` to `true` permits other Codex
+conversations to continue bounded polling within their authorized task scope.
+Changing targets, cursors or tool names does not start a new loop. A wait for
+change retains its one-time wait behavior; a zero-timeout wait is a one-time
+status check. A new actual UserPromptSubmit or a newly observed native worker
+event opens one new check.
+
+The same gate covers structured `read_thread`, `wait_threads`, recent thread
+lists and native worker roster reads. An opaque shell command does not expose its
+inner RPCs to the hook; its caller must read
+`execution-codex-polling-policy` and follow the returned scope before each poll.
+Unreadable settings or known damaged coordinator state deny continuation. Native
+spawn or SubagentStart evidence supplies child identity; model/category/title or
+old cache does not. PostToolUse feedback and stopping the whole model turn are
+separate host facts. See `specs/engine-hook-events-v2.md`; actual Desktop
+consumption needs its own native execution counts and version evidence.
+
+The coordinator batch entry remains available through
+`execution-codex-batch-arm`, `execution-codex-batch-prepare`,
+`execution-codex-batch-adopt`, `execution-codex-batch-observe` and
+`execution-codex-batch-status`. These commands use retained native peer receipts
+and a device-local ledger. `prepare` freezes the selected worker inputs but does
+not dispatch them. A registered coordinator's observe command or hook can make
+bounded native reads and, after the receipt confirms every member terminal,
+deliver one report to Main under the existing authorization. An unknown delivery
+is retained for reconciliation and is never blindly resent.
 
 ## Supported batch receipt commands
 
@@ -415,6 +446,10 @@ category supplementation is idempotent and cannot alter another host's policy.
 Model onboarding does not silently persist model choices or fake Owner provenance.
 
 ## Evidence and PR acceptance
+
+Use the [verification evidence workflow](verification-evidence.md) for implementation, merge checks and
+independent INIT acceptance. Place each `Gate-Evidence: <runId>` on its own line in the worker's final.
+The automatic report carries references verified against the member's actual work and library.
 
 Source/fixture regressions verify category routing, explicit host isolation,
 receipt reconciliation and legacy owned-hook retirement. They do not certify

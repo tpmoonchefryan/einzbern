@@ -69,7 +69,7 @@ import type { HostHookFileHost, HostHookScope, HostHooksPlan } from "./host-hook
 import { managedSectionRecordKey, managedSectionRecordsFor, planManagedWrite } from "./managed-sections.js";
 import { readAgentsNavigation } from "./machine-settings.js";
 import { readEngineModelPolicyFile } from "./engine-model-policy.js";
-import { listRules } from "./rules.js";
+import { listRulesFromProjectState } from "./rules.js";
 import { DIRECTORY } from "./names.js";
 import { NODE_FLOOR, meetsNodeFloor } from "./node-floor.js";
 import { gitRemoteOf, gitTopLevel, normalizeGitRemote, readAgentsProjectRootSelection, readRegistry, registeredAgentsProjectRoots } from "./registry.js";
@@ -858,9 +858,8 @@ async function managedSectionsCheck(context: DoctorContext, located: ProjectLibr
     }
   }
   if (pending.size > 0) causes.push("MANAGED_SECTION_PENDING");
-  const outdated = problems.length === 0 && !skipped.includes("AGENTS.md") ? (await listRules({ libraryRoot: located.libraryPath, projectRoot: context.projectRoot,
-    ...(located.entry?.projectId === undefined ? {} : { configurationProjectId: located.entry.projectId }),
-  })).filter(rule => rule.state === "update-available").map(rule => rule.section) : [];
+  const outdated = problems.length === 0 && !skipped.includes("AGENTS.md")
+    ? (await listRulesFromProjectState(effective, context.projectRoot)).filter(rule => rule.state === "update-available").map(rule => rule.section) : [];
   if (outdated.length > 0) causes.push("MANAGED_SECTION_OUTDATED");
   return result("managed-sections", causes, {
     libraryPath: located.libraryPath,

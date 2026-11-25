@@ -43,6 +43,22 @@ export function workspaceSettingIdentity(key: string, projectId?: string): strin
   return projectId === undefined ? key : JSON.stringify([projectId, key]);
 }
 
+export function isLibraryAgentsSetting(key: string): key is "agents.generation" | "agents.sharedNavigation" {
+  return key === "agents.generation" || key === "agents.sharedNavigation";
+}
+
+export function legacyLibraryAgentsSettings(state: Pick<WorkspaceState, "settings" | "projects">, key: string): readonly WorkspaceSettingRecord[] {
+  const live = new Set(state.projects.filter(project => !project.tombstone).map(project => project.id));
+  return state.settings.filter(record => record.key === key && record.projectId !== undefined && live.has(record.projectId));
+}
+
+export function libraryAgentsSetting(state: Pick<WorkspaceState, "settings" | "projects">, key: string, lineage: readonly ProjectRecord[]): WorkspaceSettingRecord | undefined {
+  const stored = state.settings.find(record => record.key === key && record.projectId === undefined);
+  if (stored !== undefined) return stored;
+  const legacy = new Map(state.settings.filter(record => record.key === key).map(record => [record.projectId, record]));
+  return lineage.map(project => legacy.get(project.id)).find(record => record !== undefined);
+}
+
 export function assertSettingScope(state: WorkspaceState, key: string, projectId?: string): void {
   projectLineage(state, projectId);
   if (chainIdentity(state, projectId)?.role === "coordination" && !coordinationRuntimeSetting(settingsCatalogEntry(key).key)) throw new ProjectScopeError("coordination chains expose runtime settings only", { key });
@@ -53,15 +69,15 @@ export function assertSettingScope(state: WorkspaceState, key: string, projectId
 
 /**
  * TCRN-CROSS-INIT-053 R47 (c1-B; Owner 2026-10-09, round 7): the settings a coordination chain keeps for
- * itself. The four library settings, and the artifact language and orchestration limits of the work
- * dispatched from it. On a coordination chain each is read and written for the whole library, and no
+ * itself. The four library settings, artifact language and shared AGENTS controls. On a coordination
+ * chain each is read and written for the whole library, and no
  * involved project inherits one as development configuration (a coordination chain is never a
- * development target or a common default). Every other key, models.* among them, stays per target.
+ * development target or a common default). Model concurrency and quota live on the device; old
+ * project model rows remain compatibility history.
  */
 export const COORDINATION_RUNTIME_SETTING_KEYS = Object.freeze([
   "engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath",
-  "artifact.language", "execution.maxConcurrentSubagents", "agents.generation", "agents.sharedNavigation",
-  "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent",
+  "artifact.language", "agents.generation", "agents.sharedNavigation",
 ] as const satisfies readonly SettingKey[]);
 
 /** Whether a coordination chain keeps this key for itself (COORDINATION_RUNTIME_SETTING_KEYS). */
@@ -87,7 +103,7 @@ export type ScopedWorkspaceState = WorkspaceState & {
 
 export const DESIGN_CONFIGURATION_KEYS = Object.freeze([
   "design.authority", "design.repository", "design.pullRequestTarget", "design.productionDocs",
-  "design.buildService", "design.buildProject", "design.consumedVersion",
+  "design.buildService", "design.buildProject",
 ] as const satisfies readonly SettingKey[]);
 
 export function designConfiguration(state: Pick<ScopedWorkspaceState, "settings"> & Partial<Pick<ScopedWorkspaceState, "configurationProjectId" | "settingSources">>): {
@@ -100,9 +116,8 @@ export function designConfiguration(state: Pick<ScopedWorkspaceState, "settings"
     source: state.settingSources?.[key] ?? { kind: state.settings.some((entry) => entry.key === key) ? "library" as const : "default" as const, projectId: null, projectName: null, inherited: state.settings.some((entry) => entry.key === key) && state.configurationProjectId != null } }));
   const missing = bindings.filter((entry) => entry.value === null).map((entry) => entry.key);
   const authoritySource = bindings[0]!.source;
-  // A new local authority cannot silently borrow another authority’s inherited publication bindings.
-  // Explicit local companion declarations are valid; the application’s consumed version may be local.
-  const conflicting = bindings.some((entry) => entry.key !== "design.consumedVersion" && entry.value !== null && entry.source.inherited && (entry.source.projectId !== authoritySource.projectId || entry.source.libraryId !== authoritySource.libraryId || entry.source.kind !== authoritySource.kind));
+  // Bind any inherited publication settings to the authority that supplied them.
+  const conflicting = bindings.some((entry) => entry.value !== null && entry.source.inherited && (entry.source.projectId !== authoritySource.projectId || entry.source.libraryId !== authoritySource.libraryId || entry.source.kind !== authoritySource.kind));
   return { status: conflicting ? "conflicting" : missing.length > 0 ? "unconfigured" : "declared", publicationVerification: "unverified", bindings, missing };
 }
 
@@ -126,7 +141,8 @@ export function scopedWorkspaceState(state: WorkspaceState, projectId?: string):
     if (coordination && !coordinationRuntimeSetting(entry.key)) continue;
     const libraryLevel = (coordination && chainIdentity(state)?.role !== "shared") || entry.scope === "library";
     const eligible = libraryLevel ? [undefined] : scopes;
-    const record = eligible.map((scope) => state.settings.find((value) => value.key === entry.key && value.projectId === scope)).find((value) => value !== undefined);
+    const record = isLibraryAgentsSetting(entry.key) ? libraryAgentsSetting(state, entry.key, lineage)
+      : eligible.map((scope) => state.settings.find((value) => value.key === entry.key && value.projectId === scope)).find((value) => value !== undefined);
     const fallback = eligible.filter((scope) => scope !== (libraryLevel ? undefined : projectId)).map((scope) => state.settings.find((value) => value.key === entry.key && value.projectId === scope)).find((value) => value !== undefined);
     if (fallback !== undefined) fallbackRecords.push(fallback);
     settingFallbackValues[entry.key] = fallback?.value ?? entry.defaultValue;

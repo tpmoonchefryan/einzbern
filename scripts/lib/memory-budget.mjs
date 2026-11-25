@@ -11,6 +11,8 @@ import { readStorageLocation } from "./storage-location.mjs";
 import { createPrivateWindowsDirectory, inspectWindowsPermissions, queryWindows } from "./windows-system.mjs";
 
 export const MEMORY_POLICY_SETTING = "execution.memoryPolicy";
+export const MACHINE_SETTINGS_SCHEMA_VERSION = "tcrn.machine-settings.v3";
+const MACHINE_SETTINGS_SCHEMA_VERSIONS = [MACHINE_SETTINGS_SCHEMA_VERSION, "tcrn.machine-settings.v2", "tcrn.machine-settings.v1"];
 export const MEMORY_LEASE_VARIABLE = "EINZBERN_MEMORY_LEASE";
 export const MiB = 1024 * 1024;
 const VERSION = "einzbern.memory-budget.v1";
@@ -41,12 +43,16 @@ export function parseMemoryPolicy(text) {
   return Object.freeze(policy);
 }
 
+export function supportsMachineSettingsSchema(version) {
+  return MACHINE_SETTINGS_SCHEMA_VERSIONS.includes(version);
+}
+
 export function readMemoryPolicy(deviceHome) {
   const path = join(deviceHome, "machine-settings.json");
   let value;
   try { value = JSON.parse(readFileSync(path, "utf8")); }
   catch (error) { if (error.code === "ENOENT") return null; fail("MEMORY_POLICY_UNREADABLE"); }
-  if (!["tcrn.machine-settings.v1", "tcrn.machine-settings.v2"].includes(value.schemaVersion) || !value.values || typeof value.values !== "object" || Array.isArray(value.values)) fail("MEMORY_POLICY_UNREADABLE");
+  if (!supportsMachineSettingsSchema(value?.schemaVersion) || !value.values || typeof value.values !== "object" || Array.isArray(value.values)) fail("MEMORY_POLICY_UNREADABLE");
   return Object.hasOwn(value.values, MEMORY_POLICY_SETTING) ? parseMemoryPolicy(value.values[MEMORY_POLICY_SETTING]) : null;
 }
 

@@ -3,7 +3,7 @@
 import { resolve } from "node:path";
 import { canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
 import { dotInstant } from "./dot-execution.js";
-import { validateEngineModelPolicyFile } from "./engine-model-policy.js";
+import { validateEngineModelPolicySnapshot } from "./engine-model-policy.js";
 import type { EngineModelPolicyFile } from "./engine-model-policy.js";
 import { hostObject, hostText, HostExecutionError } from "./host-capabilities.js";
 import { validateHostNativePreparation } from "./native-tool-evidence.js";
@@ -75,6 +75,7 @@ export interface AntigravitySwarmBoardDeliverable {
   readonly author: string;
   readonly summary: string;
   readonly commitSha?: string | null;
+  readonly gateRunIds?: readonly string[];
 }
 
 export interface AntigravitySwarmLanding {
@@ -363,11 +364,15 @@ function validateObservations(
   if (obs.boardDeliverables !== undefined) {
     if (!Array.isArray(obs.boardDeliverables)) fail("boardDeliverables must be an array");
     for (const d of obs.boardDeliverables) {
-      const item = hostObject(d, "boardDeliverable", ["seq", "author", "summary", "commitSha"]);
+      const item = hostObject(d, "boardDeliverable", ["seq", "author", "summary", "commitSha", "gateRunIds"]);
       positive(item.seq, "boardDeliverable seq");
       hostText(item.author, "boardDeliverable author");
       hostText(item.summary, "boardDeliverable summary");
       optionalNullableText(item.commitSha, "boardDeliverable commitSha");
+      if (item.gateRunIds !== undefined &&
+        (!Array.isArray(item.gateRunIds) || item.gateRunIds.length > 64 ||
+          item.gateRunIds.some(id => typeof id !== "string" || !/^[0-9]{8}T[0-9]{6}Z-[a-f0-9]{12}$/u.test(id)) ||
+          new Set(item.gateRunIds).size !== item.gateRunIds.length)) fail("invalid boardDeliverable gate run references");
     }
   }
   if (obs.landings !== undefined) {
@@ -423,7 +428,7 @@ function isLandingValid(landing: AntigravitySwarmLanding): boolean {
 function derive(input: Omit<AntigravitySwarmBatchInput, "prior">): AntigravitySwarmBatch {
   const cutoff = dotInstant(input.observationCutoff, "observation cutoff");
   const manifest = validateManifest(input.manifest);
-  const policy = validateEngineModelPolicyFile(input.policy);
+  const policy = validateEngineModelPolicySnapshot(input.policy);
   if (policy.hosts.antigravity?.digest !== manifest.policyDigest) {
     fail("policy digest differs from device hosts.antigravity policy");
   }

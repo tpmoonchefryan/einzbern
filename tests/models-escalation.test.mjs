@@ -109,13 +109,18 @@ test("Historical validator/replay 508-AC1: GIVEN a new library WHEN settings-cat
   assert.deepEqual([threshold.type, threshold.controlType, threshold.min, threshold.max], ["string", "number", 1, undefined]);
   assert.deepEqual([ceiling.type, ceiling.controlType, ceiling.valueReference, ceiling.allowedValues, ceiling.referenceStatus, ceiling.valueOrigin],
     ["string", "reference", { key: "models.category", field: "id" }, ["flagship", "main", "economy"], "ready", "default"]);
-  // The models group: the two tables, then the three keys.
+  // The models group orders the compatibility declarations after the two tables and escalation.
   assert.deepEqual(catalog.settings.filter((entry) => entry.group === "models").sort((left, right) => left.order - right.order).map((entry) => [entry.key, entry.shape]), [
     ["models.category", "collection"],
     ["models.tiers", "collection"],
     ["models.escalation.enabled", "scalar"],
     ["models.escalation.threshold", "scalar"],
     ["models.escalation.ceiling", "scalar"],
+    ["execution.maxConcurrentSubagents", "scalar"],
+    ["quota.fiveHourParallelOffPercent", "scalar"],
+    ["quota.fiveHourWaitPercent", "scalar"],
+    ["quota.weeklyParallelOffPercent", "scalar"],
+    ["quota.weeklyWaitPercent", "scalar"],
   ]);
   assert.deepEqual(readModelsEscalation((await materializeWorkspace(workspace)).settings), DEFAULT_ESCALATION);
   assert.deepEqual(readModelsEscalation([]), DEFAULT_ESCALATION, "an unset key reads as its default");

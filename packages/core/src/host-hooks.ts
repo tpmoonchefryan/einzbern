@@ -2,8 +2,7 @@
 
 // The installed engine owns prompt recall, first-work subagent recall and the bounded Read
 // guard. Each host file runs the stable device launcher, never a checkout or platform script.
-// SessionStart is added only when agents.navigation is declined. SubagentStart always carries
-// navigation and recalls against the host's documented agent_type (not a fabricated task field).
+// SessionStart and SubagentStart provide navigation when the managed file does not carry it.
 // Codex SubagentStop, SSH and control-tree hooks are retired. Peer hooks guard handoff and return.
 // DSH keeps its separate plugin contract.
 // Engine updates change engine/current without rewriting host command paths.
@@ -165,8 +164,7 @@ export interface HostHooksRequest {
   // false: no Einzbern hook in this file, only what is ours taken out of it (a container's
   // settings once the hook lives in the user's). true when left out.
   readonly install?: boolean;
-  // This device's agents.navigation: declined additionally installs SessionStart.
-  // SubagentStart remains installed regardless. null when left out.
+  // The legacy device navigation choice retained in setup receipts.
   readonly navigation?: AgentsNavigationChoice | null;
 }
 
@@ -183,8 +181,7 @@ export interface HostHooksExpectation {
   readonly launcher: string;
   readonly hooksFile: string;
   readonly configFile: string | null;
-  // Event → the Einzbern hook groups the file must carry: common events, Codex-only events for
-  // Codex, and pointer events when navigation is declined; none when nothing is installed.
+  // Event → the Einzbern hook groups the file must carry while installed.
   readonly groups: Readonly<Record<string, readonly HostHookGroup[]>>;
 }
 
@@ -283,7 +280,7 @@ export function planHostHooks(request: HostHooksRequest): HostHooksExpectation {
   if (install) {
     if (host === "devin") {
       // Devin also runs the Claude Code registration it imports, so its own commands name the host.
-      for (const event of [...DEVIN_HOOK_EVENTS, ...(navigation === "declined" ? ["SessionStart"] : [])]) {
+      for (const event of [...DEVIN_HOOK_EVENTS, "SessionStart"]) {
         const command = hostHookCommand(launcher, event, request.userHome, platform, "devin");
         groups[event] = [{ ...(event === "PreToolUse" ? { matcher: DEVIN_READ_MATCHER } : {}), hooks: [{ type: "command", command }] }];
       }
@@ -291,7 +288,7 @@ export function planHostHooks(request: HostHooksRequest): HostHooksExpectation {
       const events = [...new Set([
         ...Object.keys(HOST_HOOK_EVENTS),
         ...(host === "codex" ? Object.keys(CODEX_HOOK_EVENTS) : []),
-        ...(navigation === "declined" ? Object.keys(HOST_HOOK_POINTER_EVENTS) : []),
+        ...Object.keys(HOST_HOOK_POINTER_EVENTS),
       ])];
       for (const event of events) {
         groups[event] = [{ hooks: [{ type: "command", command: hostHookCommand(launcher, event, request.userHome, platform) }] }];

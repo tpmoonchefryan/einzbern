@@ -25,7 +25,7 @@ test("T17 precise governed save CAS/readback preserves unselected entries and ot
   assert.deepEqual(saved.readback.hosts["claude-code"], other.hosts["claude-code"]);
   assert.deepEqual(saved.operation.result.tiers[1], f.initial.hosts.codex.tiers[1]); assert.equal(saved.operation.result.tiers[0].note, "retained");
   assert.deepEqual(saved.operation.result.quota, f.initial.hosts.codex.quota); assert.deepEqual(saved.operation.result.categories, f.initial.hosts.codex.categories); assert.deepEqual(saved.operation.result.escalation, f.initial.hosts.codex.escalation);
-  assert.equal(saved.operation.result.revision, 2); assert.equal(saved.readback.revision, 3); assert.equal(saved.readback.schemaVersion, "tcrn.engine-model-policy.v2");
+  assert.equal(saved.operation.result.revision, 2); assert.equal(saved.readback.revision, 3); assert.equal(saved.readback.schemaVersion, "tcrn.engine-model-policy.v3");
   assert.deepEqual(await readEngineModelPolicyFile(f.home), saved.readback);
 });
 test("T18 same-host conflict preserves bytes; exact replay after lost receipt never increments revision", async t => {
@@ -65,7 +65,7 @@ test("T18 competing isolated transactions commit exactly one snapshot and retain
 });
 test("S2 storage compatibility: legacy reads do not migrate bytes and transaction receipts reject malformed history", async t => {
   const f = await fixture(t); const before = await readFile(f.path, "utf8");
-  assert.equal((await readEngineModelPolicyFile(f.home)).schemaVersion, "tcrn.engine-model-policy.v1"); assert.equal(await readFile(f.path, "utf8"), before);
+  assert.equal((await readEngineModelPolicyFile(f.home)).schemaVersion, "tcrn.engine-model-policy.v3"); assert.equal(await readFile(f.path, "utf8"), before);
   const saved = await applyEngineModelPolicySave(f.save);
   for (const patch of [{ extra: true }, { expectedRevision: 0 }, { storeRevision: 999 }, { result: { ...saved.operation.result, digest: "0".repeat(64) } }]) {
     assert.throws(() => validateEngineModelPolicyFile({ ...saved.readback, operations: { [f.save.operationId]: { ...saved.operation, ...patch } } }));

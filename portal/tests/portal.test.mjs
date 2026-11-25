@@ -74,27 +74,31 @@ test("portal writes carry the actor under the engine's write lock, then return t
   }));
   assert.equal(retiredClasses.response.status, 409);
   assert.equal(retiredClasses.body.reasonCode, "SETTINGS_KEY_UNREGISTERED");
-  const parallelOff = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "quota.fiveHourParallelOffPercent", value: "80" }));
-  assert.equal(parallelOff.body.reasonCode, "SETTINGS_KEY_DEVICE_LEVEL");
-  const wait = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "quota.fiveHourWaitPercent", value: "95" }));
-  assert.equal(wait.body.reasonCode, "SETTINGS_KEY_DEVICE_LEVEL");
+  const parallelOff = await request(url, "/api/machine-settings", writeOptions(boot.token, "POST", { key: "models.quota.fiveHourParallelOffPercent", value: "80" }));
+  assert.equal(parallelOff.body.reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
+  assert.equal(parallelOff.body.readback.currentValue, "80");
+  const wait = await request(url, "/api/machine-settings", writeOptions(boot.token, "POST", { key: "models.quota.fiveHourWaitPercent", value: "95" }));
+  assert.equal(wait.body.reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
+  assert.equal(wait.body.readback.currentValue, "95");
   // TCRN-CROSS-STORY-467 R3: the execution write route carried the dispatch-* writes and the
   // retired plan and persona actions. It is gone, so those posts reach no writer and leave
   // nothing in the session audit.
   const retired = await request(url, "/api/execution", writeOptions(boot.token, "POST", { action: "model-plan-set", host: "claude-code", name: "daily", defaultModel: "opus-5" }));
   assert.equal(retired.response.status, 404);
   assert.equal(retired.body.reasonCode, "PORTAL_ROUTE_UNKNOWN");
-  const active = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.maxConcurrentSubagents", value: "3" }));
-  assert.equal(active.body.reasonCode, "SETTINGS_WRITE_COMMITTED");
+  const retiredConcurrency = await request(url, "/api/settings", writeOptions(boot.token, "POST", { key: "execution.maxConcurrentSubagents", value: "3" }));
+  assert.equal(retiredConcurrency.response.status, 409);
+  assert.equal(retiredConcurrency.body.reasonCode, "SETTINGS_KEY_DEVICE_LEVEL");
+  const active = await request(url, "/api/machine-settings", writeOptions(boot.token, "POST", { key: "models.maxConcurrentSubagents", value: "3" }));
+  assert.equal(active.body.reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
+  assert.equal(active.body.readback.currentValue, "3");
   const retiredPersona = await request(url, "/api/execution", writeOptions(boot.token, "POST", { action: RETIRED_PERSONA_ACTIONS.override, name: "Verity", fields: { mission: "Review governed evidence", role: "reviewer" } }));
   assert.equal(retiredPersona.response.status, 404);
   assert.equal(retiredPersona.body.reasonCode, "PORTAL_ROUTE_UNKNOWN");
 
-  // TCRN-CROSS-STORY-482 R4: the session audit left with its page. Each settings write is answered
-  // by the engine's receipt; compatibility-only policy writes append no version.
-  for (const receipt of [setting, active]) assert.ok(receipt.body.receiptDigest && receipt.body.headEventHash && receipt.body.version);
-  const versions = [setting.body.version, active.body.version];
-  assert.ok(versions.every((version, index) => Number.isInteger(version) && (index === 0 || version > versions[index - 1])));
+  // Project setting writes have event receipts; device model values have machine-local readback.
+  assert.ok(setting.body.receiptDigest && setting.body.headEventHash && setting.body.version);
+  assert.equal(Object.hasOwn(active.body, "version"), false);
 
   const audit = await request(url, RETIRED_ROUTES.sessionAudit, readOptions(boot.token));
   assert.equal(audit.response.status, 404);

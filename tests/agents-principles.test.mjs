@@ -6,12 +6,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { planPrinciples } from "../dist/build/packages/core/src/agents-principles.js";
 import { applyManagedWrite, parseManagedFile, renderSection, sectionDigest } from "../dist/build/packages/core/src/managed-sections.js";
+import { NAVIGATION_LINES } from "../dist/build/packages/core/src/navigation-lines.js";
 import { BUILT_IN_RULES } from "../dist/build/packages/core/src/rules-catalog.js";
 
 const enabled = BUILT_IN_RULES.slice(0, 8);
 const rules = enabled.map(({ id, version }) => ({ collection: "rule", key: id, value: { enabled: true, version } }));
 const settings = [{ key: "artifact.language", value: "zh-CN" }];
-const navigation = "处理 Einzbern 相关任务时，加载 Mana Orchestrate 并遵循相应细则。";
+const navigation = NAVIGATION_LINES.join("\n");
 const at = "2026-11-21T00:00:00Z";
 const record = (id, body, state = "managed") => ({ collection: "managed-section", key: "AGENTS.md#" + id,
   value: { file: "AGENTS.md", id, digest: sectionDigest(body), rev: 1, state } });
@@ -40,7 +41,7 @@ test("a bilingual catalog renders the approved eight one-line principles with on
   const [section] = parsed.sections;
   assert.equal(section.body.replaceAll("\r\n", "\n"), [navigation, "", ...enabled.map(r => r.principle.zh), ""].join("\n"));
   assert.equal(section.digest, section.bodyDigest);
-  assert.equal(section.digest, "ba8ddb7a32add53ffed990a887d8f7782410530c419a67c79d83b66a7ee50a11");
+  assert.equal(section.digest, "f23f5d70145dd4e7223c2d3164c1a2f1639451344609923f47afaac878a2552e");
   assert.equal(parsed.outside.join(""), "# Title\r\n\r\n\r\nKeep this note.\r\nEnd of file.");
   const next = await planPrinciples(project, { settings, configRecords: [...rules, record("agents", section.body)] });
   assert.equal(next.write, false);

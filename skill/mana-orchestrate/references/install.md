@@ -183,9 +183,12 @@ configuration, state that Codex peer mode is not ready; ordinary installation an
 other hosts remain available. Do not manufacture a decision or silently migrate
 another host's groups. See `specs/engine-model-policy-v1.md`.
 
-Claude Code and DSH retain their single-conversation workflow. Codex-specific
-batch recovery uses `docs/codex-native-controller.md`; no collector or stop-hook
-activation is needed. Updates/repairs must preserve user-edited hooks and groups.
+Codex uses two conversations by default. The device setting
+`execution.codexDualConversation=false` selects single-conversation batching.
+In dual-conversation mode, the non-coordinator polling setting
+`execution.codexAllowNonCoordinatorPolling` defaults to false. Codex recovery is
+documented in `docs/codex-native-controller.md`. Claude Code and DSH use one
+conversation. Updates and repairs preserve user-edited hooks and groups.
 
 When Kiro is selected by an existing global `${KIRO_HOME:-$HOME/.kiro}` or project `.kiro/`
 configuration directory, fresh setup also manages Kiro's standalone Hooks file and Skill copy.

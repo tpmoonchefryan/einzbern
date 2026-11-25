@@ -237,7 +237,7 @@ test("477-AC1, AC4: after the move each host's user file holds one Einzbern User
   const codex = await readJson(userCodexHooks);
   for (const [label, document] of [["claude", claude], ["codex", codex]]) {
     const ours = hookCommands(document).filter((hook) => isEinzbernHookCommand(hook.command));
-    const expectedEvents = ["PostToolUse", "PreToolUse", "Stop", "SubagentStart", "UserPromptSubmit"].filter(event => label === "codex" || !["PostToolUse", "Stop"].includes(event));
+    const expectedEvents = ["PostToolUse", "PreToolUse", "SessionStart", "Stop", "SubagentStart", "UserPromptSubmit"].filter(event => label === "codex" || !["PostToolUse", "Stop"].includes(event));
     assert.deepEqual(ours.map((hook) => hook.event).sort(), expectedEvents, `${label}: current engine hooks`);
     assert.deepEqual(hookCommands(document).filter((hook) => isLegacyHookCommand(hook.command)), [], `${label}: no old hook`);
   }
@@ -245,6 +245,7 @@ test("477-AC1, AC4: after the move each host's user file holds one Einzbern User
   assert.deepEqual(claude.hooks, {
     UserPromptSubmit: [{ hooks: [{ type: "command", command: launcherCommand(device) }] }, OTHER_PROMPT],
     PreToolUse: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "pre-tool-use") }] }, OTHER_TOOL],
+    SessionStart: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "session-start") }] }],
     SubagentStart: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "subagent-start") }] }],
     ...OTHER_EVENT,
   });
@@ -252,7 +253,7 @@ test("477-AC1, AC4: after the move each host's user file holds one Einzbern User
   assert.equal(claude.skipWorkflowUsageWarning, true);
   assert.deepEqual(codex, {
     description: "the user's own hooks",
-    hooks: { PreToolUse: [OTHER_TOOL, { hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "pre-tool-use") }] }], UserPromptSubmit: [{ hooks: [{ type: "command", command: launcherCommand(device) }] }], SubagentStart: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "subagent-start") }] }], PostToolUse: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "post-tool-use") }] }], Stop: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "stop") }] }], SubagentStop: [OTHER_STOP] },
+    hooks: { PreToolUse: [OTHER_TOOL, { hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "pre-tool-use") }] }], UserPromptSubmit: [{ hooks: [{ type: "command", command: launcherCommand(device) }] }], SubagentStart: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "subagent-start") }] }], PostToolUse: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "post-tool-use") }] }], Stop: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "stop") }] }], SessionStart: [{ hooks: [{ type: "command", command: launcherCommand(device).replace("user-prompt-submit", "session-start") }] }], SubagentStop: [OTHER_STOP] },
   });
 
   // The container keeps no hook of ours, old or new, and keeps everything else.
@@ -349,8 +350,8 @@ test("common hooks render for both hosts, peer observations stay Codex-only, and
   const deviceHome = "/srv/einzbern/device";
   const claude = planHostHooks({ host: "claude-code", scope: "user", deviceHome, platform: "linux" });
   const codex = planHostHooks({ host: "codex", scope: "project", deviceHome, platform: "linux" });
-  assert.deepEqual(Object.keys(claude.groups), ["UserPromptSubmit", "SubagentStart", "PreToolUse"]);
-  assert.deepEqual(Object.keys(codex.groups), [...Object.keys(claude.groups), "PostToolUse", "Stop"]);
+  assert.deepEqual(Object.keys(claude.groups), ["UserPromptSubmit", "SubagentStart", "PreToolUse", "SessionStart"]);
+  assert.deepEqual(Object.keys(codex.groups), ["UserPromptSubmit", "SubagentStart", "PreToolUse", "PostToolUse", "Stop", "SessionStart"]);
   for (const event of Object.keys(claude.groups)) assert.deepEqual(codex.groups[event], claude.groups[event]);
   assert.deepEqual([claude.hooksFile, claude.configFile, codex.hooksFile, codex.configFile], [CLAUDE, null, CODEX, CODEX_CONFIG_FILE]);
   assert.deepEqual(mergeHostHooks(null, claude).document, { hooks: claude.groups });
@@ -383,7 +384,7 @@ test("477-R3: another tool's hook sharing a group with an old hook stays in its 
   const cleanMixed = { hooks: [{ type: "command", command: mixed.hooks[0].command, timeout: 30 }, mixed.hooks[1]] };
   const cleanMoved = { hooks: [{ type: "command", command: moved.hooks[0].command }] };
   const merged = mergeHostHooks({ hooks: { SessionStart: [cleanMixed], UserPromptSubmit: [OTHER_PROMPT, cleanMoved, OTHER_TOOL] } }, expected);
-  assert.deepEqual(merged.document.hooks.SessionStart, [{ hooks: [mixed.hooks[1]] }]);
+  assert.deepEqual(merged.document.hooks.SessionStart, [...expected.groups.SessionStart, { hooks: [mixed.hooks[1]] }]);
   assert.deepEqual(merged.document.hooks.UserPromptSubmit, [OTHER_PROMPT, ...expected.groups.UserPromptSubmit, OTHER_TOOL]);
   const again = mergeHostHooks(merged.document, expected);
   assert.deepEqual([again.document, again.removedHooks], [merged.document, []]);
@@ -495,7 +496,7 @@ test("477: a file this cannot follow is refused before anything is written, and 
   await assert.rejects(readHostHooks(expected, { root: join(home, "absent"), home }), (error) => error?.reasonCode === "HOST_HOOKS_INPUT_INVALID");
 });
 
-test("478-AC5, BL34/35: declined navigation adds SessionStart; subagent recall and Read guard remain after choosing written", async (t) => {
+test("478-AC5, BL34/35 and E05: the hooks stay registered when the navigation destination changes", async (t) => {
   const { home, device } = await scratch(t);
   for (const platform of ["darwin", "linux", "win32"]) {
     const deviceHome = platform === "win32" ? "D:\\Einzbern\\device" : "/srv/einzbern/device";
@@ -526,12 +527,11 @@ test("478-AC5, BL34/35: declined navigation adds SessionStart; subagent recall a
   assert.deepEqual(Object.keys((await readJson(join(home, CODEX))).hooks).sort(), ["PostToolUse", "PreToolUse", "SessionStart", "Stop", "SubagentStart", "UserPromptSubmit"]);
   assert.match(await readFile(join(home, CODEX_CONFIG_FILE), "utf8"), /^\[features\]\nhooks = true\n/mu);
 
-  // Written: SessionStart comes out; the three engine-owned events remain.
   const written = await render("claude-code", "user", home, home, device, { navigation: "written" });
-  assert.equal(written.applied.reasonCode, "HOST_HOOKS_WRITTEN");
-  assert.deepEqual(written.plan.removedHooks.map((hook) => hook.event).sort(), ["SessionStart"]);
+  assert.equal(written.applied.reasonCode, "HOST_HOOKS_CURRENT");
+  assert.deepEqual(written.plan.removedHooks, []);
   const after = await readJson(join(home, CLAUDE));
-  assert.deepEqual(Object.keys(after.hooks), ["UserPromptSubmit", "SubagentStart", "PreToolUse"]);
+  assert.deepEqual(after.hooks, settings.hooks);
   assert.deepEqual(after.hooks.UserPromptSubmit, settings.hooks.UserPromptSubmit);
 });
 

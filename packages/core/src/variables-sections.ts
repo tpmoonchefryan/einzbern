@@ -20,7 +20,6 @@ import {
 } from "./managed-sections.js";
 import type { ManagedSectionDecision, ManagedSectionRecord, ManagedWritePlan } from "./managed-sections.js";
 import { MODELS_TIERS_SETTING_KEY } from "./models-tiers.js";
-import { settingsCatalogEntry } from "./settings.js";
 import { looksSecretShaped, variableExportDecision, variablesInRenderOrder } from "./variables.js";
 import { appendPlannedWrite } from "./workspace.js";
 import type { WorkspaceMutationOptions, WorkspaceState } from "./workspace.js";
@@ -35,14 +34,9 @@ const DESIGN_AUTHORITY_SETTING_KEY = "design.authority";
 export const SYSTEM_VARIABLE_KEYS: readonly string[] = Object.freeze([
   ...DESIGN_CONFIGURATION_KEYS,
 ]);
-// TCRN-CROSS-STORY-540 GWT2 (MIN-243 D1, Q5; TCRN-CROSS-SUB-506): the system settings a coordination
-// library's system section renders, in its order: the orchestration limits a coordination library
-// keeps for itself (project-scope.ts, COORDINATION_RUNTIME_SETTING_KEYS) and the seven design bindings.
-// A coordination library holds no models.*, so none is here.
-export const COORDINATION_SYSTEM_VARIABLE_KEYS: readonly string[] = Object.freeze([
-  "execution.maxConcurrentSubagents",
-  ...DESIGN_CONFIGURATION_KEYS,
-]);
+// Coordination libraries keep design bindings. Execution limits now live on the device model page
+// and are never copied into shared generated output.
+export const COORDINATION_SYSTEM_VARIABLE_KEYS: readonly string[] = Object.freeze([...DESIGN_CONFIGURATION_KEYS]);
 // The heading the three models.escalation settings share in the system section.
 
 // TCRN-CROSS-STORY-540 (Q4; TCRN-CROSS-SUB-506): the fixed text of both sections in the two
@@ -190,28 +184,13 @@ function provenanceLines(state: SystemSectionState, keys: readonly string[], wor
 
 /**
  * TCRN-CROSS-STORY-540 GWT2 (MIN-243 D1, Q5; TCRN-CROSS-SUB-506): a coordination library's system
- * section. A coordination library holds no models.* (MIN-243 D1), so it renders none; it renders its
- * orchestration limits (COORDINATION_SYSTEM_VARIABLE_KEYS: execution.maxConcurrentSubagents and the four
- * quota.* settings) with their effective values, a declared one or else the engine's default, then the
- * seven design bindings and the provenance table as a project's section does.
+ * section contains its design bindings and provenance. Device execution policy is not portable
+ * library content.
  */
 function coordinationSystemSection(state: SystemSectionState, words: SectionText): RenderedVariablesSection {
   const withheld: WithheldEntry[] = [];
-  const limits = ["execution.maxConcurrentSubagents"];
   const lines = [
     words.systemHeading,
-    "",
-    words.coordinationNote,
-    "",
-    `### ${limits.join(", ")}`,
-    "",
-    words.projectBudget,
-    words.policy,
-    "",
-    ...table(words.settingValueHeader, limits.map((key) => {
-      const value = state.settings.find((entry) => entry.key === key)?.value ?? settingsCatalogEntry(key).defaultValue;
-      return row([key, value === null ? words.unset : cell(value, words)]);
-    }), words),
     "",
     ...designLines(state, words, withheld),
     "",

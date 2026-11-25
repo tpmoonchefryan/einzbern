@@ -395,8 +395,11 @@ if (!MUTATION) test("R46 I12: coordination settings omit project model rows whil
     await waitFor(() => document.querySelector("#rail-workspace-label").textContent === "TCRN-R45-COORDINATION", "the coordination chain");
     await page.waitForSettled();
     document.querySelector('[data-page-target="settings"]')?.click();
-    assert.equal(document.querySelector('[data-setting-group="models"]'), null, "coordination settings expose no project model collection");
+    assert.equal(Boolean(document.querySelector('[data-setting-group="models"]')), false, "the legacy coordination Settings page has no Models group");
+    assert.equal(Boolean(document.querySelector('#settings-rows [data-machine-row="models.maxConcurrentSubagents"]')), false, "device-wide model controls do not render in Settings");
+    assert.equal(Boolean(document.querySelector('[data-setting-row="models.tiers"]')), false, "coordination settings expose no project model collection");
     document.querySelector('[data-page-target="engine-model-policy"]')?.click();
+    assert.ok(document.querySelector('#device-model-settings [data-machine-row="models.maxConcurrentSubagents"]'), "generic concurrency stays reachable on the standalone Models page");
     assert.ok(document.querySelector('[data-engine-model-policy-host]'), "the device engine policy remains readable without a project-model scope");
     document.querySelector('[data-page-target="model-categories"]')?.click();
     assert.ok(document.querySelector('[data-collection-table="engine-model-policy-categories"]'), "the category projection still uses the engine source");
@@ -412,7 +415,6 @@ if (!MUTATION) test("R46 I12: coordination settings omit project model rows whil
 // with no project; a fixture write of another of them names no project either. Its model pages stay as R46 I12.
 if (!MUTATION) test("R47 c1-B: the coordination chain's artifact language saves from its settings page, for the whole library", async () => {
   const fixture = await projectChainFixture("tcrn-r47-c1b-coordination-");
-  await cli(["settings-set", "--workspace", fixture.coordination.library, "--at", nextAt(), "--actor", "agent:test", "--key", "execution.maxConcurrentSubagents", "--value", "3"], fixture.atelier);
   const page = await loadExecutedDom(fixture);
   try {
     const { document, window } = page;
@@ -433,7 +435,9 @@ if (!MUTATION) test("R47 c1-B: the coordination chain's artifact language saves 
     const catalog = await cli(["settings-catalog", "--workspace", fixture.coordination.library, "--project-id", fixture.coordination.projectId], fixture.deviceEnv);
     const row = (key) => catalog.settings.find((entry) => entry.key === key);
     assert.deepEqual([row("artifact.language").currentValue, row("artifact.language").declaredValue, row("artifact.language").scope, row("artifact.language").source.kind], ["fr", "fr", "library", "library"]);
-    assert.deepEqual([row("execution.maxConcurrentSubagents").currentValue, row("execution.maxConcurrentSubagents").source.kind], ["3", "library"]);
+    assert.equal(row("execution.maxConcurrentSubagents"), undefined, "historic project concurrency is not declared on a coordination library");
+    const machine = (await cli(["machine-settings-catalog"], fixture.deviceEnv)).settings;
+    assert.equal(machine.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, null, "generic concurrency is read from this device's settings");
     assert.equal(row("models.tiers"), undefined, "the model tables are not the coordination chain's");
   } finally { await closePage(page, fixture); }
 });
@@ -563,10 +567,9 @@ test("INIT-056 R5: the engine-host editor creates a complete policy and retains 
     assert.deepEqual(stored.selectedPolicy.tiers, [{ order: 20, category: "main", runner: "codex", model: "gpt-5.6-terra", effort: "max", note: "R5 economy implementation" }]);
     assert.deepEqual(stored.selectedPolicy.escalation, { enabled: true, threshold: 2, ceiling: "main" });
 
-    document.querySelector('[data-page-target="settings"]').click();
-    document.querySelector('[data-setting-group="models"]').click();
+    document.querySelector('[data-page-target="engine-model-policy"]').click();
     for (const key of ["models.category", "models.tiers", "models.escalation.enabled", "models.escalation.threshold", "models.escalation.ceiling"]) {
-      const row = document.querySelector(`[data-setting-row="${key}"]`);
+      const row = document.querySelector(`#device-model-settings [data-setting-row="${key}"]`);
       assert.ok(row?.matches("[data-model-policy-legacy=\"true\"]"), `${key} is visibly a compatibility record`);
       assert.equal(row.querySelector("[data-setting-control]"), null, `${key} exposes no project-setting write control`);
       assert.ok(row.querySelector('[data-model-policy-link="engine-model-policy"]'), `${key} links to the engine-host editor`);
@@ -595,9 +598,8 @@ test("INIT-056 R5: the engine-host editor creates a complete policy and retains 
     type(field("tiers", 0, "note"), "kept through locale and refresh");
     await selectLocale("fr");
     await waitFor(() => field("tiers", 0, "note")?.value === "kept through locale and refresh", "the draft through a locale redraw");
-    document.querySelector('[data-page-target="settings"]').click();
-    document.querySelector('[data-setting-group="execution"]').click();
-    const concurrency = document.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
+    document.querySelector('[data-page-target="engine-model-policy"]').click();
+    const concurrency = document.querySelector('[data-machine-control="models.maxConcurrentSubagents"]');
     type(concurrency, "3", "change");
     await page.waitForSettled();
     document.querySelector('[data-page-target="engine-model-policy"]').click();
@@ -649,7 +651,7 @@ if (!MUTATION) test("INIT-056 ordinary editor roundtrip keeps quota, all policy 
       assert.equal(view().querySelector('[data-codex-peer-readiness="not-ready"]'), null);
       assert.ok(view().querySelector('select[data-engine-model-policy-host]').getAttribute("aria-label"));
       assert.ok(!view().textContent.includes("modelPolicy."));
-      assert.ok(view().querySelector('[data-engine-policy-quota-enabled]').closest("label").textContent.trim());
+      assert.ok(view().querySelector('[data-engine-policy-quota-weekly-disabled]').closest("label").textContent.trim());
     }
     view().querySelector('[data-engine-model-policy-save]').click();
     await page.waitForSettled();
@@ -693,9 +695,8 @@ if (!MUTATION) test("INIT-056 settings expose central metadata and new controls 
     for (const locale of ["en", "zh-CN", "ja", "ko", "fr"]) {
       document.querySelector(`[data-locale-option="${locale}"]`).click();
       for (const [group, key, device, scope] of [
-        ["general", "agents.generation", false, "project"], ["general", "agents.sharedNavigation", false, "project"],
+        ["general", "agents.generation", false, "library"],
         ["storage", "paths.artifacts", true, "device"], ["storage", "paths.knowledgeArticles", true, "device"],
-        ["execution", "execution.maxConcurrentAgents", true, "device"],
       ]) {
         document.querySelector(`[data-setting-group="${group}"]`).click();
         const row = document.querySelector(`[data-${device ? "machine" : "setting"}-row="${key}"]`);
@@ -706,11 +707,15 @@ if (!MUTATION) test("INIT-056 settings expose central metadata and new controls 
         assert.ok(control?.getAttribute("aria-label"));
         if (key.startsWith("paths.")) assert.equal(control.tagName, "INPUT", "device path bindings accept literal text");
       }
-      document.querySelector('[data-setting-group="models"]').click();
-      const compatibility = document.querySelector('[data-setting-row="models.tiers"] [data-configuration-contract]');
+      document.querySelector('[data-page-target="engine-model-policy"]').click();
+      const agentConcurrency = document.querySelector('#device-model-settings [data-machine-row="execution.maxConcurrentAgents"]');
+      assert.ok(agentConcurrency, `${locale}: device concurrency is on the standalone model page`);
+      assert.ok(agentConcurrency.querySelector('[data-machine-control]')?.getAttribute("aria-label"));
+      const compatibility = document.querySelector('#device-model-settings [data-setting-row="models.tiers"] [data-configuration-contract]');
       assert.match(compatibility.textContent, /historical-declaration/);
       assert.match(compatibility.textContent, /project-compatibility/);
       assert.match(compatibility.textContent, /device/);
+      document.querySelector('[data-page-target="settings"]').click();
       document.querySelector('[data-setting-group="storage"]').click();
       const path = document.querySelector('[data-setting-control="workspace.generatedArtifactsPath"]');
       assert.equal(path.tagName, "INPUT");
@@ -1006,25 +1011,29 @@ if (!MUTATION) {
       const project = (await cli(["settings-catalog", "--workspace", page.workspace], page.deviceEnv)).settings;
       const device = (await cli(["machine-settings-catalog"], { ...page.deviceEnv, HOME: page.fixture.home, USERPROFILE: page.fixture.home })).settings;
       assert.ok(device.some(entry => entry.key === "agents.projectRoot"), "the compatibility key remains in the machine catalog");
-      const rows = [...project, ...device.filter(entry => entry.key !== "agents.projectRoot").map(entry => ({ ...entry, layer: "device" }))];
+      const rows = [...project.filter(entry => !["design.consumedVersion", "agents.sharedNavigation"].includes(entry.key)),
+        ...device.filter(entry => !["agents.projectRoot", "agents.navigation"].includes(entry.key)).map(entry => ({ ...entry, layer: "device" }))];
       assert.equal(page.document.querySelector('[data-machine-row="agents.projectRoot"]'), null, "manage the library's root through setup");
+      const settingsRows = rows.filter((row) => row.group !== "models");
       for (const row of rows) {
         assert.equal(page.source.includes(`"${row.key}": "${row.group}"`), false, `${row.key} has no group written into the page`);
         assert.ok(["scalar", "collection"].includes(row.shape) && typeof row.group === "string" && Number.isSafeInteger(row.order), `${row.key} carries its layout`);
       }
-      const specificationOrder = ["general", "models", "execution", "knowledge", "retrieval", "storage", "atelier"];
+      const specificationOrder = ["general", "models", "knowledge", "retrieval", "storage", "atelier"];
       const groups = [...page.document.querySelectorAll("[data-settings-layout-nav] [data-setting-group]")].map((button) => button.dataset.settingGroup);
-      assert.deepEqual(groups, specificationOrder.filter((group) => rows.some((row) => row.group === group)), "the groups are the catalogs' own, in the specification's order");
+      assert.deepEqual(groups, specificationOrder.filter((group) => settingsRows.some((row) => row.group === group)), "the Settings page contains only its catalog groups, in the specification's order");
+      assert.equal(Boolean(page.document.querySelector('[data-setting-group="models"]')), false, "the Models group is routed to its standalone page");
       const rowKey = (row) => row.dataset.settingRow ?? row.dataset.machineRow;
       const shownRows = () => [...page.document.querySelectorAll("#settings-rows [data-setting-row], #settings-rows [data-machine-row]")];
       for (const group of groups) {
         page.document.querySelector(`[data-setting-group="${group}"]`)?.click();
-        const expected = rows.filter((row) => row.group === group).sort((left, right) => left.order - right.order);
+        const expected = settingsRows.filter((row) => row.group === group).sort((left, right) => left.order - right.order);
         const shown = shownRows();
         assert.deepEqual(shown.map(rowKey), expected.map((row) => row.key), `${group} shows its keys in their catalog order`);
         for (const [index, row] of shown.entries()) {
           assert.equal(row.querySelector("[data-setting-layer]")?.dataset.settingLayer, expected[index].layer, `${expected[index].key} names its layer`);
-          const expectedShape = /^(models|quota)\./u.test(expected[index].key) ? "compatibility" : expected[index].shape;
+          const expectedShape = expected[index].layer === "device" ? expected[index].shape
+            : /^(models|quota)\./u.test(expected[index].key) || expected[index].key === "execution.maxConcurrentSubagents" ? "compatibility" : expected[index].shape;
           assert.equal(row.dataset.settingShape, expectedShape, `${expected[index].key} keeps its rendered shape`);
           assert.equal(row.hasAttribute("data-machine-row"), expected[index].layer === "device", `${expected[index].key} is written through its own layer`);
         }
@@ -1033,17 +1042,23 @@ if (!MUTATION) {
         assert.equal(page.document.querySelector(`[data-setting-row="${retiredEconomySettingKey}"]`), null, `the retired economy-tier model stays out of ${group}`);
       }
 
-      // The models group is historical compatibility information. It has no project-setting
-      // controls and sends each record to the engine-host editor instead of an old collection API.
-      page.document.querySelector('[data-setting-group="models"]')?.click();
+      page.document.querySelector('[data-setting-group="retrieval"]')?.click();
+      const scoringTrigger = page.document.querySelector('[data-concept-tip="setting.retrieval.tau"] button');
+      assert.ok(scoringTrigger);
+      const scoring = page.document.getElementById(scoringTrigger.getAttribute("aria-controls"))?.querySelector("table");
+      assert.ok(scoring);
+      assert.deepEqual([...scoring.querySelectorAll("td")].map(cell => cell.textContent), ["8", "5", "6", "1", "3"]);
+
+      // Project model rows are historical compatibility information. Current device controls and
+      // their search destinations live on the standalone Models page.
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
       for (const key of ["models.category", "models.tiers", "models.escalation.enabled", "models.escalation.threshold", "models.escalation.ceiling"]) {
-        const row = page.document.querySelector(`[data-setting-row="${key}"]`);
+        const row = page.document.querySelector(`#device-model-settings [data-setting-row="${key}"]`);
         assert.equal(row?.dataset.settingShape, "compatibility");
-        assert.equal(row.querySelector("[data-setting-control], [data-collection-field]"), null, `${key} has no editor on the settings page`);
+        assert.equal(row.querySelector("[data-setting-control], [data-collection-field]"), null, `${key} has no historical project editor`);
         row.querySelector('[data-model-policy-link="engine-model-policy"]').click();
         assert.equal(page.document.querySelector('[data-page="engine-model-policy"]')?.hidden, false, `${key} opens the engine-host editor`);
-        page.document.querySelector('[data-page-target="settings"]')?.click();
-        page.document.querySelector('[data-setting-group="models"]')?.click();
+        page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
       }
 
       // Every row names where it lives, in five languages; in Chinese 项目级（随库同步） or 本机.
@@ -1061,13 +1076,13 @@ if (!MUTATION) {
       }
       page.document.querySelector('[data-locale-option="en"]')?.click();
 
-      // Retirement is a user-visible contract, not only a grouping detail: neither
-      // legacy subagent-plan key may produce a settings row, and neither may be
+      // Retirement is a user-visible contract: neither legacy subagent-plan key may produce a
+      // Settings or Models page row, and neither may be
       // discoverable through the global search index.
-      page.document.querySelector('[data-setting-group="execution"]')?.click();
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 80));
       for (const key of ["execution.claudeCodeSubagentPlan", "execution.codexSubagentPlan"]) {
-        assert.equal(page.document.querySelector(`[data-setting-row="${key}"]`), null, `${key} must stay absent from rendered settings`);
+        assert.equal(Boolean(page.document.querySelector(`#device-model-settings [data-setting-row="${key}"]`)), false, `${key} must stay absent from rendered settings`);
         const globalSearch = page.document.querySelector("#global-search");
         globalSearch.value = key;
         globalSearch.dispatchEvent(new page.window.Event("input", { bubbles: true }));
@@ -1075,12 +1090,12 @@ if (!MUTATION) {
         assert.equal(page.document.querySelectorAll("#search-results [data-search-index]").length, 0, `${key} must stay absent from global search`);
       }
 
-      // All five localized routes keep the same execution controls in their catalog order.
-      const expectedExecutionRows = rows.filter((row) => row.group === "execution").sort((left, right) => left.order - right.order).map((row) => row.key);
+      // All five localized routes keep the device model controls in their catalog order.
+      const expectedModelRows = device.filter((row) => row.group === "models").sort((left, right) => left.order - right.order).map((row) => row.key);
       for (const locale of ["zh-CN", "en", "ja", "ko", "fr"]) {
         page.document.querySelector(`[data-locale-option="${locale}"]`)?.click();
         await new Promise((resolve) => setTimeout(resolve, 40));
-        assert.deepEqual(shownRows().map(rowKey), expectedExecutionRows, `${locale} must keep the execution controls in order`);
+        assert.deepEqual([...page.document.querySelectorAll("#device-model-settings [data-machine-row]")].map(rowKey), expectedModelRows, `${locale} must keep the model controls in order`);
       }
       page.document.querySelector('[data-locale-option="en"]')?.click();
 
@@ -1477,9 +1492,8 @@ if (!MUTATION) {
         assert.equal(control("ceiling").value, categoryId, "each prefilled group can be selected as the ceiling");
       }
       assert.equal(control("threshold").value, "3", "switch and category edits preserve the numeric threshold");
-      document.querySelector('[data-page-target="settings"]').click();
-      document.querySelector('[data-setting-group="models"]').click();
-      assert.equal(document.querySelector('[data-setting-control="models.escalation.threshold"]'), null, "legacy escalation settings are not a second writable surface");
+      document.querySelector('[data-page-target="engine-model-policy"]').click();
+      assert.equal(document.querySelector('#device-model-settings [data-setting-control="models.escalation.threshold"]'), null, "legacy escalation settings are not a second writable surface");
     } finally { await page.cleanup(); }
   });
 }
@@ -1491,11 +1505,15 @@ if (!MUTATION) {
   test("STORY-373/467 the model page, its directory and the dispatch surface are all absent", async () => {
     const page = await preparePage();
     try {
-      // TCRN-CROSS-SUB-409 (STORY-508 R5): "models" is the catalog's models and escalation group now. It
-      // lists the catalog's models keys and nothing of the retired model plans.
-      page.document.querySelector('[data-setting-group="models"]')?.click();
-      const modelsKeys = (await cli(["settings-catalog", "--workspace", page.workspace], page.deviceEnv)).settings.filter((entry) => entry.group === "models").map((entry) => entry.key).sort();
-      assert.deepEqual([...page.document.querySelectorAll("#settings-rows [data-setting-row], #settings-rows [data-machine-row]")].map((row) => row.dataset.settingRow ?? row.dataset.machineRow).sort(), modelsKeys);
+      // The Settings page no longer duplicates model entries; the standalone Models page owns
+      // device defaults and historical project compatibility rows.
+      page.document.querySelector('[data-page-target="settings"]')?.click();
+      assert.equal(Boolean(page.document.querySelector('[data-setting-group="models"]')), false);
+      assert.equal(page.document.querySelectorAll('#settings-rows [data-machine-row][data-setting-shape="scalar"]').length, 0);
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
+      const modelDeviceKeys = (await cli(["machine-settings-catalog"], page.deviceEnv)).settings.filter((entry) => entry.group === "models").map((entry) => entry.key).sort();
+      assert.deepEqual([...page.document.querySelectorAll("#device-model-settings [data-machine-row]")].map((row) => row.dataset.machineRow).sort(), modelDeviceKeys);
+      assert.ok(page.document.querySelector('#device-model-settings [data-setting-row="models.tiers"][data-model-policy-legacy="true"]'));
       assert.equal(page.document.querySelector("#model-plans"), null);
       assert.equal(page.document.querySelector('[data-ui="vendor-directory-toggle"]'), null);
       assert.equal(page.document.querySelector('[data-ui="vendor-directory-drawer"]'), null);

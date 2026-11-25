@@ -157,6 +157,23 @@ export function gitHead(directory: string): string | null {
   return git(directory, ["rev-parse", "--verify", "--quiet", "HEAD"])?.trim() || null;
 }
 
+/** Tracked and non-ignored working files under a gate root, sorted by canonical path. */
+export function gateSourcePaths(directory: string): readonly string[] | null {
+  const listed = git(directory, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
+  return listed === null ? null : [...new Set(paths(listed))].sort(compareCanonicalText);
+}
+
+/** The verified commit a gate plan names as its base, or null when it cannot be resolved. */
+export function gateBaseCommit(directory: string, base: string): string | null {
+  return git(directory, ["rev-parse", "--verify", "--end-of-options", `${base}^{commit}`])?.trim() || null;
+}
+
+/** The current checkout identity for checks that explicitly depend on Git history. */
+export function gateGitHistory(directory: string): { readonly head: string; readonly branch: string | null } | null {
+  const head = gitHead(directory);
+  return head === null ? null : { head, branch: git(directory, ["symbolic-ref", "--quiet", "HEAD"])?.trim() ?? null };
+}
+
 // A base names a commit; it never starts with - so Git cannot read it as an option.
 const BASE_SHAPE = /^[A-Za-z0-9._/@{}~^][A-Za-z0-9._/@{}~^-]*$/u;
 
@@ -233,6 +250,7 @@ export interface PlannedGate {
   readonly command: readonly string[];
   readonly required: boolean;
   readonly releaseOnly: boolean;
+  readonly reuse?: NamedGate["reuse"];
   // "release" for a full run; otherwise the first of these that selected the gate: "changed" for path
   // coverage, "work-id" for a cover naming a target Story or one of its ancestors, "work-field" for a
   // gate a target's gates field names, "required" for a required gate of a plan made for Stories.
@@ -259,6 +277,8 @@ export interface GatesPlan {
   // The project's real path, which every root is relative to.
   readonly projectRoot: string;
   readonly release: boolean;
+  // An evidence-only run is retained for handoff but never satisfies formal closeout.
+  readonly evidenceOnly?: true;
   readonly base: string | null;
   readonly baseByRoot?: Readonly<Record<string, string>>;
   // Stories whose required coverage this plan is intended to prove.
@@ -386,7 +406,7 @@ export function gateDeclarationsDigest(gates: readonly NamedGate[]): string {
     gates: [...gates]
       .filter((gate) => gate.enabled)
       .sort((left, right) => compareCanonicalText(left.name, right.name))
-      .map((gate) => ({ name: gate.name, command: gate.command, root: gate.root, ...(gate.repository === undefined ? {} : { repository: gate.repository }), covers: gate.covers, required: gate.required, enabled: gate.enabled, releaseOnly: gate.releaseOnly })),
+      .map((gate) => ({ name: gate.name, command: gate.command, root: gate.root, ...(gate.repository === undefined ? {} : { repository: gate.repository }), covers: gate.covers, required: gate.required, enabled: gate.enabled, releaseOnly: gate.releaseOnly, ...(gate.reuse === undefined ? {} : { reuse: gate.reuse }) })),
   });
 }
 
@@ -402,7 +422,7 @@ function planningOrder(left: NamedGate, right: NamedGate): number {
 }
 
 function planned(gate: NamedGate, reason: PlannedGate["reason"], matched: readonly string[], matchedWorkIds: readonly string[]): PlannedGate {
-  return { name: gate.name, root: gateRootKey(gate), command: gate.command, required: gate.required, releaseOnly: gate.releaseOnly, reason, matched, matchedWorkIds };
+  return { name: gate.name, root: gateRootKey(gate), command: gate.command, required: gate.required, releaseOnly: gate.releaseOnly, reason, matched, matchedWorkIds, ...(gate.reuse === undefined ? {} : { reuse: gate.reuse }) };
 }
 
 const WORK_ID = /^work:[0-9a-f]{24}$/u;

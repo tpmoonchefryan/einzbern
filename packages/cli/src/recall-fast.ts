@@ -8,9 +8,11 @@ import { openLibrary } from "../../core/src/ether-library.js";
 import { readRecallAuthority } from "../../core/src/recall-authority.js";
 import { effectiveProjectState } from "../../core/src/project-state-read.js";
 import { readRuntimeKnowledgeLanguagePolicy, resolveQueryLanguage } from "../../core/src/knowledge-language.js";
+import type { KnowledgeQueryLanguageAnswer } from "../../core/src/knowledge-language.js";
 import { RECALL_DEFAULT_TAU, preparePersistentRecall, recallDocuments, recallPersistent } from "../../core/src/recall.js";
-import { formatRecallLine, readRecallCards, recallContextLines, recallDecisionHints, recallInputsFromState } from "../../core/src/recall-inputs.js";
-import type { RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
+import type { RecallHit, RecallResult } from "../../core/src/recall.js";
+import { formatRecallCandidateLine, formatRecallLine, readRecallCards, recallCandidateEntries, recallContextEntries, recallDecisionHints, recallInputsFromState, recallMetadataOnly } from "../../core/src/recall-inputs.js";
+import type { RecallCardRead, RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { DecisionStatusFilter } from "../../core/src/minutes.js";
 import type { KnowledgeStatusFilter } from "../../core/src/knowledge-core.js";
 import { AGENT_OUTPUT_MAX_BYTES } from "../../core/src/runtime-output-limit.js";
@@ -41,33 +43,37 @@ function recallCrestSummary(degraded: RecallUserCrestDegraded, store: RecallCard
   };
 }
 
-export async function runRecallCommand(rest: readonly string[], io: CliIo): Promise<void> {
-  // TCRN-CROSS-STORY-474: recall answers from one library, whatever directory it sits in; the
-  // partition flag went with the partition registry. --host stays: it names the prompt-language
-  // policy the answer is negotiated against.
-  // TCRN-CROSS-SUB-425 (MIN-239 D6), TCRN-CROSS-SUB-426 R17 续作修订三 (C-R18-1; STORY-514 R4): the
-  // cards and the decisions are the valid ones unless --status names a status of one family, which reads
-  // that family as its list verb does (removed: the removed cards alone; obsolete: the obsolete
-  // decisions alone; all: both families whole) and the other family's valid records; a model adds it
-  // only when a user asked for them. See recallStatusOption.
-  const values = parseArguments(rest, ["project-id", "workspace", "host", "at", "query", "limit", "tau", "allow-trailing", "status", "view"]);
-  required(values, ["workspace", "at", "query"]);
-  const status = recallStatusOption(values.status);
-  if (values.view !== undefined && values.view !== "agent") fail("CLI_ARGUMENT_MALFORMED", "view");
-  const cardStatus: KnowledgeStatusFilter = status.status === "removed" || status.status === "all" ? status.status : "valid";
-  const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
-  const workspace = values.workspace ?? "";
-  const query = values.query ?? "";
-  if (query.trim().length === 0 || query.length > RUNTIME_CAPACITY.stringCodeUnits || !query.isWellFormed()) fail("CLI_ARGUMENT_MALFORMED", "query");
-  const limit = values.limit === undefined ? undefined : integerValue(values, "limit");
+interface RecallQueryOptions {
+  readonly at: string;
+  readonly projectId?: string;
+  readonly host?: string;
+  readonly limit?: number;
+  readonly tau?: string;
+  readonly allowTrailing?: boolean;
+  readonly explain?: boolean;
+  readonly decisions?: DecisionStatusFilter;
+  readonly cardStatus?: KnowledgeStatusFilter;
+}
+
+interface RecallQueryResult {
+  readonly result: RecallResult;
+  readonly state: Awaited<ReturnType<typeof effectiveProjectState>>;
+  readonly cards: RecallCardRead;
+  readonly scopeExcerptBytes: number;
+  readonly perPromptBytes: number;
+  readonly metadataOnly: boolean;
+  readonly languageAnswer: KnowledgeQueryLanguageAnswer;
+}
+
+export async function readRecallQuery(workspace: string, query: string, options: RecallQueryOptions): Promise<RecallQueryResult> {
+  if (query.trim().length === 0 || query.length > RUNTIME_CAPACITY.stringCodeUnits || !query.isWellFormed() || query.includes("\0")) fail("CLI_ARGUMENT_MALFORMED", "query");
+  const { at, projectId, host, limit, allowTrailing, decisions = "valid", cardStatus = "valid" } = options;
   if (limit !== undefined && (limit < 1 || !Number.isSafeInteger(limit))) fail("CLI_ARGUMENT_MALFORMED", "limit");
-  const allowTrailing = booleanValue(values["allow-trailing"], "allow-trailing");
-  const projectId = values["project-id"];
   const authorityPromise = readRecallAuthority(workspace, true);
   const cardsPromise = readRecallCards(workspace, {
     ...(projectId === undefined ? {} : { projectId }),
-    at: values.at ?? "",
-    allowTrailing,
+    at,
+    ...(allowTrailing === undefined ? {} : { allowTrailing }),
     ...(cardStatus === "valid" ? {} : { status: cardStatus }),
   }, authorityPromise.then((resolved) => resolved.authority));
   const preparedPromise = openLibrary(workspace)
@@ -77,37 +83,57 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
     await (await preparedPromise)?.handle.close().catch(() => {});
     throw error;
   });
-  let result;
-  let state: Awaited<ReturnType<typeof effectiveProjectState>>;
-  let languageAnswer;
-  let scopeExcerptBytes = 512;
-  let perPromptBytes = 1600;
   try {
-    state = await effectiveProjectState(rawState, projectId);
+    const state = await effectiveProjectState(rawState, projectId);
     const settingValue = (key: string): string | undefined => state.settings.find((entry) => entry.key === key)?.value;
     const configuredTau = Number(settingValue("retrieval.tau") ?? String(RECALL_DEFAULT_TAU));
-    const tau = values.tau === undefined
+    const tau = options.tau === undefined
       ? (Number.isFinite(configuredTau) && configuredTau >= 0 ? configuredTau : RECALL_DEFAULT_TAU)
-      : Number(values.tau);
+      : Number(options.tau);
     if (!Number.isFinite(tau) || tau < 0) fail("CLI_ARGUMENT_MALFORMED", "tau");
-    languageAnswer = resolveQueryLanguage(query, await readRuntimeKnowledgeLanguagePolicy(state.settings, values.host));
+    const languageAnswer = resolveQueryLanguage(query, await readRuntimeKnowledgeLanguagePolicy(state.settings, host));
     const scopeBytes = Number(settingValue("retrieval.scopeExcerptBytes") ?? "512");
-    scopeExcerptBytes = Number.isSafeInteger(scopeBytes) && scopeBytes > 0 ? scopeBytes : 512;
+    const scopeExcerptBytes = Number.isSafeInteger(scopeBytes) && scopeBytes > 0 ? scopeBytes : 512;
     const promptBytes = Number(settingValue("injection.perPromptBytes") ?? "1600");
-    perPromptBytes = Number.isSafeInteger(promptBytes) && promptBytes > 0 ? promptBytes : 1600;
-    result = await recallPersistent({
-      cacheKey: `${state.metadata.workspaceId}:${values["project-id"] ?? ""}`,
-      checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}`,
-      documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes,
+    const perPromptBytes = Number.isSafeInteger(promptBytes) && promptBytes > 0 ? promptBytes : 1600;
+    const metadataOnly = recallMetadataOnly(rawState.settings);
+    const result = await recallPersistent({
+      cacheKey: `${state.metadata.workspaceId}:${projectId ?? ""}`,
+      checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}${metadataOnly ? ":fields=metadata" : ""}`,
+      documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes, metadataOnly,
         ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) })),
       query,
       tau,
+      ...(options.explain ? { explain: true } : {}),
       ...(limit === undefined ? {} : { limit }),
     }, workspace, prepared);
+    return { result, state, cards, scopeExcerptBytes, perPromptBytes, metadataOnly, languageAnswer };
   } catch (error) {
     await prepared?.handle.close().catch(() => {});
     throw error;
   }
+}
+
+export async function runRecallCommand(rest: readonly string[], io: CliIo): Promise<void> {
+  const values = parseArguments(rest, ["project-id", "workspace", "host", "at", "query", "limit", "tau", "allow-trailing", "status", "view"]);
+  required(values, ["workspace", "at", "query"]);
+  const status = recallStatusOption(values.status);
+  if (values.view !== undefined && values.view !== "agent" && values.view !== "preview" && values.view !== "candidates") fail("CLI_ARGUMENT_MALFORMED", "view");
+  // A status filters only its own record family, unless `all` was requested.
+  const cardStatus: KnowledgeStatusFilter = status.status === "removed" || status.status === "all" ? status.status : "valid";
+  const decisions: DecisionStatusFilter = status.status === "obsolete" || status.status === "all" ? status.status : "valid";
+  const workspace = values.workspace ?? "";
+  const query = values.query ?? "";
+  const { result, state, cards, scopeExcerptBytes, perPromptBytes, metadataOnly, languageAnswer } = await readRecallQuery(workspace, query, {
+    at: values.at ?? "",
+    ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }),
+    ...(values.host === undefined ? {} : { host: values.host }),
+    ...(values.limit === undefined ? {} : { limit: integerValue(values, "limit") }),
+    ...(values.tau === undefined ? {} : { tau: values.tau }),
+    allowTrailing: booleanValue(values["allow-trailing"], "allow-trailing"),
+    explain: values.view === "preview",
+    cardStatus, decisions,
+  });
   // TCRN-CROSS-SUB-425, TCRN-CROSS-SUB-426 R17 续作修订三 (STORY-514 AC1): a hit on a removed card, which
   // only --status removed or all reads, says so and carries the card's removal as knowledge-list
   // answers it: the reason, basis, actor and instant, the card that superseded it, and its event.
@@ -122,12 +148,38 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
   // under obsoleteDecisions, with the decision that superseded it (null when withdrawn), and its line
   // says so.
   const hits = recallDecisionHints(state, cards.cards, statusHits, { decisions });
-  const context = [...recallContextLines(hits, perPromptBytes)];
   const source = {
     workspaceId: state.metadata.workspaceId,
     version: state.version,
     headEventHash: state.headEventHash,
   };
+  const delivery = metadataOnly || values.view === "candidates"
+    ? recallCandidateEntries(hits, perPromptBytes)
+    : recallContextEntries(hits, perPromptBytes);
+  const context = delivery.map((entry) => entry.line);
+  if (values.view === "candidates") {
+    io.write(canonicalJson({
+      schemaVersion: "tcrn.recall-candidates.v1", reasonCode: result.reasonCode, ...source,
+      perPromptBytes, context,
+      knowledgeReasonCode: cards.stores.project.reasonCode,
+      userKnowledgeReasonCode: cards.stores.user.reasonCode,
+    }));
+    return;
+  }
+  if (result.explanation !== undefined) {
+    const { threshold, matchedTerms, nearMisses } = result.explanation;
+    const candidate = (hit: RecallHit) => ({
+      id: hit.id, key: hit.key, title: hit.decision?.metadata?.title ?? hit.title, kind: hit.kind, score: String(hit.score),
+      matchedTerms: matchedTerms.get(hit.id) ?? [],
+      ...(hit.decision === undefined ? {} : { decisionReference: hit.decision.reference }),
+    });
+    io.write(canonicalJson({
+      schemaVersion: "tcrn.recall-preview.v1", reasonCode: result.reasonCode, ...source, ...status,
+      indexed: result.indexed, threshold: String(threshold), tau: String(result.tau), relativeFloor: String(result.relativeFloor),
+      candidates: delivery.map(({ hit }) => candidate(hit)), nearMisses: nearMisses.map(candidate),
+    }));
+    return;
+  }
   const knowledge = {
     knowledgeReasonCode: cards.stores.project.reasonCode,
     // Both stores' reads: each one's reason code and how many cards it gave.
@@ -220,7 +272,7 @@ export async function runRecallCommand(rest: readonly string[], io: CliIo): Prom
     records: hits.map((hit) => ({
       kind: hit.kind, key: hit.key, id: hit.id, status: hit.status,
       title: hit.title, summary: hit.summary, score: hit.score.toFixed(4),
-      line: formatRecallLine(hit), parentChain: [...hit.parentChain],
+      line: metadataOnly ? formatRecallCandidateLine(hit) : formatRecallLine(hit), parentChain: [...hit.parentChain],
       ...(hit.scope === undefined ? {} : { scope: hit.scope }),
       ...(hit.involvedProjects === undefined ? {} : { involvedProjects: hit.involvedProjects }),
       ...(hit.obsoleteDecisions === undefined ? {} : { obsoleteDecisions: hit.obsoleteDecisions.map((entry) => ({ ...entry })) }),

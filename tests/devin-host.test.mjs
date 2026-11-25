@@ -138,7 +138,7 @@ test("INIT109-3: Devin's hooks are written into its own configuration, bound to 
   const written = JSON.parse(await readFile(f.configFile, "utf8"));
   assert.equal(written.version, 1);
   assert.deepEqual(written.permissions, { allow: ["Exec(git)"] });
-  assert.deepEqual(Object.keys(written.hooks).sort(), ["PreToolUse", "UserPromptSubmit"]);
+  assert.deepEqual(Object.keys(written.hooks).sort(), ["PreToolUse", "SessionStart", "UserPromptSubmit"]);
   assert.equal(written.hooks.PreToolUse[0].matcher, DEVIN_READ_MATCHER);
   assert.equal(written.hooks.UserPromptSubmit[0].matcher, undefined);
   for (const event of ["UserPromptSubmit", "PreToolUse"]) {

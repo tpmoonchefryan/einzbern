@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 import { BRAND } from "./names.js";
 
-/** One Skill entry shared by managed navigation and fallback pointer hooks. */
+/** The navigation shared by managed files and pointer hooks. */
 export const NAVIGATION_LINES: readonly string[] = Object.freeze([
-  `This workspace uses ${BRAND.engine.name}. Load and follow the ${BRAND.helper.name} skill for applicable work.`,
+  `This project is managed by ${BRAND.engine.name}.`,
+  `Load the ${BRAND.helper.name} skill before you start work.`,
+  `Recall first: run ${BRAND.engine.name}'s recall for the task before you plan or change anything.`,
 ]);

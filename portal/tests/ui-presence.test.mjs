@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Tests in this file run sequentially; Node isolates each file in a process.
-import { CLI, DS_CONTRACT, GHOST_TARGET, MUTATION, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, join, keydown, linkBridge, loadExecutedDom, localeTable, nextAt, pageHierarchyFindings, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scratch, test, topbarFindings, vm, waitFor, writeFile, writeScratch } from "./ui-presence-support.mjs";
+import { CLI, DS_CONTRACT, GHOST_TARGET, MUTATION, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, join, keydown, linkBridge, loadExecutedDom, localeTable, machineReceiptAdvanced, nextAt, pageHierarchyFindings, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptRawText, receiptText, rm, scratch, test, topbarFindings, vm, waitFor, writeFile, writeScratch } from "./ui-presence-support.mjs";
 
 // A fixed-size, stage-owned observer of requests the scenario already makes.
 // Response/value/error identity and json's invocation receiver are preserved, but
@@ -352,123 +352,89 @@ if (!MUTATION) {
     read(designAuthorityStageDiagnostic({ ...snapshot, elapsedMs: Number.MAX_SAFE_INTEGER, requested: Number.MAX_SAFE_INTEGER, bodyConsumed: Number.MAX_SAFE_INTEGER, otherContracts: Number.MAX_SAFE_INTEGER, tailReads: maximum }, "synthetic-formatting-only", "available"));
   });
 
-  test("INC-193 the design authority is declared, and what cannot be checked here is yellow", async (context) => {
+  test("INIT-003 reads Storybook on demand and confirms only production documentation", async () => {
     const page = await preparePage();
     try {
       page.document.querySelector('[data-setting-group="general"]')?.click();
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      const row = page.document.querySelector('[data-setting-row="design.authority"]');
-      assert.ok(row, "the design authority is a setting of the general group");
-      assert.ok(row.querySelector('[data-concept-tip="setting.design.authority"]'), "its ceiling is explained where it is set");
-
-      // Unset is the ordinary case for a workspace with no design system, and it is
-      // silent: no panel, no warning, nothing to resolve. A gate that could not be
-      // satisfied in this world would make the optional key effectively required.
-      const panel = page.document.querySelector("#design-authority");
-      assert.ok(panel, "the panel exists even when there is nothing to show");
-      assert.equal(panel.hidden, true, "an undeclared optional design authority needs no warning");
-      assert.equal(panel.querySelector("[data-design-authority-state]"), null);
-
-      // The contract is fetched by the reader's browser. Both outcomes are exercised
-      // here because only one of them can be produced against a real address offline,
-      // and a state proven on one side only is half a state machine.
-      const realFetch = page.window.fetch;
-      // INC-193 / INC-221: response headers and a quiet period do not establish
-      // response consumption or handler completion. Each stage has one absolute 30s
-      // budget from its start, without resets or retries. It binds its exact contract
-      // URL and observes a fresh panel node after json()
-      // consumption, even when two warning bodies render the same text. The current
-      // control must also be rebuilt and released by the settings handler's finally.
-      const changeAuthority = async (url, body, label) => {
-        const startedAt = Date.now();
-        const deadline = startedAt + (process.platform === "win32" ? 90_000 : 30_000);
-        const expectedContract = new URL("/tcrn-design-authority.json", url).href;
-        const currentInput = () => page.document.querySelector('[data-setting-control="design.authority"]');
-        const currentPanel = () => page.document.querySelector("#design-authority [data-design-authority-state]");
-        const editable = () => {
-          const control = currentInput();
-          return control && !control.disabled && !control.hasAttribute("data-write-busy") ? control : null;
-        };
-        const beforeReceipt = receiptText(page.document);
-        const observed = { requested: 0, bodyConsumed: 0, otherContracts: 0, method: null };
-        const { invoke: observedFetch, tailReads } = observeDesignAuthorityTail(realFetch, startedAt);
-        let phase = "control-ready";
-        let input = null;
-        let panelAtConsumption = null;
-        const panelReplaced = () => observed.bodyConsumed > 0 && currentPanel() !== null && currentPanel() !== panelAtConsumption;
-        const waitWithinBudget = (predicate, stage) => waitFor(predicate, `${label}: ${stage}`, Math.max(0, deadline - Date.now()));
-        page.window.fetch = (request, options) => {
-          const target = String(request);
-          if (!target.includes("tcrn-design-authority.json")) return observedFetch(request, options);
-          if (target !== expectedContract) {
-            observed.otherContracts += 1;
-            return Promise.resolve({ ok: false, status: 404 });
-          }
-          observed.requested += 1;
-          observed.method = options?.method ?? "GET";
-          return Promise.resolve({ ok: true, status: 200, json: async () => {
-            observed.bodyConsumed += 1;
-            panelAtConsumption = currentPanel();
-            return body;
-          } });
-        };
-        try {
-          input = await waitWithinBudget(editable, phase);
-          assert.ok(Date.now() < deadline, "the original stage budget remains before dispatch");
-          phase = "write-refresh-response-consumption";
-          input.value = url;
-          input.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-          await waitWithinBudget(() => {
-            if (!observed.bodyConsumed) return false;
-            phase = "panel-replaced-and-handler-released";
-            return panelReplaced() && currentInput() !== input && editable();
-          }, "matching response consumption, panel replacement and editable current control");
-          assert.equal(currentInput().value, url, "the rendered setting belongs to this stage");
-        } catch (error) {
-          failWithDesignAuthorityDiagnostic(context, error, () => {
-            const control = currentInput();
-            return { label, phase, elapsedMs: Date.now() - startedAt,
-              requested: observed.requested, bodyConsumed: observed.bodyConsumed, otherContracts: observed.otherContracts, method: observed.method,
-              receiptAdvanced: page.document.querySelector("#receipt-chip-text") ? Boolean(receiptAdvanced(page.document, beforeReceipt)()) : null,
-              panelReplaced: panelReplaced(), controlRebuilt: control && input ? control !== input : null,
-              controlPresent: Boolean(control), disabled: control?.disabled ?? null,
-              writeBusy: control?.hasAttribute("data-write-busy") ?? null, tailReads };
-          });
-        }
+      const { document, window } = page;
+      const selector = '[data-setting-control="design.productionDocs"]';
+      const panel = document.querySelector("#design-authority");
+      const action = key => panel.querySelector(`[data-design-authority-action="${key}"]`);
+      const panelState = () => panel.querySelector("[data-design-authority-state]")?.dataset.designAuthorityState;
+      const settingsWriteSettled = () => document.querySelector("#configuration-project-select")?.disabled === false;
+      const governedWriteTimeoutMs = 45_000;
+      const address = "https://design.example.test/";
+      const current = "https://docs.example.test/current/";
+      const expected = address + "storybook/";
+      const seen = [];
+      const writes = [];
+      const nativeFetch = window.fetch;
+      let online = true;
+      window.fetch = (request, options) => {
+        const target = String(request);
+        if (target.includes("/api/settings") && options?.method === "POST") writes.push(JSON.parse(options.body));
+        if (!target.startsWith(address)) return nativeFetch(request, options);
+        assert.equal(options.mode, "cors");
+        assert.equal(options.credentials, "omit");
+        seen.push(target);
+        if (!online) return Promise.reject(new Error("offline"));
+        if (!target.startsWith(expected)) return Promise.reject(new TypeError("site root does not permit cross-origin reads"));
+        if (target === expected + "index.json") return Promise.resolve({ ok: true, json: async () => ({ v: 5, entries: { button: { type: "story" } } }) });
+        if (target === expected + "project.json") return Promise.resolve({ ok: true, json: async () => ({ storybookVersion: "10.4.6", repository: "ignored" }) });
+        return Promise.resolve({ ok: false, status: 404 });
       };
 
-      for (const [key, value] of Object.entries({"design.repository":"https://design.example.test/repository","design.pullRequestTarget":"main","design.productionDocs":"https://design.example.test/docs","design.buildService":"Example build","design.buildProject":"Example docs","design.consumedVersion":"9.9.9"})) {
-        await writeScratch(page.fixture, "settings-set", ["--key", key, "--value", value]);
-      }
-      await changeAuthority("https://design.example.test/", { schemaVersion: "tcrn.design-authority.v1", name: "Example System", version: "9.9.9" }, "declared contract");
+      assert.equal(panel.hidden, true);
+      assert.ok(document.querySelector('[data-setting-row="design.authority"] [data-concept-tip="setting.design.authority"]'));
       await page.waitForSettled();
-      const declared = page.document.querySelector("[data-design-authority-state]");
-      assert.equal(declared?.dataset.designAuthorityState, "declared");
-      assert.match(declared.textContent, /Example System/u);
-      assert.match(declared.textContent, /9\.9\.9/u);
-      assert.ok(!declared.className.includes("--warning"), "a contract that answered is not a warning");
+      await writeScratch(page.fixture, "settings-set", ["--key", "design.productionDocs", "--value", current]);
+      await writeScratch(page.fixture, "settings-set", ["--key", "design.consumedVersion", "--value", "old-release"]);
+      const author = document.querySelector('[data-setting-control="design.authority"]');
+      author.value = address;
+      author.dispatchEvent(new window.Event("change", { bubbles: true }));
+      await waitFor(() => settingsWriteSettled() && !panel.hidden && panelState() === "idle" && action("fetch"),
+        "the saved design authority to become available", governedWriteTimeoutMs);
+      assert.equal(seen.length, 0);
+      assert.equal(document.querySelector('[data-setting-row="design.consumedVersion"]'), null);
+      assert.equal(document.querySelector(selector).value, current);
 
-      // A response that is not this platform's contract is yellow, not red: the fact is
-      // outside this machine, so nothing here can be called false. The message has to
-      // say what would turn it green, or a yellow becomes a permanent decoration.
-      await changeAuthority("https://other.example.test/", { hello: "world" }, "foreign response");
-      await page.waitForSettled();
-      const warned = page.document.querySelector("[data-design-authority-state]");
-      assert.equal(warned?.dataset.designAuthorityState, "warning", "a response that is not this contract is yellow");
-      assert.ok(warned.className.includes("tcrn-inline-alert"), "the warning uses the design system's alert");
-      assert.ok(warned.className.includes("tcrn-inline-alert--warning"));
-      assert.match(warned.textContent, /advisory|unknown/u, "a browser check cannot claim production publication");
+      action("fetch").click();
+      await waitFor(() => panelState() === "available", "Storybook files checked");
+      assert.deepEqual(seen.sort(), [
+        address + "index.json", address + "project.json", expected + "index.json",
+        expected + "manifests/components.json", expected + "project.json",
+      ].sort());
+      assert.match(panel.textContent, /10\.4\.6.*1 entries/u);
+      assert.match(panel.textContent, /No component manifest published/u);
+      assert.equal(document.querySelector(selector).value, current);
+      assert.equal(writes.length, 1);
 
-      // A body that is well-formed in every way EXCEPT the schema version isolates that
-      // check. Without this case the schema check could be deleted and nothing would
-      // notice, because the earlier sample was also missing its name and version and
-      // would keep landing yellow by a different route.
-      await changeAuthority("https://third.example.test/", { schemaVersion: "someone.elses.contract.v1", name: "Example System", version: "9.9.9" }, "body under another contract");
-      await page.waitForSettled();
-      const wrongSchema = page.document.querySelector("[data-design-authority-state]");
-      assert.equal(wrongSchema?.dataset.designAuthorityState, "warning", "a well-formed body under another contract is still not ours");
-      assert.ok(!wrongSchema.textContent.includes("Example System"), "nothing from an unrecognised contract reaches the page");
-    } finally { await page.cleanup(); }
+      action("fill").click();
+      assert.equal(panelState(), "staged");
+      assert.equal(document.querySelector(selector).value, expected);
+      assert.equal(writes.length, 1);
+      action("cancel").click();
+      assert.equal(document.querySelector(selector).value, current);
+      action("fill").click();
+      page.hold(path => path === "/api/vocabulary");
+      action("save").click();
+      await waitFor(() => panelState() === "available" && writes.length === 2 && page.held() === 1,
+        "documentation read back before the settings page refresh", governedWriteTimeoutMs);
+      assert.equal(document.querySelector(selector).value, expected);
+      assert.equal(page.release(), 1);
+      await waitFor(() => settingsWriteSettled() && action("fetch")?.disabled === false,
+        "the documentation save controls to become available", governedWriteTimeoutMs);
+      assert.ok(writes.every(write => write.libraryPath === page.workspace && write.libraryId === writes[0].libraryId));
+      assert.deepEqual(writes.map(({ key, value }) => ({ key, value })), [{ key: "design.authority", value: address }, { key: "design.productionDocs", value: expected }]);
+      assert.equal(document.querySelector(selector).value, expected);
+
+      online = false;
+      action("fetch").click();
+      await waitFor(() => panelState() === "warning", "unavailable Storybook");
+      assert.equal(action("fill"), null);
+      assert.equal(document.querySelector(selector).value, expected);
+      assert.equal(writes.length, 2);
+    } finally { page.release(); await page.cleanup(); }
   });
 }
 
@@ -654,9 +620,8 @@ test("INIT-056 R5: host changes reject an old Save and an older specialized read
     page.hold((path) => path.startsWith("/api/model-policy?host="));
     selectHost("constructor");
     await waitFor(() => page.held() === 1, "the specialized constructor read");
-    document.querySelector('[data-page-target="settings"]').click();
-    document.querySelector('[data-setting-group="execution"]').click();
-    const concurrency = document.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
+    document.querySelector('[data-page-target="engine-model-policy"]').click();
+    const concurrency = document.querySelector('[data-machine-control="models.maxConcurrentSubagents"]');
     concurrency.value = "3";
     concurrency.dispatchEvent(new window.Event("change", { bubbles: true }));
     await waitFor(() => page.held() === 2, "the newer shared refresh policy read");
@@ -746,7 +711,7 @@ if (!MUTATION) {
   test("TCRN-CROSS-STORY-405 proves the fixed DS semantics, rejects structural mutations, and preserves coordination status", async () => {
     const page = await preparePage();
     try {
-      page.document.querySelector('[data-setting-group="execution"]')?.click();
+      page.document.querySelector('[data-setting-group="storage"]').click();
       await new Promise((resolve) => setTimeout(resolve, 80));
       const layout = page.document.querySelector('[data-settings-layout-component="SettingsLayout"]');
       assert.ok(layout);
@@ -947,10 +912,10 @@ if (!MUTATION) {
       const settingsList = page.document.querySelector('[data-settings-layout-nav]');
       const general = settingsList.querySelector('[data-setting-group="general"]');
       keydown(general, "ArrowRight");
-      const models = settingsList.querySelector('[data-setting-group="models"]');
-      assert.equal(models.getAttribute("aria-selected"), "true", "ArrowRight selects the next settings group");
-      assert.equal(page.document.getElementById("settings-panel").getAttribute("aria-labelledby"), models.id);
-      keydown(models, "Home");
+      const knowledge = settingsList.querySelector('[data-setting-group="knowledge"]');
+      assert.equal(knowledge.getAttribute("aria-selected"), "true", "ArrowRight skips the standalone Models page");
+      assert.equal(page.document.getElementById("settings-panel").getAttribute("aria-labelledby"), knowledge.id);
+      keydown(knowledge, "Home");
       assert.equal(general.getAttribute("aria-selected"), "true", "Home selects the first settings group");
       const atelier = settingsList.querySelector('[data-setting-group="atelier"]');
       keydown(general, "End");
@@ -1028,42 +993,41 @@ if (!MUTATION) {
 
 if (!MUTATION) {
 
-  test("TCRN-CROSS-STORY-409 R2 covers default, modified, reset, page-switch, disabled, and invalid-value lifecycle states", async () => {
+  test("STORY-011 generic model concurrency saves, resets and stays searchable", async () => {
     const page = await preparePage();
     try {
       const selectGroup = (group) => page.document.querySelector(`[data-setting-group="${group}"]`)?.click();
       const waitForReceiptChange = async (before, label) => waitFor(receiptAdvanced(page.document, before), label);
-      selectGroup("execution");
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
 
-      const defaultRow = page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]');
-      assert.equal(defaultRow?.dataset.modified, "false", "an unchanged open field starts in its default state");
-      const concurrency = defaultRow.querySelector('[data-setting-control="execution.maxConcurrentSubagents"]');
-      const beforeModify = receiptText(page.document);
+      const defaultRow = page.document.querySelector('#device-model-settings [data-machine-row="models.maxConcurrentSubagents"]');
+      assert.ok(defaultRow, "generic model concurrency belongs to the standalone Models page");
+      const concurrency = defaultRow.querySelector('[data-machine-control="models.maxConcurrentSubagents"]');
+      assert.equal(concurrency?.value, "", "an unset machine value uses the declared default");
+      assert.equal(concurrency?.placeholder, "8");
+      const beforeModify = receiptRawText(page.document);
       concurrency.value = "7";
       concurrency.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-      await waitForReceiptChange(beforeModify, "the modified open-field receipt");
-      await waitFor(() => page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified === "true", "the modified field to read back");
-      const modifiedRow = page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]');
-      assert.equal(modifiedRow?.dataset.modified, "true");
-      assert.ok(modifiedRow?.querySelector("[data-reset-setting]"), "a modified field exposes reset");
+      await waitFor(machineReceiptAdvanced(page.document, beforeModify), "the generic device setting receipt");
+      assert.equal((await cli(["machine-settings-catalog"], page.deviceEnv)).settings.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, "7");
 
-      const beforeReset = receiptText(page.document);
-      modifiedRow.querySelector("[data-reset-setting]").click();
-      await waitForReceiptChange(beforeReset, "the open-field reset receipt");
-      await waitFor(() => page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified === "false", "the reset field to read back");
-      assert.equal(page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]')?.dataset.modified, "false", "reset returns the field to the engine default");
-      assert.equal((await cli(["settings-catalog", "--workspace", page.workspace], page.deviceEnv)).settings.find((entry) => entry.key === "execution.maxConcurrentSubagents").currentValue, "8");
+      const beforeReset = receiptRawText(page.document);
+      const liveConcurrency = page.document.querySelector('#device-model-settings [data-machine-row="models.maxConcurrentSubagents"] [data-machine-control]');
+      liveConcurrency.value = "";
+      liveConcurrency.dispatchEvent(new page.window.Event("change", { bubbles: true }));
+      await waitFor(machineReceiptAdvanced(page.document, beforeReset), "the generic device setting reset receipt");
+      assert.equal((await cli(["machine-settings-catalog"], page.deviceEnv)).settings.find((entry) => entry.key === "models.maxConcurrentSubagents").currentValue, null);
 
       // A global-search jump uses the shared transient row treatment and ordinary
       // navigation clears it; the target isn't a portal-owned highlight class.
       const globalSearch = page.document.querySelector("#global-search");
-      globalSearch.value = "execution.maxConcurrentSubagents";
+      globalSearch.value = "models.maxConcurrentSubagents";
       globalSearch.dispatchEvent(new page.window.Event("input", { bubbles: true }));
       const searchTarget = page.document.querySelector("#search-results [data-search-index]");
       assert.ok(searchTarget, "the setting remains discoverable through global search");
       searchTarget.click();
-      const searchedRow = page.document.querySelector('[data-setting-row="execution.maxConcurrentSubagents"]');
-      assert.equal(searchedRow?.getAttribute("data-transient-target"), "true", "a settings search result marks its target row");
+      const searchedRow = page.document.querySelector('#device-model-settings [data-machine-row="models.maxConcurrentSubagents"]');
+      assert.equal(searchedRow?.getAttribute("data-transient-target"), "true", "a model-page search result marks its target row");
       assert.equal(searchedRow?.classList.contains("tcrn-highlight"), false, "the target treatment does not add a portal highlight class");
       page.document.querySelector('[data-page-target="dashboard"]')?.click();
       assert.equal(page.document.querySelectorAll('[data-transient-target="true"]').length, 0, "navigation clears a settings search target");
@@ -1159,10 +1123,10 @@ if (!MUTATION) {
       page.document.dispatchEvent(closeLong);
       assert.equal(long.layer.hidden, true);
 
-      page.document.querySelector('[data-setting-group="execution"]')?.click();
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 80));
       const shortTip = page.document.querySelector('[data-concept-tip="setting.execution.maxConcurrentSubagents"]');
-      assert.ok(shortTip, "the execution group must expose the short overlay consumer");
+      assert.ok(shortTip, "the Models page retains the compatibility setting's short overlay consumer");
       const short = inspect(shortTip);
       assert.equal(short.trigger.getAttribute("aria-describedby"), short.layer.getAttribute("id"));
       assert.equal(short.layer.getAttribute("role"), "tooltip");
@@ -1205,9 +1169,9 @@ if (!MUTATION) {
       await new Promise((resolve) => setTimeout(resolve, 60));
       const languageRow = page.document.querySelector('[data-setting-row="artifact.language"]');
       assert.ok(languageRow?.querySelector("[data-vocabulary-link]"), "a closed-enum setting keeps its dictionary link");
-      page.document.querySelector('[data-setting-group="execution"]')?.click();
+      page.document.querySelector('[data-page-target="engine-model-policy"]')?.click();
       await new Promise((resolve) => setTimeout(resolve, 60));
-      const planRow = page.document.querySelector('[data-setting-row="execution.claudeCodeSubagentPlan"]');
+      const planRow = page.document.querySelector('#device-model-settings [data-setting-row="execution.claudeCodeSubagentPlan"]');
       if (planRow) assert.equal(planRow.querySelector("[data-vocabulary-link]"), null, "a plan-sourced setting must not offer a link to an entry that does not exist");
     } finally { await page.cleanup(); }
   });
@@ -1224,7 +1188,7 @@ if (!MUTATION) {
     try {
       const tabs = [...page.document.querySelectorAll("[data-workspace-tab]")].map((tab) => tab.dataset.workspaceTab);
       // TCRN-CROSS-SUB-513 (TCRN-CROSS-STORY-541) adds the Library tab: chain identity and the registry.
-      assert.deepEqual(tabs, ["overview", "work", "knowledge", "library"]);
+      assert.deepEqual(tabs, ["overview", "work", "knowledge", "minutes", "activity", "library"]);
       assert.deepEqual([...page.document.querySelectorAll("[data-workspace-panel]")].map((panel) => panel.dataset.workspacePanel), tabs);
       for (const selector of ['[data-ui="evolution-dashboard"]', "#evolution-retirement", "#evolution-eval", "#evolution-hosts", "#audit-button", "#dashboard-audit", "#drawer-audit", '[data-ui="dispatch-config-surface"]']) {
         assert.equal(page.document.querySelector(selector), null, `${selector} must be absent`);

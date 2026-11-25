@@ -535,6 +535,42 @@ test("INC-027: event-list pages the chain and the concatenation IS the chain", a
   assert.equal(events.at(-1).eventHash, status.streams[0].headEventHash, "the last page ends at the head the authority reports");
 });
 
+test("INIT-003 activity searches stored events before taking a newest-first page", async (context) => {
+  const { workspace } = await longChainFixture(context, 12);
+  const ws = ["--workspace", workspace];
+  const ordinary = await run(["event-list", ...ws]);
+  const matched = await run(["event-list", ...ws, "--search", "Ｐｒｏｊｅｃｔ-00", "--newest-first", "true", "--limit", "3", "--offset", "1"]);
+  assert.equal(matched.total, 10);
+  assert.deepEqual(matched.records, ordinary.records.slice(6, 9).reverse());
+  assert.equal(matched.headEventHash, ordinary.headEventHash);
+  const none = await run(["event-list", ...ws, "--search", "no matching activity"]);
+  assert.deepEqual([none.total, none.records], [0, []]);
+  assert.equal(none.headEventHash, ordinary.headEventHash);
+});
+
+test("INIT-003 pending actions count awaiting validation in the requested project", async (context) => {
+  const { workspace, ids } = await fixture(context);
+  const ws = ["--workspace", workspace];
+  const count = projectId => run(["pending-actions", ...ws, "--project-id", projectId]);
+  const initial = await count(ids.projectA);
+  assert.equal(initial.reasonCode, "PENDING_ACTIONS_READY");
+  assert.equal(initial.counts.workValidation, 0);
+  const state = await createWork(workspace, {
+    occurredAt: instant(31), projectId: ids.projectA, externalKey: "STORY-PENDING",
+    kind: "Story", parentId: ids.epicA, status: "ready", scope: STORY_SCOPE,
+  });
+  const id = state.work.find((item) => item.externalKey === "STORY-PENDING").id;
+  await run(["work-transition", ...ws, "--id", id, "--status", "active", "--at", instant(32)]);
+  await run(["work-transition", ...ws, "--id", id, "--status", "pending-validate", "--at", instant(33)]);
+  const [a, b, stateAfterRead] = await Promise.all([count(ids.projectA), count(ids.projectB), run(["status", ...ws])]);
+  assert.equal(a.counts.workValidation, 1);
+  assert.equal(b.counts.workValidation, 0);
+  assert.equal(a.counts.gateProposals, 0);
+  assert.equal(a.counts.ruleProposals, 0);
+  assert.equal(a.headEventHash, stateAfterRead.headEventHash);
+  assert.equal(b.headEventHash, stateAfterRead.headEventHash);
+});
+
 // The refusal is the whole reason paging exists here. A page silently shortened to fit
 // would be indistinguishable from the end of the chain -- the same "limit expressed as
 // absence" that INC-004/INC-005 were filed for, reintroduced one layer down.

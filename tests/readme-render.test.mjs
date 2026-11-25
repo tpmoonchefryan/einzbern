@@ -146,12 +146,13 @@ test("486-R4: render-readme writes the five root READMEs, and --check compares w
 // 2026-10-31: refresh current snapshots for the Owner-reviewed usage section and translations;
 // the independent historical STORY-495 fixtures and their digests remain unchanged.
 // STORY-667 updates the current hook descriptions in the five templates. The STORY-495 archive above stays pinned.
+// INIT-003 documents both Codex modes and on-demand design authority access.
 const ETHER_TEMPLATE_SHA256 = {
-  "README.md": "b948aa294d6088b00162fbb5a937b0224cf6d89f6b2955f1c5dde0d4296b5dfb",
-  "README.en.md": "a73b2314973163d54907f00271542cb6752462bf96c2d7c3da33dad327bd9794",
-  "README.ja.md": "1ee6806f62d62692243c3a24503cab5ef3fde9604accbac17f5221cb93b7c83c",
-  "README.ko.md": "e9cfd83c2b5a8b0a01a2085e21a884d96c61bd60843289973020a0dfb58930d3",
-  "README.fr.md": "816b857bfffaed17735ee8bc7873bf8969cb5d096b7da0e026156345308d5587"
+  "README.md": "0e7b2baf2b7d68e1bf590a136988a44c35f47be1f1040725c10591912dd779df",
+  "README.en.md": "409aad4adfe23204911576ef0270eb414e2f1f3d235e42e538610c9c809cae2b",
+  "README.ja.md": "b64fec7a779ef5e62792ea3e0029d654f9b519137cdbba28e8a0328b09a73f70",
+  "README.ko.md": "bca86ea8a45d220d1b34aa9cb9be08f46e078db1cd52c7cfba3fdf5fcb0893ff",
+  "README.fr.md": "295598a39eff0a230ea92b8931627596ff6875f5cdeb4780a4ae24808421f236"
 };
 test("MIN-337: current README templates retain the Ether naming baseline", async () => {
   for (const name of NAMES) {

@@ -27,7 +27,7 @@ const fixtureProjectIds = new Map();
 const GLOBAL_SETTING_KEYS = new Set(["engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents", "workspace.generatedArtifactsPath"]);
 // TCRN-CROSS-INIT-053 R47 (c1-B): a coordination chain writes these for the whole library as well, so a fixture
 // write of one to a coordination library names no project either.
-const COORDINATION_SETTING_KEYS = new Set([...GLOBAL_SETTING_KEYS, "artifact.language", "execution.maxConcurrentSubagents", "quota.fiveHourParallelOffPercent", "quota.fiveHourWaitPercent", "quota.weeklyParallelOffPercent", "quota.weeklyWaitPercent"]);
+const COORDINATION_SETTING_KEYS = new Set([...GLOBAL_SETTING_KEYS, "artifact.language"]);
 const coordinationLibraries = new Set();
 const MUTATION = process.env.TCRN_UI_MUTATION ?? "";
 const COMPONENTS = Object.freeze([
@@ -543,9 +543,14 @@ async function waitFor(predicate, label, timeoutMs = process.platform === "win32
 // for, and cleanup then kills the child mid-flight (ECONNRESET). Capture the text
 // before the click and wait for it to move.
 const receiptText = (document) => document.querySelector("#receipt-chip-text")?.textContent ?? "";
+const receiptRawText = (document) => document.querySelector("#receipt-raw")?.textContent ?? "";
 const receiptAdvanced = (document, before) => () => {
   const current = receiptText(document);
   return current !== before && /^✓v\d+$/u.test(current) ? current : null;
+};
+const machineReceiptAdvanced = (document, before) => () => {
+  const current = receiptRawText(document);
+  return current !== before && current.includes("MACHINE_SETTINGS_WRITE_COMMITTED") ? current : null;
 };
 
 // TCRN-CROSS-INIT-053 R45 (U14): the page's label rule, restated for expectations. Each target has
@@ -584,7 +589,7 @@ async function preparePage(env = {}) {
       finally { await removePage(page, fixture); }
     };
     page.document.querySelector('[data-page-target="settings"]')?.click();
-    page.document.querySelector('[data-setting-group="execution"]')?.click();
+    page.document.querySelector('[data-setting-group="models"]')?.click();
     await new Promise((resolve) => setTimeout(resolve, 80));
     return page;
   } catch (error) {
@@ -657,11 +662,10 @@ function assertDomContract(document) {
   const missing = missingComponents(document);
   assert.deepEqual(missing, [], `rendered DOM components absent: ${JSON.stringify(missing)}`);
   const navigationItems = [...document.querySelectorAll(".tcrn-side-nav .tcrn-nav-item")];
-  // STORY-370 retired Entities, STORY-403 folds article reading into knowledge,
-  // STORY-485 adds the independent gate configuration destination, and TCRN-CROSS-SUB-409
-  // (STORY-508 R5) gives model categories and model tiers a page each.
-  assert.equal(navigationItems.length, 9, "the portal renders the engine host policy alongside the existing destinations");
-  assert.deepEqual(navigationItems.map((button) => button.getAttribute("data-page-target")), ["dashboard", "settings", "model-categories", "model-tiers", "engine-model-policy", "variables", "prose", "vocabulary", "gates"]);
+  assert.deepEqual(navigationItems.map((button) => button.getAttribute("data-page-target")), [
+    "dashboard", "settings", "model-categories", "model-tiers", "engine-model-policy",
+    "variables", "prose", "recall-preview", "vocabulary", "gates",
+  ]);
   assert.ok(navigationItems.every((button) => button.getAttribute("aria-label")?.trim()), "every destination must expose an accessible name");
   assert.ok(navigationItems.every((button) => button.getAttribute("data-i18n-aria-label")?.trim()), "every destination name must come from the locale table");
   assert.equal(document.querySelector('img.tcrn-brand-mark')?.getAttribute("alt"), "", "the decorative mark must not duplicate the brand accessible name");
@@ -677,13 +681,11 @@ async function assertBehaviorContract(page) {
   assert.equal(drawer.getAttribute("aria-hidden"), "false", "receipt drawer must expose its open state");
   document.querySelector("#drawer-close").click();
   const beforeSetting = receiptText(document);
-  const control = document.querySelector('#settings-rows [data-setting-control]');
+  document.querySelector('[data-setting-group="retrieval"]').click();
+  const control = document.querySelector('#settings-rows [data-setting-control="retrieval.metadataOnly"]');
   assert.ok(control, "fixture must expose a settings control for the write leg");
-  if (control.tagName === "BUTTON") control.click();
-  else {
-    if (control.tagName === "SELECT") control.value = control.value;
-    control.dispatchEvent(new window.Event("change", { bubbles: true }));
-  }
+  control.checked = true;
+  control.dispatchEvent(new window.Event("change", { bubbles: true }));
   await waitFor(receiptAdvanced(document, beforeSetting), "the receipt chip to advance after the settings write");
   const chipText = document.querySelector("#receipt-chip-text").textContent;
   assert.match(chipText, /^✓v\d+$/u, `receipt chip must update after a successful write, got ${JSON.stringify(chipText)}`);
@@ -807,4 +809,4 @@ function policySwitchControls(page, selector) {
   };
   return { view, control, change, recovered };
 }
-export { CLI, COMPLETE_ID, DS_CONTRACT, GHOST_TARGET, MUTATION, appendHistoricalGateCreate, asFixtureDevice, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, coordinationContainerFixture, expectedTargetLabels, fixtureProjectIds, join, keydown, linkBridge, loadExecutedDom, localeTable, mkdir, nextAt, openWorkContentEditor, openWorkEditor, pageHierarchyFindings, policySwitchControls, policySwitchViews, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scopedWorkFixture, scratch, seed, test, topbarFindings, vm, waitFor, writeFile, writeScratch };
+export { CLI, COMPLETE_ID, DS_CONTRACT, GHOST_TARGET, MUTATION, appendHistoricalGateCreate, asFixtureDevice, assert, assertBehaviorContract, assertDomContract, bridgeExports, cli, closePage, coordinationContainerFixture, expectedTargetLabels, fixtureProjectIds, join, keydown, linkBridge, loadExecutedDom, localeTable, machineReceiptAdvanced, mkdir, nextAt, openWorkContentEditor, openWorkEditor, pageHierarchyFindings, policySwitchControls, policySwitchViews, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptRawText, receiptText, rm, scopedWorkFixture, scratch, seed, test, topbarFindings, vm, waitFor, writeFile, writeScratch };

@@ -144,6 +144,44 @@ async function declareSuite(library) {
 
 const names = (plan) => plan.gates.map((gate) => gate.name);
 
+test("the CLI plans reusable package checks and preserves the original gate output", async (context) => {
+  const { base, project, library, baseCommit } = await setup(context);
+  const projectId = (await cli(["project-create", "--workspace", library, "--at", at(), "--external-key", "GC-REUSE-PROJECT", "--name", "Reuse fixture"])).record.id;
+  const initiation = await cli([
+    "work-create", "--workspace", library, "--at", at(), "--project-id", projectId,
+    "--external-key", "GC-REUSE-INIT", "--kind", "Initiative", "--title", "Verify package evidence",
+  ]);
+  const check = {
+    name: "source",
+    command: [node, "-e", "process.stdout.write(require('node:fs').readFileSync('src/a.ts'))"],
+    reuse: { source: ["src/a.ts"], portable: true },
+  };
+  const checksPath = join(base, "checks.json");
+  await writeFile(checksPath, JSON.stringify([check]));
+  await put(project, "src/a.ts", "first candidate\n");
+  const args = ["--workspace", library, "--project", project, "--base", baseCommit, "--work-id", initiation.record.id, "--checks-from", checksPath];
+  const plan = () => raw(["gates-plan", ...args]);
+  const run = () => raw(["gates-run", ...args, "--at", at(), "--gate-timeout-ms", "15000"]);
+
+  assert.equal((await plan()).verification[0].action, "run");
+  const first = await run();
+  assert.equal(first.run.projectId, projectId);
+  assert.equal(first.run.evidenceOnly, true);
+  assert.equal(first.run.gates[0].verification.mode, "executed");
+  assert.equal((await plan()).verification[0].action, "reuse");
+  const reused = await run();
+  assert.equal(reused.run.gates[0].verification.mode, "reused");
+  assert.equal(reused.run.gates[0].outputFile, first.run.gates[0].outputFile);
+  await put(project, "src/a.ts", "second candidate\n");
+  assert.equal((await plan()).verification[0].action, "run");
+  assert.equal((await run()).run.gates[0].verification.mode, "executed");
+
+  const registered = await declare(library, check.name, check.command, ["--reuse", JSON.stringify(check.reuse)]);
+  assert.deepEqual(registered.gate.reuse, check.reuse);
+  const removed = await declare(library, check.name, null, ["--reuse", "null"]);
+  assert.equal(removed.gate.reuse, undefined);
+});
+
 test("485-R1 (CLI): gates are declared, listed, redeclared in part and removed, and a malformed one is refused", async (context) => {
   const { library } = await setup(context);
   const declared = await declare(library, "unit", [node, "-e", "process.exit(0)"], ["--covers", "src/**"]);
