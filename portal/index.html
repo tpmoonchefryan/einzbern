@@ -4238,10 +4238,11 @@ button:disabled { cursor: not-allowed; }
             <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="page.dashboard">Workspace status</h1><p class="tcrn-text tcrn-page__lede" data-i18n="dashboard.lede">Doctor's eight checks and the selected library state.</p></div><div class="tcrn-page-header__actions tcrn-page__actions"><span class="tcrn-badge tcrn-badge--positive" id="health-chip"><span id="health-chip-text" data-i18n="health.healthy">healthy</span></span></div></div></header>
           </div>
           <div class="tcrn-page-hierarchy__section-tabs" data-page-hierarchy-region="section-tabs" data-page-hierarchy-slot="section-tabs">
-            <div class="tcrn-section-tabs" role="tablist" data-ui="workspace-tabs" aria-label="Workspace views"><button class="tcrn-button" role="tab" aria-selected="true" data-selected="true" data-workspace-tab="overview" data-i18n="dashboard.overview">Status</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="work" data-i18n="dashboard.work">Work</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="knowledge" data-i18n="dashboard.knowledge">Knowledge</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="library" data-i18n="dashboard.libraryTab">Library</button></div>
+            <div class="tcrn-section-tabs" role="tablist" data-ui="workspace-tabs" aria-label="Workspace views"><button class="tcrn-button" role="tab" aria-selected="true" data-selected="true" data-workspace-tab="overview" data-i18n="dashboard.overview">Status</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="work" data-i18n="dashboard.work">Work</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="knowledge" data-i18n="dashboard.knowledge">Knowledge</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="activity" data-i18n="activity.title">Activity</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="library" data-i18n="dashboard.libraryTab">Library</button></div>
           </div>
           <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content" data-page-hierarchy-slot="content">
         <div data-workspace-panel="overview">
+          <article class="tcrn-surface" aria-labelledby="pending-actions-heading"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="pending-actions-heading" data-i18n="pendingActions.title">Waiting for you</h2></div></div><div id="pending-actions-content" aria-live="polite"></div></article>
           <div class="tcrn-grid tcrn-grid--4"><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.chain">Chain version</span><strong class="tcrn-stat-card__value" id="stat-version">—</strong><span class="tcrn-stat-card__note" id="stat-head"></span></article><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.events">Events</span><strong class="tcrn-stat-card__value" id="stat-events">—</strong><span class="tcrn-stat-card__note" data-i18n="dashboard.eventsNote">materialized chain</span></article><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.engine">Engine</span><strong class="tcrn-stat-card__value" id="stat-engine">—</strong><span class="tcrn-stat-card__note" data-i18n="dashboard.engineNote">local loopback</span></article><article class="tcrn-stat-card" data-stat-card="true" data-stat-tone="neutral"><span class="tcrn-stat-card__label" data-i18n="dashboard.healthCard">Health</span><strong class="tcrn-stat-card__value" id="stat-health">—</strong><span class="tcrn-stat-card__note" data-i18n="dashboard.healthCardNote">read-only checks</span></article></div>
           <div class="tcrn-grid tcrn-grid--2 tcrn-dashboard-grid">
             <article class="tcrn-surface"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.healthTitle">Doctor checks</h2><p class="tcrn-text" data-i18n="dashboard.healthNote">The eight checks returned by doctor for the selected project.</p></div><span class="tcrn-badge tcrn-badge--positive" id="validate-chip">doctor</span></div><div class="tcrn-definition-list tcrn-definition-list--dense" id="health-list"></div></article>
@@ -4250,6 +4251,17 @@ button:disabled { cursor: not-allowed; }
         </div>
         <div data-workspace-panel="work" hidden><div class="tcrn-surface" data-ui="work-tree"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.workTitle">Work tree</h2><p class="tcrn-text" data-i18n="dashboard.workNote">Initiatives, Epics, and Stories read from the engine.</p></div><span class="tcrn-badge" id="work-count">—</span></div><div class="tcrn-state-surface" id="work-loading" role="status" data-i18n="dashboard.workLoading" hidden>Reading work records through the engine…</div><div id="work-tree-content"></div><div id="work-target-editor" class="tcrn-surface"></div><div id="work-content-editor" class="tcrn-surface"></div></div></div>
         <div data-workspace-panel="knowledge" hidden><div class="tcrn-surface" data-ui="knowledge-view"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.knowledgeTitle">Knowledge inventory</h2><p class="tcrn-text" data-i18n="dashboard.knowledgeNote">Cards and article indexes, metadata only.</p></div><span class="tcrn-badge" id="knowledge-count">—</span></div><div id="knowledge-view-content"></div></div></div>
+        <div data-workspace-panel="activity" hidden>
+          <article class="tcrn-surface" aria-labelledby="activity-heading">
+            <div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="activity-heading" data-i18n="activity.title">Activity</h2></div></div>
+            <form id="activity-search" class="tcrn-action-row" role="search" data-i18n-aria-label="activity.search">
+              <label class="tcrn-field"><span class="tcrn-sr-only" data-i18n="activity.search">Search activity</span><input id="activity-query" class="tcrn-input" type="search" data-i18n-placeholder="activity.search"></label>
+              <button type="submit" class="tcrn-button tcrn-button--primary tcrn-button--sm" data-i18n="activity.find">Search</button>
+            </form>
+            <div id="activity-results" aria-live="polite"></div>
+            <div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="activity-previous" data-i18n="activity.previous">Previous</button><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="activity-next" data-i18n="activity.next">Next</button></div>
+          </article>
+        </div>
         <div data-workspace-panel="library" hidden>
           <article class="tcrn-surface" data-ui="chain-identity" aria-labelledby="chain-identity-title"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="chain-identity-title" data-i18n="chainIdentity.title">Chain identity</h2><p class="tcrn-text" data-i18n="chainIdentity.note">The library's role and the coordination library it belongs to.</p></div><span class="tcrn-badge" id="chain-identity-current" data-ui="chain-identity-current">—</span></div>
             <form id="chain-declare-form" data-ui="chain-declare-form">
@@ -6486,6 +6498,77 @@ const BOOT = __PORTAL_BOOT__;
     const passed = outcomes.filter((gate) => gate.ok).length;
     runHost.innerHTML = `<div><div data-gate-run-row><span>${esc(t("gates.runAt"))}: <time datetime="${esc(run.at)}">${esc(new Date(run.at).toLocaleString(state.locale))}</time></span><span class="tcrn-text">${esc(t("gates.runId"))}: <code>${esc(run.runId)}</code></span><span class="tcrn-badge ${run.reds?.length ? "tcrn-badge--danger" : "tcrn-badge--positive"}">${passed}/${outcomes.length} · ${esc(run.reds?.length ? t("gates.runFailed") : t("gates.runOk"))}</span></div><div class="tcrn-definition-list tcrn-definition-list--dense">${outcomes.map((gate) => `<div class="tcrn-definition-list__item"><span>${esc(gate.name)}${gate.required ? ` · ${esc(t("gates.required"))}` : ""}</span><span class="tcrn-badge ${gate.ok ? "tcrn-badge--positive" : "tcrn-badge--danger"}">${esc(gate.ok ? t("gates.runOk") : t("gates.runFailed"))}</span></div>`).join("") || `<div class="tcrn-state-surface">${esc(t("gates.lastRunEmpty"))}</div>`}</div></div>`;
   };
+  const activity = { target: null, query: "", offset: 0, result: null, loading: false, serial: 0 };
+  let pendingActions = { target: null, loading: false, result: null };
+  const overviewTarget = () => JSON.stringify(pageTarget());
+  const renderPendingActions = () => {
+    const host = $("#pending-actions-content");
+    const current = pendingActions.target === overviewTarget() ? pendingActions : { loading: true };
+    const counts = current.result?.counts;
+    if (!counts) {
+      host.innerHTML = `<p class="tcrn-text">${esc(t(current.loading ? "config.loading" : "config.readUnavailable"))}</p>`;
+      return;
+    }
+    const visible = Object.entries(counts).filter(([, count]) => count === null || count > 0);
+    host.innerHTML = visible.length
+      ? `<dl class="tcrn-definition-list tcrn-definition-list--dense">${visible.map(([kind, count]) => `<div class="tcrn-definition-list__item"><dt class="tcrn-definition-list__term">${esc(t("pendingActions." + kind))}</dt><dd class="tcrn-definition-list__definition" data-pending-count="${esc(kind)}">${esc(count ?? t("config.readUnavailable"))}</dd></div>`).join("")}</dl>`
+      : `<p class="tcrn-text">${esc(t("pendingActions.empty"))}</p>`;
+  };
+  const loadPendingActions = async () => {
+    const target = overviewTarget();
+    if (pendingActions.target === target && pendingActions.loading) return;
+    const request = pendingActions = { target, loading: true, result: null };
+    renderPendingActions();
+    try {
+      const result = await api("/api/pending-actions");
+      if (request !== pendingActions || target !== overviewTarget() || unkept(result)) return;
+      request.result = result.ok ? result : null;
+    } catch { /* The panel renders a scoped read failure. */ }
+    finally {
+      request.loading = false;
+      renderPendingActions();
+    }
+  };
+  const renderActivity = () => {
+    const host = $("#activity-results");
+    const current = activity.target === overviewTarget() ? activity : { loading: true, offset: 0 };
+    const result = current.result;
+    $("#activity-previous").disabled = current.loading || !result?.ok || current.offset === 0;
+    $("#activity-next").disabled = current.loading || !result?.ok || !result.truncated;
+    if (!result?.ok || current.loading) {
+      host.innerHTML = `<p class="tcrn-state-surface">${esc(t(current.loading ? "config.loading" : "config.readUnavailable"))}</p>`;
+      return;
+    }
+    host.innerHTML = result.records.length > 0 ? `<ul class="tcrn-activity-feed">${result.records.map((event) => {
+      const detail = event.payload?.record;
+      const subject = detail?.title ?? detail?.name ?? detail?.externalKey ?? detail?.key ?? "";
+      const when = new Date(event.occurredAt).toLocaleString(state.locale);
+      return `<li class="tcrn-activity-feed__item"><div class="tcrn-activity-feed__head"><strong>${esc(event.payload?.operation ?? event.id)}</strong><time datetime="${esc(event.occurredAt)}">${esc(when)}</time></div><p class="tcrn-text">${esc(subject)} <code>${esc(event.id)}</code></p></li>`;
+    }).join("")}</ul>` : `<p class="tcrn-state-surface">${esc(t("activity.empty"))}</p>`;
+  };
+  const loadActivity = async (query = activity.query, offset = 0) => {
+    const target = overviewTarget();
+    const pageHead = offset > 0 && activity.target === target ? activity.result?.headEventHash : null;
+    const serial = ++activity.serial;
+    Object.assign(activity, { target, query: query.trim(), offset, result: null, loading: true });
+    renderActivity();
+    const parameters = new URLSearchParams({ q: activity.query, offset: String(offset) });
+    try {
+      const result = await api(`/api/activity?${parameters}`);
+      if (serial !== activity.serial || target !== overviewTarget() || unkept(result)) return;
+      if (result.ok && pageHead && pageHead !== result.headEventHash) {
+        void loadActivity(query);
+        return;
+      }
+      activity.result = result;
+    } catch { /* The page keeps its search and renders a read failure. */ }
+    finally {
+      if (serial === activity.serial) {
+        activity.loading = false;
+        renderActivity();
+      }
+    }
+  };
   const renderDashboard = () => {
     const doctorFocus = rememberFocus($("#health-list"));
     const status = state.status || {};
@@ -6528,9 +6611,23 @@ const BOOT = __PORTAL_BOOT__;
     renderWorkView();
     renderKnowledgeView();
     renderLibraryView();
+    renderPendingActions();
+    renderActivity();
+    $("#activity-search").onsubmit = (event) => {
+      event.preventDefault();
+      void loadActivity($("#activity-query").value);
+    };
+    $("#activity-previous").onclick = () => void loadActivity(activity.query, Math.max(0, activity.offset - 24));
+    $("#activity-next").onclick = () => {
+      if (activity.result?.truncated) void loadActivity(activity.query, activity.offset + activity.result.records.length);
+    };
     bindTabList($('[data-ui="workspace-tabs"]'), {
       selected: state.dashboardTab,
-      onSelect: (tab) => { state.dashboardTab = tab.dataset.workspaceTab; },
+      onSelect: (tab) => {
+        state.dashboardTab = tab.dataset.workspaceTab;
+        if (state.dashboardTab === "activity") void loadActivity($("#activity-query").value);
+        if (state.dashboardTab === "overview") void loadPendingActions();
+      },
       onSync: (tab) => {
         const selected = tab?.dataset.workspaceTab;
         $$('[data-workspace-panel]').forEach((panel) => { panel.hidden = panel.dataset.workspacePanel !== selected; });
@@ -7027,6 +7124,8 @@ const BOOT = __PORTAL_BOOT__;
       state.machineSettings = machine; state.settings = settings; renderConfigurationTargets(); state.vocabulary = vocabularyResult; state.status = status; state.knowledge = knowledge; state.variables = variables; state.commands = commandsResult.commands || [];
       for (const collection of Object.values(state.collections)) if (!collection.dirty) collection.draft = null;
       renderDashboard(); renderSettings(); renderCollections(); renderModelPolicy(); renderVariables(); renderVocabulary(); rebuildSearchIndex();
+      if (state.dashboardTab === "overview") void loadPendingActions();
+      if (state.dashboardTab === "activity" && activity.target !== overviewTarget()) void loadActivity($("#activity-query").value);
     } catch (error) {
       if ((state.libraryEpoch || 0) !== epoch || state.settingsRead !== read) return;
       if (modelPolicyReadCurrent(policyTarget)) acceptModelPolicyRead(policyTarget, { ok: false, httpStatus: 503, reasonCode: "PORTAL_MODEL_POLICY_READ_UNAVAILABLE", error: String(error?.message ?? error) });

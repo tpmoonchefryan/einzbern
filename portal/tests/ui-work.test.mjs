@@ -1,8 +1,45 @@
 // SPDX-License-Identifier: Apache-2.0
 import { canonicalDocumentBytes } from "../../scripts/lib/canonical-json.mjs";
 // Tests in this file run sequentially; Node isolates each file in a process.
-import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile } from "./ui-presence-support.mjs";
+import { CLI, MUTATION, assert, cli, closePage, join, loadExecutedDom, localeTable, nextAt, openWorkContentEditor, openWorkEditor, portalRoot, preparePage, projectChainFixture, readFile, receiptAdvanced, receiptText, rm, scopedWorkFixture, scratch, test, waitFor, writeFile, writeScratch } from "./ui-presence-support.mjs";
 
+if (!MUTATION) test("INIT-003 Atelier activity and pending actions use the read-only engine views", async () => {
+  const page = await preparePage();
+  const { document, window } = page;
+  const ws = ["--workspace", page.workspace];
+  try {
+    await writeScratch(page.fixture, "project-create", ["--external-key", "ACTIVITY-NEEDLE", "--name", "Activity needle"]);
+    const before = await cli(["status", ...ws], page.deviceEnv);
+    document.querySelector('[data-page-target="dashboard"]').click();
+    document.querySelector('[data-workspace-tab="activity"]').click();
+    const query = document.querySelector("#activity-query");
+    const form = document.querySelector("#activity-search");
+    const results = document.querySelector("#activity-results");
+    const search = async (value, result) => {
+      query.value = value;
+      form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+      await waitFor(() => results.textContent.includes(result), "activity search result", 30_000);
+    };
+    await search("ACTIVITY NEEDLE", "Activity needle");
+    assert.equal(results.querySelectorAll(".tcrn-activity-feed__item").length, 1);
+    await search("nothing matches this exact activity query", "No activity matches this search.");
+    assert.equal(results.querySelectorAll(".tcrn-activity-feed__item").length, 0);
+
+    document.querySelector('[data-workspace-tab="overview"]').click();
+    const pending = document.querySelector("#pending-actions-content");
+    const expected = await cli(["pending-actions", ...ws, "--project", page.fixture.proseRoot, "--project-id", page.fixture.projectId], page.deviceEnv);
+    const visible = Object.values(expected.counts).some(count => count === null || count > 0);
+    await waitFor(() => visible ? pending.querySelector("[data-pending-count]") : pending.textContent.includes("No pending actions."),
+      "overview pending actions", 30_000);
+    for (const [kind, count] of Object.entries(expected.counts)) {
+      const displayed = pending.querySelector(`[data-pending-count="${kind}"]`);
+      if (count === null) assert.ok(displayed?.textContent);
+      else if (count > 0) assert.equal(displayed?.textContent, String(count));
+      else assert.equal(displayed, null);
+    }
+    assert.equal((await cli(["status", ...ws], page.deviceEnv)).headEventHash, before.headEventHash);
+  } finally { await page.cleanup(); }
+});
 
 
 // TCRN-CROSS-INIT-053 R46 (I09; I04, U20 D5): a library whose knowledge store was never created shows the

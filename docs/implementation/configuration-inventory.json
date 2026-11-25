@@ -8839,6 +8839,16 @@
             "name": "offset",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "search",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "newest-first",
+            "required": false,
+            "valueKind": "boolean"
           }
         ]
       },
@@ -11104,6 +11114,28 @@
           },
           {
             "name": "status",
+            "required": false,
+            "valueKind": "string"
+          }
+        ]
+      },
+      {
+        "name": "pending-actions",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project-id",
             "required": false,
             "valueKind": "string"
           }

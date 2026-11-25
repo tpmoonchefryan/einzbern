@@ -1193,6 +1193,24 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       send(response, 200, await workProjection());
       return;
     }
+    if (request.method === "GET" && pathname === "/api/activity") {
+      const args = ["event-list", "--workspace", currentLibrary().libraryPath, "--limit", "24", "--newest-first", "true"];
+      const search = url.searchParams.get("q");
+      if (search?.trim()) args.push("--search", search);
+      const offset = url.searchParams.get("offset");
+      if (offset !== null) args.push("--offset", offset);
+      const result = await cliResult(args);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
+      return;
+    }
+    if (request.method === "GET" && pathname === "/api/pending-actions") {
+      const selected = currentLibrary();
+      const binding = proseBinding(selected);
+      const location = binding.entry === null ? [] : ["--project", binding.entry.projectPath];
+      const result = await cliResult(["pending-actions", "--workspace", selected.libraryPath, ...location, ...scopeArguments()]);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
+      return;
+    }
     if (request.method === "GET" && pathname === "/api/knowledge") {
       const status = url.searchParams.get("status") ?? "valid";
       if (!KNOWLEDGE_STATUSES.includes(status)) { send(response, 400, { ok: false, reasonCode: "PORTAL_KNOWLEDGE_STATUS_INVALID", status }); return; }
