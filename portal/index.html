@@ -4754,7 +4754,7 @@ const BOOT = __PORTAL_BOOT__;
   const settingGroupName = (group) => SETTING_GROUP_NAMES.find(([id]) => id === group)?.[1]() ?? group;
   // Both catalogs' rows: the library's keys (settings-catalog) and this device's (machine-settings-catalog).
   const settingEntries = () => [
-    ...(Array.isArray(state.settings?.settings) ? state.settings.settings : []).map((entry) => ({ ...entry })),
+    ...(Array.isArray(state.settings?.settings) ? state.settings.settings : []).filter((entry) => entry.key !== "design.consumedVersion").map((entry) => ({ ...entry })),
     ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings : []).map((entry) => ({ ...entry, layer: "device" })),
   ];
   const settingEntry = (key) => settingEntries().find((entry) => entry.key === key);
@@ -4894,56 +4894,93 @@ const BOOT = __PORTAL_BOOT__;
     if (entry.controlType === "enum" && values.length > 0) return `<div class="tcrn-setting-choice" data-setting-choice-component="SettingChoice" ${settingChoiceAttrs(values, entry.key)}><label class="tcrn-setting-choice__select-label" for="${esc(id)}"><span class="tcrn-sr-only">${esc(label)}</span><select class="tcrn-select" id="${esc(id)}" aria-label="${esc(label)}" data-setting-control="${esc(entry.key)}" data-cli-action="settings-set">${values.map((value) => `<option value="${esc(value)}" ${value === current ? "selected" : ""}>${esc(entry.key === "artifact.language" ? promptLanguageLabel(value) : value || t("config.unset"))}</option>`).join("")}</select></label></div>`;
     return `<label class="tcrn-field"><span class="tcrn-sr-only">${esc(label)}</span><input class="tcrn-input" id="${esc(id)}" value="${esc(current)}" placeholder="${esc(unconfiguredDevicePath ? t("config.unset") : entry.defaultValue ?? t("config.unset"))}" aria-label="${esc(label)}" data-setting-control="${esc(entry.key)}" data-cli-action="settings-set">${unconfiguredDevicePath ? `<span class="tcrn-field__hint" data-device-path-status="unconfigured">${esc(t("config.unset"))}</span>` : ""}</label>`;
   };
-  // INC-193: the design authority is a declaration, and what is behind it is an
-  // external fact. Verified-true is green, verified-false is red, and "cannot be
-  // verified here" is yellow — a distinct state rather than a soft red, so it never
-  // changes an exit code and never becomes a place to park a defect. Every yellow
-  // states what would turn it green. The fetch happens in the reader's browser: the
-  // engine is offline by construction and the portal server never reaches out either.
-  const DESIGN_AUTHORITY_CONTRACT = "/tcrn-design-authority.json";
-  const designAuthorityState = { key: null, status: "unset", detail: null, epoch: 0 };
-  const readDesignAuthority = async (url) => {
-    if (!url) return { status: "unset", detail: null };
-    let contract;
-    try { contract = new URL(DESIGN_AUTHORITY_CONTRACT, url).href; } catch { return { status: "warning", detail: t("design.warnBadUrl") }; }
+  const productionDocsKey = "design.productionDocs";
+  const designAuthorityUrl = () => currentSetting("design.authority")?.currentValue || "";
+  const designAuthorityContext = () => JSON.stringify([BOOT.library?.libraryId, state.libraryEpoch, state.settings?.projectId, designAuthorityUrl()]);
+  let designAuthorityRead = { context: null, status: "idle" };
+  const storybookFile = (base, path) => fetch(new URL(path, base).href, { mode: "cors", credentials: "omit", cache: "no-store" });
+  const standardStorybook = async (base) => {
     try {
-      const response = await fetch(contract, { mode: "cors", credentials: "omit", cache: "no-store" });
-      if (!response.ok) return { status: "warning", detail: t("design.warnStatus", { status: response.status }) };
-      const body = await response.json();
-      // The response is somebody else's bytes: it is checked for shape before anything
-      // from it reaches the page, and rendered escaped like any other untrusted input.
-      if (body?.schemaVersion !== "tcrn.design-authority.v1") return { status: "warning", detail: t("design.warnSchema") };
-      if (typeof body.name !== "string" || typeof body.version !== "string" || body.name.length === 0 || body.version.length === 0) {
-        return { status: "warning", detail: t("design.warnFields") };
+      const [indexResponse, projectResponse] = await Promise.all([storybookFile(base, "index.json"), storybookFile(base, "project.json")]);
+      const rejected = [indexResponse, projectResponse].find((response) => !response.ok);
+      if (rejected) return { status: "warning", message: "design.warnStatus", values: { status: rejected.status } };
+      const [index, project] = await Promise.all([indexResponse.json(), projectResponse.json()]).catch(() => []);
+      if (!Number.isInteger(index?.v) || !index?.entries || typeof index.entries !== "object" || Array.isArray(index.entries) || typeof project?.storybookVersion !== "string" || !project.storybookVersion.trim()) {
+        return { status: "warning", message: "design.warnSchema" };
       }
-      return { status: "declared", detail: { name: body.name, version: body.version } };
-    } catch { return { status: "warning", detail: t("design.warnUnreachable") }; }
+      const components = await storybookFile(base, "manifests/components.json").then(async (response) => {
+        if (response.status === 404) return "missing";
+        if (!response.ok) return "unverified";
+        const manifest = await response.json();
+        return manifest && typeof manifest === "object" ? "available" : "unverified";
+      }).catch(() => "unverified");
+      return { status: "available", url: base.href, count: Object.keys(index.entries).length, version: project.storybookVersion, components };
+    } catch { return { status: "warning", message: "design.warnUnreachable" }; }
+  };
+  const fetchDesignAuthority = async () => {
+    const context = designAuthorityContext();
+    const request = designAuthorityRead = { context, status: "loading" };
+    renderDesignAuthority();
+    let base;
+    try {
+      base = new URL(designAuthorityUrl());
+      if (!["http:", "https:"].includes(base.protocol) || base.username || base.password) throw new Error("Expected an HTTP(S) site");
+      base.search = "";
+      base.hash = "";
+      if (!base.pathname.endsWith("/")) base.pathname += "/";
+    } catch {
+      if (designAuthorityRead === request) {
+        designAuthorityRead = { context, status: "warning", message: "design.warnBadUrl" };
+        renderDesignAuthority();
+      }
+      return;
+    }
+    const first = await standardStorybook(base);
+    const result = first.status === "available" || base.pathname.endsWith("/storybook/") || first.message === "design.warnUnreachable"
+      ? first
+      : await standardStorybook(new URL("storybook/", base));
+    if (designAuthorityRead !== request || context !== designAuthorityContext()) return;
+    designAuthorityRead = { context, ...result };
+    renderDesignAuthority();
   };
   const renderDesignAuthority = () => {
     const host = $("#design-authority");
-    if (!host) return;
-    const { status, detail } = designAuthorityState;
-    if (status === "unset") { host.innerHTML = ""; host.hidden = true; return; }
-    host.hidden = false;
-    host.innerHTML = status === "declared"
-      ? `<div class="tcrn-inline-alert" data-design-authority-state="declared"><span>${esc(t("design.declared"))}: <strong>${esc(detail.name)}</strong> ${esc(detail.version)}. ${esc(t("design.warnResolve"))}</span></div>`
-      : `<div class="tcrn-inline-alert tcrn-inline-alert--warning" data-design-authority-state="${esc(status)}" role="status"><span>${esc(detail)} ${["unconfigured", "conflicting"].includes(status) ? "" : esc(t("design.warnResolve"))}</span></div>`;
-  };
-  const refreshDesignAuthority = async () => {
-    const url = currentSetting("design.authority")?.currentValue ?? null;
+    const context = designAuthorityContext();
+    if (designAuthorityRead.context !== context) designAuthorityRead = { context, status: "idle" };
+    host.hidden = !designAuthorityUrl() || state.settings?.chain?.role === "coordination" || state.settingGroup !== settingGroup("design.authority");
+    if (host.hidden) { host.innerHTML = ""; return; }
+    const { status, url, count, version, components, message, values } = designAuthorityRead;
+    const field = $("[data-setting-control='design.productionDocs']", $("#settings-rows"));
+    const action = (key, label, primary = false) => `<button type="button" class="tcrn-button tcrn-button--${primary ? "primary" : "quiet"} tcrn-button--sm" data-design-authority-action="${key}">${esc(t(label))}</button>`;
+    const outcome = status === "available" || status === "staged"
+      ? `<p>${esc(t("design.storybook", { version, count }))} ${esc(t("design.components." + components))}</p><p><code>${esc(url)}</code></p><p>${esc(t("design.warnResolve"))}</p>`
+      : status === "warning" ? `<p>${esc(t(message, values))}</p>` : status === "loading" ? `<p>${esc(t("config.loading"))}</p>` : "";
+    const actions = status === "staged" ? action("save", "config.save", true) + action("cancel", "config.undo")
+      : status === "available" && field ? action("fill", "design.useDocs", true) + action("fetch", "design.fetch")
+        : status === "loading" ? "" : action("fetch", "design.fetch");
     const declaration = state.settings?.design;
-    const key = JSON.stringify([BOOT.library?.libraryId, state.settings?.projectId, declaration, state.locale]);
-    if (key === designAuthorityState.key) return;
-    const epoch = ++designAuthorityState.epoch;
-    designAuthorityState.key = key;
-    const result = !url ? { status: "unset", detail: null } : declaration?.status === "unconfigured"
-      ? { status: "unconfigured", detail: t("design.missingBindings", { fields: declaration.missing.map(settingLabel).join(", ") }) }
-      : declaration?.status === "conflicting"
-        ? { status: "conflicting", detail: t("design.conflictingBindings") }
-        : await readDesignAuthority(url);
-    if (epoch !== designAuthorityState.epoch || key !== designAuthorityState.key) return;
-    Object.assign(designAuthorityState, result);
-    renderDesignAuthority();
+    const hint = declaration?.status === "conflicting" ? t("design.conflictingBindings")
+      : declaration?.status === "unconfigured" ? t("design.missingBindings", { fields: declaration.missing.map(settingLabel).join(", ") }) : "";
+    host.innerHTML = `<div class="tcrn-inline-alert${status === "warning" ? " tcrn-inline-alert--warning" : ""}" data-design-authority-state="${status}"><div aria-live="polite">${hint ? `<p>${esc(hint)}</p>` : ""}${outcome}${status === "staged" ? `<p>${esc(t("design.staged"))}</p>` : ""}</div><div class="tcrn-action-row">${actions}</div></div>`;
+    if (status === "staged" && field) field.value = url;
+    $('[data-design-authority-action="fetch"]', host)?.addEventListener("click", () => void fetchDesignAuthority());
+    $('[data-design-authority-action="fill"]', host)?.addEventListener("click", () => {
+      designAuthorityRead.status = "staged";
+      renderDesignAuthority();
+      $('[data-design-authority-action="save"]', host)?.focus();
+    });
+    $('[data-design-authority-action="cancel"]', host)?.addEventListener("click", () => {
+      designAuthorityRead.status = "available";
+      renderSettings();
+    });
+    $('[data-design-authority-action="save"]', host)?.addEventListener("click", async (event) => {
+      if (state.librarySwitching || state.settingsWritePending || context !== designAuthorityContext()) return;
+      event.currentTarget.disabled = true;
+      await saveSetting(productionDocsKey, url);
+      if (context !== designAuthorityContext()) return;
+      if (currentSetting(productionDocsKey)?.currentValue === url) designAuthorityRead.status = "available";
+      renderDesignAuthority();
+    });
   };
   // A settings row for each shape and layer. A project-level key keeps the controls it always had; a
   // device key is written to this device's own file (machine-settings-set); a collection key is a
@@ -5196,10 +5233,7 @@ const BOOT = __PORTAL_BOOT__;
       : `<div class="tcrn-state-surface" data-settings-state="${phase}">${esc(stateText)}</div>`;
     const valid = unavailable || deviceUnavailable ? "false" : "true";
     $("#settings-rows").innerHTML = `<section class="tcrn-surface tcrn-content-scope" data-content-scope="settings-group" data-content-group="${esc(state.settingGroup)}" data-content-source="engine.settings-catalog engine.machine-settings" data-content-phase="${phase}" data-content-valid="${valid}" data-content-shown-count="${entries.length}" data-content-total-count="${entries.length}" data-content-count-kind="total" data-content-stale="false"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(settingGroupName(state.settingGroup))}</h2><p class="tcrn-text">${esc(t("settings.groupNote"))}</p></div></div>${body}</section>`;
-    // The design authority's panel sits with the key, in whichever group the catalog files it.
-    const authorityGroup = settingGroup("design.authority");
-    $("#design-authority").hidden = state.settings?.chain?.role === "coordination" || state.settingGroup !== authorityGroup || designAuthorityState.status === "unset";
-    if (state.settings?.chain?.role !== "coordination" && state.settingGroup === authorityGroup) { renderDesignAuthority(); refreshDesignAuthority(); }
+    renderDesignAuthority();
     void renderProjectBindings();
     const rows = $("#settings-rows");
     $$('[data-setting-control]', rows).forEach((control) => {

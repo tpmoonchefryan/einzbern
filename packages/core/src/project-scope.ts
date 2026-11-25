@@ -87,7 +87,7 @@ export type ScopedWorkspaceState = WorkspaceState & {
 
 export const DESIGN_CONFIGURATION_KEYS = Object.freeze([
   "design.authority", "design.repository", "design.pullRequestTarget", "design.productionDocs",
-  "design.buildService", "design.buildProject", "design.consumedVersion",
+  "design.buildService", "design.buildProject",
 ] as const satisfies readonly SettingKey[]);
 
 export function designConfiguration(state: Pick<ScopedWorkspaceState, "settings"> & Partial<Pick<ScopedWorkspaceState, "configurationProjectId" | "settingSources">>): {
@@ -100,9 +100,8 @@ export function designConfiguration(state: Pick<ScopedWorkspaceState, "settings"
     source: state.settingSources?.[key] ?? { kind: state.settings.some((entry) => entry.key === key) ? "library" as const : "default" as const, projectId: null, projectName: null, inherited: state.settings.some((entry) => entry.key === key) && state.configurationProjectId != null } }));
   const missing = bindings.filter((entry) => entry.value === null).map((entry) => entry.key);
   const authoritySource = bindings[0]!.source;
-  // A new local authority cannot silently borrow another authority’s inherited publication bindings.
-  // Explicit local companion declarations are valid; the application’s consumed version may be local.
-  const conflicting = bindings.some((entry) => entry.key !== "design.consumedVersion" && entry.value !== null && entry.source.inherited && (entry.source.projectId !== authoritySource.projectId || entry.source.libraryId !== authoritySource.libraryId || entry.source.kind !== authoritySource.kind));
+  // Bind any inherited publication settings to the authority that supplied them.
+  const conflicting = bindings.some((entry) => entry.value !== null && entry.source.inherited && (entry.source.projectId !== authoritySource.projectId || entry.source.libraryId !== authoritySource.libraryId || entry.source.kind !== authoritySource.kind));
   return { status: conflicting ? "conflicting" : missing.length > 0 ? "unconfigured" : "declared", publicationVerification: "unverified", bindings, missing };
 }
 

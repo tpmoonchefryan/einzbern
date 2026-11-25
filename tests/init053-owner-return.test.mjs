@@ -121,14 +121,18 @@ test('R1: stable projects and declared subprojects persist distinct writes, inhe
  await assert.rejects(()=>cli(['agents-render','--project',project,'--project-id',peer,'--at',at()]),/binding|conflict/);
 });
 
-test('R1/R6: companion bindings show inherited sources, local consumed version, missing/conflicting state and no publication claim',async ctx=>{
+test('R1/R6: companion bindings show inherited sources and conflicts while a historical version stays readable',async ctx=>{
  const {workspace,projectId:p}=await workspaceFixture(ctx,{externalKey:'R27-DESIGN'});
  let s=await createProject(workspace,{externalKey:'R27-DESIGN-CHILD',name:'Child',parentProjectId:p,occurredAt:at()});let c=s.projects.find(x=>x.externalKey==='R27-DESIGN-CHILD').id;
  assert.equal(designConfiguration(scopedWorkspaceState(s,c)).status,'unconfigured');
  const entries={'design.authority':'https://authority.example/contract.json','design.repository':'https://authority.example/repository','design.pullRequestTarget':'main','design.productionDocs':'https://authority.example/docs','design.buildService':'Declared build service','design.buildProject':'Authority docs','design.consumedVersion':'release-v1'};
  for(const [key,v] of Object.entries(entries))await setWorkspaceSetting(workspace,{key,value:v,configurationProjectId:p,occurredAt:at()});
  s=await setWorkspaceSetting(workspace,{key:'design.consumedVersion',value:'release-v2',configurationProjectId:c,occurredAt:at()});
- let d=designConfiguration(scopedWorkspaceState(s,c));assert.equal(d.status,'declared');assert.equal(d.publicationVerification,'unverified');assert.equal(d.bindings.find(x=>x.key==='design.repository').source.projectId,p);assert.equal(d.bindings.find(x=>x.key==='design.consumedVersion').source.projectId,c);
+ const scoped = scopedWorkspaceState(s,c);
+ const d = designConfiguration(scoped);
+ assert.equal(d.status,'declared');assert.equal(d.publicationVerification,'unverified');assert.equal(d.bindings.find(x=>x.key==='design.repository').source.projectId,p);
+ assert.equal(d.bindings.some(x=>x.key==='design.consumedVersion'),false);
+ assert.equal(scoped.settings.find(x=>x.key==='design.consumedVersion').value,'release-v2');
  s=await setWorkspaceSetting(workspace,{key:'design.authority',value:'https://other.example/contract.json',configurationProjectId:c,occurredAt:at()});
  assert.equal(designConfiguration(scopedWorkspaceState(s,c)).status,'conflicting');
 });

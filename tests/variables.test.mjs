@@ -208,7 +208,7 @@ const SYSTEM_HEADINGS = ["### Engine execution policy", "### design.authority"];
 
 test("552: the system section holds runtime lookup guidance and design bindings, not device values or unrelated settings", async (context) => {
   const fx = await project(context);
-  assert.deepEqual(SYSTEM_VARIABLE_KEYS, ["design.authority", "design.repository", "design.pullRequestTarget", "design.productionDocs", "design.buildService", "design.buildProject", "design.consumedVersion"]);
+  assert.deepEqual(SYSTEM_VARIABLE_KEYS, ["design.authority", "design.repository", "design.pullRequestTarget", "design.productionDocs", "design.buildService", "design.buildProject"]);
   const unset = renderSystemVariablesSection(await materializeWorkspace(fx.library));
   assert.deepEqual(unset.body.match(/^### .+$/gmu), SYSTEM_HEADINGS);
   assert.match(unset.body, /execution-policy-resolve --host/u);
@@ -525,7 +525,7 @@ test("489: a variable-section write whose records went in before the failure (a 
 // ---- TCRN-CROSS-STORY-540 GWT2, Q4, Q5 (MIN-243 D1; TCRN-CROSS-SUB-506) ----
 
 const COORDINATION_LIMITS = ["execution.maxConcurrentSubagents"];
-const DESIGN_KEYS = ["design.authority", "design.repository", "design.pullRequestTarget", "design.productionDocs", "design.buildService", "design.buildProject", "design.consumedVersion"];
+const DESIGN_KEYS = ["design.authority", "design.repository", "design.pullRequestTarget", "design.productionDocs", "design.buildService", "design.buildProject"];
 
 // The project fixture's library as a coordination library, registered on this device for the project
 // root, the container it coordinates.

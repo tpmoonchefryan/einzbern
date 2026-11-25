@@ -23,7 +23,7 @@ retrieval entry<br><sub>one lookup before every prompt, silent unless strongly r
 <td align="center" width="33%">
 
 ### 0
-runtime dependencies<br><sub>a single zero-dependency file, no database, no network</sub>
+runtime dependencies<br><sub>a single offline file with no database. When you read a design authority in Atelier, your browser contacts the address you entered.</sub>
 
 </td>
 <td align="center" width="33%">

@@ -186,7 +186,7 @@
       "inheritance": "explicit project parent chain and permitted public defaults; no implicit coordination-library inheritance",
       "sharing": "portable declarations sync with library",
       "export": "on-demand scoped settings query and project context; no AGENTS value snapshot",
-      "consumer": "project-chain.ts design context; project-scope.ts",
+      "consumer": "historical declaration retained for library replay",
       "effect": "next consumer read; managed outputs require explicit render",
       "compatibility": "historical string events preserved; typed readback does not rewrite events",
       "defaultValue": null

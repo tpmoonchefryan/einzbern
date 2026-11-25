@@ -352,122 +352,80 @@ if (!MUTATION) {
     read(designAuthorityStageDiagnostic({ ...snapshot, elapsedMs: Number.MAX_SAFE_INTEGER, requested: Number.MAX_SAFE_INTEGER, bodyConsumed: Number.MAX_SAFE_INTEGER, otherContracts: Number.MAX_SAFE_INTEGER, tailReads: maximum }, "synthetic-formatting-only", "available"));
   });
 
-  test("INC-193 the design authority is declared, and what cannot be checked here is yellow", async (context) => {
+  test("INIT-003 reads Storybook on demand and confirms only production documentation", async () => {
     const page = await preparePage();
     try {
       page.document.querySelector('[data-setting-group="general"]')?.click();
-      await new Promise((resolve) => setTimeout(resolve, 80));
-      const row = page.document.querySelector('[data-setting-row="design.authority"]');
-      assert.ok(row, "the design authority is a setting of the general group");
-      assert.ok(row.querySelector('[data-concept-tip="setting.design.authority"]'), "its ceiling is explained where it is set");
-
-      // Unset is the ordinary case for a workspace with no design system, and it is
-      // silent: no panel, no warning, nothing to resolve. A gate that could not be
-      // satisfied in this world would make the optional key effectively required.
-      const panel = page.document.querySelector("#design-authority");
-      assert.ok(panel, "the panel exists even when there is nothing to show");
-      assert.equal(panel.hidden, true, "an undeclared optional design authority needs no warning");
-      assert.equal(panel.querySelector("[data-design-authority-state]"), null);
-
-      // The contract is fetched by the reader's browser. Both outcomes are exercised
-      // here because only one of them can be produced against a real address offline,
-      // and a state proven on one side only is half a state machine.
-      const realFetch = page.window.fetch;
-      // INC-193 / INC-221: response headers and a quiet period do not establish
-      // response consumption or handler completion. Each stage has one absolute 30s
-      // budget from its start, without resets or retries. It binds its exact contract
-      // URL and observes a fresh panel node after json()
-      // consumption, even when two warning bodies render the same text. The current
-      // control must also be rebuilt and released by the settings handler's finally.
-      const changeAuthority = async (url, body, label) => {
-        const startedAt = Date.now();
-        const deadline = startedAt + (process.platform === "win32" ? 90_000 : 30_000);
-        const expectedContract = new URL("/tcrn-design-authority.json", url).href;
-        const currentInput = () => page.document.querySelector('[data-setting-control="design.authority"]');
-        const currentPanel = () => page.document.querySelector("#design-authority [data-design-authority-state]");
-        const editable = () => {
-          const control = currentInput();
-          return control && !control.disabled && !control.hasAttribute("data-write-busy") ? control : null;
-        };
-        const beforeReceipt = receiptText(page.document);
-        const observed = { requested: 0, bodyConsumed: 0, otherContracts: 0, method: null };
-        const { invoke: observedFetch, tailReads } = observeDesignAuthorityTail(realFetch, startedAt);
-        let phase = "control-ready";
-        let input = null;
-        let panelAtConsumption = null;
-        const panelReplaced = () => observed.bodyConsumed > 0 && currentPanel() !== null && currentPanel() !== panelAtConsumption;
-        const waitWithinBudget = (predicate, stage) => waitFor(predicate, `${label}: ${stage}`, Math.max(0, deadline - Date.now()));
-        page.window.fetch = (request, options) => {
-          const target = String(request);
-          if (!target.includes("tcrn-design-authority.json")) return observedFetch(request, options);
-          if (target !== expectedContract) {
-            observed.otherContracts += 1;
-            return Promise.resolve({ ok: false, status: 404 });
-          }
-          observed.requested += 1;
-          observed.method = options?.method ?? "GET";
-          return Promise.resolve({ ok: true, status: 200, json: async () => {
-            observed.bodyConsumed += 1;
-            panelAtConsumption = currentPanel();
-            return body;
-          } });
-        };
-        try {
-          input = await waitWithinBudget(editable, phase);
-          assert.ok(Date.now() < deadline, "the original stage budget remains before dispatch");
-          phase = "write-refresh-response-consumption";
-          input.value = url;
-          input.dispatchEvent(new page.window.Event("change", { bubbles: true }));
-          await waitWithinBudget(() => {
-            if (!observed.bodyConsumed) return false;
-            phase = "panel-replaced-and-handler-released";
-            return panelReplaced() && currentInput() !== input && editable();
-          }, "matching response consumption, panel replacement and editable current control");
-          assert.equal(currentInput().value, url, "the rendered setting belongs to this stage");
-        } catch (error) {
-          failWithDesignAuthorityDiagnostic(context, error, () => {
-            const control = currentInput();
-            return { label, phase, elapsedMs: Date.now() - startedAt,
-              requested: observed.requested, bodyConsumed: observed.bodyConsumed, otherContracts: observed.otherContracts, method: observed.method,
-              receiptAdvanced: page.document.querySelector("#receipt-chip-text") ? Boolean(receiptAdvanced(page.document, beforeReceipt)()) : null,
-              panelReplaced: panelReplaced(), controlRebuilt: control && input ? control !== input : null,
-              controlPresent: Boolean(control), disabled: control?.disabled ?? null,
-              writeBusy: control?.hasAttribute("data-write-busy") ?? null, tailReads };
-          });
-        }
+      const { document, window } = page;
+      const selector = '[data-setting-control="design.productionDocs"]';
+      const panel = document.querySelector("#design-authority");
+      const action = key => panel.querySelector(`[data-design-authority-action="${key}"]`);
+      const panelState = () => panel.querySelector("[data-design-authority-state]")?.dataset.designAuthorityState;
+      const address = "https://design.example.test/";
+      const current = "https://docs.example.test/current/";
+      const expected = address + "storybook/";
+      const seen = [];
+      const writes = [];
+      const nativeFetch = window.fetch;
+      let online = true;
+      window.fetch = (request, options) => {
+        const target = String(request);
+        if (target.includes("/api/settings") && options?.method === "POST") writes.push(JSON.parse(options.body));
+        if (!target.startsWith(address)) return nativeFetch(request, options);
+        assert.equal(options.mode, "cors");
+        assert.equal(options.credentials, "omit");
+        seen.push(target);
+        if (!online) return Promise.reject(new Error("offline"));
+        if (target === expected + "index.json") return Promise.resolve({ ok: true, json: async () => ({ v: 5, entries: { button: { type: "story" } } }) });
+        if (target === expected + "project.json") return Promise.resolve({ ok: true, json: async () => ({ storybookVersion: "10.4.6", repository: "ignored" }) });
+        return Promise.resolve({ ok: false, status: 404 });
       };
 
-      for (const [key, value] of Object.entries({"design.repository":"https://design.example.test/repository","design.pullRequestTarget":"main","design.productionDocs":"https://design.example.test/docs","design.buildService":"Example build","design.buildProject":"Example docs","design.consumedVersion":"9.9.9"})) {
-        await writeScratch(page.fixture, "settings-set", ["--key", key, "--value", value]);
-      }
-      await changeAuthority("https://design.example.test/", { schemaVersion: "tcrn.design-authority.v1", name: "Example System", version: "9.9.9" }, "declared contract");
+      assert.equal(panel.hidden, true);
+      assert.ok(document.querySelector('[data-setting-row="design.authority"] [data-concept-tip="setting.design.authority"]'));
       await page.waitForSettled();
-      const declared = page.document.querySelector("[data-design-authority-state]");
-      assert.equal(declared?.dataset.designAuthorityState, "declared");
-      assert.match(declared.textContent, /Example System/u);
-      assert.match(declared.textContent, /9\.9\.9/u);
-      assert.ok(!declared.className.includes("--warning"), "a contract that answered is not a warning");
+      await writeScratch(page.fixture, "settings-set", ["--key", "design.productionDocs", "--value", current]);
+      await writeScratch(page.fixture, "settings-set", ["--key", "design.consumedVersion", "--value", "old-release"]);
+      const author = document.querySelector('[data-setting-control="design.authority"]');
+      author.value = address;
+      author.dispatchEvent(new window.Event("change", { bubbles: true }));
+      await page.waitForSettled();
+      assert.ok(!panel.hidden && panelState() === "idle" && action("fetch"), receiptText(document));
+      assert.equal(seen.length, 0);
+      assert.equal(document.querySelector('[data-setting-row="design.consumedVersion"]'), null);
+      assert.equal(document.querySelector(selector).value, current);
 
-      // A response that is not this platform's contract is yellow, not red: the fact is
-      // outside this machine, so nothing here can be called false. The message has to
-      // say what would turn it green, or a yellow becomes a permanent decoration.
-      await changeAuthority("https://other.example.test/", { hello: "world" }, "foreign response");
-      await page.waitForSettled();
-      const warned = page.document.querySelector("[data-design-authority-state]");
-      assert.equal(warned?.dataset.designAuthorityState, "warning", "a response that is not this contract is yellow");
-      assert.ok(warned.className.includes("tcrn-inline-alert"), "the warning uses the design system's alert");
-      assert.ok(warned.className.includes("tcrn-inline-alert--warning"));
-      assert.match(warned.textContent, /advisory|unknown/u, "a browser check cannot claim production publication");
+      action("fetch").click();
+      await waitFor(() => panelState() === "available", "Storybook files checked");
+      assert.deepEqual(seen.sort(), [
+        address + "index.json", address + "project.json", expected + "index.json",
+        expected + "manifests/components.json", expected + "project.json",
+      ].sort());
+      assert.match(panel.textContent, /10\.4\.6.*1 entries/u);
+      assert.match(panel.textContent, /No component manifest published/u);
+      assert.equal(document.querySelector(selector).value, current);
+      assert.equal(writes.length, 1);
 
-      // A body that is well-formed in every way EXCEPT the schema version isolates that
-      // check. Without this case the schema check could be deleted and nothing would
-      // notice, because the earlier sample was also missing its name and version and
-      // would keep landing yellow by a different route.
-      await changeAuthority("https://third.example.test/", { schemaVersion: "someone.elses.contract.v1", name: "Example System", version: "9.9.9" }, "body under another contract");
+      action("fill").click();
+      assert.equal(panelState(), "staged");
+      assert.equal(document.querySelector(selector).value, expected);
+      assert.equal(writes.length, 1);
+      action("cancel").click();
+      assert.equal(document.querySelector(selector).value, current);
+      action("fill").click();
+      action("save").click();
+      await waitFor(() => panelState() === "available" && writes.length === 2, "only documentation saved");
       await page.waitForSettled();
-      const wrongSchema = page.document.querySelector("[data-design-authority-state]");
-      assert.equal(wrongSchema?.dataset.designAuthorityState, "warning", "a well-formed body under another contract is still not ours");
-      assert.ok(!wrongSchema.textContent.includes("Example System"), "nothing from an unrecognised contract reaches the page");
+      assert.ok(writes.every(write => write.libraryPath === page.workspace && write.libraryId === writes[0].libraryId));
+      assert.deepEqual(writes.map(({ key, value }) => ({ key, value })), [{ key: "design.authority", value: address }, { key: "design.productionDocs", value: expected }]);
+      assert.equal(document.querySelector(selector).value, expected);
+
+      online = false;
+      action("fetch").click();
+      await waitFor(() => panelState() === "warning", "unavailable Storybook");
+      assert.equal(action("fill"), null);
+      assert.equal(document.querySelector(selector).value, expected);
+      assert.equal(writes.length, 2);
     } finally { await page.cleanup(); }
   });
 }

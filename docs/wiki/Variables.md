@@ -78,10 +78,10 @@
 
 ### design.authority
 
-当前项目或子项目奉为权威的设计系统，以该系统公开契约的 HTTPS URL 表示。
+当前项目或子项目采用的设计系统站点。Atelier 的浏览器读取 Storybook 标准文件，确认后可填写生产文档地址。
 同一配置中的 `design.repository`、`design.pullRequestTarget`、`design.productionDocs`、
-`design.buildService`、`design.buildProject` 和 `design.consumedVersion` 声明仓库、PR 目标、
-生产文档、构建服务/项目和实际消费版本。每个键显示声明位置和明确父项目的继承来源；
+`design.buildService` 和 `design.buildProject` 声明仓库、PR 目标、
+生产文档、构建服务和构建项目。历史 `design.consumedVersion` 保留供回放。每个现行键显示声明位置和父项目的继承来源。
 缺项是未配置，换权威却继承其它权威的配套项是冲突。离线引擎不把声明或网页可访问
 当作发布成功；真实 PR、生产发布和构建证据由已获授权的执行者核对。
 

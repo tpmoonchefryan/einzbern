@@ -233,7 +233,7 @@ test("MIN291 D1: an optional design authority does not block development, while 
   const partial = await resolveProjectTarget(f.a.reference, f.home);
   assert.equal(partial.readiness.design.ready, false, "declaring authority activates companion requirements");
   assert.ok(partial.readiness.design.missing.includes("design.repository"));
-  assert.ok(partial.readiness.design.missing.includes("design.consumedVersion"));
+  assert.ok(!partial.readiness.design.missing.includes("design.consumedVersion"));
   assert.equal(partial.readiness.development.ready, false);
   assert.equal(partial.readiness.model.ready, true);
   await configure(f.a, "alpha");

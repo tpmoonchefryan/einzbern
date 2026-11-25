@@ -103,7 +103,7 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `general` | `design.productionDocs` | project | scalar | 6 |
 | `general` | `design.buildService` | project | scalar | 7 |
 | `general` | `design.buildProject` | project | scalar | 8 |
-| `general` | `design.consumedVersion` | project | scalar | 9 |
+| `general` | `design.consumedVersion` (historical) | project | scalar | 9 |
 | `general` | `agents.generation` | project | scalar | 20 |
 | `general` | `agents.sharedNavigation` | project | scalar | 21 |
 | `general` | `work.contentPolicy` | project | scalar | 22 |
@@ -569,10 +569,12 @@ bodies are in `rules-catalog.ts` and exact text fixtures. It follows the same
 enable/read/render/explicit-upgrade, keep/overwrite/unmanage and user-modified
 protection as the other built-in rules. It is disabled until explicitly enabled.
 
-The seven actual catalog variables are `design.authority`, `design.repository`,
+The active design bindings are `design.authority`, `design.repository`,
 `design.pullRequestTarget`, `design.productionDocs`, `design.buildService`,
-`design.buildProject` and `design.consumedVersion`. They resolve independently per
-project and show inherited sources. Design authority is optional: a project or
+and `design.buildProject`. Historical `design.consumedVersion` declarations remain
+readable for replay. Atelier reads the configured site's Storybook `index.json` and
+`project.json` in the browser. Confirmation fills the production documentation field.
+The bindings resolve independently per project and show inherited sources. A project or
 submodule without a declaration is `unconfigured`, and that absence does not by
 itself block general development readiness. When an authority is declared, its
 resolved source and inherited bindings remain visible. Changing only an authority

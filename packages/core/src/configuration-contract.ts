@@ -52,7 +52,7 @@ const CONSUMERS = Object.freeze({
   "design.authority": "project-chain.ts readiness; project-scope.ts design query",
   "design.buildProject": "project-chain.ts design context; project-scope.ts",
   "design.buildService": "project-chain.ts design context; project-scope.ts",
-  "design.consumedVersion": "project-chain.ts design context; project-scope.ts",
+  "design.consumedVersion": "historical declaration retained for library replay",
   "design.productionDocs": "project-chain.ts design context; project-scope.ts",
   "design.pullRequestTarget": "project-chain.ts design context; project-scope.ts",
   "design.repository": "project-chain.ts design context; project-scope.ts",
@@ -224,7 +224,7 @@ export function annotateConfigValue(key: string, value: string | null, valueOrig
 } {
   const contract = settingContracts().find((entry) => entry.key === key);
   if (contract === undefined) throw new ConfigurationContractError("CONFIGURATION_KEY_UNKNOWN", `Unknown configuration key: ${key}`);
-  const historical = key.startsWith("models.") || key.startsWith("quota.");
+  const historical = key.startsWith("models.") || key.startsWith("quota.") || key === "design.consumedVersion";
   const provenance = {
     valueRole: historical ? "historical-declaration" as const : "resolved-setting" as const,
     valueSource: historical ? "project-compatibility" as const : "caller-supplied-setting" as const,

@@ -386,6 +386,7 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     order: 7,
   },
   {
+    // Keep old values readable and removable without including them in the active design bindings.
     key: "design.consumedVersion",
     type: "string",
     controlType: "text",
