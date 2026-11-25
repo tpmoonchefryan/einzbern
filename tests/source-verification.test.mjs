@@ -272,6 +272,125 @@ test("a controlled dataless preflight refuses fallback even when an earlier segm
   assert.equal(sourceOpenedAfterPreflight, false, "a dataless classification must not reach the generic source reader");
 });
 
+async function unmergedFixture(t) {
+  const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "einzbern-source-availability-")));
+  const previous = process.env.EINZBERN_HOME;
+  process.env.EINZBERN_HOME = join(root, "device");
+  t.after(async () => {
+    process.env.EINZBERN_HOME = previous;
+    await fs.rm(root, { recursive: true, force: true });
+  });
+  const library = join(root, "plain");
+  await initializeLibrary({ root: library, createdAt: at });
+  const state = await createProject(library, { externalKey: "VERIFY-plain", name: "plain", occurredAt: at });
+  await setWorkspaceSetting(library, { key: "storage.segmentBytes", value: "4096", occurredAt: at });
+  await appendEvents(library, Array.from({ length: 3 }, (_, n) => createWorkDelta({
+    projectId: state.projects[0].id, externalKey: `VERIFY-plain-${n}`, kind: "Initiative", parentId: null,
+    title: `Plain ${n}`, scope: "plain ".repeat(160), occurredAt: at,
+  })), { occurredAt: at });
+  return { root, library };
+}
+
+async function segmentPaths(library) {
+  const paths = [];
+  const collect = async (root, manifest) => {
+    for (const stream of (await readAllStreams(root, { archivedManifest: manifest })).streams) {
+      for (const segment of stream.manifest?.segments ?? []) paths.push(join(root, "akasha", stream.deviceId, segment.name));
+    }
+    for (const entry of (await readConsolidationIndex(root, manifest))?.sources ?? []) await collect(join(root, entry.archive), entry.manifest);
+  };
+  await collect(library, (await openLibrary(library)).manifest);
+  return paths.sort();
+}
+
+async function withControlledDarwinPreflight(t, respond, operation) {
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const requests = [];
+  t.mock.method(childProcess, "spawnSync", (command, arguments_, options) => {
+    if (command !== "/usr/bin/osascript") return spawnSync(command, arguments_, options);
+    const request = JSON.parse(arguments_.at(-1));
+    requests.push(request);
+    return respond(request);
+  });
+  syncBuiltinESMExports();
+  Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+  try {
+    return { requests, result: await operation() };
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    Object.defineProperty(process, "platform", platform);
+  }
+}
+
+const datalessPreflight = request => ({
+  status: 0,
+  stdout: JSON.stringify({ schemaVersion: "einzbern.darwin-source-identity.v1", preflight: true, ioPolicyResult: 0,
+    files: request.files.map(() => ({ file: packedFileAttributes(0x40000000) })) }),
+  stderr: "",
+});
+
+for (const [name, setup] of [
+  ["an unmerged library", async t => (await unmergedFixture(t)).library],
+  ["a merged library under the full-read cost limit", async t => (await fixture(t, false)).library],
+]) {
+  test(`a controlled dataless preflight stops the general reader for ${name}`, async t => {
+    const library = await setup(t);
+    const segments = await segmentPaths(library);
+    assert.ok(segments.length > 0);
+    const originalOpen = fs.open;
+    const opened = [];
+    t.mock.method(fs, "open", (path, ...arguments_) => {
+      if (segments.includes(String(path))) opened.push(String(path));
+      return originalOpen(path, ...arguments_);
+    });
+    const { requests } = await withControlledDarwinPreflight(t, datalessPreflight, () =>
+      assert.rejects(withRecallObservation(() => materializeLibrary(library)), error => error.reasonCode === "SOURCE_DATALESS_FALLBACK_BLOCKED"
+        && /SF_DATALESS/u.test(error.message) && /Make the source available and retry/u.test(error.message)));
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].preflight, true, "the classification precedes any identity query or source open");
+    assert.deepEqual(requests[0].files.map(file => file.path).sort(), segments);
+    assert.deepEqual(opened, [], "a dataless classification must not reach the general source reader");
+  });
+}
+
+test("an unavailable Darwin preflight keeps the general reader for an unmerged library", async t => {
+  const { library } = await unmergedFixture(t);
+  const expected = await materializeWorkspaceFromGenesis(library);
+  const { requests, result } = await withControlledDarwinPreflight(t, () => ({ status: 1, stdout: "", stderr: "unavailable" }),
+    () => withRecallObservation(() => materializeLibrary(library)));
+  assert.equal(requests.length, 1);
+  assert.deepEqual(result.value, expected);
+  assert.ok(result.observation.logicalEventBytes > 0);
+});
+
+test("real Darwin reads classify every segment of unmerged and small merged libraries before reading", { skip: !native && "requires macOS" }, async t => {
+  for (const library of [(await unmergedFixture(t)).library, (await fixture(t, false)).library]) {
+    const segments = await segmentPaths(library);
+    const preflights = [];
+    t.mock.method(childProcess, "spawnSync", (command, arguments_, options) => {
+      const result = spawnSync(command, arguments_, options);
+      if (command === "/usr/bin/osascript") {
+        const request = JSON.parse(arguments_.at(-1));
+        if (request.preflight === true) preflights.push({ request, response: JSON.parse(result.stdout) });
+      }
+      return result;
+    });
+    syncBuiltinESMExports();
+    try {
+      const result = await withRecallObservation(() => materializeLibrary(library));
+      assert.deepEqual(result.value, await materializeWorkspaceFromGenesis(library));
+    } finally {
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+    }
+    assert.equal(preflights.length, 1);
+    assert.deepEqual(preflights[0].request.files.map(file => file.path).sort(), segments);
+    assert.equal(preflights[0].response.ioPolicyResult, 0);
+    assert.deepEqual(preflights[0].response.files.map(entry => classifyDarwinFileAvailability(entry.file)), segments.map(() => "available"));
+  }
+});
+
 test("the early identity pass defers bytes and the later full proof preserves full-read results", async t => {
   const f = await fixture(t, false);
   await materializeWorkspaceFromGenesis(f.library);
@@ -670,17 +789,20 @@ for (const kind of ["in-place", "same-name-replacement", "rename", "hardlink", "
 }
 
 
-test("small consolidated sources keep full verification without starting a helper", { skip: !native }, async t => {
+test("small consolidated sources keep full verification with only a placeholder precheck", { skip: !native }, async t => {
   const f = await fixture(t, false);
-  let calls = 0;
-  t.mock.method(childProcess, "spawnSync", (...args) => { calls += 1; return spawnSync(...args); });
+  const requests = [];
+  t.mock.method(childProcess, "spawnSync", (command, arguments_, options) => {
+    if (command === "/usr/bin/osascript") requests.push(JSON.parse(arguments_.at(-1)));
+    return spawnSync(command, arguments_, options);
+  });
   syncBuiltinESMExports();
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   for (let n = 0; n < 2; n += 1) {
     const result = await read(f);
-    assert.equal(calls, 0);
+    assert.equal(requests.length, n + 1);
+    assert.ok(requests.every(request => request.preflight === true), "small sources classify availability without a native identity query");
     assert.equal(hits(result.observation), 0);
-    assert.equal(result.observation.verificationHelperOutputBytes, 0);
     assert.ok(result.observation.logicalEventBytes > 0);
     assert.deepEqual(result.value, await materializeWorkspaceFromGenesis(f.library));
   }
@@ -710,8 +832,8 @@ test("a current cost hint lets the full reader validate one index without retain
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   for (let request = 1; request <= 2; request += 1) {
     const result = await read(f);
-    assert.equal(reads, request + 1, "only a hint miss needs a precheck; each normal reader still validates its current index");
-    assert.equal(parses, request, "reuse ends with each materialization request");
+    assert.equal(reads, 2 * request, "a hint miss reuses its cost read for the placeholder precheck; a hint hit reads once for the precheck; each normal reader still validates its current index");
+    assert.equal(parses, 2 * request - 1, "reuse ends with each materialization request; a hint hit precheck parses outside the reader");
     assert.ok(result.observation.logicalEventBytes > 0);
     assert.equal(hits(result.observation), 0);
   }
@@ -856,7 +978,8 @@ test("stale, foreign, malformed and oversized cost hints fall back and refresh f
     await fs.writeFile(hint, text);
     const result = await read(f);
     assert.deepEqual(result.value, await materializeWorkspaceFromGenesis(f.library));
-    assert.equal(result.observation.verificationHelperOutputBytes, 0);
+    assert.equal(hits(result.observation), 0);
+    assert.ok(result.observation.cacheReasons.includes("source-verification-full-cost-path"));
     assert.deepEqual(JSON.parse(await fs.readFile(hint, "utf8")), prior);
   }
 });
