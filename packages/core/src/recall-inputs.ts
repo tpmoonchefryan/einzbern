@@ -729,20 +729,24 @@ function formatRecallLineWithin(hit: RecallHit, maximumBytes: number): string {
  * newline between lines counts). An overlong candidate never blocks a later line.
  */
 export function recallContextLines(hits: readonly RecallHit[], perPromptBytes: number): readonly string[] {
-  const lines: string[] = [];
+  return recallContextEntries(hits, perPromptBytes).map((entry) => entry.line);
+}
+
+export function recallContextEntries(hits: readonly RecallHit[], perPromptBytes: number): readonly { hit: RecallHit; line: string }[] {
+  const entries: { hit: RecallHit; line: string }[] = [];
   let used = 0;
   for (const hit of hits) {
     let line = formatRecallLine(hit);
     if (line.length === 0) continue;
-    const separator = lines.length === 0 ? 0 : 1;
+    const separator = entries.length === 0 ? 0 : 1;
     if (used + Buffer.byteLength(line, "utf8") + separator > perPromptBytes && hit.decision !== undefined && Buffer.byteLength(hit.decision.text, "utf8") > 480) {
       line = formatRecallLineWithin(hit, perPromptBytes - used - separator);
       if (line.length === 0) continue;
     }
     const cost = Buffer.byteLength(line, "utf8") + separator;
     if (used + cost > perPromptBytes) continue;
-    lines.push(line);
+    entries.push({ hit, line });
     used += cost;
   }
-  return lines;
+  return entries;
 }

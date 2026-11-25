@@ -1391,7 +1391,7 @@
 | `--allow-trailing` | 可选 | `boolean` |  |
 | `--status` | 可选 | `string` |  |
 | `--project-id` | 可选 | `string` |  |
-| `--view` | 可选 | `enum` | `agent (omit for the full tcrn.recall.v1 response)` |
+| `--view` | 可选 | `enum` | `agent or preview (omit for the full tcrn.recall.v1 response)` |
 
 ## `recover`
 

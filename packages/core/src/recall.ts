@@ -380,14 +380,15 @@ function externalKeyTokens(text: string): readonly string[] {
     .match(/[a-z0-9]+/gu) ?? [])];
 }
 
-function externalKeyExpression(query: string): string {
+function externalKeyQueryGroups(query: string): readonly (readonly string[])[] {
   return (query.match(/[A-Za-z0-9][A-Za-z0-9-]*/gu) ?? [])
-
     .map((part) => externalKeyTokens(part))
     // A lone word asks for a key prefix only when it could be one: not a stop word, not one letter.
-    .filter((tokens) => tokens.length > 1 || (tokens.length === 1 && tokens[0]!.length > 1 && !STOP_WORDS.has(tokens[0]!)))
-    .map((tokens) => `(${tokens.map((token) => `"${token}"*`).join(" AND ")})`)
-    .join(" OR ");
+    .filter((tokens) => tokens.length > 1 || (tokens.length === 1 && tokens[0]!.length > 1 && !STOP_WORDS.has(tokens[0]!)));
+}
+
+function keyMatchExpression(tokens: readonly string[]): string {
+  return `(${tokens.map((token) => `"${token}"*`).join(" AND ")})`;
 }
 
 /**
@@ -420,6 +421,11 @@ function documentDigest(document: RecallDocument): string {
 function matchExpression(tokens: readonly string[]): string {
   return tokens.map((token) => `"${token.replace(/"/gu, "")}"`).join(" OR ");
 }
+
+type RecallFtsTable = "recall_prose" | "recall_index";
+type RecallMatch =
+  | { readonly kind: "direct"; readonly terms: readonly string[] }
+  | { readonly kind: "fts"; readonly table: RecallFtsTable; readonly terms: readonly (readonly string[])[]; readonly keys: boolean };
 
 interface IndexedRow {
   readonly rowId: number;
@@ -675,6 +681,7 @@ export class RecallIndex {
   #checkpoint: string;
   #cleanup: (() => void) | undefined;
   #requested = new WeakMap<RecallHit, number>();
+  #matches = new WeakMap<RecallHit, RecallMatch>();
   #packedTerms: PackedRecallTerms | undefined;
   #slim = false;
   #slimSize = 0;
@@ -1177,7 +1184,7 @@ export class RecallIndex {
   }
 
   /** The ranked answer, before any threshold. The records the prompt names, by key or fragment, lead. */
-  search(query: string, limit: number = RECALL_CANDIDATE_LIMIT, details = true): readonly RecallHit[] {
+  search(query: string, limit: number = RECALL_CANDIDATE_LIMIT, details = true, explain = false): readonly RecallHit[] {
     const makeHit = (document: RecallDocument, score: number, requested = 0): RecallHit => {
       if (details) {
         const row = this.#rows.get(document.id)!;
@@ -1193,24 +1200,26 @@ export class RecallIndex {
       const id = this.#byExternalKey.get(key.toUpperCase());
       return id === undefined ? undefined : this.#rowDoc(id);
     };
-    const named = new Map<string, { document: RecallDocument; requested: number }>();
+    const named = new Map<string, { document: RecallDocument; requested: number; key: string }>();
     for (const match of query.matchAll(RECORD_REFERENCE_CANDIDATE)) {
-      const key = match[1]!;
+      let key = match[1]!;
       let document = this.#rowDoc(key) ?? byKey(key) ?? this.#namedByFragment(key);
       if (document === undefined && key.includes(":")) {
         // An unresolved namespace must not swallow a known key and its adjacent clause.
-        const suffix = key.slice(key.indexOf(":") + 1);
-        document = byKey(suffix) ?? this.#namedByFragment(suffix);
+        key = key.slice(key.indexOf(":") + 1);
+        document = byKey(key) ?? this.#namedByFragment(key);
       }
       if (document === undefined) continue;
       // Bind the adjacent #D through the same resolver as the record, before deduplication.
       if (!named.has(document.id) || named.get(document.id)!.requested === 0) {
-        named.set(document.id, { document, requested: Number(match[2] ?? 0) });
+        named.set(document.id, { document, requested: Number(match[2] ?? 0), key });
       }
     }
-    for (const { document, requested } of named.values()) {
+    for (const { document, requested, key } of named.values()) {
       seen.add(document.id);
-      hits.push(makeHit(document, RECALL_EXTERNAL_KEY_SCORE, requested));
+      const hit = makeHit(document, RECALL_EXTERNAL_KEY_SCORE, requested);
+      if (explain) this.#matches.set(hit, { kind: "direct", terms: [key] });
+      hits.push(hit);
     }
     const allTokens = [...recallTextTokens(query)];
     const scopeCues = recallQueryScopeCues(query);
@@ -1229,28 +1238,36 @@ export class RecallIndex {
       ...scopeCues.flatMap((cue) => cue.kind === "version-release" ? versionQueryTokens(cue.version) : []),
     ];
     const tokens = queryTerms(retrievalTokens);
-    const keyExpression = externalKeyExpression(query);
+    const keyGroups = externalKeyQueryGroups(query);
+    const keyExpression = keyGroups.map(keyMatchExpression).join(" OR ");
     if (tokens.length === 0 && keyExpression.length === 0) return hits;
     const byRowId = new Map<number, IndexedRow>();
     for (const row of this.#rows.values()) byRowId.set(row.rowId, row);
     const weights = RECALL_FIELD_WEIGHTS;
-    const rows: Record<string, unknown>[] = [];
+    const rows: (Record<string, unknown> & { match?: RecallMatch })[] = [];
+    const expandedTerms = /[a-z][A-Z]|[A-Z][A-Z][a-z]|_/u.test(query) ? queryTerms(recallQueryTokensForScope(query)) : null;
     const searches = [
       {
-        table: "recall_prose",
+        table: "recall_prose" as const,
         weights: [weights.title, weights.body, weights.tags, weights.expansions],
         expression: matchExpression(tokens),
+        terms: explain ? tokens.map((token) => [token]) : [],
+        keys: false,
       },
       {
-        table: "recall_index",
+        table: "recall_index" as const,
         weights: [weights.title, weights.body, weights.tags, weights.expansions, weights.externalKey],
         expression: keyExpression.length === 0 ? "" : `externalKey : (${keyExpression})`,
+        terms: keyGroups,
+        keys: true,
       },
-      ...(/[a-z][A-Z]|[A-Z][A-Z][a-z]|_/u.test(query) ? [{
-        table: "recall_index",
+      ...(expandedTerms === null ? [] : [{
+        table: "recall_index" as const,
         weights: [weights.title, weights.body, weights.tags, weights.expansions, 0],
-        expression: `{title body tags expansions} : (${matchExpression(queryTerms(recallQueryTokensForScope(query)))})`,
-      }] : []),
+        expression: `{title body tags expansions} : (${matchExpression(expandedTerms)})`,
+        terms: explain ? expandedTerms.map((token) => [token]) : [],
+        keys: false,
+      }]),
     ];
     for (const search of searches) {
       if (search.expression.length === 0) continue;
@@ -1259,7 +1276,10 @@ export class RecallIndex {
           + ` FROM ${search.table} WHERE ${search.table} MATCH ? ORDER BY score LIMIT ?`,
       );
       try {
-        rows.push(...statement.all(search.expression, limit) as Record<string, unknown>[]);
+        const match = explain ? { kind: "fts" as const, table: search.table, terms: search.terms, keys: search.keys } : undefined;
+        const found = statement.all(search.expression, limit);
+        if (match === undefined) rows.push(...found);
+        else for (const row of found) rows.push({ ...row, match });
       } catch (error) {
         throw new RecallError("RECALL_QUERY_FAILED", `the complete recall query could not be evaluated: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -1309,7 +1329,7 @@ export class RecallIndex {
         const rowId = document === undefined ? undefined : this.#rows.get(document.id)?.rowId;
         if (rowId !== undefined) {
           byRowId.set(rowId, this.#rows.get(document.id)!);
-          rows.push({ rowId, score: Number(row["score"]) * scale });
+          rows.push({ rowId, score: Number(row["score"]) * scale, ...(explain ? { match: { kind: "direct", terms: clauseTokens } } : {}) });
         }
       }
     }
@@ -1375,7 +1395,9 @@ export class RecallIndex {
         const anchored = allTokens.filter((token) => hasWord(anchor, this.#wordLookup.get(token))).length >= 2;
         coverage = anchored ? 1 : matched / total;
       }
-      hits.push(makeHit(document, (-Number(row["score"]) + identifierBonus + scopeBonus) * decay * coverage * (coherent ? 1.1 : 1)));
+      const hit = makeHit(document, (-Number(row["score"]) + identifierBonus + scopeBonus) * decay * coverage * (coherent ? 1.1 : 1));
+      if (row.match !== undefined) this.#matches.set(hit, row.match);
+      hits.push(hit);
       if (hits.length >= maximumHits) break;
     }
     return [
@@ -1388,6 +1410,21 @@ export class RecallIndex {
     const row = this.#rows.get(hit.id)!;
     const projection = row.lexicon !== undefined ? row : this.#rowProjection(hit.id);
     return hitOf(row.deliveryDocument ?? projection.document, projection.lexicon, this.#wordLookup, hit.score, query, this.#frequencyLookup, this.#requested.get(hit) ?? 0);
+  }
+
+  matchedTerms(hit: RecallHit): readonly string[] {
+    const match = this.#matches.get(hit);
+    if (match === undefined) return [];
+    if (match.kind === "direct") return match.terms;
+    const rowId = this.#rows.get(hit.id)!.rowId;
+    const { table } = match;
+    const found = this.#database.prepare(`SELECT 1 FROM ${table} WHERE ${table} MATCH ? AND rowid = ?`);
+    const matched = match.terms.filter((terms) => {
+      const expression = match.keys ? `externalKey : ${keyMatchExpression(terms)}`
+        : table === "recall_index" ? `{title body tags expansions} : (${matchExpression(terms)})` : matchExpression(terms);
+      return found.get(expression, rowId) !== undefined;
+    });
+    return [...new Set(matched.flat())];
   }
 
   close(): void {
@@ -1416,8 +1453,7 @@ export function selectRecallHits(
   const relativeFloor = options.relativeFloor ?? RECALL_RELATIVE_FLOOR;
   const limit = options.limit ?? RECALL_DEFAULT_LIMIT;
   const quota = options.quota ?? null;
-  const best = ranked.find((hit) => hit.score !== RECALL_EXTERNAL_KEY_SCORE)?.score ?? 0;
-  const floor = Math.max(tau, best * relativeFloor);
+  const floor = recallSelectionFloor(ranked, tau, relativeFloor);
   const taken = new Map<RecallKind, number>();
   const out: RecallHit[] = [];
   for (const hit of ranked) {
@@ -1431,6 +1467,11 @@ export function selectRecallHits(
     if (out.length >= limit) break;
   }
   return out;
+}
+
+function recallSelectionFloor(ranked: readonly RecallHit[], absolute: number, relative: number): number {
+  const best = ranked.find((hit) => hit.score !== RECALL_EXTERNAL_KEY_SCORE)?.score ?? 0;
+  return Math.max(absolute, best * relative);
 }
 
 export interface RecallKnowledgeInput {
@@ -1631,6 +1672,13 @@ export interface RecallRequest {
   readonly relativeFloor?: number;
   readonly limit?: number;
   readonly quota?: Readonly<Record<RecallKind, number>> | null;
+  readonly explain?: boolean;
+}
+
+export interface RecallExplanation {
+  readonly threshold: number;
+  readonly matchedTerms: ReadonlyMap<string, readonly string[]>;
+  readonly nearMisses: readonly RecallHit[];
 }
 
 export interface RecallResult {
@@ -1650,6 +1698,7 @@ export interface RecallResult {
   readonly limit: number;
   readonly total: number;
   readonly records: readonly RecallHit[];
+  readonly explanation?: RecallExplanation;
 }
 
 /**
@@ -1934,7 +1983,7 @@ export function recall(request: RecallRequest): RecallResult {
   }
   cachedIndexes.delete(request.cacheKey);
   cachedIndexes.set(request.cacheKey, index);
-  const ranked = index.search(request.query, RECALL_CANDIDATE_LIMIT, false);
+  const ranked = index.search(request.query, RECALL_CANDIDATE_LIMIT, false, request.explain === true);
   const tau = request.tau ?? RECALL_STRONG_TAU;
   if (!Number.isFinite(tau) || tau < 0) {
     throw new RecallError("RECALL_TAU_INVALID", `recall tau must be a finite non-negative number, not ${String(tau)}`);
@@ -1947,14 +1996,25 @@ export function recall(request: RecallRequest): RecallResult {
   // so the bm25 floor it becomes moves with the library the prompt is put to.
   const floor = recallStrongHitFloor(tau, index.size);
   const strong = ranked.some((hit) => hit.score === RECALL_EXTERNAL_KEY_SCORE || hit.score >= floor);
-  const records = strong
+  const selected = strong
     ? selectRecallHits(ranked, {
       tau: floor,
       relativeFloor,
       limit,
       quota: request.quota ?? null,
-    }).map(hit => index.deliver(hit, request.query))
+    })
     : [];
+  let explanation: RecallExplanation | undefined;
+  if (request.explain) {
+    const threshold = recallSelectionFloor(ranked, floor, relativeFloor);
+    // A near miss falls short of the same selection floor by at most one rarity-scaled word.
+    const lower = threshold - recallScoreUnit(index.size);
+    const nearMisses = ranked.filter((hit) => hit.score !== RECALL_EXTERNAL_KEY_SCORE &&
+      hit.score > 0 && hit.score >= lower && hit.score < threshold).slice(0, 2);
+    explanation = { threshold, nearMisses, matchedTerms: new Map(
+      [...selected, ...nearMisses].map((hit) => [hit.id, index.matchedTerms(hit)]),
+    ) };
+  }
   return {
     reasonCode: strong ? "RECALL_READY" : "RECALL_NO_STRONG_HIT",
     checkpoint: request.checkpoint,
@@ -1968,7 +2028,8 @@ export function recall(request: RecallRequest): RecallResult {
     relativeFloor,
     limit,
     total: ranked.length,
-    records,
+    records: selected.map(hit => index.deliver(hit, request.query)),
+    ...(explanation === undefined ? {} : { explanation }),
   };
 }
 

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { createProject, createWork, initializeLibrary, recordMinutes } from "../dist/build/packages/core/src/index.js";
-import { RecallIndex, recall, recallDocuments, recallQueryTokens, resetRecallCache, segmentForIndex } from "../dist/build/packages/core/src/recall.js";
+import { RecallIndex, recall, recallDocuments, recallQueryTokens, recallScoreUnit, resetRecallCache, segmentForIndex } from "../dist/build/packages/core/src/recall.js";
 import { formatRecallLine, recallContextLines, recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
 import { deriveStableId } from "../dist/build/packages/protocol/src/index.js";
 
@@ -33,6 +33,35 @@ test("delivery selects D2/D8/D9 and keeps valid source and scope inside the byte
     assert.deepEqual(recallContextLines(hits, 8), [], "a source that cannot fit is not cut into a false delivery");
   }
   resetRecallCache();
+});
+
+test("the recall preview explains the same scored selection and shows a near miss", () => {
+  const titles = ["Violet violet violet habitat", "Violet habitat", ...Array.from({ length: 16 }, (_, index) => `Unrelated fossil ${index}`)];
+  const documents = titles.map((title, index) => ({
+    kind: "work", id: `work:${String(index).padStart(24, "0")}`, key: `EVAL-STORY-${index}`, status: "active",
+    title, body: "", tags: "", expansions: "", summary: "Field notes", recordKind: "Story", parentChain: [], lead: "",
+  }));
+  try {
+    const request = { cacheKey: "preview", checkpoint: "preview", query: "violet unmatchedneedle", documents: () => documents };
+    const unfiltered = recall({ ...request, tau: 0 });
+    assert.deepEqual(unfiltered.records.map((hit) => hit.key), ["EVAL-STORY-0", "EVAL-STORY-1"]);
+    const [first, second] = unfiltered.records;
+    const tau = (first.score + second.score) / (2 * recallScoreUnit(documents.length));
+    const normal = recall({ ...request, tau });
+    const preview = recall({ ...request, tau, explain: true });
+    assert.equal(normal.explanation, undefined);
+    assert.deepEqual(preview.records, normal.records);
+    assert.deepEqual(preview.explanation.nearMisses.map((hit) => hit.id), [second.id]);
+    assert.ok(second.score < preview.explanation.threshold && preview.explanation.threshold < first.score);
+    assert.deepEqual([...preview.explanation.matchedTerms], [[first.id, ["violet"]], [second.id, ["violet"]]]);
+    const empty = recall({ ...request, query: "unmatchedneedle", tau, explain: true });
+    assert.equal(empty.reasonCode, "RECALL_NO_STRONG_HIT");
+    assert.deepEqual([empty.records, empty.explanation.nearMisses], [[], []]);
+    const named = recall({ ...request, query: first.key, tau: 100, explain: true });
+    assert.deepEqual(named.explanation.matchedTerms.get(first.id), [first.key]);
+  } finally {
+    resetRecallCache();
+  }
 });
 
 test("a 2060B second candidate cannot block a 788B third candidate in 1600B", () => {
