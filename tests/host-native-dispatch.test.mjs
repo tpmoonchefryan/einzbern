@@ -12,17 +12,15 @@ import { setWorkspaceSetting } from "../dist/build/packages/core/src/workspace.j
 import { runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
 import { nativeFixture, selection, codexGuardFixture } from "./helpers/host-native-fixture.mjs";
 
-test("native preparation enforces persisted string device and project concurrency caps", async t => {
-  for (const scope of ["device", "project"]) {
+test("native preparation enforces persisted device and shared child concurrency caps", async t => {
+  for (const scope of ["device", "children"]) {
     await t.test(scope, async t => {
       const f = await nativeFixture(t);
-      const setting = { key: "execution.maxConcurrentAgents", value: "1", occurredAt: new Date().toISOString() };
-      let state = f.state;
-      if (scope === "device") {
-        await applyMachineSettingSet({ ...setting, path: join(f.home, "machine-settings.json") });
-      } else {
-        state = await setWorkspaceSetting(f.workspace, { ...setting, key: "execution.maxConcurrentSubagents" });
-      }
+      const { state } = f;
+      const key = scope === "device" ? "execution.maxConcurrentAgents" : "models.maxConcurrentSubagents";
+      const setting = { value: "1", occurredAt: new Date().toISOString() };
+      await applyMachineSettingSet({ ...setting, key, path: join(f.home, "machine-settings.json") });
+      if (scope === "children") await assert.rejects(setWorkspaceSetting(f.workspace, { ...setting, key: "execution.maxConcurrentSubagents" }), { reasonCode: "SETTINGS_KEY_DEVICE_LEVEL" });
       const reason = `configured-${scope === "device" ? "total" : "children"}-concurrency-exceeded`;
       const request = { ...f.request, requestedAgents: 2 };
       const context = await workProjectContexts(state, f.work.id, f.home, request);

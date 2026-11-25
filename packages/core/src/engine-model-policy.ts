@@ -197,25 +197,35 @@ export function validateEngineModelPolicy(hostValue: unknown, value: unknown): E
   });
 }
 
+function nextModelRowOrder(rows: readonly { readonly order: number }[]): number {
+  const maximum = rows.reduce((max, row) => Math.max(max, row.order), 0);
+  if (maximum <= Number.MAX_SAFE_INTEGER - 10) return maximum + 10;
+  const used = new Set(rows.map(row => row.order));
+  let next = 1;
+  while (used.has(next)) next += 1;
+  return next;
+}
+
 /** INIT-076: additive onboarding draft, offered on fresh installs and subsequent repairs.
  * Existing groups, custom categories, quota and escalation remain untouched. Saving the draft
  * still goes through the normal actor/Owner-decision/CAS write path; reading never writes it.
  */
-export function engineModelPolicyOnboarding(hostValue: string, policy?: EngineModelPolicyConfig | null): EngineModelPolicyConfig {
+export function engineModelPolicyOnboarding(hostValue: string, policy?: EngineModelPolicyConfig | null, sharedCategories?: ModelsCategories): EngineModelPolicyConfig {
   const host = hostId(hostValue);
   const current = policy == null ? null : validateEngineModelPolicy(host, { categories: policy.categories, tiers: policy.tiers, escalation: policy.escalation, ...(policy.quota === undefined ? {} : { quota: policy.quota }), ...(policy.maxConcurrentSubagents === undefined ? {} : { maxConcurrentSubagents: policy.maxConcurrentSubagents }) });
+  if (current === null && sharedCategories && sharedCategories.length > 0) {
+    const ceiling = sharedCategories.find(category => category.id === "main")?.id ?? sharedCategories[0]!.id;
+    return validateEngineModelPolicy(host, {
+      categories: sharedCategories,
+      tiers: sharedCategories.map(category => ({ order: category.order, category: category.id, runner: host, model: "", effort: "", note: "" })),
+      escalation: { enabled: false, threshold: 2, ceiling },
+    });
+  }
   const categories = [...(current?.categories ?? [])];
   const tiers = [...(current?.tiers ?? [])];
-  const nextOrder = (rows: readonly { readonly order: number }[]): number => {
-    const maximum = rows.reduce((max, row) => Math.max(max, row.order), 0);
-    if (maximum <= Number.MAX_SAFE_INTEGER - 10) return maximum + 10;
-    const used = new Set(rows.map(row => row.order));
-    let next = 1; while (used.has(next)) next += 1;
-    return next;
-  };
   for (const category of defaultModelsCategory()) {
-    if (!categories.some(row => row.id === category.id)) categories.push({ ...category, order: nextOrder(categories) });
-    if (!tiers.some(row => row.category === category.id)) tiers.push({ order: nextOrder(tiers), category: category.id, runner: host, model: "", effort: "", note: "" });
+    if (!categories.some(row => row.id === category.id)) categories.push({ ...category, order: nextModelRowOrder(categories) });
+    if (!tiers.some(row => row.category === category.id)) tiers.push({ order: nextModelRowOrder(tiers), category: category.id, runner: host, model: "", effort: "", note: "" });
   }
   return validateEngineModelPolicy(host, {
     categories, tiers,
@@ -401,9 +411,6 @@ export function engineModelPolicyCatalogFromSnapshot(
   const hosts = Object.fromEntries(Object.entries(file.hosts).sort(([left], [right]) => left.localeCompare(right)));
   const host = hostValue === undefined ? undefined : hostId(hostValue);
   const hasSelectedHost = host !== undefined && Object.hasOwn(file.hosts, host);
-  const onboardingBase = host === undefined || hasSelectedHost ? hasSelectedHost ? file.hosts[host!] : null : {
-    categories: file.categoryCatalog ?? defaultModelsCategory(), tiers: [], escalation: { enabled: false, threshold: 2, ceiling: "main" },
-  };
   return Object.freeze({
     schemaVersion: ENGINE_MODEL_POLICY_CATALOG_VERSION,
     source: Object.freeze({ kind: "device-engine", path: engineModelPolicyPath(home) }),
@@ -418,7 +425,7 @@ export function engineModelPolicyCatalogFromSnapshot(
       selectedHost: host,
       selectedPolicy: hasSelectedHost ? file.hosts[host] : null,
       selectedStatus: hasSelectedHost ? "configured" as const : "unconfigured" as const,
-      onboarding: engineModelPolicyOnboarding(host, onboardingBase),
+      onboarding: engineModelPolicyOnboarding(host, hasSelectedHost ? file.hosts[host] : null, file.categoryCatalog),
       peerReadiness: codexPeerReadiness(host, hasSelectedHost ? file.hosts[host] : null),
     }),
   });
@@ -427,6 +434,17 @@ export function engineModelPolicyCatalogFromSnapshot(
 /** A host-aware catalog view; callers may request a syntactically valid but unconfigured host. */
 export async function readEngineModelPolicyCatalog(hostValue?: string, home: string = deviceHome()): Promise<EngineModelPolicyCatalog> {
   return engineModelPolicyCatalogFromSnapshot(await readEngineModelPolicyFile(home), hostValue, home);
+}
+
+/** Older host writes could supply only their own category rows. Keep other declared rows. */
+function categoriesForHostWrite(supplied: ModelsCategories, existing: ModelsCategories): ModelsCategories {
+  const result = [...supplied];
+  for (const row of existing) {
+    if (result.some(category => category.id === row.id)) continue;
+    const order = result.some(category => category.order === row.order) ? nextModelRowOrder(result) : row.order;
+    result.push({ ...row, order });
+  }
+  return validateModelsCategory(result);
 }
 
 /**
@@ -462,7 +480,9 @@ export async function applyEngineModelPolicySet(input: {
     const current = await readEngineModelPolicyFile(home);
     if (input.expectedStoreRevision !== undefined && current.revision !== input.expectedStoreRevision) fail("ENGINE_MODEL_POLICY_CAS_CONFLICT", "shared categories or another host changed after the approved catalog snapshot", { expectedStoreRevision: input.expectedStoreRevision, actualStoreRevision: current.revision });
     const currentHost = Object.hasOwn(current.hosts, host) ? current.hosts[host] : undefined;
-    const categories = config.categories;
+    const categories = input.expectedStoreRevision === undefined && current.revision > 0
+      ? categoriesForHostWrite(config.categories, current.categoryCatalog ?? [])
+      : config.categories;
     const hosts: Record<string, EngineModelPolicyEntry> = {};
     for (const [otherHost, prior] of Object.entries(current.hosts)) {
       if (otherHost === host) continue;

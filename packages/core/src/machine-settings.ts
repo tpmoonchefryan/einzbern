@@ -1,4 +1,4 @@
-import { MEMORY_POLICY_SETTING, parseMemoryPolicy } from "../../../scripts/lib/memory-budget.mjs";
+import { MACHINE_SETTINGS_SCHEMA_VERSION, MEMORY_POLICY_SETTING, parseMemoryPolicy, supportsMachineSettingsSchema } from "../../../scripts/lib/memory-budget.mjs";
 import { HEAVY_RUNS_DEFAULT, HEAVY_RUNS_MAX, HEAVY_RUNS_MIN, HEAVY_RUNS_SETTING } from "../../../scripts/lib/heavy-runs.mjs";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-281 — the machine settings layer.
@@ -35,7 +35,7 @@ import { DEVICE_HOME_ENTRIES, USER_CREST_PATH_SETTING, deviceHome, userCrestPath
 import { DIRECTORY } from "./names.js";
 import type { SettingGroup, SettingShape } from "./settings.js";
 
-export const MACHINE_SETTINGS_VERSION = "tcrn.machine-settings.v3" as const;
+export const MACHINE_SETTINGS_VERSION = MACHINE_SETTINGS_SCHEMA_VERSION;
 export const MACHINE_SETTINGS_LAYER_KIND = "machine_configuration" as const;
 export const MACHINE_SETTINGS_FILE_NAME = DEVICE_HOME_ENTRIES.machineSettings;
 /** The machine-level engine home, as declared by install-manifest item machine.workflow-engine. */
@@ -148,7 +148,7 @@ export const MACHINE_SETTINGS_CATALOG: readonly MachineSettingsCatalogEntry[] = 
     appliesOn: "next-open",
     valueSource: "settings-catalog",
   }),
-  // Legacy compatibility mirror for the per-library registry selection. An absolute path,
+  // Legacy compatibility input for the per-library registry selection. An absolute path,
   // stored as its real path like every path key.
   Object.freeze({
     key: AGENTS_PROJECT_ROOT_SETTING,
@@ -388,7 +388,7 @@ function assertUpdatedAt(value: unknown): asserts value is string {
 export function validateMachineSettingsFile(value: unknown, base?: string): MachineSettingsFile {
   if (value === null || typeof value !== "object" || Array.isArray(value)) fail("MACHINE_SETTINGS_FILE_INVALID", "machine settings must be an object");
   const record = value as Record<string, unknown>;
-  if (record.schemaVersion !== MACHINE_SETTINGS_VERSION && record.schemaVersion !== "tcrn.machine-settings.v2" && record.schemaVersion !== "tcrn.machine-settings.v1") fail("MACHINE_SETTINGS_FILE_INVALID", `machine settings schemaVersion must be ${MACHINE_SETTINGS_VERSION}`);
+  if (!supportsMachineSettingsSchema(record.schemaVersion)) fail("MACHINE_SETTINGS_FILE_INVALID", `machine settings schemaVersion must be ${MACHINE_SETTINGS_VERSION}`);
   if (record.layerKind !== MACHINE_SETTINGS_LAYER_KIND) fail("MACHINE_SETTINGS_FILE_INVALID", `machine settings layerKind must be ${MACHINE_SETTINGS_LAYER_KIND}`);
   assertUpdatedAt(record.updatedAt);
   const values = record.values;

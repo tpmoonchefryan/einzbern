@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { effectiveProjectState } from "./project-state-read.js";
 import { readRecallCards, recallCandidateEntries, recallCandidateRef, recallInputsFromState, recallMetadataOnly } from "./recall-inputs.js";
-import { RECALL_DEFAULT_SCOPE_EXCERPT_BYTES, RECALL_DEFAULT_TAU, recallDocuments, recallPersistent } from "./recall.js";
+import { RECALL_DEFAULT_SCOPE_EXCERPT_BYTES, RECALL_DEFAULT_TAU, recall, recallDocuments } from "./recall.js";
 import { storyFields } from "./story-fields.js";
 import { workContent } from "./work-content.js";
 import type { WorkspaceState } from "./workspace.js";
@@ -27,13 +27,14 @@ export async function dispatchRecallOffer(state: WorkspaceState, workspace: stri
   const perPromptBytes = value("injection.perPromptBytes", 1600);
   const metadataOnly = recallMetadataOnly(state.settings);
   const { cards, digest } = await readRecallCards(workspace, { projectId: work.projectId, at });
-  const result = await recallPersistent({
+  // The omitted work differs for each dispatch. Keep this one-off projection in memory.
+  const result = recall({
     cacheKey: `dispatch:${state.metadata.workspaceId}:${work.projectId}`,
     checkpoint: `${state.headEventHash}:${digest}:scope-bytes=${scopeExcerptBytes}:without=${workId}${metadataOnly ? ":fields=metadata" : ""}`,
     documents: () => recallDocuments(recallInputsFromState(scoped, cards, { projectId: work.projectId, scopeExcerptBytes, metadataOnly })).filter(record => record.id !== workId),
     query,
     tau: value("retrieval.tau", RECALL_DEFAULT_TAU),
-  }, workspace);
+  });
   const candidates = recallCandidateEntries(result.records, perPromptBytes);
   if (candidates.length === 0) return undefined;
   return {
