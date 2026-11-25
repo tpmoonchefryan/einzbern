@@ -41,6 +41,8 @@ import { writeFileAtomic } from "./atomic-file.js";
 import { backupsPath, ensureDeviceDirectory, registryPath } from "./device-home.js";
 import { openLibrary } from "./ether-library.js";
 import { suggestCloudHosted } from "./cloud-roots.js";
+import { readAgentsProjectRoot } from "./machine-settings.js";
+import { pathIsInside } from "./path-containment.js";
 
 export const REGISTRY_SCHEMA_VERSION = "einzbern.registry.v2" as const;
 export const REGISTRY_REASON_CODES = Object.freeze([
@@ -79,6 +81,19 @@ export interface RegistryEntry {
 export interface Registry {
   readonly schemaVersion: typeof REGISTRY_SCHEMA_VERSION;
   readonly entries: readonly RegistryEntry[];
+  /** Per-device managed-output root by library id; null keeps an invalidated selection from reviving. */
+  readonly agentsProjectRoots?: Readonly<Record<string, string | null>>;
+}
+
+export interface AgentsProjectRootSelection {
+  readonly libraryId: string;
+  readonly projectPath: string | null;
+  readonly source: "registry" | "legacy-machine-setting" | "unset";
+}
+
+function eligibleAgentsProjectRoots(registry: Registry, libraryId: string): readonly string[] {
+  const libraries = registry.entries.map(entry => entry.libraryPath);
+  return [...new Set(registry.entries.filter(entry => entry.libraryId === libraryId && !libraries.some(library => pathIsInside(library, entry.projectPath))).map(entry => entry.projectPath))].sort();
 }
 
 export type ResolutionPath = "project-path" | "git-toplevel" | "git-remote";
@@ -139,8 +154,21 @@ export async function readRegistry(home?: string): Promise<Registry> {
     !Array.isArray((value as Readonly<Record<string, unknown>>).entries)) {
     fail("LIBRARY_REGISTRY_INVALID", `${path} is not an ${REGISTRY_SCHEMA_VERSION} registry`, { file: path });
   }
-  const entries = ((value as { readonly entries: readonly unknown[] }).entries).map((entry, index) => registryEntry(entry, `${path} entries[${index}]`, dirname(path)));
-  return { schemaVersion: REGISTRY_SCHEMA_VERSION, entries };
+  const record = value as Readonly<Record<string, unknown>>;
+  const entries = ((record.entries as readonly unknown[])).map((entry, index) => registryEntry(entry, `${path} entries[${index}]`, dirname(path)));
+  let agentsProjectRoots: Record<string, string | null> | undefined;
+  if (Object.hasOwn(record, "agentsProjectRoots")) {
+    const raw = record.agentsProjectRoots;
+    if (raw === null || typeof raw !== "object" || Array.isArray(raw)) fail("LIBRARY_REGISTRY_INVALID", `${path} agentsProjectRoots is not an object`, { file: path });
+    agentsProjectRoots = {};
+    for (const [libraryId, projectPath] of Object.entries(raw as Record<string, unknown>)) {
+      if (libraryId.trim() === "" || libraryId.includes("\u0000") || !(projectPath === null || typeof projectPath === "string")) {
+        fail("LIBRARY_REGISTRY_INVALID", `${path} agentsProjectRoots has an invalid entry`, { file: path, libraryId });
+      }
+      agentsProjectRoots[libraryId] = projectPath === null ? null : loadPath(dirname(path), projectPath);
+    }
+  }
+  return { schemaVersion: REGISTRY_SCHEMA_VERSION, entries, ...(agentsProjectRoots === undefined ? {} : { agentsProjectRoots }) };
 }
 
 /** Whether the existing record needs its legacy device paths normalized on repair. */
@@ -148,14 +176,81 @@ export async function registryPathsPortable(home?: string): Promise<boolean> {
   const path = registryPath(home);
   const value = await readFile(path, "utf8").then(text => JSON.parse(text) as Registry, error => { if (error.code === "ENOENT") return null; throw error; });
   if (value === null) return true;
-  return value.entries.every(entry => [entry.projectPath, entry.libraryPath, ...(entry.migratedFrom === undefined ? [] : [entry.migratedFrom])].every(path => storePath(dirname(registryPath(home)), loadPath(dirname(registryPath(home)), path)) === path));
+  const base = dirname(registryPath(home));
+  return value.entries.every(entry => [entry.projectPath, entry.libraryPath, ...(entry.migratedFrom === undefined ? [] : [entry.migratedFrom])].every(path => storePath(base, loadPath(base, path)) === path)) &&
+    Object.values(value.agentsProjectRoots ?? {}).every(path => path === null || storePath(base, loadPath(base, path)) === path);
 }
 
 async function writeRegistry(registry: Registry, home?: string): Promise<void> {
   const path = home === undefined ? registryPath() : registryPath(home);
   await ensureDeviceDirectory(dirname(path));
-  const entries = [...registry.entries].sort((left, right) => (left.projectPath < right.projectPath ? -1 : left.projectPath > right.projectPath ? 1 : 0)).map(entry => ({ ...entry, projectPath: storePath(dirname(path), entry.projectPath), libraryPath: storePath(dirname(path), entry.libraryPath), ...(entry.migratedFrom === undefined ? {} : { migratedFrom: storePath(dirname(path), entry.migratedFrom) }) }));
-  await writeFileAtomic(path, canonicalJson({ schemaVersion: REGISTRY_SCHEMA_VERSION, entries } as unknown as JsonValue));
+  const base = dirname(path);
+  const entries = [...registry.entries].sort((left, right) => (left.projectPath < right.projectPath ? -1 : left.projectPath > right.projectPath ? 1 : 0)).map(entry => ({ ...entry, projectPath: storePath(base, entry.projectPath), libraryPath: storePath(base, entry.libraryPath), ...(entry.migratedFrom === undefined ? {} : { migratedFrom: storePath(base, entry.migratedFrom) }) }));
+  const agentsProjectRoots = registry.agentsProjectRoots === undefined ? undefined : Object.fromEntries(Object.entries(registry.agentsProjectRoots).sort(([left], [right]) => left.localeCompare(right)).map(([libraryId, selected]) => {
+    // An unregister, rebind or consolidation must never leave a selection pointing at a root
+    // the same device no longer registers to that library. Keep a null tombstone for that id.
+    const valid = selected !== null && eligibleAgentsProjectRoots(registry, libraryId).includes(selected);
+    return [libraryId, valid ? storePath(base, selected!) : null];
+  }));
+  await writeFileAtomic(path, canonicalJson({ schemaVersion: REGISTRY_SCHEMA_VERSION, entries, ...(agentsProjectRoots === undefined ? {} : { agentsProjectRoots }) } as unknown as JsonValue));
+}
+
+/** Registered project paths for a library on this device, in stable lexical order. */
+export async function registeredAgentsProjectRoots(libraryId: string, home?: string): Promise<readonly string[]> {
+  return eligibleAgentsProjectRoots(await readRegistry(home), libraryId);
+}
+
+/** A setup answer/default is valid only when it is this project or a live root of this library. */
+export async function validateAgentsProjectRoot(libraryId: string | null, candidate: string, currentProjectPath: string, home?: string): Promise<string | null> {
+  const selected = await real(candidate).catch(() => null);
+  if (selected === null) return null;
+  const current = await real(currentProjectPath).catch(() => null);
+  const registry = await readRegistry(home);
+  const libraries = registry.entries.map(entry => entry.libraryPath);
+  if (selected === current && !libraries.some(library => pathIsInside(library, selected))) return selected;
+  if (libraryId === null) return null;
+  return eligibleAgentsProjectRoots(registry, libraryId).includes(selected) ? selected : null;
+}
+
+/**
+ * The effective managed-output root for a library on this device. A registry selection (including
+ * a null tombstone) wins. Old installations may have only the former device-wide setting; it is
+ * accepted only for the library that actually registers that path.
+ */
+export async function readAgentsProjectRootSelection(libraryId: string, home?: string): Promise<AgentsProjectRootSelection> {
+  const registry = await readRegistry(home);
+  const registered = eligibleAgentsProjectRoots(registry, libraryId);
+  if (Object.hasOwn(registry.agentsProjectRoots ?? {}, libraryId)) {
+    const selected = registry.agentsProjectRoots![libraryId] ?? null;
+    return { libraryId, projectPath: selected !== null && registered.includes(selected) ? selected : null, source: "registry" };
+  }
+  const legacy = await readAgentsProjectRoot(home);
+  if (legacy !== null) {
+    const realLegacy = await real(legacy).catch(() => null);
+    if (realLegacy !== null && registered.includes(realLegacy)) return { libraryId, projectPath: realLegacy, source: "legacy-machine-setting" };
+  }
+  return { libraryId, projectPath: null, source: "unset" };
+}
+
+/** Persist selections atomically. Every non-null path must be registered to the named library. */
+export async function setAgentsProjectRoots(selections: readonly { readonly libraryId: string; readonly projectPath: string | null }[], home?: string): Promise<void> {
+  if (selections.length === 0) return;
+  await mutateRegistry(home, async (registry, directory) => {
+    const roots = { ...(registry.agentsProjectRoots ?? {}) };
+    for (const selection of selections) {
+      if (selection.libraryId.trim() === "" || selection.libraryId.includes("\u0000")) fail("LIBRARY_REGISTRY_INVALID", "agents project root selection requires a library id");
+      if (selection.projectPath === null) {
+        roots[selection.libraryId] = null;
+        continue;
+      }
+      const selected = await real(selection.projectPath);
+      if (!eligibleAgentsProjectRoots(registry, selection.libraryId).includes(selected)) {
+        fail("LIBRARY_REGISTRY_MISMATCH", `${selected} is not a registered project root of ${selection.libraryId}`, { libraryId: selection.libraryId, project: selected });
+      }
+      roots[selection.libraryId] = selected;
+    }
+    await writeRegistry({ ...registry, agentsProjectRoots: roots }, directory);
+  });
 }
 
 /** Serialize the whole read/modify/replace transaction, not just publication.
@@ -224,6 +319,8 @@ export interface RegisterLibraryInput {
   // from the caller and persisted relative to the registry. Left out, an entry the project already
   // has for the same library keeps its own.
   readonly migratedFrom?: string;
+  /** The managed-output root selected for this library on this device. */
+  readonly agentsProjectRoot?: string;
 }
 
 /** Record that the project at `projectPath` keeps its records in the library at `libraryPath`. */
@@ -256,7 +353,15 @@ export async function registerLibrary(input: RegisterLibraryInput, home?: string
       registeredAt: input.registeredAt,
       ...(migratedFrom === undefined ? {} : { migratedFrom }),
     };
-    await writeRegistry({ ...registry, entries: [...registry.entries.filter((candidate) => candidate.projectPath !== projectPath), entry] }, directory);
+    const entries = [...registry.entries.filter((candidate) => candidate.projectPath !== projectPath), entry];
+    const agentsProjectRoots = input.agentsProjectRoot === undefined ? registry.agentsProjectRoots : {
+      ...(registry.agentsProjectRoots ?? {}),
+      [library.manifest.libraryId]: await real(input.agentsProjectRoot),
+    };
+    if (input.agentsProjectRoot !== undefined && !eligibleAgentsProjectRoots({ ...registry, entries }, library.manifest.libraryId).includes(agentsProjectRoots![library.manifest.libraryId]!)) {
+      fail("LIBRARY_REGISTRY_MISMATCH", `${input.agentsProjectRoot} is not a registered project root of ${library.manifest.libraryId}`, { libraryId: library.manifest.libraryId, project: input.agentsProjectRoot });
+    }
+    await writeRegistry({ ...registry, entries, ...(agentsProjectRoots === undefined ? {} : { agentsProjectRoots }) }, directory);
     return entry;
   });
 }

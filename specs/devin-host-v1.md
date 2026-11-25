@@ -29,10 +29,10 @@ Devin also runs the hooks it imports from Claude Code's settings and gives them 
 | Run | Result |
 | --- | --- |
 | Devin's own command | Answers as host `devin`. |
-| Imported command, Devin's own registration installed | Answers nothing. One `HOOK_DEVIN_IMPORT_YIELDED` line is logged per prompt. |
-| Imported command, no registration of Devin's own | Answers as host `devin`. |
+| Imported command, Devin has a matching Einzbern registration for the same event | Yields to Devin's own registration. A yielded prompt logs one `HOOK_DEVIN_IMPORT_YIELDED` line. |
+| Imported command, only other events or no Devin registrations | Answers as host `devin`. |
 
-The launcher decides this before any engine version is loaded, from `DEVIN_PROJECT_DIR` and the commands in Devin's `config.json`. A run that carries `DEVIN_PROJECT_DIR` is never treated as Codex, so it writes no Codex coordination state. Under Claude Code and Codex neither variable rule applies and their behaviour is unchanged.
+The launcher checks the current event group and the event argument of its commands in Devin's `config.json` before loading the engine. A `PreToolUse` registration therefore leaves the imported `UserPromptSubmit` hook available. A run that carries `DEVIN_PROJECT_DIR` uses Devin's path and does not write Codex coordination state.
 
 ## Read window
 

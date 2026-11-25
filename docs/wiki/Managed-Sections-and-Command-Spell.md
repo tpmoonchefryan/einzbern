@@ -29,6 +29,10 @@ AGENTS.md 与 CLAUDE.md 是你的文件。Einzbern 只写它自己标记出来�
 | `variables-custom` | AGENTS.md | 自定义变量，见「变量」页。 |
 | `rule:<规则 id>` | AGENTS.md | 一条已启用的 Command Spell 原则的正文。 |
 
+设备注册表 `agentsProjectRoots` 按库 ID 保存本机受管输出根，每个库只选一个有效登记目录；值为 `null` 表示先前选中的目录已失效，不能被旧设置重新激活。技能和钩子装在用户目录里，只有 AGENTS.md 跟着项目，所以 Einzbern 必须知道它该写到哪里。选中的库只在这个根保管受管段；写入同库其他登记目录会被拒绝并报 `MANAGED_SECTION_OUTPUT_UNREGISTERED`，其他库各自使用自己的选择。旧版设备 `machine-settings.json` 的 `agents.projectRoot` 标量仍可读：只在它指向某库的登记根时兼容该库，不会影响其他库。选择只保存在设备，不写进库或 AGENTS.md。
+
+全新安装、更新和修复都可以用 `--project-root <目录>` 选择当前库的根。显式回答和默认值使用相同校验，只接受当前项目或同库有效登记根。没有现存选择时，当前库只有一个登记根便自动采用；有多个则计划带 `SETUP_ANSWER_REQUIRED`，选定后后续更新复用。新库没有登记根时，全新安装默认使用当前项目。更新或修复会把旧版标量选择迁移到设备注册表；注销所选根会留下失效标记，不能再被默认或显式选择。独立使用旧的 `machine-settings-set --key agents.projectRoot --value <目录> --at <时刻>` 时，它按目标根所属库更新选择。选择不会新建文件，下一次明确写入受管段（`agents-render`、规则变更或安装）才会创建 AGENTS.md。
+
 `agents-render [--project <目录>] --at <时刻>` 按库里的记录把上表各段渲染进本机注册表解析出的项目。`--project` 可以是项目里的任何目录，省略时取当前目录。回执 `AGENTS_RENDERED` 列出每一段的 `{id, file, result, state}`、等待你处置的段和备份目录。
 
 ## 你改过的段：三种处置

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-// Managed instruction sections are harness wiring. Refresh existing registered outputs with
-// the engine selected by setup, not the catalog imported by the process that began the update.
+// Managed instruction sections are harness wiring. Refresh only the selected per-library
+// registered roots with the engine selected by setup, not the catalog imported by the process
+// that began the update.
 import { execFile } from "node:child_process";
 import { dirname, join } from "node:path";
 import { AGENTS_FILE, CLAUDE_FILE, managedOutputBinding } from "./agents-sections.js";
@@ -29,11 +30,19 @@ function binding(entry: Pick<RegistryEntry, "projectPath" | "libraryPath" | "lib
 }
 
 /** Lists possible writes without executing or unpacking the new engine during a read-only plan. */
-export async function planSetupManagedUpdates(recorder: SetupRecorder, deviceHome: string): Promise<readonly SetupManagedUpdate[]> {
+export async function planSetupManagedUpdates(recorder: SetupRecorder, deviceHome: string, plannedRoots: ReadonlyMap<string, string | null> = new Map()): Promise<readonly SetupManagedUpdate[]> {
   const outputs: SetupManagedUpdate[] = [];
-  for (const entry of (await readRegistry(deviceHome)).entries) {
+  const registry = await readRegistry(deviceHome);
+  for (const entry of registry.entries) {
     const target = binding(entry);
     try {
+      const plannedRoot = plannedRoots.has(entry.libraryId) ? plannedRoots.get(entry.libraryId) ?? null : undefined;
+      if (plannedRoots.has(entry.libraryId) && plannedRoot === null) {
+        outputs.push({ ...target, status: "skipped", reasonCode: "AGENTS_PROJECT_ROOT_REQUIRED" }); continue;
+      }
+      if (plannedRoot !== undefined && plannedRoot !== entry.projectPath) {
+        outputs.push({ ...target, status: "skipped", reasonCode: "MANAGED_SECTION_OUTPUT_UNREGISTERED" }); continue;
+      }
       await assertNotDotAgentsTarget(entry.projectPath);
       const state = await setupTargetState(entry.projectPath, entry.libraryPath, deviceHome);
       if (state.settings.find(setting => setting.key === "agents.generation")?.value === "none") {
@@ -42,7 +51,7 @@ export async function planSetupManagedUpdates(recorder: SetupRecorder, deviceHom
       if (!state.configRecords.some(record => record.collection === "managed-section")) {
         outputs.push({ ...target, status: "skipped", reasonCode: "NO_MANAGED_OUTPUT" }); continue;
       }
-      if (await managedOutputBinding(entry.libraryPath, entry.projectPath, state, deviceHome) !== "bound") {
+      if (await managedOutputBinding(entry.libraryPath, entry.projectPath, state, deviceHome, plannedRoots.has(entry.libraryId) ? { agentsProjectRoot: plannedRoot! } : undefined) !== "bound") {
         outputs.push({ ...target, status: "skipped", reasonCode: "MANAGED_SECTION_OUTPUT_UNREGISTERED" }); continue;
       }
       const pending: { file: string; id: string }[] = [];
@@ -57,7 +66,8 @@ export async function planSetupManagedUpdates(recorder: SetupRecorder, deviceHom
       outputs.push({ ...target, status: "planned", pending });
     } catch (error) {
       const reasonCode = reasonOf(error) ?? "MANAGED_OUTPUT_UNAVAILABLE";
-      const skipped = reasonCode === "DOT_INDEPENDENT_TARGET" || reasonCode === "MANAGED_SECTION_OUTPUT_INSIDE_LIBRARY";
+      // MANAGED_SECTION_OUTPUT_UNREGISTERED: another registered root of this library was selected.
+      const skipped = reasonCode === "DOT_INDEPENDENT_TARGET" || reasonCode === "MANAGED_SECTION_OUTPUT_INSIDE_LIBRARY" || reasonCode === "MANAGED_SECTION_OUTPUT_UNREGISTERED";
       outputs.push({ ...target, status: skipped ? "skipped" : "unavailable", reasonCode });
     }
   }

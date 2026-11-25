@@ -241,6 +241,8 @@ test("480-AC1: the default answers install the library, the registry entry, both
     ["cloud", "--cloud", false],
     ["language", "--language", "en"],
     ["navigation", "--navigation", true],
+    // The device holds no project root yet, so the plan suggests the project being set up.
+    ["projectRoot", "--project-root", f.project],
   ]);
   const expected = [
     ["device", join(f.deviceHome, "device.json"), "create"],
@@ -273,7 +275,7 @@ test("480-AC1: the default answers install the library, the registry entry, both
   assert.deepEqual(rows(applied.written), expected, "the summary lists every file written");
   assert.equal(applied.backupDir, null);
   assert.equal(applied.library.created, true);
-  assert.deepEqual(applied.answers, { artifacts: join(dirname(f.deviceHome), "Ether"), cloud: false, language: "en", navigation: true });
+  assert.deepEqual(applied.answers, { artifacts: join(dirname(f.deviceHome), "Ether"), cloud: false, language: "en", navigation: true, projectRoot: f.project });
 
   const manifest = JSON.parse(await readFile(join(dirname(f.deviceHome), "Ether", "manifest.json"), "utf8"));
   assert.equal(manifest.libraryId, applied.library.libraryId);
@@ -338,6 +340,8 @@ test("480-AC2: a second run with the same answers plans no write and writes noth
     ["cloud", false],
     ["language", "en"],
     ["navigation", true],
+    // What the device holds now: the root the first run stored.
+    ["projectRoot", f.project],
   ]);
   const second = await applySetup(again);
   assert.deepEqual(second.written, []);
@@ -418,7 +422,7 @@ test("480-R5: every host file and project file is backed up before it is replace
 test("480-R2: a library outside the project gets the project's host write roots; declined device navigation adds pointer hooks without removing shared navigation", async (context) => {
   const f = await fixture(context);
   const library = join(f.base, "elsewhere", "Ether", "project");
-  const planned = await plan(f, { artifacts: library, cloud: false, language: "en", navigation: false });
+  const planned = await plan(f, { artifacts: library, cloud: false, language: "en", navigation: false, projectRoot: f.project });
   assert.deepEqual(planned.questions, []);
   assert.deepEqual(planned.blockers, []);
   const roots = [join(f.project, ".claude", "settings.local.json"), join(f.project, ".codex", "config.toml")];
