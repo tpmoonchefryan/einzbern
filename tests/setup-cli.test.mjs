@@ -623,3 +623,21 @@ test("project root: explicit and default choices stay within one library, and le
   assert.equal(await deviceProjectRoot(), third.project);
   assert.equal(await hasManagedSection(third.project), true);
 });
+
+test("fresh never reuses an unregistered root after selection invalidation", async context => {
+  const [f] = await twoProjectFixture(context);
+  const third = { ...f, project: join(f.base, "third-project") };
+  await mkdir(third.project);
+  const before = JSON.parse(await readFile(join(f.deviceHome, "registry.json"), "utf8"));
+  const libraryId = before.entries.find(entry => resolve(f.deviceHome, entry.projectPath) === f.project).libraryId;
+  const removed = await cli(["library-unregister", "--project", f.project, "--at", at(), "--yes", "true"]);
+  assert.equal(removed.reasonCode, "LIBRARY_UNREGISTERED");
+  const after = JSON.parse(await readFile(join(f.deviceHome, "registry.json"), "utf8"));
+  assert.equal(after.agentsProjectRoots?.[libraryId], null, "unregister leaves an invalidation tombstone");
+
+  const inferred = await setup(third, "fresh");
+  const inferredRoot = inferred.resolved.projectRoot ?? inferred.questions.find(question => question.id === "projectRoot")?.default;
+  assert.notEqual(inferredRoot, f.project, "the removed root is neither the automatic choice nor the question's default");
+  const staleAnswer = await setup(third, "fresh", "--project-root", f.project);
+  assert.deepEqual(staleAnswer.blockers.map(blocker => blocker.reasonCode), ["SETUP_ANSWER_INVALID"]);
+});

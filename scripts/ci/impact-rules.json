@@ -2544,7 +2544,7 @@
     "tests/segmented-body-publication.test.mjs": "25e902ffc2711c247761827576a6d4f88e14f85b27dabd1eaeff9f27ec1a8af0",
     "tests/settings-catalog-shape.test.mjs": "b0af892df3b24b2916f80638e3a760bac72a08db274051f455349c833d5c531c",
     "tests/settings-path-boundaries.test.mjs": "6f1f7744a862e3399699b18c150c96b62231d6aaaeb97e448650d01324807ede",
-    "tests/setup-cli.test.mjs": "f4643ab36f51c9133c9c228670fbc216f9eb7ae910f22aabd9792771c59a5010",
+    "tests/setup-cli.test.mjs": "b78b85b42984d6a4041b0e6ff2ae2d585307d5bc12e5e55d9f46b04e3a0326cc",
     "tests/setup-fresh-navigation.test.mjs": "7f6c99a13130adb8867093b925659c9a3cd9b04c3f270dcc19ea63af6714eb7a",
     "tests/setup-fresh.test.mjs": "ae49b5a51fef654c4652bb1f0d953ff227d51758864393aafe4036cc180b0da5",
     "tests/setup-maintain.test.mjs": "ea5f0d026bcafe6d072f82de4bd20bbee18aabd173a3d2962d2807f5fbd9e293",
