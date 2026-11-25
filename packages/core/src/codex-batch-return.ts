@@ -149,11 +149,43 @@ export async function nativeBatchHandoff(call: CodexCall, coordinator: string, b
   return null;
 }
 
-/** The destination is read once before sending and once for readback. An ambiguous send is never retried. */
+/** Inspect the destination before sending and confirm the actual recipient item afterwards. */
 export async function deliverBatch(call: CodexCall, main: string, marker: string, prompt: string, since: string,
   existing: ReturnIntent | null, saveIntent: (intent: ReturnIntent) => Promise<void>): Promise<RecipientReceipt> {
   let intent = existing;
   let active: string | null = null;
+  function receiptForItem(item: Raw, turnId: string, times = item): RecipientReceipt | null {
+    if (item.type !== "userMessage" || !Array.isArray(item.content)) return null;
+    const body = item.content.map(obj).find(c => c.type === "text" && typeof c.text === "string" && c.text.startsWith(marker))?.text;
+    if (!body) return null;
+    if (!intent || item.clientId !== intent.clientId || body !== intent.prompt) {
+      throw new Error("Existing marked report at destination; reconcile its original sender receipt before taking further action");
+    }
+    if (typeof item.id !== "string" || item.id.length === 0) throw new Error("Marked Codex report is missing its native item id");
+    const received = nativeTime(times.startedAtMs, 1) ?? nativeTime(times.completedAtMs, 1);
+    return { turnId, itemId: item.id, clientId: intent.clientId, receivedAt: received ?? new Date().toISOString(), timeSource: received ? "native-item" : "recipient-readback-upper-bound" };
+  }
+  async function findSteeredReceipt(prior: ReturnIntent): Promise<RecipientReceipt | null> {
+    if (prior.targetTurn === null) return null;
+    let cursor: string | null = null;
+    const visited = new Set<string>();
+    do {
+      const p = page(await call("thread/items/list", { threadId: main, turnId: prior.targetTurn, limit: 32, sortDirection: "desc", cursor }));
+      for (const entry of p.rows) {
+        if (entry.turnId !== prior.targetTurn) throw new Error("Codex receipt item is outside the steered turn");
+        const receipt = receiptForItem(obj(entry.item), prior.targetTurn, entry);
+        if (receipt) return receipt;
+      }
+      if (p.rows.length && p.rows.every(entry => {
+        const time = nativeTime(entry.completedAtMs, 1) ?? nativeTime(entry.startedAtMs, 1);
+        return time !== null && Date.parse(time) < Date.parse(prior.requestedAt);
+      })) break;
+      cursor = p.next;
+      if (cursor && visited.has(cursor)) throw new Error("Codex receipt item cursor repeated");
+      if (cursor) visited.add(cursor);
+    } while (cursor);
+    return null;
+  }
   async function findReceipt(beforeSend: boolean): Promise<RecipientReceipt | null> {
     let cursor: string | null = null;
     const visited = new Set<string>();
@@ -162,20 +194,17 @@ export async function deliverBatch(call: CodexCall, main: string, marker: string
       for (const t of p.rows) {
         if (beforeSend && t.status === "inProgress") active = String(t.id);
         for (const item of (Array.isArray(t.items) ? t.items.map(obj) : [])) {
-          if (item.type !== "userMessage" || !Array.isArray(item.content)) continue;
-          const body = item.content.map(obj).find(c => c.type === "text" && typeof c.text === "string" && c.text.startsWith(marker))?.text;
-          if (!body) continue;
-          if (!intent || item.clientId !== intent.clientId || body !== intent.prompt) throw new Error("Existing marked report at destination; reconcile its original sender receipt before taking further action");
-          const received = nativeTime(item.startedAtMs, 1) ?? nativeTime(item.completedAtMs, 1);
-          return { turnId: String(t.id), itemId: String(item.id), clientId: intent.clientId, receivedAt: received ?? new Date().toISOString(), timeSource: received ? "native-item" : "recipient-readback-upper-bound" };
+          const receipt = receiptForItem(item, String(t.id));
+          if (receipt) return receipt;
         }
       }
-      if (p.rows.some(t => { const end = nativeTime(t.completedAt); return end && Date.parse(end) < Date.parse(since); })) return null;
+      if (p.rows.some(t => { const end = nativeTime(t.completedAt); return end && Date.parse(end) < Date.parse(since); })) break;
       cursor = p.next;
       if (cursor && visited.has(cursor)) throw new Error("Codex destination cursor repeated");
       if (cursor) visited.add(cursor);
     } while (cursor);
-    return null;
+    // Turn summaries can omit user items appended to the active turn by turn/steer.
+    return intent === null ? null : findSteeredReceipt(intent);
   }
   const found = await findReceipt(true);
   if (found) return found;

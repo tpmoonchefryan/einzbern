@@ -5,6 +5,7 @@ import test from "node:test";
 import { join } from "node:path";
 import { writeFile, readFile } from "node:fs/promises";
 import { prepareCodexBatch } from "../dist/build/packages/core/src/codex-batch-prepare.js";
+import { deliverBatch } from "../dist/build/packages/core/src/codex-batch-return.js";
 import { NATIVE_TOOL_COMMAND_CATALOG, runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
 import { nativeFixture } from "./helpers/host-native-fixture.mjs";
 
@@ -69,4 +70,32 @@ test("legacy batch CLI entry points are registered and preparation writes only a
   assert.deepEqual(JSON.parse(await readFile(output, "utf8")).selected, []);
   const status = await runNativeToolCommand("execution-codex-batch-status", { coordinator: "fixture-coordinator" }, context);
   assert.deepEqual(status.campaigns, []);
+});
+
+test("a retained steer is acknowledged from its native item without a second send", async () => {
+  const marker = "Fixture-Batch-Digest: check\n";
+  const prompt = marker + "Synthetic delivery payload";
+  const receiptTime = "2026-11-25T14:42:56.035Z";
+  const intent = { clientId: "fixture-client", prompt, requestedAt: "2026-11-25T14:42:55.500Z", method: "turn/steer", targetTurn: "fixture-turn" };
+  const calls = [];
+  const read = async (method, params) => {
+    calls.push(method);
+    if (method === "thread/turns/list") return { data: [{ id: intent.targetTurn, status: "inProgress", items: [] }] };
+    assert.equal(method, "thread/items/list");
+    assert.equal(params.turnId, intent.targetTurn);
+    assert.equal(params.sortDirection, "desc");
+    if (params.cursor === null) {
+      return { data: [{ turnId: intent.targetTurn, item: { type: "agentMessage" }, startedAtMs: Date.parse(receiptTime) + 100 }], nextCursor: "older-page" };
+    }
+    assert.equal(params.cursor, "older-page");
+    return { data: [{ turnId: intent.targetTurn, startedAtMs: Date.parse(receiptTime), item: {
+      type: "userMessage", id: "fixture-recipient-item", clientId: intent.clientId,
+      content: [{ type: "text", text: prompt }],
+    } }] };
+  };
+  const result = await deliverBatch(read, "fixture-main", marker, prompt, intent.requestedAt, intent, async () => assert.fail("no second intent"));
+  assert.deepEqual(result, {
+    turnId: intent.targetTurn, itemId: "fixture-recipient-item", clientId: intent.clientId, receivedAt: receiptTime, timeSource: "native-item",
+  });
+  assert.deepEqual(calls, ["thread/turns/list", "thread/items/list", "thread/items/list"]);
 });
