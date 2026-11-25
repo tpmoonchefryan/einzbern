@@ -783,8 +783,8 @@ test("R46 I07 (fixture): --project at the coordination partition's root is refus
 // its own artifact language and orchestration limit through the migration. In the nine-row mapping the
 // old coordination chain declares fr and execution.maxConcurrentSubagents 3 at its library level: the
 // plan lists both rows for the coordination partition alone, the import carries both (the wizard writes
-// neither), the coordination library reads them at its library level through settings-catalog, and no
-// project library reads either. The coordination root as --project is still refused at plan time, and
+// neither). The coordination library exposes the language in settings-catalog and keeps the old
+// limit in its event history. Neither transfers to a project library. The coordination root as --project is refused at plan time, and
 // the same mapping applied again writes nothing.
 test("R47-04 (fixture): the coordination partition's own language and orchestration limit are listed in its plan, carried by the import, and never reach a project chain", async (context) => {
   const m = await machine(context);
@@ -846,20 +846,20 @@ test("R47-04 (fixture): the coordination partition's own language and orchestrat
   assert.deepEqual(again.written.filter((entry) => entry.step === "library"), [], "the same mapping writes nothing into a library");
   assert.equal((await readAllStreams(targets[0])).streams.flatMap((stream) => stream.events).length, coordinationEvents.length);
 
-  // TCRN-CROSS-INIT-053 R48 (J-2): a key the old chain declares and the coordination library no longer
-  // holds (removed after the import) is a write row again; the apply writes the old chain's value at the
-  // library level, signed agent:setup, and the next plan reads it carried.
-  for (const key of ["artifact.language", "execution.maxConcurrentSubagents"]) {
-    await asDevice(m, () => removeWorkspaceSetting(targets[0], { key, occurredAt: at(), actorId: "agent:setup" }));
-  }
+  // R48 J-2 re-applies the missing language. The historical orchestration limit is read-only.
+  await assert.rejects(
+    asDevice(m, () => removeWorkspaceSetting(targets[0], { key: "execution.maxConcurrentSubagents", occurredAt: at(), actorId: "agent:setup" })),
+    { reasonCode: "SETTINGS_KEY_DEVICE_LEVEL" },
+  );
+  await asDevice(m, () => removeWorkspaceSetting(targets[0], { key: "artifact.language", occurredAt: at(), actorId: "agent:setup" }));
   const removed = (await readAllStreams(targets[0])).streams.flatMap((stream) => stream.events).length;
   const rewrite = receipt(migrate(projectRoot));
-  assert.deepEqual(rewrite.migration.partitions[0].coordinationSettings, carried.map((row) => ({ ...row, action: "write" })));
+  assert.deepEqual(rewrite.migration.partitions[0].coordinationSettings, [{ ...carried[0], action: "write" }, carried[1]]);
   const rewritten = receipt(migrate(projectRoot, ["--yes", "true"]));
   assert.deepEqual(rewritten.written.filter((entry) => entry.step === "library").map((entry) => [entry.path, entry.action]), [[targets[0], "update"]], "one library entry: the coordination library, updated");
   const written = (await readAllStreams(targets[0])).streams.flatMap((stream) => stream.events).slice(removed).map((event) => event.payload);
   assert.deepEqual(written.map((payload) => [payload.operation, payload.record?.key, payload.record?.value, Object.hasOwn(payload.record ?? {}, "projectId"), payload.actor]),
-    [["settings.updated", "artifact.language", "fr", false, "agent:setup"], ["settings.updated", "execution.maxConcurrentSubagents", "3", false, "agent:setup"]]);
+    [["settings.updated", "artifact.language", "fr", false, "agent:setup"]]);
   assert.deepEqual(receipt(migrate(projectRoot)).migration.partitions[0].coordinationSettings, carried);
 });
 

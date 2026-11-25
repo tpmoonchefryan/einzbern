@@ -242,7 +242,7 @@ test("483-R2, R3: the rule verbs' refusals, and a rule recorded at another versi
   const current = await readFile(agents, "utf8");
 
   // Recorded at a newer version by a newer engine: this one refuses to write its older text.
-  await setConfigRecord(library, { collection: "rule", key: "batch", value: { enabled: true, version: 4 }, projectId: (await list(project)).projectId, occurredAt: at() });
+  await setConfigRecord(library, { collection: "rule", key: "batch", value: { enabled: true, version: 4 }, occurredAt: at() });
   assert.equal((await refusal(["rule-enable", "--project", project, "--id", "batch", "--at", at()])).reasonCode, "RULE_VERSION_NEWER");
   assert.deepEqual((await render(project)).sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "managed" });
   assert.equal(await readFile(agents, "utf8"), current);
@@ -281,7 +281,7 @@ test("INIT-053 AC2: v2 through CLI: the rule verbs' refusals, and a rule recorde
   const current = await readFile(agents, "utf8");
 
   // Recorded at a newer version by a newer engine: this one refuses to write its older text.
-  await setConfigRecord(library, { collection: "rule", key: "batch", value: { enabled: true, version: 4 }, projectId: (await list(project)).projectId, occurredAt: at() });
+  await setConfigRecord(library, { collection: "rule", key: "batch", value: { enabled: true, version: 4 }, occurredAt: at() });
   assert.equal((await refusal(["rule-enable", "--project", project, "--id", "batch", "--at", at()])).reasonCode, "RULE_VERSION_NEWER");
   assert.deepEqual((await render(project)).sections.find((section) => section.id === "agents"), { id: "agents", file: "AGENTS.md", result: "unchanged", state: "managed" });
   assert.equal(await readFile(agents, "utf8"), current);

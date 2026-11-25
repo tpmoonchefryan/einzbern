@@ -133,7 +133,8 @@ test("479-AC1, AC3 through the CLI: every verb the generated table names is list
   assert.ok(verbs.includes("execution-evidence"), "the installed workflow names its public evidence entry");
   assert.match(markdown, /Evidence validation grants no execution permission/);
   assert.match(markdown, /specs\/dispatch-admission-evidence-v1\.md/);
-  assert.ok(markdown.includes('`recall --view agent --query "<task>" --at <UTC>`'));
+  assert.ok(markdown.includes('`recall --view candidates --query "<task>" --at <UTC>`'));
+  assert.ok(markdown.includes('`recall-read --refs` is optional.'));
   const recall = (await invoke(["recall", "--help"])).report.commands[0];
   assert.equal(recall.flags.find(({ name }) => name === "view").valueKind, "enum");
   assert.equal(recall.flags.find(({ name }) => name === "at").required, true);
