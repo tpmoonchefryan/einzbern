@@ -677,7 +677,7 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
 
 export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = Object.freeze(
   catalogEntries.slice().sort((left, right) => compareCanonicalText(left.key, right.key)).map((entry) => {
-    const libraryScoped = ["engine.requiredVersion", "retrieval.metadataOnly", "storage.segmentBytes", "storage.snapshotEveryEvents"].includes(entry.key);
+    const libraryScoped = ["agents.generation", "agents.sharedNavigation", "engine.requiredVersion", "retrieval.metadataOnly", "storage.segmentBytes", "storage.snapshotEveryEvents"].includes(entry.key);
     return Object.freeze({
       ...entry,
       layer: libraryScoped ? "library" as const : SETTINGS_PROJECT_LAYER,

@@ -4398,14 +4398,16 @@ button:disabled { cursor: not-allowed; }
       <section class="tcrn-page tcrn-product-shell-content-stack" data-page="prose" hidden>
         <div class="tcrn-page-hierarchy" data-page-hierarchy="true" data-page-hierarchy-depth="two" data-page-hierarchy-source="explicit-depth-prop" data-page-hierarchy-width-policy="container-only" data-page-hierarchy-shell-boundary="global-product-shell-external" data-page-hierarchy-valid="true" data-page-hierarchy-validation="valid">
           <div class="tcrn-page-hierarchy__header" data-page-hierarchy-region="header" data-page-hierarchy-slot="header">
-            <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="page.prose">Rules</h1><p class="tcrn-text tcrn-page__lede" data-i18n="prose.lede" data-order-purpose="rules">Manage built-in rules and edit the project's AGENTS.md. A rule's order sets the order AGENTS.md renders the rule sections in: rules with an order first, from the smallest, then the others in catalog order.</p></div><div class="tcrn-page-header__actions tcrn-page__actions"><button class="tcrn-button tcrn-button--secondary" id="pending-open" data-i18n="rule.pendingTitle">Pending</button><span class="tcrn-badge" id="reconcile-chip">—</span><button class="tcrn-button tcrn-button--primary" id="save-agents" data-i18n="prose.save" data-cli-action="rule-list">Save and check</button></div></div></header>
+            <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="page.prose">Rules</h1><p class="tcrn-text tcrn-page__lede" data-i18n="prose.lede" data-order-purpose="rules">Manage library rules, including custom rules, and edit this project's AGENTS.md.</p></div><div class="tcrn-page-header__actions tcrn-page__actions"><button class="tcrn-button tcrn-button--secondary" id="pending-open" data-i18n="rule.pendingTitle">Pending</button><span class="tcrn-badge" id="reconcile-chip">—</span><button class="tcrn-button tcrn-button--primary" id="save-agents" data-i18n="prose.save" data-cli-action="rule-list">Save and check</button></div></div></header>
           </div>
           <div class="tcrn-page-hierarchy__section-tabs" data-page-hierarchy-region="section-tabs" data-page-hierarchy-slot="section-tabs">
             <div id="rules-pending" class="tcrn-surface" data-ui="rules-pending" aria-label="Pending rule changes"><strong data-i18n="rule.pendingTitle">Pending</strong><label class="tcrn-sr-only" for="pending-section" data-i18n="rule.pendingSelect">Pending section</label><select class="tcrn-select" id="pending-section" data-ui="pending-section"></select><button class="tcrn-button tcrn-button--secondary" type="button" data-pending-action="keep" data-i18n="rule.keep">Keep my text</button><button class="tcrn-button tcrn-button--secondary" type="button" data-pending-action="overwrite" data-i18n="rule.overwrite">Overwrite</button><button class="tcrn-button tcrn-button--quiet" type="button" data-pending-action="unmanage" data-i18n="rule.unmanage">Unmanage</button></div>
             <p class="tcrn-text" id="prose-binding-note" data-ui="prose-binding-note" hidden></p>
+            <div class="tcrn-surface" data-ui="rules-navigation"><label class="tcrn-switch"><input class="tcrn-switch__control" id="rules-write-navigation" type="checkbox" role="switch"><span class="tcrn-switch__label" data-i18n="rules.navigation.label">Write navigation</span></label><p class="tcrn-text" data-i18n="rules.navigation.note">When enabled, navigation is written into shared AGENTS.md. When disabled, the hook supplies it on this device.</p></div>
           </div>
           <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content" data-page-hierarchy-slot="content">
-            <div data-ui="rules-layout"><section id="prose-directory" data-ui="rule-list" aria-label="Built-in rules"></section><div class="tcrn-editor-shell"><div class="tcrn-editor__bar"><span class="tcrn-text" id="agents-file">AGENTS.md</span><details class="tcrn-disclosure-panel" id="agents-path-details" data-identity-details="agents-path" hidden><summary class="tcrn-disclosure-panel__title" data-i18n="prose.fullPath">Full path</summary><code id="agents-path"></code> <button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--sm" data-copy-identity="" data-clipboard-copy-state="idle" aria-label="Copy the full path of AGENTS.md"><span data-copy-label>Copy</span><span class="tcrn-sr-only" role="status" aria-live="polite" data-copy-status></span></button></details><span class="tcrn-text tcrn-editor__status" id="agents-status" data-i18n="prose.fileNote">AGENTS.md</span></div><div class="tcrn-line-numbered-editor" id="prose-editor" data-line-numbered-editor="true"><ol class="tcrn-line-numbered-editor__gutter" id="prose-gutter" data-ui="prose-gutter" role="note" aria-label="Line numbers"></ol><div class="tcrn-line-numbered-editor__content"><textarea class="tcrn-input tcrn-textarea tcrn-line-numbered-editor__control" id="agents-md" spellcheck="false" aria-label="AGENTS.md"></textarea><ul class="tcrn-line-numbered-editor__findings" id="reconcile-findings" aria-label="Editor findings"></ul></div></div></div></div>
+            <article class="tcrn-surface" data-ui="custom-rule-form"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="rules.custom.heading">Custom rule</h2><p class="tcrn-text" data-i18n="rules.custom.note">Add or edit a rule shared by this library.</p></div></div><form id="custom-rule-form"><div class="tcrn-grid tcrn-grid--2"><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.id">Rule ID</span><input class="tcrn-input" id="custom-rule-id" name="id" required maxlength="64" pattern="custom-[a-z][a-z0-9-]*" autocomplete="off"></label><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.title">Title</span><input class="tcrn-input" id="custom-rule-title" name="title" required maxlength="120"></label></div><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.body">Rule text</span><textarea class="tcrn-input tcrn-textarea" id="custom-rule-body" name="body" required maxlength="4000" rows="4"></textarea></label><label class="tcrn-field"><span class="tcrn-field__label" data-i18n="rules.custom.order">Order</span><input class="tcrn-input" id="custom-rule-order" name="order" type="number" min="1" step="1"></label><div class="tcrn-action-row"><button class="tcrn-button tcrn-button--primary" id="custom-rule-save" type="submit" data-i18n="rules.custom.create">Add rule</button><button class="tcrn-button tcrn-button--secondary" id="custom-rule-cancel" type="button" data-i18n="rules.custom.cancel" hidden>Cancel</button></div></form></article>
+            <div data-ui="rules-layout"><section id="prose-directory" data-ui="rule-list" data-i18n-aria-label="page.prose" aria-label="Rules"></section><div class="tcrn-editor-shell"><div class="tcrn-editor__bar"><span class="tcrn-text" id="agents-file">AGENTS.md</span><details class="tcrn-disclosure-panel" id="agents-path-details" data-identity-details="agents-path" hidden><summary class="tcrn-disclosure-panel__title" data-i18n="prose.fullPath">Full path</summary><code id="agents-path"></code> <button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--sm" data-copy-identity="" data-clipboard-copy-state="idle" aria-label="Copy the full path of AGENTS.md"><span data-copy-label>Copy</span><span class="tcrn-sr-only" role="status" aria-live="polite" data-copy-status></span></button></details><span class="tcrn-text tcrn-editor__status" id="agents-status" data-i18n="prose.fileNote">AGENTS.md</span></div><div class="tcrn-line-numbered-editor" id="prose-editor" data-line-numbered-editor="true"><ol class="tcrn-line-numbered-editor__gutter" id="prose-gutter" data-ui="prose-gutter" role="note" aria-label="Line numbers"></ol><div class="tcrn-line-numbered-editor__content"><textarea class="tcrn-input tcrn-textarea tcrn-line-numbered-editor__control" id="agents-md" spellcheck="false" aria-label="AGENTS.md"></textarea><ul class="tcrn-line-numbered-editor__findings" id="reconcile-findings" aria-label="Editor findings"></ul></div></div></div></div>
           </div>
         </div>
       </section>
@@ -4449,7 +4451,7 @@ const BOOT = __PORTAL_BOOT__;
   const systemTheme = typeof window.matchMedia === "function" ? window.matchMedia("(prefers-color-scheme: dark)") : null;
   let followSystemTheme = storedTheme === null && machineTheme === "system";
   if (storedTheme === null && machineTheme !== null) document.documentElement.dataset.tcrnTheme = machineTheme === "system" ? (systemTheme?.matches ? "dark" : "light") : machineTheme;
-  const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? "en", theme: document.documentElement.dataset.tcrnTheme, page: "dashboard", dashboardTab: "overview", settingGroup: "general", collections: { "models.category": { draft: null, dirty: false, findings: [], refusal: null }, "models.tiers": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: "codex", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: "", knowledgeStatus: "valid", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: "conferenceTypes", receipt: null, operationDetailsOpen: false, agentsText: "", reconciliation: null, rules: null, pendingSection: "", searchIndex: [], searchResults: [], searchSelection: 0 };
+  const state = { locale: storedLocale ?? (Object.keys(LOCALES).includes(BOOT.machineDefaults?.locale) ? BOOT.machineDefaults.locale : null) ?? BOOT.defaultLocale ?? "en", theme: document.documentElement.dataset.tcrnTheme, page: "dashboard", dashboardTab: "overview", settingGroup: "general", customRuleEditing: "", collections: { "models.category": { draft: null, dirty: false, findings: [], refusal: null }, "models.tiers": { draft: null, dirty: false, findings: [], refusal: null } }, collectionFocus: null, transientTargetTimer: null, settings: null, machineSettings: null, configBackups: null, modelPolicy: null, modelPolicyHost: "codex", modelPolicyDrafts: new Map(), modelPolicyWrites: new Map(), modelPolicyRead: 0, modelPolicyReadTarget: null, modelPolicyReadPending: false, modelPolicyLibraryId: BOOT.library?.libraryId ?? null, variables: null, vocabulary: null, status: null, work: null, workRead: { library: 0, readingFor: null, again: false }, knowledge: null, knowledgeQuery: "", knowledgeStatus: "valid", knowledgeBody: null, gates: [], gateResponse: null, lastGateRun: null, commands: [], selectedVocabulary: "conferenceTypes", receipt: null, operationDetailsOpen: false, agentsText: "", reconciliation: null, rules: null, pendingSection: "", searchIndex: [], searchResults: [], searchSelection: 0 };
   const $ = (selector, root = document) => root.querySelector(selector);
   const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
   // DS Tabs is a behavior contract, not a role decoration. Every tablist below
@@ -4800,9 +4802,9 @@ const BOOT = __PORTAL_BOOT__;
     ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings.filter((entry) => entry.group === "models").map((entry) => ({ ...entry, layer: "device" })) : []),
   ].sort((left, right) => entryOrder(left) - entryOrder(right) || String(left.key).localeCompare(String(right.key)));
   const settingEntries = () => [
-    ...(Array.isArray(state.settings?.settings) ? state.settings.settings.filter((entry) => entry.group !== "models" && entry.key !== "design.consumedVersion").map((entry) => ({ ...entry })) : []),
+    ...(Array.isArray(state.settings?.settings) ? state.settings.settings.filter((entry) => entry.group !== "models" && entry.key !== "design.consumedVersion" && entry.key !== "agents.sharedNavigation").map((entry) => ({ ...entry })) : []),
     ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings
-      .filter((entry) => entry.group !== "models" && entry.key !== "agents.projectRoot").map((entry) => ({ ...entry, layer: "device" })) : []),
+      .filter((entry) => entry.group !== "models" && entry.key !== "agents.projectRoot" && entry.key !== "agents.navigation").map((entry) => ({ ...entry, layer: "device" })) : []),
   ];
   const settingEntry = (key) => settingEntries().find((entry) => entry.key === key);
   const entryGroup = (entry) => typeof entry?.group === "string" && entry.group.length > 0 ? entry.group : SETTING_GROUP_NAMES[0][0];
@@ -6925,6 +6927,7 @@ const BOOT = __PORTAL_BOOT__;
     mountStaticOverlayMounts();
   };
   const lineFromText = (text) => text.split("\n");
+  const ruleDisplayTitle = (rule) => rule?.custom === true && typeof rule.title === "string" ? rule.title : ruleTitle(rule?.id ?? "");
   const ruleTitle = (id) => ({
     autonomy: t("rule.title.autonomy"),
     batch: t("rule.title.batch"),
@@ -6966,7 +6969,7 @@ const BOOT = __PORTAL_BOOT__;
     const editable = rule.state === "enabled" || rule.state === "disabled";
     const note = rule.state === "enabled" ? "" : `<span data-rule-order-note>${esc(editable ? t("rule.orderOnEnable") : t("rule.orderLocked"))}</span>`;
     const save = rule.state === "enabled" ? `<button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-rule-order-save="${esc(rule.id)}" data-cli-action="rule-enable">${esc(t("rule.saveOrder"))}</button>` : "";
-    return `<div data-rule-card-order><label class="tcrn-field" data-rule-order-field><span class="tcrn-field__label">${esc(t("collection.order"))}</span>${orderInput(rule.order ?? "", `aria-label="${esc(`${t("collection.order")} · ${ruleTitle(rule.id)}`)}" data-rule-order="${esc(rule.id)}"${editable ? "" : " disabled"}`)}</label>${save}${note}</div>`;
+    return `<div data-rule-card-order><label class="tcrn-field" data-rule-order-field><span class="tcrn-field__label">${esc(t("collection.order"))}</span>${orderInput(rule.order ?? "", `aria-label="${esc(`${t("collection.order")} · ${ruleDisplayTitle(rule)}`)}" data-rule-order="${esc(rule.id)}"${editable ? "" : " disabled"}`)}</label>${save}${note}</div>`;
   };
   const ruleOrderValue = (id) => $(`[data-rule-order="${CSS.escape(id)}"]`)?.value.trim() ?? "";
   // Proposals (TCRN-CROSS-STORY-527) begin.
@@ -7003,6 +7006,14 @@ const BOOT = __PORTAL_BOOT__;
     return `<article class="tcrn-surface" data-ui="${kind}-proposals-list" aria-label="${esc(title)}"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2>${esc(title)}</h2></div></div>
       <div class="tcrn-table-shell" role="table" aria-label="${esc(title)}" data-ui="proposals-table" data-mobile-layout="stacked-cards"><div class="tcrn-table-shell__head" role="row"><span class="tcrn-table-shell__heading" role="columnheader">${esc(subject)}</span><span class="tcrn-table-shell__heading" role="columnheader">${esc(t("proposals.columnChange"))}</span><span class="tcrn-table-shell__heading" role="columnheader">${esc(t("proposals.columnStatus"))}</span></div><div role="rowgroup">${rows}</div></div></article>`;
   };
+  const renderRuleNavigation = () => {
+    const toggle = $("#rules-write-navigation");
+    if (!toggle) return;
+    const entry = currentSetting("agents.sharedNavigation");
+    const value = entry?.currentValue ?? entry?.defaultValue ?? "written";
+    toggle.checked = value === "written";
+    toggle.disabled = entry === undefined || state.settings?.ok === false || state.librarySwitching === true || state.settingsWritePending === true;
+  };
   // Proposals end.
   const renderProseDirectory = () => {
     // The cards follow the rule sections of AGENTS.md: rules with an order first, then in catalog order.
@@ -7011,9 +7022,26 @@ const BOOT = __PORTAL_BOOT__;
       const enabled = ruleIsEnabled(rule);
       const changed = ["user-modified", "pending"].includes(rule.state);
       const forceId = `rule-force-${rule.id}`;
+      const title = ruleDisplayTitle(rule);
+      const edit = rule.custom === true ? `<button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-custom-rule-edit="${esc(rule.id)}">${esc(t("rules.custom.edit"))}</button>` : "";
       const upgrade = rule.state === "update-available" ? `<button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-rule-upgrade="${esc(rule.id)}" data-cli-action="rule-enable">${esc(t("rule.upgrade", { version: rule.version }))}</button>` : "";
-      return `<article class="tcrn-surface" data-rule-card="${esc(rule.id)}"><div class="tcrn-surface__head" data-rule-card-head><h2 class="tcrn-heading tcrn-heading--3" data-rule-card-title>${esc(ruleTitle(rule.id))}</h2><span class="tcrn-badge" data-rule-state="${esc(rule.state)}">${esc(ruleStateLabel(rule.state))}</span></div><div class="tcrn-text" data-rule-card-meta>${esc(rule.section)} · v${esc(rule.version ?? "—")}</div>${ruleOrderField(rule)}<div data-rule-card-actions><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-rule-switch="${esc(rule.id)}" aria-label="${esc(ruleTitle(rule.id))}" ${enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(enabled ? t("config.enabled") : t("config.disabled"))}</span></label>${upgrade}${changed && enabled ? `<label class="tcrn-text" data-rule-force-label for="${forceId}"><input class="tcrn-checkbox" type="checkbox" id="${forceId}" data-rule-force="${esc(rule.id)}">${esc(t("rule.forceDisable"))}</label>` : ""}</div></article>`;
+      const customBody = rule.custom === true && typeof rule.body === "string" ? `<p class="tcrn-text" data-custom-rule-summary>${esc(rule.body)}</p>` : "";
+      return `<article class="tcrn-surface" data-rule-card="${esc(rule.id)}"${rule.custom === true ? ' data-custom-rule="true"' : ""}><div class="tcrn-surface__head" data-rule-card-head><h2 class="tcrn-heading tcrn-heading--3" data-rule-card-title>${esc(title)}</h2><span class="tcrn-badge" data-rule-state="${esc(rule.state)}">${esc(ruleStateLabel(rule.state))}</span></div><div class="tcrn-text" data-rule-card-meta>${esc(rule.section)} · v${esc(rule.version ?? "—")}</div>${customBody}${ruleOrderField(rule)}<div data-rule-card-actions><label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-rule-switch="${esc(rule.id)}" aria-label="${esc(title)}" ${enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(enabled ? t("config.enabled") : t("config.disabled"))}</span></label>${edit}${upgrade}${changed && enabled ? `<label class="tcrn-text" data-rule-force-label for="${forceId}"><input class="tcrn-checkbox" type="checkbox" id="${forceId}" data-rule-force="${esc(rule.id)}">${esc(t("rule.forceDisable"))}</label>` : ""}</div></article>`;
     }).join("") : `<div class="tcrn-state-surface">${esc(t("config.loading"))}</div>`);
+    renderRuleNavigation();
+    $$('[data-custom-rule-edit]').forEach((button) => button.addEventListener("click", () => {
+      const rule = rules.find((entry) => entry.id === button.dataset.customRuleEdit && entry.custom === true);
+      if (!rule) return;
+      state.customRuleEditing = rule.id;
+      $("#custom-rule-id").value = rule.id;
+      $("#custom-rule-id").readOnly = true;
+      $("#custom-rule-title").value = rule.title ?? "";
+      $("#custom-rule-body").value = rule.body ?? "";
+      $("#custom-rule-order").value = rule.order ?? "";
+      $("#custom-rule-save").textContent = t("rules.custom.update");
+      $("#custom-rule-cancel").hidden = false;
+      $("#custom-rule-title").focus();
+    }));
     $$('[data-rule-switch]').forEach((input) => input.addEventListener("change", async () => {
       const id = input.dataset.ruleSwitch;
       const action = input.checked ? "enable" : "disable";
@@ -7134,6 +7162,7 @@ const BOOT = __PORTAL_BOOT__;
       showReceipt(result);
       await refresh();
       if (rendersSystemVariables(key)) await loadAgents();
+      return result;
     } catch (error) {
       if ((state.libraryEpoch || 0) === epoch) {
         state.promptLanguageDraft = null;
@@ -7663,6 +7692,38 @@ const BOOT = __PORTAL_BOOT__;
     showReceipt(result);
     await loadAgents();
   }));
+  const resetCustomRuleEditor = () => {
+    state.customRuleEditing = "";
+    $("#custom-rule-form").reset();
+    $("#custom-rule-id").readOnly = false;
+    $("#custom-rule-save").textContent = t("rules.custom.create");
+    $("#custom-rule-cancel").hidden = true;
+  };
+  $("#custom-rule-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const id = $("#custom-rule-id").value.trim();
+    const title = $("#custom-rule-title").value.trim();
+    const body = $("#custom-rule-body").value.trim();
+    const order = $("#custom-rule-order").value.trim();
+    const action = state.customRuleEditing ? "update" : "create";
+    const payload = { action, title, body, ...(order === "" ? {} : { order }) };
+    echo(action === "create" ? "rule-create" : "rule-update", ["--id", id, "--title", title, "--body", body, ...(order === "" ? [] : ["--order", order])]);
+    const result = await api(`/api/rules/${encodeURIComponent(id)}`, { method: "POST", body: JSON.stringify(payload) });
+    showReceipt(result);
+    if (result.ok) {
+      resetCustomRuleEditor();
+      await loadAgents();
+    } else renderProseDirectory();
+  });
+  $("#custom-rule-cancel").addEventListener("click", resetCustomRuleEditor);
+  $("#rules-write-navigation").addEventListener("change", async (event) => {
+    const toggle = event.currentTarget;
+    const value = toggle.checked ? "written" : "declined";
+    toggle.disabled = true;
+    const result = await mutateSetting("agents.sharedNavigation", { value });
+    if (result?.ok) await loadAgents();
+    renderRuleNavigation();
+  });
   $("#receipt-chip").addEventListener("click", openReceipt); $("#receipt-details-trigger").addEventListener("click", toggleReceiptDetails); $("#drawer-button").addEventListener("click", openReceipt); $("#drawer-close").addEventListener("click", closeReceipt);
   // TCRN-CROSS-INIT-053 R46 (I10; U20 D3, D13): what a view shows for the target the page is leaving goes
   // before any request for the next one is sent. In-flight reads must not restore those results.

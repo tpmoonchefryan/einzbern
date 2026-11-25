@@ -118,9 +118,10 @@ export function hookProtocolOutput(host: HostHookHost, event: string, lines: rea
  * additionalContext of `event`, SessionStart or SubagentStart. Nothing is retrieved and nothing is
  * read, so it is the same for every registered project.
  */
-export function navigationPointerAnswer(host: HostHookHost, event: string): PromptRecallAnswer {
+export function navigationPointerAnswer(host: HostHookHost, event: string, includeNavigation = true): PromptRecallAnswer {
   if (!Object.hasOwn(HOST_HOOK_POINTER_EVENTS, event)) fail("HOOK_INPUT_INVALID", `${String(event)} is not a pointer hook event`, { event: String(event) });
-  return { lines: NAVIGATION_LINES, output: hookProtocolOutput(host, event, NAVIGATION_LINES) };
+  const lines = includeNavigation ? NAVIGATION_LINES : [];
+  return { lines, output: hookProtocolOutput(host, event, lines) };
 }
 
 export interface PromptRecallRequest {
