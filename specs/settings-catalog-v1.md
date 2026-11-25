@@ -672,13 +672,16 @@ for a selected library writes only there and refuses other roots with
 `MANAGED_SECTION_OUTPUT_UNREGISTERED`; a library with no effective selection cannot write a
 managed section until setup chooses one. Other libraries use their own entries. A legacy
 `machine-settings.json` `agents.projectRoot` scalar remains a compatibility hint and is accepted
-only by the library that registers that path. `machine-settings-set` keeps working by updating the
-same library's map entry. The registry still resolves a directory to its library and project; the
+only by the library that registers that path. `machine-settings-set --key agents.projectRoot` writes
+the selected library's map entry. `machine-settings-catalog --project <dir>` reads the library's
+selection and `machine-settings-remove --key agents.projectRoot --project <dir>` clears it.
+Setup is the owner-facing entry point and the generic Atelier settings omit the legacy scalar.
+The registry still resolves a directory to its library and project; the
 selection only says which of that library's registered roots keeps the managed file. It is local
 to this device and never written into a library or AGENTS.md, because a project may have a
 different path on another device.
 
-`setup --mode fresh`, `update` and `repair` accept `--project-root <dir>`. Explicit answers and
+`setup --mode fresh`, `restore`, `update` and `repair` accept `--project-root <dir>`. Explicit answers and
 defaults use the same real-path and same-library validation: only the current project or an
 eligible root registered to its library is accepted (`SETUP_ANSWER_INVALID` otherwise). Fresh
 setup uses the current project when the library has no roots, reuses an effective selection, or

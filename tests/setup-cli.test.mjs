@@ -30,6 +30,7 @@ import {
   setWorkspaceSetting,
 } from "../dist/build/packages/core/src/index.js";
 import { ENGINE_FORMAT_VERSION } from "../dist/build/packages/core/src/format-version.js";
+import { AGENTS_PROJECT_ROOT_SETTING, applyMachineSettingSet, machineSettingsPath } from "../dist/build/packages/core/src/machine-settings.js";
 import { canonicalJson } from "../dist/build/packages/protocol/src/index.js";
 import { SKILL_COPY_ROOTS, skillCopyPath } from "../dist/build/packages/core/src/skill-copies.js";
 
@@ -544,7 +545,7 @@ async function asAtelier(operation) {
   }
 }
 
-const deviceProjectRoot = async () => (await cli(["machine-settings-catalog"])).settings.find((setting) => setting.key === "agents.projectRoot").currentValue;
+const deviceProjectRoot = async project => (await cli(["machine-settings-catalog", "--project", project])).rootSelection.projectPath;
 const hasManagedSection = async (project) => (await readFile(join(project, "AGENTS.md"), "utf8")).includes("einzbern:section");
 
 test("project root: the first installation stores it, and another project of the library takes no managed sections until the root moves", async (context) => {
@@ -553,7 +554,7 @@ test("project root: the first installation stores it, and another project of the
   assert.deepEqual(planned.questions.find((question) => question.id === "projectRoot"), { id: "projectRoot", flag: "--project-root", default: f.project, choices: null });
   const applied = await setup(f, "fresh", "--project-root", f.project, "--yes", "true");
   assert.equal(applied.answers.projectRoot, f.project);
-  assert.equal(await deviceProjectRoot(), f.project);
+  assert.equal(await deviceProjectRoot(f.project), f.project);
   assert.equal(await hasManagedSection(f.project), true);
 
   const second = { ...f, project: join(f.base, "second-project") };
@@ -564,7 +565,7 @@ test("project root: the first installation stores it, and another project of the
   assert.deepEqual(later.writes.filter((entry) => entry.step === "managed-sections"), [], "another root of the library plans no managed sections");
   await setup(second, "fresh", "--yes", "true");
   await assert.rejects(lstat(join(second.project, "AGENTS.md")), { code: "ENOENT" });
-  assert.equal(await deviceProjectRoot(), f.project, "the device's root stays");
+  assert.equal(await deviceProjectRoot(second.project), f.project, "the library's root stays");
   const checks = (await cli(["doctor", "--project", second.project])).checks;
   assertChecksGreen(checks);
   assert.equal(checks.find((entry) => entry.check === "managed-sections").detail.projectRoot, f.project);
@@ -577,11 +578,19 @@ test("project root: the first installation stores it, and another project of the
   assert.deepEqual((await cli(["variable-list", "--workspace", f.library, "--project-id", secondId])).variables.map((variable) => variable.name), ["task.category"]);
   await assert.rejects(lstat(join(second.project, "AGENTS.md")), { code: "ENOENT" });
 
-  // The legacy scalar command now updates only the library registered to this selected path.
+  const machineFile = await readFile(machineSettingsPath(), "utf8");
+  // An explicit selection updates the registry of the selected library.
   assert.equal((await cli(["machine-settings-set", "--key", "agents.projectRoot", "--value", second.project, "--at", at()])).reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
+  assert.equal(await deviceProjectRoot(f.project), second.project);
+  assert.equal(await readFile(machineSettingsPath(), "utf8"), machineFile);
   assert.equal((await cli(["agents-render", "--project", second.project, "--at", at()])).reasonCode, "AGENTS_RENDERED");
   assert.equal(await hasManagedSection(second.project), true);
   await assert.rejects(cli(["agents-render", "--project", f.project, "--at", at()]), { reasonCode: "MANAGED_SECTION_OUTPUT_UNREGISTERED" });
+  const cleared = await cli(["machine-settings-remove", "--key", "agents.projectRoot", "--project", f.project, "--at", at()]);
+  assert.equal(cleared.rootSelection.projectPath, null);
+  assert.equal(await deviceProjectRoot(second.project), null);
+  await assert.rejects(cli(["agents-render", "--project", second.project, "--at", at()]), { reasonCode: "MANAGED_SECTION_OUTPUT_UNREGISTERED" });
+  assert.equal(await readFile(machineSettingsPath(), "utf8"), machineFile);
 });
 
 test("project root: explicit and default choices stay within one library, and legacy multi-root setup asks once", async (context) => {
@@ -612,7 +621,7 @@ test("project root: explicit and default choices stay within one library, and le
   const legacyRegistry = JSON.parse(await readFile(registryPath, "utf8"));
   delete legacyRegistry.agentsProjectRoots;
   await writeFile(registryPath, `${JSON.stringify(legacyRegistry)}\n`);
-  assert.equal((await cli(["machine-settings-set", "--key", "agents.projectRoot", "--value", foreign.project, "--at", at()])).reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
+  await applyMachineSettingSet({ key: AGENTS_PROJECT_ROOT_SETTING, value: foreign.project, occurredAt: at() });
   const unanswered = await setup(third, "fresh");
   assert.deepEqual(unanswered.questions.find((question) => question.id === "projectRoot"), { id: "projectRoot", flag: "--project-root", default: null, choices: null });
   assert.equal(Object.hasOwn(unanswered.resolved, "projectRoot"), false);
@@ -620,7 +629,8 @@ test("project root: explicit and default choices stay within one library, and le
   assert.deepEqual((await setup(third, "fresh", "--project-root", foreign.project)).blockers.map(blocker => blocker.reasonCode), ["SETUP_ANSWER_INVALID"]);
   const answered = await setup(third, "fresh", "--project-root", third.project, "--yes", "true");
   assert.equal(answered.answers.projectRoot, third.project);
-  assert.equal(await deviceProjectRoot(), third.project);
+  assert.equal(await deviceProjectRoot(third.project), third.project);
+  assert.equal(await deviceProjectRoot(foreign.project), foreign.project);
   assert.equal(await hasManagedSection(third.project), true);
 });
 
@@ -640,4 +650,24 @@ test("fresh never reuses an unregistered root after selection invalidation", asy
   assert.notEqual(inferredRoot, f.project, "the removed root is neither the automatic choice nor the question's default");
   const staleAnswer = await setup(third, "fresh", "--project-root", f.project);
   assert.deepEqual(staleAnswer.blockers.map(blocker => blocker.reasonCode), ["SETUP_ANSWER_INVALID"]);
+});
+
+test("restore retains a legacy library's sole registered root before adding a checkout", async context => {
+  const f = await fixture(context);
+  await setup(f, "fresh", "--yes", "true");
+  const second = { ...f, project: join(f.base, "second-project") };
+  await mkdir(second.project);
+  const registryFile = join(f.deviceHome, "registry.json");
+  const legacy = JSON.parse(await readFile(registryFile, "utf8"));
+  delete legacy.agentsProjectRoots;
+  await writeFile(registryFile, `${JSON.stringify(legacy)}\n`);
+  const plan = await setup(second, "restore", "--restore", f.library);
+  assert.deepEqual(plan.blockers, []);
+  assert.equal(plan.resolved.projectRoot, f.project);
+  assert.ok(!plan.writes.some(write => write.step === "managed-sections"));
+  const applied = await setup(second, "restore", "--restore", f.library, "--yes", "true");
+  assert.equal(applied.reasonCode, "SETUP_APPLIED");
+  assert.equal(await deviceProjectRoot(second.project), f.project);
+  assert.ok((await cli(["library-list"])).entries.some(entry => entry.projectPath === second.project));
+  await assert.rejects(lstat(join(second.project, "AGENTS.md")), { code: "ENOENT" });
 });

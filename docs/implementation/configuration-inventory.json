@@ -11146,6 +11146,11 @@
             "name": "home",
             "required": false,
             "valueKind": "string"
+          },
+          {
+            "name": "project",
+            "required": false,
+            "valueKind": "string"
           }
         ]
       },
@@ -11166,6 +11171,11 @@
           },
           {
             "name": "home",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "project",
             "required": false,
             "valueKind": "string"
           }

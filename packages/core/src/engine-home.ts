@@ -331,6 +331,7 @@ export interface EngineUpdateInput {
   readonly version: string;
   readonly at: string;
   readonly home?: string;
+  readonly beforeSwitch?: () => Promise<void>;
 }
 
 async function report(
@@ -426,6 +427,7 @@ export async function updateEngine(input: EngineUpdateInput): Promise<EngineSwit
     // Finish every fallible report read before committing the switch. In particular, a damaged
     // registry must not turn an already-committed update into a refusal.
     const result = await report("ENGINE_UPDATED", current, engine, home, installed);
+    await input.beforeSwitch?.();
     await writeEngineCurrent(current, home);
     return result;
   });
@@ -441,6 +443,7 @@ export async function rollbackEngine(input: {
   readonly at: string;
   readonly home?: string;
   readonly expectedCurrent?: Pick<EngineCurrent, "version" | "previous">;
+  readonly beforeSwitch?: () => Promise<void>;
 }): Promise<EngineSwitchReport> {
   assertStrictInstant(input.at);
   const home = input.home ?? deviceHome();
@@ -476,6 +479,7 @@ export async function rollbackEngine(input: {
       switchedAt: input.at,
     });
     const result = await report("ENGINE_ROLLED_BACK", current, engine, home);
+    await input.beforeSwitch?.();
     await writeEngineCurrent(current, home);
     return result;
   });

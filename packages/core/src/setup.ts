@@ -932,7 +932,7 @@ const MODE_TABLE: Readonly<Record<SetupMode, SetupModeEntry>> = Object.freeze({
     apply: (plan: SetupPlan): Promise<SetupApplied> => applyFreshSetup(plan),
   },
   restore: {
-    options: ["restore", "cloud", "navigation"],
+    options: ["restore", "cloud", "navigation", "projectRoot"],
     plan: (input: SetupModeInput): Promise<SetupModePlan> => planRestoreSetup(input),
     apply: (plan: SetupPlan): Promise<SetupApplied> => applyRestoreSetup(plan),
   },

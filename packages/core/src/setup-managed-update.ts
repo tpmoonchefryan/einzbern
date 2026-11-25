@@ -36,6 +36,9 @@ export async function planSetupManagedUpdates(recorder: SetupRecorder, deviceHom
   for (const entry of registry.entries) {
     const target = binding(entry);
     try {
+      if (await entryKind(entry.projectPath) !== "directory") {
+        outputs.push({ ...target, status: "unavailable", reasonCode: "MANAGED_OUTPUT_UNAVAILABLE" }); continue;
+      }
       const plannedRoot = plannedRoots.has(entry.libraryId) ? plannedRoots.get(entry.libraryId) ?? null : undefined;
       if (plannedRoots.has(entry.libraryId) && plannedRoot === null) {
         outputs.push({ ...target, status: "skipped", reasonCode: "AGENTS_PROJECT_ROOT_REQUIRED" }); continue;

@@ -4801,7 +4801,8 @@ const BOOT = __PORTAL_BOOT__;
   ].sort((left, right) => entryOrder(left) - entryOrder(right) || String(left.key).localeCompare(String(right.key)));
   const settingEntries = () => [
     ...(Array.isArray(state.settings?.settings) ? state.settings.settings.filter((entry) => entry.group !== "models" && entry.key !== "design.consumedVersion").map((entry) => ({ ...entry })) : []),
-    ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings.filter((entry) => entry.group !== "models").map((entry) => ({ ...entry, layer: "device" })) : []),
+    ...(Array.isArray(state.machineSettings?.settings) ? state.machineSettings.settings
+      .filter((entry) => entry.group !== "models" && entry.key !== "agents.projectRoot").map((entry) => ({ ...entry, layer: "device" })) : []),
   ];
   const settingEntry = (key) => settingEntries().find((entry) => entry.key === key);
   const entryGroup = (entry) => typeof entry?.group === "string" && entry.group.length > 0 ? entry.group : SETTING_GROUP_NAMES[0][0];
