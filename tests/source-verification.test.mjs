@@ -18,11 +18,47 @@ import {
 } from "../dist/build/packages/core/src/index.js";
 import { canonicalJson, canonicalSha256 } from "../dist/build/packages/protocol/src/index.js";
 import { withRecallObservation } from "../dist/build/packages/core/src/recall-observation.js";
+import { readRecallAuthority } from "../dist/build/packages/core/src/recall-authority.js";
+import { discardCacheSnapshot } from "../dist/build/packages/core/src/library-cache.js";
+import { classifyDarwinFileAvailability } from "../dist/build/packages/core/src/source-verification-native.js";
 
 const at = "2026-11-11T12:00:00Z";
 const native = process.platform === "darwin";
 const spawnSync = childProcess.spawnSync;
 const hits = observation => observation.verifiedSegmentsBySource.reduce((sum, source) => sum + source.segments, 0);
+
+function packedFileAttributes(flags) {
+  const bytes = Buffer.alloc(76);
+  bytes.writeUInt32LE(bytes.length, 0);
+  bytes.writeUInt32LE(0x8a0c0006, 4);
+  bytes.writeUInt32LE(0, 8);
+  bytes.writeUInt32LE(0, 12);
+  bytes.writeUInt32LE(0x200, 16);
+  bytes.writeUInt32LE(0x200, 20);
+  bytes.writeUInt32LE(flags, 36);
+  return { result: 0, bytes: bytes.toString("base64") };
+}
+
+test("SF_DATALESS metadata classifies availability and rejects unknown attributes", () => {
+  assert.equal(classifyDarwinFileAvailability(packedFileAttributes(0)), "available");
+  assert.equal(classifyDarwinFileAvailability(packedFileAttributes(0x40000000)), "dataless");
+  assert.equal(classifyDarwinFileAvailability({ result: 1, bytes: null }), "unknown");
+  assert.equal(classifyDarwinFileAvailability(packedFileAttributes(0).bytes), "unknown");
+});
+
+test("Darwin guard has a non-materializing preflight before source descriptor opens", async () => {
+  const helper = await fs.readFile(new URL("../packages/core/src/darwin-source-identity.mjs", import.meta.url), "utf8");
+  const source = await fs.readFile(new URL("../packages/core/src/source-verification-native.ts", import.meta.url), "utf8");
+  const preflight = helper.indexOf("if (request.preflight === true)");
+  const pathAttributes = helper.indexOf("attributes(file.path, request.fileAttributes, true)", preflight);
+  const helperOpen = helper.indexOf("$.open(file.path");
+  const prepare = source.indexOf("async function prepareFiles");
+  const nativePreflight = source.indexOf("queryDarwinAvailability(batch)", prepare);
+  const nodeOpen = source.indexOf("await open(file.path", prepare);
+  assert.ok(preflight >= 0 && pathAttributes > preflight && helperOpen > pathAttributes);
+  assert.ok(helper.includes("$.setiopolicy_np(IOPOL_TYPE_VFS_MATERIALIZE_DATALESS_FILES, IOPOL_SCOPE_PROCESS, IOPOL_MATERIALIZE_DATALESS_FILES_OFF)"));
+  assert.ok(nativePreflight >= 0 && nodeOpen > nativePreflight);
+});
 
 async function fixture(t, large = true) {
   const root = await fs.realpath(await fs.mkdtemp(join(tmpdir(), "einzbern-source-verification-")));
@@ -69,13 +105,13 @@ async function fixture(t, large = true) {
 // A controlled provider response exercises the eligibility branches on local
 // fixtures. fgetattrlist, held-object identity, boot, mount and generations
 // still come from the system helper. These tests do not claim real hydration.
-function provider(t, change = () => {}) {
+function provider(t, change = () => {}, preflightChange = () => {}) {
   let queries = 0;
   t.mock.method(childProcess, "spawnSync", (command, arguments_, options) => {
     const result = spawnSync(command, arguments_, options);
     if (command !== "/usr/bin/osascript" || result.status !== 0) return result;
     const value = JSON.parse(result.stdout);
-    queries += 1;
+    const request = JSON.parse(arguments_.at(-1));
     for (const file of value.files) file.resources = {
       NSURLIsUbiquitousItemKey: true,
       NSURLUbiquitousItemIsDownloadingKey: false,
@@ -83,7 +119,8 @@ function provider(t, change = () => {}) {
       NSURLUbiquitousItemDownloadingErrorKey: null,
       NSURLFileResourceIdentifierKey: "controlled-provider-identity",
     };
-    change(value, queries, JSON.parse(arguments_.at(-1)));
+    if (request.preflight === true) preflightChange(value, request);
+    else change(value, ++queries, request);
     return { ...result, stdout: JSON.stringify(value) };
   });
   syncBuiltinESMExports();
@@ -99,6 +136,68 @@ async function warm(f) {
   assert.ok(result.observation.logicalEventBytes > 0, "reuse verifies actual content, including existing writable mappings");
   assert.deepEqual(result.value, await materializeWorkspaceFromGenesis(f.library));
   return result;
+}
+async function fileInventory(root, prefix = "") {
+  const files = [];
+  let entries;
+  try { entries = await fs.readdir(join(root, prefix), { withFileTypes: true }); }
+  catch (error) { if (error.code === "ENOENT") return files; throw error; }
+  entries.sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0);
+  for (const entry of entries) {
+    const path = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...await fileInventory(root, path));
+    } else if (entry.isFile()) {
+      const bytes = await fs.readFile(join(root, path));
+      files.push({ path, bytes: bytes.length, sha256: digestBytes(bytes) });
+    }
+  }
+  return files;
+}
+async function sourceSnapshot(f) {
+  const library = await openLibrary(f.library);
+  const read = await readAllStreams(f.library);
+  const streams = [];
+  function collect(current, archive = "") {
+    for (const stream of current.streams) {
+      if (stream.manifest !== null) streams.push({ archive, deviceId: stream.deviceId, streamId: stream.manifest.streamId,
+        sequence: stream.manifest.sequence, headEventHash: stream.manifest.headEventHash });
+    }
+    for (const { source, read: nested } of current.consolidation?.sources ?? []) collect(nested, source.archive);
+  }
+  collect(read);
+  streams.sort((left, right) => `${left.archive}/${left.deviceId}` < `${right.archive}/${right.deviceId}` ? -1 : 1);
+  const files = await fileInventory(f.library);
+  return {
+    libraryId: library.manifest.libraryId,
+    consolidationSha256: library.manifest.consolidation?.sha256 ?? null,
+    versionVector: read.versionVector,
+    streams,
+    headIdentity: canonicalSha256({ libraryId: library.manifest.libraryId,
+      consolidationSha256: library.manifest.consolidation?.sha256 ?? null, streams }),
+    inputFiles: files,
+    inputDigest: canonicalSha256(files),
+  };
+}
+async function authorityRead(f) {
+  const measured = await withRecallObservation(async () => (await readRecallAuthority(f.library)).state);
+  return { state: measured.value, resultDigest: canonicalSha256(JSON.parse(JSON.stringify(measured.value))), observation: measured.observation };
+}
+async function genesisRead(f) {
+  const measured = await withRecallObservation(() => materializeWorkspaceFromGenesis(f.library));
+  return { state: measured.value, resultDigest: canonicalSha256(JSON.parse(JSON.stringify(measured.value))), observation: measured.observation };
+}
+function materializationMetrics(result) {
+  const observation = result.observation;
+  return {
+    resultDigest: result.resultDigest,
+    replayedEvents: observation.replayedEvents,
+    segmentReads: observation.segmentReads,
+    logicalEventBytes: observation.logicalEventBytes,
+    verificationContentBytes: observation.verificationContentBytes,
+    elapsedMs: observation.elapsedMs,
+    cacheReasons: observation.cacheReasons,
+  };
 }
 async function editRecord(f, change) {
   const name = (await fs.readdir(f.records)).find(name => name.endsWith(".json"));
@@ -125,6 +224,231 @@ test("unknown per-file provider status preserves full source reads", { skip: !na
   assert.deepEqual(result.value, await materializeWorkspaceFromGenesis(f.library));
 });
 
+test("a controlled dataless preflight refuses fallback even when an earlier segment has unknown status", async t => {
+  const f = await fixture(t);
+  const platform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalOpen = fs.open;
+  let preflightSeen = false;
+  let sourceOpenedBeforePreflight = false;
+  let sourceOpenedAfterPreflight = false;
+  t.mock.method(fs, "open", (path, ...arguments_) => {
+    if (String(path) === f.target) {
+      if (preflightSeen) sourceOpenedAfterPreflight = true;
+      else sourceOpenedBeforePreflight = true;
+    }
+    return originalOpen(path, ...arguments_);
+  });
+  t.mock.method(childProcess, "spawnSync", (command, arguments_, options) => {
+    if (command !== "/usr/bin/osascript") return spawnSync(command, arguments_, options);
+    const request = JSON.parse(arguments_.at(-1));
+    assert.equal(request.preflight, true, "a data-less result must stop before the post-open identity query");
+    assert.ok(request.files.some(file => file.path === f.target));
+    const targetIndex = request.files.findIndex(file => file.path === f.target);
+    assert.ok(targetIndex > 0, "the fixture has an earlier source segment whose provider status is unknown");
+    const files = request.files.map((file, index) => ({
+      file: index === 0
+        ? { result: 1, bytes: null }
+        : packedFileAttributes(file.path === f.target ? 0x40000000 : 0),
+    }));
+    preflightSeen = true;
+    return {
+      status: 0,
+      stdout: JSON.stringify({ schemaVersion: "einzbern.darwin-source-identity.v1", preflight: true, ioPolicyResult: 0, files }),
+      stderr: "",
+    };
+  });
+  syncBuiltinESMExports();
+  Object.defineProperty(process, "platform", { ...platform, value: "darwin" });
+  try {
+    await assert.rejects(read(f), error => error.reasonCode === "SOURCE_DATALESS_FALLBACK_BLOCKED"
+      && /SF_DATALESS/u.test(error.message) && /Make the source available and retry/u.test(error.message));
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+    Object.defineProperty(process, "platform", platform);
+  }
+  assert.equal(preflightSeen, true);
+  assert.equal(sourceOpenedBeforePreflight, false);
+  assert.equal(sourceOpenedAfterPreflight, false, "a dataless classification must not reach the generic source reader");
+});
+
+test("the early identity pass defers bytes and the later full proof preserves full-read results", async t => {
+  const f = await fixture(t, false);
+  await materializeWorkspaceFromGenesis(f.library);
+
+  const references = [];
+  for (let index = 0; index < 3; index += 1) {
+    references.push(await withRecallObservation(() => materializeWorkspaceFromGenesis(f.library)));
+  }
+  const noHit = await read(f);
+  const hitsOnWarmReads = [];
+  for (let index = 0; index < 3; index += 1) hitsOnWarmReads.push(await read(f));
+
+  const reference = references[references.length - 1];
+  const referenceBytes = reference.observation.logicalEventBytes;
+  assert.ok(referenceBytes > 0);
+  assert.equal(hits(noHit.observation), 0);
+  assert.deepEqual(noHit.value, reference.value);
+  assert.equal(noHit.observation.verificationContentBytes, referenceBytes,
+    "the no-hit path reads source content once more for the required later full proof, with no early proof pass");
+  for (const warm of hitsOnWarmReads) {
+    assert.ok(hits(warm.observation) > 0);
+    assert.deepEqual(warm.value, reference.value);
+    assert.equal(warm.observation.verificationContentBytes, referenceBytes,
+      "a positive projection hit still gets the required later full source proof");
+    assert.equal(warm.observation.logicalEventBytes, referenceBytes);
+    assert.equal(warm.observation.segmentReads, reference.observation.segmentReads);
+  }
+
+  const median = values => [...values].sort((left, right) => left - right)[Math.floor(values.length / 2)];
+  t.diagnostic(JSON.stringify({
+    measurement: "hot local fixture; fixture creation and the unmeasured page-cache prime are excluded",
+    reference: {
+      samplesMs: references.map(result => result.observation.elapsedMs),
+      medianMs: median(references.map(result => result.observation.elapsedMs)),
+      segmentReads: reference.observation.segmentReads,
+      logicalEventBytes: referenceBytes,
+    },
+    noHit: {
+      elapsedMs: noHit.observation.elapsedMs,
+      segmentReads: noHit.observation.segmentReads,
+      logicalEventBytes: noHit.observation.logicalEventBytes,
+      verificationContentBytes: noHit.observation.verificationContentBytes,
+      projectionHitSegments: hits(noHit.observation),
+    },
+    positiveHit: {
+      samplesMs: hitsOnWarmReads.map(result => result.observation.elapsedMs),
+      medianMs: median(hitsOnWarmReads.map(result => result.observation.elapsedMs)),
+      segmentReads: hitsOnWarmReads[0].observation.segmentReads,
+      logicalEventBytes: hitsOnWarmReads[0].observation.logicalEventBytes,
+      verificationContentBytes: hitsOnWarmReads[0].observation.verificationContentBytes,
+      projectionHitSegments: hits(hitsOnWarmReads[0].observation),
+    },
+  }));
+});
+
+test("authenticated materialized state reuses a fixed head and falls back after derived-state corruption", { skip: process.platform !== "linux" }, async t => {
+  const f = await fixture(t, false);
+  const cache = cachePath(f.manifest.libraryId);
+  const projectionRecords = join(f.home, "derived-projections", f.manifest.libraryId.replace(":", "-"));
+  // Remove only this isolated fixture's materialized and replay projections to establish a measured no-hit path.
+  await fs.rm(join(cache, "materialized.bin"), { force: true });
+  await fs.rm(join(cache, "materialized-events.bin"), { force: true });
+  await fs.rm(join(projectionRecords, "materialized.json"), { force: true });
+  await fs.rm(join(projectionRecords, "materialized-events.json"), { force: true });
+  await discardCacheSnapshot(f.manifest.libraryId, f.home);
+  await fs.rm(join(f.home, "replay-projections", f.manifest.libraryId.replace(":", "-")), { recursive: true, force: true });
+
+  const fixedHead = await sourceSnapshot(f);
+  const reference = await genesisRead(f);
+  const noHit = await authorityRead(f);
+  const noHitHead = await sourceSnapshot(f);
+  assert.equal(noHitHead.headIdentity, fixedHead.headIdentity);
+  assert.equal(noHitHead.inputDigest, fixedHead.inputDigest);
+  assert.deepEqual(noHit.state, reference.state);
+  assert.equal(noHit.resultDigest, reference.resultDigest);
+  assert.ok(noHit.observation.replayedEvents > 0, "the no-hit path performs the authority replay");
+
+  const hit = await authorityRead(f);
+  const hitHead = await sourceSnapshot(f);
+  assert.equal(hitHead.headIdentity, fixedHead.headIdentity);
+  assert.equal(hitHead.inputDigest, fixedHead.inputDigest);
+  assert.deepEqual(hit.state, reference.state);
+  assert.equal(hit.resultDigest, reference.resultDigest);
+  assert.equal(hit.observation.replayedEvents, 0);
+  assert.ok(hit.observation.cacheReasons.includes("materialized-state-hit"));
+  assert.equal(hit.observation.verificationContentBytes, noHit.observation.verificationContentBytes,
+    "a materialized-state hit still proves every current source byte");
+
+  const changedSourceBefore = await sourceSnapshot(f);
+  await createWork(f.library, { projectId: f.sources[0].projectId, externalKey: "VERIFY-MATERIALIZED-CHANGED",
+    kind: "Initiative", parentId: null, title: "Changed materialized source", scope: "source changed after the fixed-head pair", occurredAt: at });
+  const changedSource = await sourceSnapshot(f);
+  assert.notEqual(changedSource.headIdentity, changedSourceBefore.headIdentity);
+  assert.notEqual(changedSource.inputDigest, changedSourceBefore.inputDigest);
+  const changedReference = await genesisRead(f);
+  const changed = await authorityRead(f);
+  assert.deepEqual(changed.state, changedReference.state);
+  assert.equal(changed.resultDigest, changedReference.resultDigest);
+  assert.ok(changed.observation.replayedEvents > 0, "a changed source head cannot reuse the earlier materialized state");
+
+  const corruptionResults = [];
+  for (const filename of ["materialized.bin", "materialized-events.bin"]) {
+    const stateBeforeDamage = await sourceSnapshot(f);
+    const target = join(cache, filename);
+    const targetBytes = await fs.readFile(target);
+    const proofPath = join(projectionRecords, filename.replace(/\.bin$/u, ".json"));
+    const proofBefore = await fs.readFile(proofPath);
+    const cacheBefore = await fileInventory(cache);
+    const changedBytes = Buffer.from(targetBytes);
+    changedBytes[0] ^= 1;
+    await fs.writeFile(target, changedBytes);
+    const cacheAfterDamage = await fileInventory(cache);
+    const changedCachePaths = cacheAfterDamage.filter(file => cacheBefore.find(before => before.path === file.path)?.sha256 !== file.sha256).map(file => file.path);
+    assert.deepEqual(changedCachePaths, [filename], "only the selected derived state payload was damaged");
+    assert.equal(digestBytes(await fs.readFile(proofPath)), digestBytes(proofBefore), "the independent local proof remains unchanged");
+    const stateAfterDamage = await sourceSnapshot(f);
+    assert.equal(stateAfterDamage.headIdentity, stateBeforeDamage.headIdentity);
+    assert.equal(stateAfterDamage.inputDigest, stateBeforeDamage.inputDigest);
+
+    const recovered = await authorityRead(f);
+    assert.deepEqual(recovered.state, changedReference.state);
+    assert.equal(recovered.resultDigest, changedReference.resultDigest);
+    assert.ok(recovered.observation.cacheReasons.includes("materialized-state-fallback"));
+    const stateAfterRecovery = await sourceSnapshot(f);
+    assert.equal(stateAfterRecovery.headIdentity, stateBeforeDamage.headIdentity);
+    assert.equal(stateAfterRecovery.inputDigest, stateBeforeDamage.inputDigest);
+    const restored = await authorityRead(f);
+    assert.deepEqual(restored.state, changedReference.state);
+    assert.equal(restored.resultDigest, changedReference.resultDigest);
+    assert.equal(restored.observation.replayedEvents, 0);
+    assert.ok(restored.observation.cacheReasons.includes("materialized-state-hit"));
+    corruptionResults.push({ damagedObject: filename, originalSha256: digestBytes(targetBytes), damagedSha256: digestBytes(changedBytes),
+      proofSha256Unchanged: digestBytes(proofBefore), sourceHeadIdentity: stateBeforeDamage.headIdentity,
+      sourceInputDigest: stateBeforeDamage.inputDigest, recovered: materializationMetrics(recovered), restored: materializationMetrics(restored) });
+  }
+
+  t.diagnostic(JSON.stringify({ schemaVersion: "tcrn.story701.materialized-state-local-evidence.v1", platform: process.platform,
+    darwinNativeBehavior: "unverified: this run is Linux", fixtureRoot: f.root,
+    fixedHead: { identity: fixedHead.headIdentity, inputDigest: fixedHead.inputDigest, inputFiles: fixedHead.inputFiles },
+    fullRecomputeReference: materializationMetrics(reference),
+    fixedHeadNoHit: materializationMetrics(noHit), fixedHeadHit: materializationMetrics(hit),
+    changedSource: { fromHeadIdentity: changedSourceBefore.headIdentity, headIdentity: changedSource.headIdentity,
+      inputDigest: changedSource.inputDigest, inputFiles: changedSource.inputFiles,
+      fullRecomputeReference: materializationMetrics(changedReference), actual: materializationMetrics(changed) },
+    corruptionResults }));
+});
+
+test("resident local fixture bytes remain fully proved after a warmed projection", async t => {
+  const f = await fixture(t);
+  const result = await warm(f);
+  assert.ok(result.observation.logicalEventBytes > 0);
+  assert.deepEqual(result.value, await materializeWorkspaceFromGenesis(f.library));
+  await fs.writeFile(f.target, await corrupt(f));
+  await assert.rejects(read(f), error => error.reasonCode === "AKASHA_EVENT_CORRUPT");
+  await assert.rejects(materializeWorkspaceFromGenesis(f.library), error => error.reasonCode === "AKASHA_EVENT_CORRUPT");
+});
+
+test("a local source change during content proof cannot reuse an older projection", async t => {
+  const f = await fixture(t);
+  await warm(f);
+  const changed = await corrupt(f);
+  const originalOpen = fs.open;
+  let changedDuringProbe = false;
+  t.mock.method(fs, "open", async (path, ...arguments_) => {
+    const handle = await originalOpen(path, ...arguments_);
+    if (String(path) === f.target && !changedDuringProbe) {
+      changedDuringProbe = true;
+      writeFileSync(f.target, changed);
+    }
+    return handle;
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  await assert.rejects(read(f), error => error.reasonCode === "AKASHA_EVENT_CORRUPT");
+  assert.equal(changedDuringProbe, true);
+});
+
 test("resident native local files reuse without provider-only download keys", { skip: !native }, async t => {
   const f = await fixture(t);
   const result = await warm(f);
@@ -141,7 +465,7 @@ test("verified projections avoid repeated event validation and batch native help
   assert.ok(result.observation.logicalEventBytes > 0, "native attributes cannot attest unchanged bytes");
   assert.ok(result.observation.verificationHelperScriptBytes > 0);
   const helper = await fs.readFile(new URL("../packages/core/src/darwin-source-identity.mjs", import.meta.url));
-  assert.equal(result.observation.verificationHelperScriptBytes, helper.length * 2);
+  assert.equal(result.observation.verificationHelperScriptBytes, helper.length * 3);
   assert.ok(result.observation.cacheReadBytes < first.observation.logicalEventBytes + first.observation.cacheReadBytes);
   assert.deepEqual(result.value, await materializeWorkspaceFromGenesis(f.library));
 });
@@ -458,6 +782,15 @@ test("native protocol returns the complete packed attributes without buffer padd
     for (const file of value.files) for (const attributes of [file.file, file.volume]) {
       const bytes = Buffer.from(attributes.bytes, "base64");
       assert.equal(attributes.result, 0);
+      assert.equal(bytes.readUInt32LE(), bytes.length);
+      assert.ok(bytes.length >= 24 && bytes.length < 8192);
+      queried += 1;
+    }
+  }, (value, request) => {
+    assert.equal(request.preflight, true);
+    for (const file of value.files) {
+      const bytes = Buffer.from(file.file.bytes, "base64");
+      assert.equal(file.file.result, 0);
       assert.equal(bytes.readUInt32LE(), bytes.length);
       assert.ok(bytes.length >= 24 && bytes.length < 8192);
       queried += 1;

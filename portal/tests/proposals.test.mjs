@@ -159,7 +159,9 @@ test("527 GWT2: Atelier's approval of a proposed rule enables it and writes its 
   assert.equal(approved.status, 200, JSON.stringify(approved.body));
   assert.equal(approved.body.rules.find((entry) => entry.id === rule).state, "enabled");
   assert.deepEqual(approved.body.proposals, []);
-  assert.match(await readFile(join(fixture.proseRoot, "AGENTS.md"), "utf8"), new RegExp(`rule:${rule}`, "u"));
+  const agents = await readFile(join(fixture.proseRoot, "AGENTS.md"), "utf8");
+  assert.match(agents, /<!-- einzbern:section id=agents /u);
+  assert.match(agents, /- \*\*Autonomy\*\*/u);
   const events = await lastEvents(fixture, 3);
   assert.deepEqual(events.map((payload) => [payload.record.collection, payload.surface, payload.decidedIn]), ["rule", "managed-section", "proposal"].map((collection) => [collection, "atelier", `proposal:rule:${rule}@${proposed.proposal.proposedAt}`]));
 });

@@ -69,6 +69,15 @@ function reasonOf(args) {
   return runCli(args, { write() {} }).then(() => null, (error) => error?.reasonCode);
 }
 
+async function errorOf(args) {
+  try {
+    await runCli(args, { write() {} });
+  } catch (error) {
+    return error;
+  }
+  return null;
+}
+
 test("INIT-047 work-list search returns bounded scope and work-draft uses canonical headings", async (context) => {
   const fx = await fixture(context);
   const before = await validateWorkspace(fx.workspace);
@@ -286,6 +295,24 @@ test("work-show returns one record and fails closed on unknown ids and malformed
   assert.equal(await reasonOf(["work-list", ...ws, "--status", "bogus"]), "CLI_ARGUMENT_MALFORMED");
   assert.equal(await reasonOf(["work-list", ...ws, "--limit", "0"]), "CLI_ARGUMENT_MALFORMED");
   assert.equal(await reasonOf(["project-list", ...ws, "--offset", "-1"]), "CLI_ARGUMENT_MALFORMED");
+});
+
+test("STORY-691: work-show distinguishes a live external key passed as --id from a missing record", async (context) => {
+  const fx = await fixture(context);
+  const ws = ["--workspace", fx.workspace];
+  const byKey = await run(["work-show", ...ws, "--external-key", "INIT-A"]);
+  const byId = await run(["work-show", ...ws, "--id", byKey.record.id]);
+  assert.equal(byKey.record.id, fx.ids.initA);
+  assert.equal(byId.record.id, byKey.record.id);
+
+  const misplaced = await errorOf(["work-show", ...ws, "--id", "INIT-A"]);
+  assert.equal(misplaced?.reasonCode, "WORKSPACE_INPUT_INVALID");
+  assert.match(misplaced?.message ?? "", /--external-key INIT-A/u);
+
+  const missing = await errorOf(["work-show", ...ws, "--external-key", "TCRN-CROSS-STORY-NOT-FOUND"]);
+  assert.equal(missing?.reasonCode, "WORKSPACE_INPUT_INVALID");
+  assert.match(missing?.message ?? "", /is unavailable/u);
+  assert.doesNotMatch(missing?.message ?? "", /--external-key/u);
 });
 
 // CQ-05(c2) proof. Before this guard the round trip was BROKEN, not merely inconsistent:

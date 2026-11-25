@@ -515,6 +515,7 @@ test("integrated engine: non-decision valueShapes document projection selection,
     ["execution-antigravity-record", { name: "binding", required: true, valueKind: "string", valueShape: "Saved Antigravity HostExecutionPreparation v1 JSON." }],
     ["execution-antigravity-record", { name: "result", required: false, valueKind: "string", valueShape: "Actual Antigravity child process return JSON; omit only for a refused preflight." }],
     ["execution-antigravity-record", { name: "output", required: true, valueKind: "string", valueShape: "Create-new private Antigravity process evidence outside device/library roots." }],
+    ["execution-batch-plan", { name: "from-file", required: true, valueKind: "string", valueShape: "Observed free slots, frozen candidate inputs and package write sets." }],
     ["execution-evidence", {
       name: "from-file", required: true, valueKind: "string",
       valueShape: "Path to JSON {handoff, hostResult}; see specs/dispatch-admission-evidence-v1.md in the engine archive. Association only, not host authentication. Exit 0: complete association; exit 1: invalid, unavailable, or unreadable input.",
@@ -528,6 +529,8 @@ test("integrated engine: non-decision valueShapes document projection selection,
     ["execution-prepare", { name: "action", required: false, valueKind: "string", valueShape: "implementation, research or coordination; required to disambiguate legacy content-incomplete dispatch; does not grant authority" }],
     ["execution-prepare", { name: "observations", required: true, valueKind: "string", valueShape: "Machine JSON file: explicit availableCombinations, optional timestamped usage/expectedPolicy; never inferred from policy." }],
     ["execution-prepare", { name: "output", required: true, valueKind: "string", valueShape: "Create-new private local preparation file outside device/library roots; refused preparations are retained. No dispatch." }],
+    ["execution-queue-reconcile", { name: "scope", required: true, valueKind: "string", valueShape: "All current authorized INIT grants, independent of the queue." }],
+    ["execution-queue-reconcile", { name: "assessments", required: false, valueKind: "string", valueShape: "Revision-bound findings and native attempt/report observations." }],
     ["execution-record", { name: "binding", required: true, valueKind: "string", valueShape: "Saved execution-prepare file." }],
     ["execution-record", { name: "target", required: true, valueKind: "integer", valueShape: "Exact zero-based target index in the preparation bindings." }],
     ["execution-record", { name: "process-return", required: true, valueKind: "string", valueShape: "Actual process artifact per specs/dispatch-admission-evidence-v1.md; native tool responses unsupported." }],
@@ -654,7 +657,7 @@ test("INIT062 new valueShape roster is closed and preserves the existing transpo
 test("INIT065 general-native catalog is separate from legacy closed roster", async () => {
   const entries = COMMAND_CATALOG.filter(entry => entry.name.startsWith("execution-host-"));
   assert.deepEqual(entries.map(entry => entry.name), ["execution-host-evidence", "execution-host-prepare", "execution-host-record"]);
-  assert.deepEqual(entries.flatMap(entry => entry.flags.filter(flag => flag.valueShape !== undefined).map(flag => `${entry.name}:${flag.name}`)), ["execution-host-prepare:request", "execution-host-prepare:arguments", "execution-host-prepare:codex-settings-intent", "execution-host-record:events"]);
+  assert.deepEqual(entries.flatMap(entry => entry.flags.filter(flag => flag.valueShape !== undefined).map(flag => `${entry.name}:${flag.name}`)), ["execution-host-prepare:request", "execution-host-prepare:codex-usage", "execution-host-prepare:codex-capacity", "execution-host-prepare:arguments", "execution-host-prepare:codex-startup-evidence", "execution-host-prepare:codex-settings-intent", "execution-host-prepare:prior-peer-receipt", "execution-host-record:events"]);
   for (const entry of entries) {
     for (const flag of entry.flags) {
       const expectedKind = entry.name === "execution-host-prepare" && flag.name === "codex-peer-worker" ? "boolean" : "string";

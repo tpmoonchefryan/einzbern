@@ -66,12 +66,13 @@ function absolutePath(text) {
   return ABSOLUTE_PATH.exec(text)?.[0] ?? null;
 }
 
-test("the engine ships nine built-in rules at their versions, batch processing at v3", () => {
+test("the engine ships ten built-in rules at their versions, batch processing at v3", () => {
   assert.deepEqual(BUILT_IN_RULES.map((rule) => [rule.id, rule.version]), [
     ["autonomy", 1],
     ["batch", 3],
     ["unattended-commands", 2],
     ["silent-reporting", 1],
+    ["discussion-style", 1],
     ["design-authority", 1],
     ["residue-cleanup", 1],
     ["goal-writing", 1],
@@ -117,7 +118,7 @@ test("no rule text names an absolute path", () => {
 test("every current Chinese body and the archived English contracts match their explicit fixtures", async () => {
   // Historical bodies remain separately archived; current supplements have explicit fixtures.
   // The eighth source is asserted below without changing its contract.
-  for (const rule of BUILT_IN_RULES.filter(rule => !["incremental-update", "privacy-publication"].includes(rule.id))) {
+  for (const rule of BUILT_IN_RULES.filter(rule => !["discussion-style", "incremental-update", "privacy-publication"].includes(rule.id))) {
     assert.equal(proceduralRule(rule.id).body.zh, portableProcedure(await readFile(join(fixtures, `${rule.id}.zh.md`), "utf8")), rule.id);
   }
   assert.equal(proceduralRule("design-authority")?.body.en, await readFile(join(fixtures, "design-authority.en.md"), "utf8"));
@@ -235,7 +236,7 @@ const INC_225_CLAUSES = Object.freeze([
 ]);
 
 test("540 (MIN-259 D1): residue-cleanup v1 preserves its eight historical clauses plus the branch supplement, and goal-writing stays unchanged", async () => {
-  assert.deepEqual(BUILT_IN_RULE_IDS.slice(4, 7), ["design-authority", "residue-cleanup", "goal-writing"]);
+  assert.deepEqual(BUILT_IN_RULE_IDS.slice(5, 8), ["design-authority", "residue-cleanup", "goal-writing"]);
   const residue = proceduralRule("residue-cleanup");
   const goal = builtInRule("goal-writing");
   assert.deepEqual([residue.version, { ...residue.title }], [1, { zh: "无效残余收尾原则", en: "Residue Cleanup Principle" }]);
@@ -328,7 +329,7 @@ test("INIT-062 universal supplements preserve v1 history, explicit user limits a
 });
 
 test("MIN358 scoped-prohibition and governance persistence clauses extend selectable autonomy without new rules", async () => {
-  assert.equal(BUILT_IN_RULES.filter(rule => rule.id !== "privacy-publication").length, 8); // INIT068 adds only its separately approved principle.
+  assert.equal(BUILT_IN_RULES.filter(rule => !["privacy-publication", "discussion-style"].includes(rule.id)).length, 8); // INIT068 adds only its separately approved principle.
   for (const language of LANGUAGES) {
     assert.ok(builtInRule("autonomy").body[language].includes(AUTONOMY_RESTRICTION_SCOPE_BODY[language]));
     const previous = await readFile(join(fixtures, `autonomy-v1-rev2.${language}.md`), "utf8");

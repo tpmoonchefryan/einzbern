@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { summarizeGateResult } from "../scripts/preflight.mjs";
 import { scanPrivacyEntries } from "../scripts/lib/privacy.mjs";
+import { LEGACY_REPOSITORY_NAMES } from "../scripts/lib/names.mjs";
 const source = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 function section(text, start, end) {
   assert.equal(text.split(start).length, 2, start);
@@ -67,9 +68,7 @@ for (const { name, commit, digest } of [
 ]) test(`audit: ${name} reviewed merge classification is exact in commit and full line`, async (context) => {
   const result = spawnSync("git", ["cat-file", "commit", commit], { cwd: new URL("..", import.meta.url), encoding: "utf8" });
   if (result.status !== 0) { context.skip("reviewed historical commit unavailable in this clone"); return; }
-  const names = await source("packages/core/src/names.ts");
-  const upstreamOwner = /owner:\s*"([^"]+)"/u.exec(names)?.[1];
-  assert.ok(upstreamOwner);
+  const upstreamOwner = LEGACY_REPOSITORY_NAMES.owner;
   const subject = result.stdout.split("\n").find((line) => createHash("sha256").update(line).digest("hex") === digest);
   assert.ok(subject);
   const owner = /^Merge pull request #\d+ from ([^/\s]+)\//u.exec(subject)?.[1];

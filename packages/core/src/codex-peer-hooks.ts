@@ -5,9 +5,11 @@ import { dirname, join } from "node:path";
 import { writeFileAtomic } from "./atomic-file.js";
 import { withFileLock } from "./file-lock.js";
 import { isCodexIndependentCreate, isCodexNativeSpawn } from "./codex-tool-identity.js";
+import { isRecognizedEnrolledThreadReadSource } from "./codex-peer-batch.js";
 import type { CodexPeerBatch } from "./codex-peer-batch.js";
-import { canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
+import { canonicalJson, canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
 import { codexToolResult, runCodexQueryGuard } from "./codex-query-guard.js";
+import { hasCodexReportSessionSetting, hasCodexSettingsOverride } from "./codex-peer-settings.js";
 
 type ObjectValue = Record<string, unknown>;
 interface PeerTurn {
@@ -32,6 +34,7 @@ export interface PeerHookResult {
 }
 
 const SEND = "mcp__codex_app__send_message_to_thread";
+const TURN_START = "turn/start";
 const WAIT = "mcp__codex_app__wait_threads";
 const READ = "mcp__codex_app__read_thread";
 const DELIVERY_REASON = "This coordinator's recorded batch is terminal, but no return attempt was observed. Load Mana Orchestrate and follow its Codex batch-delivery procedure. If the existing authorization covers delivery, send the batch result to the recorded main conversation and retain the receipt. A local final reply is not cross-conversation delivery. Report unavailable capability or permission instead of retrying blindly.";
@@ -114,22 +117,23 @@ export async function runCodexPeerHook(event: string, payload: unknown, device: 
   const unchanged = { reasonCode: "HOOK_PEER_NOT_APPLICABLE", output: null };
   if (body === null || !text(body.session_id)) return unchanged;
   const tool = body.tool_name;
-  if (event === "PostToolUse" && tool === SEND && (await import("./codex-peer-settings.js")).hasCodexSettingsOverride(body.tool_input)) {
+  if (event === "PostToolUse" && tool === SEND && hasCodexSettingsOverride(body.tool_input)) {
     const { observeCodexSettingsResult } = await import("./codex-peer-settings.js");
     await observeCodexSettingsResult(device, body);
   }
   const query = await runCodexQueryGuard(event, body, device);
   if (query.reasonCode !== "HOOK_PEER_NOT_APPLICABLE") return query;
   if (event === "PreToolUse" && tool === SEND) {
-    const problem = await codexPeerReportRecipientProblem(device, body.session_id, body.tool_input);
+    const problem = await codexPeerReportDispatchProblem(device, body.session_id, SEND, body.tool_input);
     if (problem) return denyPeer(problem.reasonCode, problem.reason);
   }
-  if (event === "PreToolUse" && tool === SEND && (await import("./codex-peer-settings.js")).hasCodexSettingsOverride(body.tool_input)) {
+  if (event === "PreToolUse" && tool === SEND && hasCodexReportSessionSetting(body.tool_input)) {
     const role = await readCodexPeerRole(device, body.session_id);
     if (role.status === "error") return denyPeer("HOOK_PEER_ROLE_RECOVERY_FAILED", role.reason);
     const input = object(body.tool_input) ?? {};
     if (role.status === "active" && input.threadId === role.role.mainId && (input.hostId === undefined || input.hostId === "local")) {
       try {
+        if (!hasCodexSettingsOverride(body.tool_input)) return denyPeer("HOOK_PEER_SETTINGS_DENIED", "Ordinary reports omit model, thinking, effort, serviceTier and serviceTierForTurn. Only the existing explicit model/thinking adjustment supports a separate Owner decision.");
         const { consumeCodexSettingsIntent } = await import("./codex-peer-settings.js");
         if (!await consumeCodexSettingsIntent(device, body)) return denyPeer("HOOK_PEER_SETTINGS_DENIED", "Ordinary reports omit model/thinking. Load Mana Orchestrate; prepare an explicitly authorized settings adjustment with its exact native arguments and existing Owner decision.");
       } catch (error) { return denyPeer("HOOK_PEER_SETTINGS_DENIED", String(error)); }
@@ -266,18 +270,64 @@ export type CodexPeerRoleRead =
   | { readonly status: "error"; readonly reason: string }
   | { readonly status: "active" | "retired"; readonly role: CodexPeerRole };
 
-/** The existing report marker binds a batch report, never an ordinary message permit. */
-export async function codexPeerReportRecipientProblem(
+function reportText(toolName: string, input: ObjectValue | null): string | null {
+  if (toolName === SEND) return typeof input?.prompt === "string" ? input.prompt : null;
+  if (toolName !== TURN_START || !Array.isArray(input?.input)) return null;
+  const item = input.input.map(value => object(value)).find(value => value?.type === "text" && typeof value.text === "string");
+  return typeof item?.text === "string" ? item.text : null;
+}
+
+function reportArgumentsProblem(toolName: string, input: ObjectValue): string | null {
+  const allowed = toolName === SEND ? ["threadId", "hostId", "prompt"] : ["threadId", "input", "clientUserMessageId"];
+  const unsupported = Object.keys(input).filter(key => !allowed.includes(key));
+  if (unsupported.length > 0) return `ordinary ${toolName} report contains unsupported fields: ${unsupported.join(", ")}`;
+  if (!text(input.threadId)) return `ordinary ${toolName} report needs a nonempty threadId`;
+
+  if (toolName === SEND) {
+    if (!text(input.prompt)) return "ordinary send_message_to_thread report needs a nonempty prompt";
+    if (input.hostId !== undefined && !text(input.hostId)) return "ordinary send_message_to_thread report hostId must be nonempty when supplied";
+    return null;
+  }
+
+  if (!Array.isArray(input.input) || input.input.length !== 1) return "ordinary turn/start report needs exactly one text input";
+  const message = object(input.input[0]);
+  if (message === null || Object.keys(message).some(key => !["type", "text", "text_elements"].includes(key)) || message.type !== "text" || !text(message.text)) {
+    return "ordinary turn/start report input must be one text input with nonempty text";
+  }
+  if (Object.hasOwn(message, "text_elements") && (!Array.isArray(message.text_elements) || message.text_elements.length > 0)) {
+    return "ordinary turn/start report text_elements must be an empty array when supplied";
+  }
+  if (Object.hasOwn(input, "clientUserMessageId") && input.clientUserMessageId !== null && !text(input.clientUserMessageId)) {
+    return "turn/start clientUserMessageId must be nonempty when supplied";
+  }
+  return null;
+}
+
+function mainHostId(manifest: CodexPeerBatch["manifest"]): string {
+  let nativeMain: unknown = manifest.main.raw;
+  for (const segment of manifest.main.conversationPointer.split("/").slice(1, -1)) {
+    nativeMain = object(nativeMain)?.[segment.replaceAll("~1", "/").replaceAll("~0", "~")];
+  }
+  const value = object(nativeMain)?.hostId;
+  return typeof value === "string" && value.length > 0 ? value : "local";
+}
+
+/** The existing report marker binds a batch report; ordinary bound-Main reports get a narrow argument preflight. */
+export async function codexPeerReportDispatchProblem(
   device: string,
   sessionId: string | undefined,
+  toolName: string,
   argumentsValue: unknown,
   work?: { readonly libraryId: string; readonly workId: string; readonly workRevision: number },
+  ordinaryReport = true,
 ): Promise<{ reasonCode: string; reason: string } | null> {
   const input = object(argumentsValue);
-  const prompt = input?.prompt;
-  if (typeof prompt !== "string" || !/^Einzbern-Codex-Peer-Manifest-SHA256:/mu.test(prompt)) return null;
+  if (toolName !== SEND && toolName !== TURN_START) return null;
+  const prompt = reportText(toolName, input);
+  const marked = typeof prompt === "string" && /^Einzbern-Codex-Peer-Manifest-SHA256:/mu.test(prompt);
+  if (!marked && !ordinaryReport) return null;
   const role = sessionId ? await readCodexPeerRole(device, sessionId) : { status: "unbound" as const };
-  if (role.status === "unbound") return null;
+  if (!marked && role.status !== "active") return null;
   if (role.status === "error") {
     return {
       reasonCode: "HOOK_PEER_ROLE_RECOVERY_FAILED",
@@ -293,34 +343,73 @@ export async function codexPeerReportRecipientProblem(
   const manifest = role.role.receipt.manifest;
   const source = `role.receipt.manifest.main (${manifest.main.sourceRef})`;
   const binding = `batch ${manifest.batchId}/${manifest.attemptId}`;
-  const { codexPeerReportPrefix } = await import("./codex-peer-batch.js");
-  if (!prompt.startsWith(codexPeerReportPrefix(manifest))) {
+  if (marked) {
+    const { codexPeerReportPrefix } = await import("./codex-peer-batch.js");
+    if (!prompt!.startsWith(codexPeerReportPrefix(manifest))) {
+      return {
+        reasonCode: "HOOK_PEER_REPORT_BINDING_DENIED",
+        reason: `Report marker differs from the current ${binding}. Read the durable role receipt's reportPrefix and ${source}; put that exact prefix, including LF, first.`,
+      };
+    }
+    if (hasCodexReportSessionSetting(argumentsValue)) {
+      return {
+        reasonCode: "HOOK_PEER_REPORT_SETTINGS_DENIED",
+        reason: "Batch reports omit model, thinking, effort, serviceTier and serviceTierForTurn; delivery inherits the bound recipient's session settings.",
+      };
+    }
+    const works = [{ workId: manifest.workId, workRevision: manifest.workRevision }, ...manifest.members];
+    if (work && (work.libraryId !== role.role.libraryId || !works.some(member => member.workId === work.workId && member.workRevision === work.workRevision))) {
+      return {
+        reasonCode: "HOOK_PEER_REPORT_BINDING_DENIED",
+        reason: `Report work/library differs from the current ${binding}; read the durable role receipt's manifest and current work before preparing delivery.`,
+      };
+    }
+  } else {
+    if (input?.threadId !== manifest.main.conversationId) return null;
+    if (hasCodexReportSessionSetting(argumentsValue)) {
+      const hostId = mainHostId(manifest);
+      if (toolName === SEND && (input.hostId ?? "local") !== hostId) {
+        return {
+          reasonCode: "HOOK_PEER_REPORT_RECIPIENT_DENIED",
+          reason: `This native session is coordinator ${role.role.coordinatorId}. The report must use threadId=${manifest.main.conversationId}, hostId=${String(hostId)} from ${source}.`,
+        };
+      }
+      return null;
+    }
+  }
+
+  if (input === null) {
     return {
-      reasonCode: "HOOK_PEER_REPORT_BINDING_DENIED",
-      reason: `Report marker differs from the current ${binding}. Read the durable role receipt's reportPrefix and ${source}; put that exact prefix, including LF, first.`,
+      reasonCode: "HOOK_PEER_REPORT_ARGUMENTS_DENIED",
+      reason: `ordinary ${toolName} report arguments must be an object; reports to Main use only their supported recipient, text body and optional deduplication ID.`,
     };
   }
-  const works = [{ workId: manifest.workId, workRevision: manifest.workRevision }, ...manifest.members];
-  if (work && (work.libraryId !== role.role.libraryId || !works.some(member => member.workId === work.workId && member.workRevision === work.workRevision))) {
+  const malformed = reportArgumentsProblem(toolName, input);
+  if (malformed) {
     return {
-      reasonCode: "HOOK_PEER_REPORT_BINDING_DENIED",
-      reason: `Report work/library differs from the current ${binding}; read the durable role receipt's manifest and current work before preparing delivery.`,
+      reasonCode: "HOOK_PEER_REPORT_ARGUMENTS_DENIED",
+      reason: `${malformed}; reports to Main use only their supported recipient, text body and optional deduplication ID.`,
     };
   }
-  // The identity pointer's containing native object supplies hostId; the native
-  // tool's existing omitted-host default is local. No second manifest field.
-  let nativeMain: unknown = manifest.main.raw;
-  for (const segment of manifest.main.conversationPointer.split("/").slice(1, -1)) {
-    nativeMain = object(nativeMain)?.[segment.replaceAll("~1", "/").replaceAll("~0", "~")];
-  }
-  const hostId = object(nativeMain)?.hostId ?? "local";
-  if (input?.threadId !== manifest.main.conversationId || (input.hostId ?? "local") !== hostId) {
+
+  const hostId = mainHostId(manifest);
+  if (input.threadId !== manifest.main.conversationId || (toolName === SEND && (input.hostId ?? "local") !== hostId)) {
     return {
       reasonCode: "HOOK_PEER_REPORT_RECIPIENT_DENIED",
-      reason: `This native session is coordinator ${role.role.coordinatorId}. The current ${binding} report must use threadId=${manifest.main.conversationId}, hostId=${String(hostId)} from ${source}. Correct the arguments explicitly; worker return instructions do not change the coordinator's recipient.`,
+      reason: `This native session is coordinator ${role.role.coordinatorId}. The current ${binding} report must use threadId=${manifest.main.conversationId}${toolName === SEND ? `, hostId=${String(hostId)}` : ""} from ${source}. Correct the arguments explicitly; worker return instructions do not change the coordinator's recipient.`,
     };
   }
   return null;
+}
+
+/** Backward-compatible native send preflight entry. */
+export async function codexPeerReportRecipientProblem(
+  device: string,
+  sessionId: string | undefined,
+  argumentsValue: unknown,
+  work?: { readonly libraryId: string; readonly workId: string; readonly workRevision: number },
+): Promise<{ reasonCode: string; reason: string } | null> {
+  return codexPeerReportDispatchProblem(device, sessionId, SEND, argumentsValue, work);
 }
 
 export function codexPeerRoleDirectory(device: string, sessionId: string): string {
@@ -343,16 +432,108 @@ export async function readCodexPeerRole(device: string, sessionId: string): Prom
     const { digest, ...payload } = value;
     if (digest !== canonicalSha256(payload) || value.schemaVersion !== "einzbern.codex-peer-role.v1" ||
         value.host !== "codex" || value.coordinatorId !== sessionId || !["active", "retired"].includes(String(value.status)) ||
+        !text(value.libraryId) || !text(value.mainId) || !text(anchor.libraryId) || !text(anchor.mainId) ||
         value.libraryId !== anchor.libraryId || value.mainId !== anchor.mainId || value.status !== anchor.status || !text(value.actor) || !text(value.recordedAt)) throw new Error("invalid role identity, version or digest");
-    const { normalizeCodexPeerBatch } = await import("./codex-peer-batch.js");
-    const receipt = normalizeCodexPeerBatch(value.receipt);
-    if (receipt.schemaVersion !== "tcrn.codex-peer-batch.v2" || receipt.manifest.coordinator.conversationId !== sessionId ||
+    const { normalizeCodexPeerBatchForEnrolledRole } = await import("./codex-peer-batch.js");
+    const receipt = normalizeCodexPeerBatchForEnrolledRole(value.receipt, { coordinatorId: sessionId, mainId: value.mainId });
+    if ((receipt.schemaVersion !== "tcrn.codex-peer-batch.v2" && receipt.schemaVersion !== "tcrn.codex-peer-batch.v3") || receipt.manifest.coordinator.conversationId !== sessionId ||
         receipt.manifest.main.conversationId !== value.mainId) throw new Error("role differs from validated peer receipt");
     if (value.status === "retired" && !text(value.decidedIn)) throw new Error("retired role has no lifecycle decision");
     return { status: value.status as "active" | "retired", role: value as unknown as CodexPeerRole };
   } catch (error) {
     return { status: "error", reason: `known coordinator role cannot be recovered: ${String(error)}` };
   }
+}
+
+export type CodexPeerHistoricalReceiptResolution =
+  | { readonly status: "matched"; readonly identity: { readonly coordinatorId: string; readonly mainId: string } }
+  | { readonly status: "wrong-batch" }
+  | { readonly status: "tampered" }
+  | { readonly status: "unknown-origin" };
+
+/** Resolve only an exact v2 receipt already present in the authenticated role's linked history.
+ * This is a read-only compatibility path; it does not make the receipt current or authorize resume. */
+export async function resolveCodexPeerHistoricalReceipt(
+  device: string,
+  value: unknown,
+): Promise<CodexPeerHistoricalReceiptResolution> {
+  const candidate = object(value);
+  const manifest = object(candidate?.manifest);
+  const main = object(manifest?.main);
+  const coordinator = object(manifest?.coordinator);
+  const coordinatorId = text(coordinator?.conversationId) ? coordinator.conversationId : "";
+  const mainId = text(main?.conversationId) ? main.conversationId : "";
+  const batchId = text(manifest?.batchId) ? manifest.batchId : "";
+  const attemptId = text(manifest?.attemptId) ? manifest.attemptId : "";
+  if (candidate?.schemaVersion !== "tcrn.codex-peer-batch.v2" || !coordinatorId || !mainId || !batchId || !attemptId ||
+      coordinator?.conversationPointer !== "/result/thread/id" ||
+      !isRecognizedEnrolledThreadReadSource(coordinator.sourceRef)) {
+    return { status: "unknown-origin" };
+  }
+
+  const enrolled = await readCodexPeerRole(device, coordinatorId);
+  if ((enrolled.status !== "active" && enrolled.status !== "retired") || enrolled.role.mainId !== mainId) {
+    return { status: "unknown-origin" };
+  }
+
+  const role = enrolled.role;
+  const identity = { coordinatorId, mainId };
+  const directory = codexPeerRoleDirectory(device, coordinatorId);
+  const currentRole = role as unknown as ObjectValue;
+  const roleMatches = (historical: ObjectValue, expectedDigest: string): boolean => {
+    const { digest, ...payload } = historical;
+    return digest === expectedDigest && canonicalSha256(payload) === expectedDigest &&
+      historical.schemaVersion === "einzbern.codex-peer-role.v1" && historical.host === "codex" &&
+      historical.coordinatorId === role.coordinatorId && historical.mainId === role.mainId &&
+      historical.libraryId === role.libraryId && ["active", "retired"].includes(String(historical.status)) &&
+      (historical.previousDigest === null || (typeof historical.previousDigest === "string" && /^[a-f0-9]{64}$/u.test(historical.previousDigest)));
+  };
+  const inspectReceipt = (historical: ObjectValue): "matched" | "same-batch" | "other-batch" | "other" => {
+    const receipt = object(historical.receipt);
+    const priorManifest = object(receipt?.manifest);
+    if (priorManifest?.attemptId !== attemptId) return "other";
+    if (priorManifest.batchId !== batchId) return "other-batch";
+    if (canonicalJson(receipt) === canonicalJson(candidate)) return "matched";
+    return "same-batch";
+  };
+  const stillEnrolled = async (): Promise<boolean> => {
+    const confirmed = await readCodexPeerRole(device, coordinatorId);
+    return (confirmed.status === "active" || confirmed.status === "retired") &&
+      confirmed.role.digest === role.digest && confirmed.role.mainId === mainId && confirmed.role.libraryId === role.libraryId;
+  };
+
+  const currentMatch = inspectReceipt(currentRole);
+  if (currentMatch === "matched") {
+    return await stillEnrolled() ? { status: "matched", identity } : { status: "unknown-origin" };
+  }
+  let sawSameBatch = currentMatch === "same-batch";
+  let sawOtherBatch = currentMatch === "other-batch";
+  let previousDigest: unknown = role.previousDigest;
+  const seen = new Set([role.digest]);
+  while (previousDigest !== null) {
+    if (typeof previousDigest !== "string" || !/^[a-f0-9]{64}$/u.test(previousDigest) || seen.has(previousDigest)) {
+      return { status: "unknown-origin" };
+    }
+    seen.add(previousDigest);
+    let historical: ObjectValue | null;
+    try {
+      historical = object(JSON.parse(await readFile(join(directory, "history", `${previousDigest}.json`), "utf8")));
+    } catch {
+      return { status: "unknown-origin" };
+    }
+    if (historical === null || !roleMatches(historical, previousDigest)) return { status: "unknown-origin" };
+    const match = inspectReceipt(historical);
+    if (match === "matched") {
+      return await stillEnrolled() ? { status: "matched", identity } : { status: "unknown-origin" };
+    }
+    sawSameBatch ||= match === "same-batch";
+    sawOtherBatch ||= match === "other-batch";
+    previousDigest = historical.previousDigest;
+  }
+  if (!await stillEnrolled()) return { status: "unknown-origin" };
+  if (sawSameBatch) return { status: "tampered" };
+  if (sawOtherBatch) return { status: "wrong-batch" };
+  return { status: "unknown-origin" };
 }
 
 /** Existing peer-record is the only enrollment/lifecycle writer. Authorization is resolved
@@ -368,7 +549,7 @@ export async function persistCodexPeerRole(input: {
   const { normalizeCodexPeerBatch } = await import("./codex-peer-batch.js");
   const receipt = normalizeCodexPeerBatch(input.receipt);
   const manifest = receipt.manifest;
-  if (receipt.schemaVersion !== "tcrn.codex-peer-batch.v2") throw new Error("legacy peer receipt is historical, not role enrollment");
+  if (receipt.schemaVersion !== "tcrn.codex-peer-batch.v2" && receipt.schemaVersion !== "tcrn.codex-peer-batch.v3") throw new Error("legacy peer receipt is historical, not role enrollment");
   if (!input.sessionId || ![manifest.main.conversationId, manifest.coordinator.conversationId].includes(input.sessionId)) throw new Error("role enrollment requires the actual native main/coordinator session");
   if (receipt.records.length !== manifest.members.length || receipt.blockedReasons.some(reason => reason === "work-revisions-unknown" || reason === "policy-drift" || reason === "model-groups-not-ready" || reason.startsWith("work-revision-drift:"))) throw new Error("role enrollment needs the current complete set of scoped pending worker preparations and matching work/policy");
   const directory = codexPeerRoleDirectory(input.device, manifest.coordinator.conversationId);

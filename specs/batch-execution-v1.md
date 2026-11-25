@@ -7,12 +7,15 @@ Load only when the corresponding principle is enabled and this task needs its pr
 
 This governs approved decomposition, implementation, gates, testing, acceptance, chain writes, reporting and dispatch. It does not automatically add an INIT, agents or acceptance stages to ordinary tasks. Follow the current Owner decision on methods, roles, order, gates and criteria. Before changing an approved method, explain the difference, evidence, benefits, costs and risks and obtain the corresponding approval; unknown benefits remain unknown.
 
-1. The unit of a batch. All open Stories under one INIT form one batch. One subagent performs decomposition, and each Subtask identifies changed files and dependencies. New work outside the batch scope goes on the problem list for the next batch; correcting an implementer's own changes to deliver the original package remains part of that implementation.
-2. Packages and local self-checks. Group dependent Subtasks or changes to the same files into one sequential package; independent packages run concurrently. Assign one subagent per package in its own worktree and branch. Select its category through current task routing and host policy; clearly scoped local execution defaults to economy. Respect execution.maxConcurrentSubagents, device limits and actual host capacity. Before delivery, the implementer runs the smallest compilation, type check or tests directly relevant to the changes, fixes confirmed issues within the package, and supplies commands, results and unverified items. Do not repeatedly run full gates for local edits or take over independent acceptance or chain writes. Retire delivered packages; integrate all completed packages in dependency order and assign conflicts to one integration subagent.
-3. Aggregate formal acceptance findings. At batch end, collect executable gate and independent acceptance results and issues before intervening. Do not interrupt, repair, rerun or open work items for individual red results; group one root cause as one issue. After integrating all implementation packages, complete the approved formal gates and independent acceptance once, address findings together, then rerun only affected or still-unexecuted required checks. Handle safety refusals and hard blockers immediately. This aggregation does not prohibit implementer self-checks and repairs under clause 2.
+1. One Initiative owns formal acceptance. Decompose implementation by dependency and shared writes. Keep requirement IDs, expected results and methods on each work item so implementers can test their work and the INIT can trace the results. Put all independent acceptance on the INIT checklist. Existing verification assignments and completed findings remain usable.
+For each criterion identify when evidence first exists and which decision it gates. Track evidence that needs publication, adoption or a business event in linked post-release work with its trigger, verifier and expected receipt. Independently validate the delivery scope and finalize accepted items bottom-up before starting release checks.
+2. Dispatch each authorized independent package as soon as its frozen inputs and a real slot are available. Fill the maximum compatible set within project, device and host capacity, then refill when a worker releases a slot. A pending predecessor can supply a usable implementation candidate. Overlapping writes or unavailable inputs hold only the affected packages. Reconcile native worker state after an interruption. Prepare the prior report alongside newly authorized work.
+When the queue empties, Main reads every Initiative covered by its current implementation grants and checks each full work tree, existing evidence, outstanding attempts and reports. Reconcile fully implemented legacy work to Pending Validate and retain partial scope. Record the basis and trigger for inactive conditions, and the evidence and release condition for actual blockers. Refill ready work until complete or every remaining applicable item is demonstrably blocked.
+
+3. Implementers self-test their changes and return the candidate, input, criterion, command and actual result. The implementer responsible for merging checks affected interfaces and repairs integration failures. Mark implemented work Pending Validate. Main uses this evidence to decide which packages can start. A complete Story checklist is never a per-wave dispatch gate. Once every Epic is implementation-ready, the coordinator dispatches fresh validators independent of the corresponding implementation. Main adjudicates their combined reports. Reuse equivalent evidence, collect findings together and rerun only missing or invalidated checks. Existing security and release gates and Owner decisions still apply.
 4. Generate according to purpose. Generate formal coverage baselines, proof artifacts and hook renderings once at batch end, not after each edit. Temporary output needed for local compilation or testing may be generated during implementation and reclaimed under residue cleanup. If aggregate fixes invalidate formal output, regenerate only affected output. Raising budgets, rewriting baselines or changing thresholds still requires the corresponding approval; regeneration is no substitute.
 5. One chain write and report per batch. Aggregate transitions and annotations through the batch entry and read them back. Group decisions needed from the Owner with recommendations. Make nonblocking choices first only when they are within existing authorization and delegated discretion, and report them at closure. A nonblocking action still needing approval is not executed first; necessary communication follows the silent-reporting exceptions.
-6. Dispatch by stage. Use one agent for decomposition, one per implementation package and one for integration; independent acceptance may be split by approved Epic impact. Do not dispatch agents for individual steps, confirming readings or mechanical summaries. Apply the small-round condition first: no more than 2 implementation packages or only one acceptance slice means one main-tier agent performs acceptance and judgment together, retaining the acceptance, judgment and lessons files. If another round is actually needed, include its decomposition without a separate agent. Split acceptance with separate judgment and decomposition only when the small-round condition does not apply and two or more slices are needed; an explicitly approved different role allocation remains authoritative. With no implementation package and only chain writes or documentation, the main thread performs the work and one main-tier agent reads back and judges, without decomposition or acceptance agents. Independent reviewers do not accept their own implementation.
+6. Size dispatches by purpose. Give each implementation package one implementer and assign merge responsibilities within that work. Independent validators may divide the INIT checklist. An implementation wave adds no separate acceptance or judgment round. For small rounds outside an INIT, retain the existing approved combined acceptance and judgment role. A reviewer must be independent of the corresponding implementation.
 7. Continue for substantive progress. Findings and queued work feed the next round. The responsible role continues authorized work that can advance until the goal is reached or all remaining work is blocked. Codex peers follow the stage handoff and next-batch authorization below, without idle polling by main. For the same issue, stop repeating an action after two consecutive analyses or rechecks yield no new evidence. Choose a check that distinguishes causes, or present the specific difference, actual impact and disposition choices requiring an Owner decision. Changing agents, rounds or models does not reset this history. New checks stay within approved methods and permissions; other actionable work continues. End when required acceptance is satisfied and there are no substantive findings; do not manufacture issues to start another round.
 8. Capture knowledge per round. The judgment agent produces lessons.json beside its report, with subject, summary, snippet, body, tags and source evidence references (stable project identity plus repository-relative path). Capture at most 5 newly established facts or lessons; an empty list is valid. In the same round's chain write, main uses knowledge-capture and reads back the result. Record budget refusals and their actual release conditions rather than assuming migration is the only remedy. Do not depend on Stop-hook markers or repeatedly capture the same conclusion.
 9. Read evidence as needed. Governance agents and main start with dispatched excerpts, sections or line ranges while preserving complete requirements and context needed for judgment. Save tool output as evidence and use tools to extract identity, hashes, counts, mappings and differences; main-tier work addresses behavior, contracts and disputed conclusions. Read no more than 200 lines at a time and do not read files over 32 KB whole. Retrieve relevant segments within actual host limits. Fill evidence gaps from relevant sources without repeatedly restating the full history.
@@ -31,6 +34,50 @@ This governs approved decomposition, implementation, gates, testing, acceptance,
 3. The main agent reduces round trips. Do not reply with pure acknowledgments or ask for ordinary progress. Act directly on information that needs a decision or action. Ordinary status messages do not trigger extra queries of every agent's status or repeated reports.
 4. Avoid empty polling while waiting. Use completion notifications and blocking waits supported by the host. Lengthen query intervals when there is repeatedly no new state, respect the host's wait limit and user interruption requirements, and continue independent work when it is available.
 
+### Pack dispatch and recovery
+
+When INIT-108 is complete, a new implementation dispatch must carry a live Pack
+reference, the stable assignment ID, the frozen assignment roster, and an
+observed capacity snapshot. `execution-host-prepare` re-reads the Pack from the
+workspace, checks the Pack revision and all source, acceptance, prerequisite,
+result and parent references, and confirms that the requested work revision is
+one of that assignment's sources. It puts the Pack ID, stable assignment ID,
+all original source/ancestor work contexts, criteria and file scope into the
+native worker prompt and retains the same structured context beside the
+ordinary host context. The context also lists plan concurrency and each row
+left for later. A missing or stale binding fails before an attempt is prepared.
+Work already in progress keeps its original native attempt and can be
+reconciled through its existing record.
+
+Freeze the roster in plan order. Its size cannot exceed
+`min(Pack.maxConcurrency, capacity.limit) - capacity.active`; capacity must be
+known before a new dispatch. Concurrent rows must share a declared
+`parallelGroup`, and their persisted prerequisites must already be satisfied.
+The snapshot reports the plan concurrency, selected rows and remaining rows;
+it is an observation, not a host reservation.
+
+For Codex, each peer manifest member binds one unique Pack assignment ID. The
+receipt checks the worker preparation against that Pack ID/revision, frozen
+roster and capacity snapshot, then retains the native conversation identity,
+attempt, terminal result, failure and released or occupied slot as before.
+Unknown or running attempts keep their occupancy; reconcile them by the same
+attempt instead of dispatching a duplicate. A failed terminal result remains a
+failure and is reported as a terminal failure, not successful completion.
+
+A coordinator takeover may change only the coordinator conversation. The new
+manifest must keep the same batch ID and attempt, main conversation, Pack,
+roster and member attempts, and it must cite the exact prior receipt digest and
+all earlier coordinator IDs. Existing member receipts are carried forward; a
+handoff does not start workers again. Preserve the normal result and delivery
+boundaries, including the prohibition on replaying a confirmed delivery or
+advancing after an unknown delivery.
+
+Candidate verification may simulate INIT-108 complete to test this rule.
+Formal enforcement applies only after INIT-108 is complete and only to new
+implementation dispatches. Existing work and in-flight attempts continue under
+the existing dispatch path. Source/fixture regression and real-host acceptance
+are recorded separately.
+
 ### Codex independent peer-conversation contract (not other hosts or dot)
 
 Only explicitly selected Codex multi-subagent orchestration uses an independent main-category decision conversation and economy-category coordinator conversation, not a parent/collector pair. The main conversation owns batch goals, stage boundaries, judgment and next-batch authorization. The economy coordinator directly dispatches fresh workers according to task categories and existing rejection-escalation thresholds, waits for them and reads their native results. Workers do not proactively message their parent; retain native final and use supported result/interruption paths for safety and hard blockers. The coordinator is not a read-only collector and dispatches no collector. Claude Code and DSH retain single-conversation coordination and native completion notifications; dot policy is unchanged.
@@ -41,7 +88,9 @@ Before dispatch, fix batchId, application attempt, both independent conversation
 
 After handing off a stage, the main conversation stops idle polling and must not use /goal or /loop to actively wait. The economy coordinator directly reads fixed members using supported bounded waits, respecting intervals, deadline, query-failure limits, budget and user interruption. Preserve failed, cancelled_confirmed and unknown outcomes. Stale, future, wrong-batch/wrong-attempt or drifted observations and query failures do not establish completion. No dedicated collector subagent, SubagentStop keepalive, collector-wait helper or old collection fallback remains. Retire old engine-owned hooks only after ownership verification; preserve user edits and unrelated hooks.
 
-Deduplicate within the exact batch/attempt and hand back one batch report after all members have confirmed terminal outcomes; failure is not success. Interruption, deadline, permission, safety, exhausted budget and no-progress exceptions retain outstanding ownership. On recovery reconcile existing dispatch, native state and delivery receipts first: unknown is investigated, not duplicate dispatch, replay of confirmed delivery or revival of ended workers. Retain late results without advancing another attempt. Unknown delivery permits neither blind resend nor the next batch. Missing capability stops only the dependent path, with no collector fallback.
+Deduplicate within the exact batch/attempt and hand back one batch report after all members have confirmed terminal outcomes; failure is not success. Interruption, deadline, permission, safety, exhausted budget and no-progress exceptions retain outstanding ownership. On recovery reconcile existing dispatch, native state and delivery receipts first: unknown is investigated, not duplicate dispatch, replay of confirmed delivery or revival of ended workers. Retain late results without advancing another attempt. Unknown delivery holds retries and work dependent on that delivery. Independently authorized, nonoverlapping packages with confirmed free slots may start while the earlier report is assembled. Missing capability stops only the dependent path, with no collector fallback.
+
+A cross-conversation report is ordinary text. Model and effort belong only in the native worker spawn. Main authorizes scope, ready inputs and the INIT disposition. Economy dispatches both implementers and, at the INIT boundary, independent validators.
 
 Record source/automated regression separately from native-host acceptance. The current Owner decision defines the testing scope and acceptance responsibility; documentation and fixtures do not prove native acceptance of a candidate. No daemon, private session database or invented RPC is introduced. Preserve existing user goals, automations and legitimate M governance rounds with substantive work.
 
@@ -49,12 +98,15 @@ Record source/automated regression separately from native-host acceptance. The c
 
 适用于已获批的拆分、实施、跑门、测试、验收、链写、汇报与派工。批量原则不为普通任务自动新增 INIT、代理或验收阶段；具体执行方法、角色、顺序、门与判据遵循当前 Owner 决定。需要改变已批准方法时，说明差异、依据、收益、成本与风险并取得相应批准；未知收益保持未知。
 
-1. 批的单位。一个 INIT 下全部待办 Story 是一批。拆分由一个子代理一次做完，每张 Subtask 写明改动文件与依赖。批内发现的范围外新工作记入本批问题清单，进下一批；实施者为交付原包而修正自身改动，属于原包实施。
-2. 实施分包与局部自测。有依赖或改同一批文件的 Subtask 进同一包，包内顺序执行；互不影响的包并行。每包一个子代理，在自己的工作树与分支上做；类别按当前任务分档和宿主策略选择，范围明确的局部执行默认经济档。并发遵守 execution.maxConcurrentSubagents、设备限制与宿主实际容量。实施者交付前运行与改动直接相关的最小编译、类型检查或测试，修复原包内已确认的问题，并交付命令、结果及未验证项；不为局部修改反复跑全量门，也不承担独立验收或链写。包交付后退役；全部包完成后按依赖顺序合并，冲突交一个集成子代理。
-3. 正式验收集中处置。批末门与独立验收先收齐本批可执行的检查结果和问题，不逐红中断、修补、重跑或开单；同一根因合并一项。全部实施包合并后，按已批准范围完成一次正式门和独立验收，问题集中处置后只复跑受影响或尚未执行的必需检查。安全拒绝和阻断后续工作的硬阻塞立即处理。此处的集中处置不禁止第 2 条的实施者局部自测与修复。
+1. 正式验收只跟 INIT。拆单按硬依赖和共写范围分配实施，工单保留需求、判据和自测方法，汇总到 INIT 验收清单。旧工单的核验分工和历史有效结论继续复用。
+拆单逐项记录证据最早可取得的阶段及其决定的阶段。公开发行、实际采用或业务事件之后才有的证据交由关联的发布后工单收取，登记触发事件、收证人和回执。主对话独立验收本轮适用范围，验收通过的交付项自下而上转 done，再进入正式发行检查。
+2. 已授权的包有可用冻结候选和真实空槽即派，按项目、设备和宿主容量选出可并行的最大集合，释放一个名额即补位。待验的前置可以交付可用的实施输入。输入未就绪或写入冲突只影响相关包。中断后先核对原生在途和终态，上一批汇报可与新授权包并行。
+队列为空时，主对话从本次全部实施授权读取各 INIT 的完整工单树，核对已有证据、适用条件、在途尝试与未收报告。完整实施项逐项衔接为待验，局部交付保留剩余范围。条件未触发记依据及触发事件，真正受阻记缺口、证据和解除条件。继续派就绪包，完成或所有剩余适用工作确实受阻时才结束。
+
+3. 实施者交付候选、输入、判据、命令和实际结果。负责合并的实施者只验证受影响接口，复现并修复集成故障，交付后记 Pending Validate。主对话据此判断后继能否开工，逐项核准 Story 不作为逐批派工门。全部 EPIC 实施就绪后，协调者新派未参与相应实现的独立验收者，主对话根据报告集中裁定。等价证据复用，集中反馈，只补缺失或失效的检查。原有安全、发布及 Owner 专属门照常执行。
 4. 生成物按用途处理。正式覆盖基线、证明物、钩子渲染等在批末各生成一次，不随每条修改重做；局部编译或测试必需的临时产物可在实施期间生成，随后按残余收尾原则回收。集中修复确实使正式产物失效时，只再生受影响产物。预算抬线、基线改写和阈值变化仍须有对应批准，不能以生成物更新代替。
 5. 一批一次链写、一次汇报。转态与注解通过批量入口集中写入并读回。需要 Owner 决定的事项集中列出并附建议；可自主选择且已有授权的非阻塞事项先做并在收口回显。仍需批准的事项不能因“不阻塞”而先执行，沟通时点遵循静默汇报原则的必要例外。
-6. 派工按批段。拆分一个代理，实施每包一个代理，集成一个代理；独立验收可按已批准的 Epic 影响范围分片。不为单步、确认读数或机械汇总另派代理。先判定小轮合并：实施包不超过 2 个或验收只有一片时，由一个主力档代理一次完成验收与判断，仍按原格式写验收、判断与 lessons 三份文件；确有下一轮时顺带写拆分文件，不另派拆分代理。只有不满足上述小轮条件且确需两片以上验收时，才分片验收、单独判断和拆分；已有明确批准的不同角色安排按该批准执行。没有实施包、只有链写或文档动作的轮，不派拆分与验收代理，主线程完成动作后派一个主力档代理读回并判断。独立验收者不验收自己实施的改动。
+6. 一个实施包由一名实施者负责，在分工中指定负责合并的人。独立验收者可并行覆盖同一 INIT 清单。每个实施批次只增加必要的实施工作。INIT 之外的小轮次沿用已批准的验收与裁定分工，对应实现的参与者不得担任独立验收者。
 7. 按实质进展接续。一轮的问题清单与排队项是下一轮输入；仍有已批准且可推进的工作时，由负责该阶段的角色继续，直到达到目标终态或剩余工作全部阻塞。Codex 双对话按下文的批段交接与下一批授权执行，不让主决策对话空闲轮询。对同一问题，连续两次分析或复验没有新增证据时，停止重复同一动作；改用能区分原因的检查，或说明需 Owner 决定的具体差异、实际影响和可选处置。更换代理、轮次或模型不重置该记录；新检查仍须在已批准的方法与权限内，其他可推进工作继续。没有实质性发现且必需验收已满足时结束，不为凑问题启动下一轮。
 8. 知识采集按轮。判断代理在判断报告旁产出 lessons.json，每条含 subject、summary、snippet、body、tags 与来源证据引用（稳定项目标识和仓库相对路径）；只写本轮新确立的事实与教训，不超过 5 条，没有新知识可为空。主线程在同一轮的链写中用 knowledge-capture 落卡并读回；预算拒绝如实记录并按实际解除条件处理，不自动假定迁移是唯一出口。不依赖 Stop 钩子标记行，不重复落同一结论。
 9. 证据按需要读取。治理代理与主线程先读派工指定的摘录、节号或行号范围，保留判断必需的完整要求与上下文。工具输出先写入证据文件，机器提取身份、哈希、计数、映射与差异；主力负责行为、契约和争议判断。每次读入不超过 200 行，不整读超过 32 KB 的文件；按相关范围分段，遵守宿主实际读取限制。证据缺口只补相关来源，不反复复述完整历史。
@@ -83,7 +135,9 @@ Record source/automated regression separately from native-host acceptance. The c
 
 主决策对话交付批段后停止空闲轮询，不用 /goal 或 /loop 主动等待；经济协调对话使用宿主支持的有界等待直接读取固定成员结果，遵守间隔、截止、失败次数、预算及用户中断。保留 failed、cancelled_confirmed 与 unknown；陈旧、未来、错批、错 attempt、漂移及查询失败不算完成。禁止专用收集子代理、SubagentStop 保活、collector-wait 或旧收集机制 fallback。旧引擎 owned hook 仅在核实归属后退役，保留用户修改及无关 hook。
 
-协调者按同批同 attempt 去重，全部成员确认终态后向主决策对话交付一次批报告；失败不伪装成功。中断、期限、权限、安全、预算耗尽与无进展明确报告剩余责任。恢复时先核对既有派工、原生状态与已交付回执，结果未知先查证，不重复派工、不重放已确认交付、不复活已结束 worker；迟到结果保留但不得推进另一 attempt。交付未知不得盲目重发或启动下一批。缺能力只停依赖路径，不能换收集者回退。
+协调者按同批同 attempt 去重，全部成员确认终态后向主决策对话交付一次批报告；失败不伪装成功。中断、期限、权限、安全、预算耗尽与无进展明确报告剩余责任。恢复时先核对既有派工、原生状态与已交付回执，结果未知先查证，不重复派工、不重放已确认交付、不复活已结束 worker；迟到结果保留但不得推进另一 attempt。交付未知时先核实，该交付的重发和依赖方等待；已单独获批、有明确输入与空槽的独立包可以接续。缺能力只停依赖路径，不能换收集者回退。
+
+跨对话以普通文本回报，模型和档位仅传给工作子代理的原生派工调用。主对话给出授权范围、可用输入和 INIT 裁定，Economy 负责派实施者和 INIT 边界的独立验收者。
 
 源码/自动化回归与真实宿主验收分别记录；具体测试范围和验收责任遵循当前 Owner 决定，不以文档或模拟冒称候选真实宿主已验收。不创建 daemon、不读取私有会话数据库、不虚构 RPC。保留既有用户目标、自动化及 M 正常治理轮次；本限制不取消有实质工作的后续轮。
 

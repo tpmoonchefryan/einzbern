@@ -11,6 +11,31 @@ Versioning after the first accepted release.
 - `setup --mode fresh` asks for the project root with `--project-root <dir>` and stores the answer. The plan suggests the root the device already holds, or the project being set up when it is its library's first on the device. On a device that holds no root while the library already has other projects registered, the plan requires the answer (`SETUP_ANSWER_REQUIRED`). After such an installation, another project installed into the same library takes no managed sections of its own. The other modes leave the stored root as it is and refuse the flag.
 - Unregistering or uninstalling the project that is the device's project root leaves the setting naming an unregistered directory, so the library's remaining projects answer for their own managed sections again; `doctor` reports `MANAGED_FILE_MISSING` for one that never had them until it is repaired or the setting is pointed at it.
 
+## 5.8.0
+
+Einzbern and Mana Orchestrate ship in lockstep at 5.8.0.
+
+### Work planning and acceptance
+
+- Record the earliest stage that supplies evidence and which decision depends on it. Work admission checks stage order for criteria, delivery children and explicit hard predecessors. Linked post-release work records the trigger, verification owner and expected receipt for evidence that depends on publication, adoption or a business event.
+- Track implementation that is ready for independent validation and the resulting validated state. Finalize accepted delivery work from children to parents with the current work evidence and required gates. Existing work without stage declarations keeps its recorded scope.
+
+### Codex coordination and Pack dispatch
+
+- Reconcile the authorized implementation queue, recording work revisions, ready packages, conditions and blockers against real capacity. Separate the implementation wave from INIT-level independent validation and keep model and effort selection on the native dispatch request.
+- Require a newly started Economy coordinator to have same-thread Full Access evidence before handoff or dispatch. Check plain-text report arguments before either supported send path, and preserve delivery receipts and historical coordinator evidence across attempts.
+- Prepare an explicit Pack and its assignments before dispatch. Bind preparation to the actual assignment and preserve results and native receipts when a coordinator takes over or a later application attempt continues.
+
+### Command diagnostics and Skill examples
+
+- Reject an array passed to minutes-record through the comma-list option before any write. The file option preserves each decision's text, order and count. Ordinary comma lists, including bracketed labels, remain supported.
+- Explain which Codex observation is missing, stale or mismatched in doctor, and distinguish a work external key used with the wrong flag from a correctly formed query with no match. Generated Skill examples cover project rules, work lookup, doctor and structured minutes.
+
+### Recall and source verification
+
+- Retain full source verification whenever an input has changed or cannot be verified. Reuse equivalent materialized and Crest projection results when their source and receipt still match, and rebuild or fall back when they diverge.
+- Treat a Darwin File Provider placeholder as unavailable before the general source reader opens it. Keep the full-read path for materialized sources and report native evidence only for the environments actually observed.
+
 ## 5.0.1
 
 Einzbern and Mana Orchestrate ship in lockstep at 5.0.1.

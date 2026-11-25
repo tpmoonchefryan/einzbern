@@ -2,7 +2,7 @@
   "$id": "https://tcrn.dev/schemas/work-model-v1.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "TCRN Work Model V1",
-  "$comment": "A stored work record of any kind reads, including every Incident, Release, Review and Knowledge record already on a chain. Since TCRN-CROSS-STORY-472 R1 a write creates only Initiative, Epic, Story and Subtask records (WORK_KIND_RETIRED otherwise). Relations are fields (STORY-472 R2): parentId, the advisory:decided-by minutes list (decided-in), and the required:false extension advisory:relations whose value is $defs/relationsExtensionValue; the reverse relations are projected on read and never stored.",
+  "$comment": "A stored work record of any kind reads, including every Incident, Release, Review and Knowledge record already on a chain. New delivery work remains Initiative, Epic, Story and Subtask; a new parentless Pack is a separate execution batch and never enters that four-level hierarchy. Relations are fields (STORY-472 R2): parentId, the advisory:decided-by minutes list (decided-in), and the required:false extension advisory:relations whose value is $defs/relationsExtensionValue; the reverse relations are projected on read and never stored.",
   "type": "object",
   "additionalProperties": false,
   "x-tcrn-aos-requirementIds": [
@@ -42,6 +42,7 @@
         "Epic",
         "Story",
         "Subtask",
+        "Pack",
         "Review",
         "Incident",
         "Release",

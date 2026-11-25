@@ -732,7 +732,8 @@ export { configProjectionStatus } from "./library-config.js";
 // TCRN-CROSS-STORY-468 R6: an old-layout workspace imported as a library's first stream.
 export { defaultImportTarget, importLegacyWorkspace } from "./legacy-import.js";
 // TCRN-CROSS-STORY-470 R1: this device's registry of libraries and resolution from a directory.
-export { readRegistry, registerLibrary, resolveLibrary } from "./registry.js";
+export { readAgentsProjectRootSelection, readRegistry, registerLibrary, registeredAgentsProjectRoots, resolveLibrary, setAgentsProjectRoots, validateAgentsProjectRoot } from "./registry.js";
+export type { AgentsProjectRootSelection } from "./registry.js";
 // TCRN-CROSS-STORY-541 (TCRN-CROSS-SUB-511): library-unregister's plan and removal of one entry.
 export { planLibraryUnregister, unregisterLibraryEntry } from "./registry.js";
 // TCRN-CROSS-STORY-470 R2: the cloud folders a cloud-hosted flag is suggested for.
@@ -911,6 +912,7 @@ export * from "./involved-projects.js";
 export * from "./project-chain.js";
 
 export { prepareDispatch, recordDispatch, writeDispatchArtifact } from "./dispatch-workflow.js";
+export { resolvePackDispatchContext } from "./pack-dispatch.js";
 
 export * from "./consolidate.js";
 export * from "./consolidation-format.js";

@@ -177,7 +177,9 @@ test("527 GWT3: a rule proposal does not enable the rule; its approval enables i
   const approval = await approve(paths, `rule:${rule.id}`, proposed.proposal.proposedAt, { projectRoot: paths.project, backupRoot: paths.backups });
   assert.equal(approval.ruleChange.status.state, "enabled");
   assert.equal(approval.ruleChange.status.order, 2, "the order the proposal carries");
-  assert.match(await readFile(paths.agents, "utf8"), new RegExp(`rule:${rule.id}`, "u"));
+  const agents = await readFile(paths.agents, "utf8");
+  assert.match(agents, /<!-- einzbern:section id=agents /u);
+  assert.ok(agents.includes(rule.principle.en));
   const appended = approval.state.events.slice(head - approval.state.version).map((event) => event.payload);
   assert.deepEqual(appended.map((payload) => [payload.operation, payload.record.collection]), [
     ["config.record.set", "rule"], ["config.record.set", "managed-section"], ["config.record.removed", PROPOSAL_COLLECTION],

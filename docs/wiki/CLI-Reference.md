@@ -435,6 +435,15 @@
 | `--prior` | 可选 | `string` |
 | `--output` | 必填 | `string` |
 
+## `execution-batch-plan`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 | 写法 |
+| --- | --- | --- | --- |
+| `--from-file` | 必填 | `string` | `Observed free slots, frozen candidate inputs and package write sets.` |
+
 ## `execution-codex-peer-evidence`
 
 - 可用范围：`cli`。
@@ -499,10 +508,14 @@
 | --- | --- | --- | --- |
 | `--workspace` | 必填 | `string` |  |
 | `--request` | 必填 | `string` | `HostExecutionRequest v1 JSON` |
+| `--codex-usage` | 可选 | `string` | `Timestamped native rate-limit capture` |
+| `--codex-capacity` | 可选 | `string` | `Timestamped native roster and observed limit` |
 | `--arguments` | 必填 | `string` | `{selection, argumentsValue} actual request JSON` |
 | `--codex-peer-worker` | 可选 | `boolean` |  |
+| `--codex-startup-evidence` | 可选 | `string` | `Same-ID Codex App Server thread/start response retained as {conversationId, sourceRef, raw, conversationPointer}` |
 | `--codex-admission` | 可选 | `string` |  |
 | `--codex-settings-intent` | 可选 | `string` | `Existing Owner decision and exact settings target source; never a query permission` |
+| `--prior-peer-receipt` | 可选 | `string` | `Exact validated prior Pack receipt required before a new Codex Pack application attempt` |
 | `--output` | 必填 | `string` |  |
 
 ## `execution-host-record`
@@ -615,6 +628,17 @@
 | `--requested-agents` | 必填 | `integer` |  |
 | `--observations` | 必填 | `string` | `Machine JSON file: explicit availableCombinations, optional timestamped usage/expectedPolicy; never inferred from policy.` |
 | `--output` | 必填 | `string` | `Create-new private local preparation file outside device/library roots; refused preparations are retained. No dispatch.` |
+
+## `execution-queue-reconcile`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 | 写法 |
+| --- | --- | --- | --- |
+| `--workspace` | 必填 | `string` |  |
+| `--scope` | 必填 | `string` | `All current authorized INIT grants, independent of the queue.` |
+| `--assessments` | 可选 | `string` | `Revision-bound findings and native attempt/report observations.` |
 
 ## `execution-record`
 
@@ -1930,6 +1954,7 @@
 
 | 旗标 | 必填 | 取值类型 |
 | --- | --- | --- |
+| `--blocked-criteria` | 可选 | `list` |
 | `--workspace` | 可选 | `string` |
 | `--at` | 必填 | `instant` |
 | `--id` | 必填 | `string` |

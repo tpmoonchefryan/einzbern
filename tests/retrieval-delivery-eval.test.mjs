@@ -75,3 +75,18 @@ test("ranked records, delivered clauses, budget misses and obsolete instructions
   assert.equal(legal.legalEmpty, true);
   assert.equal(legal.invalidVacuum, false);
 });
+
+test("actual first-delivery position comes from the ordered agent context", () => {
+  const source = "EVAL-MIN-42";
+  const id = deriveStableId("minutes", source);
+  const reference = `${id}#D8`;
+  const entry = { id: "component", source, split: "development", category: "D8", decision: 8, excerpt: "Keep the amber audit" };
+  const line = `[纪要 ${source}] Contract · D8 现行有效 · 范围 fixture · Keep the amber audit · ${reference}（minutes-show --id ${reference}）`;
+  const first = { context: [line] };
+  const second = { context: ["[纪要 OTHER-MIN-1] Unrelated · D1 现行有效 · D1 · minutes-show --id minutes:111111111111111111111111#D1", line] };
+  const position = (answer) => answer.context.findIndex((item) => item.includes(`${reference}（minutes-show --id ${reference}）`)) + 1;
+  assert.equal(deliveryObservation(entry, { records: [{ id, key: source, line }], perPromptBytes: 1600 }, first, []).delivered, true);
+  assert.equal(position(first), 1);
+  assert.equal(deliveryObservation(entry, { records: [{ id, key: source, line }], perPromptBytes: 1600 }, second, []).delivered, true);
+  assert.equal(position(second), 2, "a candidate in the context is not automatically the first delivered item");
+});

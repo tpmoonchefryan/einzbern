@@ -1,6 +1,7 @@
-import { workContent, workContentMissing, contentFail } from "./work-content.js";
+import { WORK_ACCEPTANCE_STAGES, workContent, workContentMissing, contentFail } from "./work-content.js";
 import { readWorkContentPolicy, workContentPolicyApplies } from "./work-content-templates.js";
 import { workRequirementProblems, effectiveWorkRequirements } from "./work-requirements.js";
+import { storedRelations } from "./work-relations.js";
 import { workAcceptanceProblems } from "./work-acceptance.js";
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // SPDX-License-Identifier: Apache-2.0
@@ -115,14 +116,72 @@ export function workSubjectKeys(work: readonly Pick<WorkRecord, "id" | "external
   return [...keys].sort(compareCanonicalText);
 }
 
+/** A child is a prerequisite of its delivery parent. Later evidence belongs in a linked follow-up tree. */
+function acceptanceStageProblems(work: readonly WorkRecord[], record: WorkRecord): string[] {
+  const details = workContent(record)?.details;
+  if (!details || (details.evidenceStage === undefined && details.decisionStage === undefined)) return [];
+  const stages: readonly string[] = WORK_ACCEPTANCE_STAGES;
+  const evidence = stages.indexOf(details.evidenceStage ?? "");
+  const decision = stages.indexOf(details.decisionStage ?? "");
+  if (details.evidenceStage && evidence < 0) return ["details.evidenceStage:unknown"];
+  if (details.decisionStage && decision < 0) return ["details.decisionStage:unknown"];
+  if (decision >= 0 && evidence > decision) return ["acceptance:evidence-after-decision"];
+  const earliest = Math.max(evidence, decision);
+  const byId = new Map(work.map(item => [item.id, item]));
+  for (const id of workAncestorIds(work, record.id)) {
+    const ancestor = byId.get(id);
+    const limit = ancestor && (workContent(ancestor)?.details.decisionStage || (ancestor.kind === "Initiative" ? "development" : undefined));
+    if (limit && stages.indexOf(limit) < earliest) return [`acceptance:later-than-parent:${id}:use-linked-follow-up`];
+  }
+  if (decision < 0) return [];
+  const blockers = new Set(storedRelations(record).blockedBy);
+  // A hard predecessor gates this decision even if it lives in another tree.
+  // Check both directions so editing either endpoint preserves the dependency.
+  for (const item of work) {
+    if (item.tombstone || item.status === "cancelled" || item.id === record.id) continue;
+    if (blockers.has(item.id)) {
+      const plan = workContent(item)?.details;
+      if (plan && [plan.evidenceStage, plan.decisionStage].some(value => stages.indexOf(value ?? "") > decision)) {
+        return [`acceptance:later-blocker:${item.id}:use-linked-follow-up`];
+      }
+    }
+    if (storedRelations(item).blockedBy?.includes(record.id)) {
+      const dependentStage = stages.indexOf(workContent(item)?.details.decisionStage ?? "");
+      if (dependentStage >= 0 && earliest > dependentStage) return [`acceptance:earlier-dependent:${item.id}:use-linked-follow-up`];
+    }
+  }
+  // Check existing children too when the parent acquires an earlier deadline.
+  const children = new Map<string, WorkRecord[]>();
+  for (const item of work) {
+    if (item.tombstone || item.status === "cancelled" || !item.parentId) continue;
+    const siblings = children.get(item.parentId) ?? [];
+    siblings.push(item);
+    children.set(item.parentId, siblings);
+  }
+  const pending = [...(children.get(record.id) ?? [])];
+  const visited = new Set<string>([record.id]);
+  while (pending.length) {
+    const child = pending.pop()!;
+    if (visited.has(child.id)) continue;
+    visited.add(child.id);
+    const plan = workContent(child)?.details;
+    if (plan && [plan.evidenceStage, plan.decisionStage].some(value => stages.indexOf(value ?? "") > decision)) {
+      return [`acceptance:later-child:${child.id}:use-linked-follow-up`];
+    }
+    pending.push(...children.get(child.id) ?? []);
+  }
+  return [];
+}
+
 // INIT-068: structural content admission. Not semantic verification or a new gate record.
 export function workContentAdmissionProblems(state: Pick<WorkspaceState, "work" | "settings">, record: WorkRecord, phase: "draft" | "write" | "start" | "done"): readonly string[] {
   const content = workContent(record);
   const policy = readWorkContentPolicy(state, record.projectId);
   if (!content) return workContentPolicyApplies(policy, record, state.work) ? ["content:required"] : [];
-  if (phase === "draft") return [];
   const work = [...state.work.filter(w => w.id !== record.id), record];
-  const problems = [...workContentMissing(content, phase), ...workRequirementProblems(work, record), ...workAcceptanceProblems(work, record, { done: phase === "done" })];
+  const stageProblems = acceptanceStageProblems(work, record);
+  if (phase === "draft") return stageProblems;
+  const problems = [...stageProblems, ...workContentMissing(content, phase), ...workRequirementProblems(work, record), ...workAcceptanceProblems(work, record, { done: phase === "done" })];
   if (phase === "start" || phase === "done") {
     for (const ancestorId of workAncestorIds(work, record.id)) {
       const ancestor = work.find(w => w.id === ancestorId);

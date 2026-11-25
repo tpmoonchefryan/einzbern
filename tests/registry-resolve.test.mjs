@@ -137,6 +137,7 @@ test("470-R1: a verb run without --workspace works on the library the current di
     ["execution-codex-peer-record", true],
     ["execution-host-prepare", true],
     ["execution-native-prepare", true],
+    ["execution-queue-reconcile", true],
     ["init", true],
     ["shared-submit-advisory-read", true],
     ["shared-submit-advisory-write", true],

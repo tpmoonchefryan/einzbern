@@ -1,0 +1,384 @@
+{
+  "$id": "https://tcrn.dev/schemas/pack-plan-v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TCRN Pack execution plan V1",
+  "$comment": "The containing WorkRecord supplies the stable Pack number (externalKey), version (revision), state (status), and parentless identity. This plan pins source work revisions and parent links, ordered assignments, source criteria, file scopes, prerequisites and result locators. It is a plan record; it does not dispatch work.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "initiative",
+    "maxConcurrency",
+    "assignments"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "tcrn.pack-plan.v1"
+    },
+    "initiative": {
+      "$ref": "#/$defs/workReference"
+    },
+    "maxConcurrency": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "assignments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/assignment"
+      }
+    }
+  },
+  "$defs": {
+    "workReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "externalKey",
+        "kind",
+        "revision",
+        "parentId"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "./protocol-common-v1.schema.json#/$defs/stableId"
+        },
+        "externalKey": {
+          "$ref": "./protocol-common-v1.schema.json#/$defs/canonicalExternalKey"
+        },
+        "kind": {
+          "enum": [
+            "Initiative",
+            "Epic",
+            "Story",
+            "Subtask",
+            "Pack",
+            "Review",
+            "Incident",
+            "Release",
+            "Knowledge"
+          ]
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "parentId": {
+          "anyOf": [
+            {
+              "$ref": "./protocol-common-v1.schema.json#/$defs/stableId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "criterion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "acceptanceOwner",
+        "acceptanceId",
+        "acceptanceVersion",
+        "requirementOwner",
+        "requirementId",
+        "requirementVersion"
+      ],
+      "properties": {
+        "acceptanceOwner": {
+          "$ref": "#/$defs/workReference"
+        },
+        "acceptanceId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "acceptanceVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "requirementOwner": {
+          "$ref": "#/$defs/workReference"
+        },
+        "requirementId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requirementVersion": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      }
+    },
+    "fileScope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "path",
+        "access"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "access": {
+          "enum": [
+            "read",
+            "modify",
+            "conditional"
+          ]
+        },
+        "condition": {
+          "type": "string",
+          "minLength": 1
+        },
+        "resolution": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "access": {
+                "const": "conditional"
+              }
+            },
+            "required": [
+              "access"
+            ]
+          },
+          "then": {
+            "required": [
+              "condition"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "condition"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "prerequisite": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "work",
+            "blocker",
+            "requiredStatus"
+          ],
+          "properties": {
+            "kind": {
+              "const": "blocked-by"
+            },
+            "work": {
+              "$ref": "#/$defs/workReference"
+            },
+            "blocker": {
+              "$ref": "#/$defs/workReference"
+            },
+            "requiredStatus": {
+              "enum": [
+                "planned",
+                "ready",
+                "active",
+                "blocked",
+                "pending-owner-acceptance",
+                "done",
+                "cancelled"
+              ]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "assignmentId"
+          ],
+          "properties": {
+            "kind": {
+              "const": "assignment-result"
+            },
+            "assignmentId": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "resultSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "locator"
+      ],
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/workReference"
+        },
+        "locator": {
+          "enum": [
+            "completion.result",
+            "advisory:result"
+          ]
+        }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trigger",
+        "afterAssignmentIds",
+        "verifiers"
+      ],
+      "properties": {
+        "trigger": {
+          "const": "after-results-recorded"
+        },
+        "afterAssignmentIds": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "verifiers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/workReference"
+          }
+        }
+      }
+    },
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "order",
+        "role",
+        "status",
+        "parallelGroup",
+        "sourceWorks",
+        "criteria",
+        "files",
+        "prerequisites",
+        "resultSources",
+        "verification"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,63}$"
+        },
+        "order": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "role": {
+          "enum": [
+            "implementation",
+            "evidence",
+            "verification"
+          ]
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "ready",
+            "active",
+            "blocked",
+            "pending-owner-acceptance",
+            "done",
+            "cancelled"
+          ]
+        },
+        "parallelGroup": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sourceWorks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/workReference"
+          }
+        },
+        "criteria": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/criterion"
+          }
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/fileScope"
+          }
+        },
+        "prerequisites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/prerequisite"
+          }
+        },
+        "resultSources": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/resultSource"
+          }
+        },
+        "verification": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/verification"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

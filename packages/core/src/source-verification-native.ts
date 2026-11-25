@@ -36,6 +36,7 @@ const FILE_COMMON = 0x8a0c0006;
 const VOLUME = 0xc006d000;
 const EXTENDED_FLAGS = 0x200;
 const DATA_LENGTH = 0x200;
+const SF_DATALESS = 0x40000000;
 const active = new AsyncLocalStorage<VerificationSession>();
 
 interface DarwinIdentity {
@@ -91,6 +92,7 @@ interface VerificationSession extends VerificationBoundary {
   readonly files: Map<string, OpenSegment>;
   metadata: string;
   readonly metadataFiles: Map<string, LocalFileIdentity>;
+  datalessSource?: OpenSegment;
   localContext?: LocalIdentityContext | null;
   attestation?: SourceAttestation;
 }
@@ -102,6 +104,21 @@ interface OpenSegment {
   key?: string;
   native?: NativeIdentity | null;
   stat?: BigIntStats;
+}
+
+class DatalessSourceFallbackError extends Error {
+  readonly reasonCode = "SOURCE_DATALESS_FALLBACK_BLOCKED";
+  readonly details: Readonly<Record<string, string>>;
+
+  constructor(file: OpenSegment) {
+    super(`source segment ${file.binding.deviceId}/${file.segment.name} was classified SF_DATALESS; refusing the full-reader fallback because it could hydrate the file. Make the source available and retry.`);
+    this.name = "DatalessSourceFallbackError";
+    this.details = {
+      deviceId: file.binding.deviceId,
+      streamId: file.binding.streamId,
+      segment: file.segment.name,
+    };
+  }
 }
 
 function fileKey(file: OpenSegment): string {
@@ -145,6 +162,14 @@ interface CachedMaterializedState {
   readonly fields: Readonly<Record<string, Buffer>>;
   readonly work: readonly CachedMaterializedWork[];
   readonly decisionHints: PrecomputedDecisionHints;
+}
+
+function isCachedMaterializedState(value: unknown): value is CachedMaterializedState {
+  if (!object(value) || !object(value.fields) || !Array.isArray(value.work) || !object(value.decisionHints)) return false;
+  if (!Object.values(value.fields).every(Buffer.isBuffer)) return false;
+  return value.work.every(record => object(record) && object(record.fields)
+    && Array.isArray(record.detailKeys) && record.detailKeys.every(key => typeof key === "string")
+    && Buffer.isBuffer(record.details));
 }
 
 function digest(bytes: Uint8Array): string {
@@ -203,7 +228,7 @@ function nativeIdentity(value: unknown, boot: string, path: string): DarwinIdent
   const mountPoint = attributeString(volume, 24), mountedDevice = attributeString(volume, 36);
   const generation = file.readUInt32LE(40), flags = file.readUInt32LE(36);
   const volumeId = volume.subarray(76, 92).toString("hex");
-  if (sourcePath !== path || mountPoint === null || mountedDevice === null || generation === 0 || (flags & 0x40000000) !== 0 || /^0+$/u.test(volumeId)) return null;
+  if (sourcePath !== path || mountPoint === null || mountedDevice === null || generation === 0 || (flags & SF_DATALESS) !== 0 || /^0+$/u.test(volumeId)) return null;
   return {
     boot,
     mount: canonicalSha256({ fsid: file.subarray(28, 36).toString("hex"), mountPoint, mountedDevice }),
@@ -218,7 +243,14 @@ function nativeIdentity(value: unknown, boot: string, path: string): DarwinIdent
   };
 }
 
-async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (DarwinIdentity | null)[] | null> {
+/** SF_DATALESS reports availability only; unknown metadata fails closed. */
+export function classifyDarwinFileAvailability(value: unknown): "available" | "dataless" | "unknown" {
+  const file = attributeBytes(value, FILE_COMMON, 0, DATA_LENGTH, EXTENDED_FLAGS);
+  if (file === null || file.length < 40) return "unknown";
+  return (file.readUInt32LE(36) & SF_DATALESS) !== 0 ? "dataless" : "available";
+}
+
+async function runDarwinHelper(files: readonly OpenSegment[], preflight = false): Promise<Record<string, unknown> | null> {
   const session = active.getStore();
   if (session?.helperUnavailable === true) return null;
   let script: string;
@@ -231,7 +263,7 @@ async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (Dar
     if (session !== undefined) session.helperUnavailable = true;
     return null;
   }
-  const request = JSON.stringify({ fileAttributes: attributes(FILE_COMMON, 0, DATA_LENGTH, EXTENDED_FLAGS), volumeAttributes: attributes(0x80000000, VOLUME), files: files.map(file => ({ path: file.path })) });
+  const request = JSON.stringify({ ...(preflight ? { preflight: true } : {}), fileAttributes: attributes(FILE_COMMON, 0, DATA_LENGTH, EXTENDED_FLAGS), volumeAttributes: attributes(0x80000000, VOLUME), files: files.map(file => ({ path: file.path })) });
   const started = performance.now();
   const result = spawnSync("/usr/bin/osascript", ["-l", "JavaScript", "-", request], { input: script, encoding: "utf8", stdio: "pipe", timeout: 5_000, maxBuffer: 65_536 + files.length * 24_576 });
   observeVerificationHelper(Buffer.byteLength(script), Buffer.byteLength(request), Buffer.byteLength(result.stdout ?? "") + Buffer.byteLength(result.stderr ?? ""), performance.now() - started);
@@ -242,7 +274,23 @@ async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (Dar
   }
   try {
     const value: unknown = JSON.parse(result.stdout);
-    if (!object(value) || value.schemaVersion !== "einzbern.darwin-source-identity.v1" || value.bootResult !== 0 || typeof value.boot !== "string" || !Array.isArray(value.files) || value.files.length !== files.length) return null;
+    if (!object(value) || value.schemaVersion !== "einzbern.darwin-source-identity.v1" || !Array.isArray(value.files) || value.files.length !== files.length) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+async function queryDarwinAvailability(files: readonly OpenSegment[]): Promise<readonly ("available" | "dataless" | "unknown")[] | null> {
+  const value = await runDarwinHelper(files, true);
+  if (value === null || value.preflight !== true || value.ioPolicyResult !== 0 || !Array.isArray(value.files) || value.files.length !== files.length) return null;
+  return value.files.map(entry => object(entry) ? classifyDarwinFileAvailability(entry.file) : "unknown");
+}
+
+async function queryDarwin(files: readonly OpenSegment[]): Promise<readonly (DarwinIdentity | null)[] | null> {
+  const value = await runDarwinHelper(files);
+  if (value === null || value.preflight === true || value.bootResult !== 0 || typeof value.boot !== "string" || !Array.isArray(value.files) || value.files.length !== files.length) return null;
+  try {
     const boot = Buffer.from(value.boot, "base64").toString("utf8").split("\0")[0] ?? "";
     if (!/^[A-Fa-f0-9-]{36}$/u.test(boot)) return null;
     return value.files.map((entry, index) => nativeIdentity(entry, boot, files[index]!.path));
@@ -407,7 +455,7 @@ async function prepareFiles(session: VerificationSession): Promise<boolean> {
       if (manifest === null) continue;
       for (const segment of manifest.segments) {
         const path = join(sourceRoot, "akasha", manifest.deviceId, segment.name);
-        const handle = process.platform === "linux" ? undefined : await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+        const handle = process.platform === "linux" || process.platform === "darwin" ? undefined : await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
         const binding: SegmentBinding = { libraryId: session.library.manifest.libraryId, sourceId: source.libraryId, archive, streamId: manifest.streamId, deviceId: manifest.deviceId, identityScheme: manifest.identityScheme, segment, rootManifest, sourceManifest };
         fileEntries.push({ ...(handle === undefined ? {} : { handle }), path, segment, binding });
       }
@@ -433,6 +481,31 @@ async function prepareFiles(session: VerificationSession): Promise<boolean> {
     }
     const files = [...session.files.values()];
     if (files.length === 0) return false;
+    if (process.platform === "darwin") {
+      let preflightUnavailable = false;
+      for (let offset = 0; offset < files.length; offset += 64) {
+        const batch = files.slice(offset, offset + 64);
+        const availability = await active.run(session, () => queryDarwinAvailability(batch));
+        if (availability === null) {
+          preflightUnavailable = true;
+          continue;
+        }
+        const dataless = availability.findIndex(status => status === "dataless");
+        if (dataless >= 0) {
+          session.datalessSource = batch[dataless]!;
+          observeCacheReason("source-verification-preopen-unavailable");
+          return false;
+        }
+        if (availability.some(status => status !== "available")) preflightUnavailable = true;
+      }
+      if (preflightUnavailable) {
+        observeCacheReason("source-verification-preopen-unavailable");
+        return false;
+      }
+    }
+    if (process.platform === "darwin") {
+      for (const file of files) file.handle = await open(file.path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    }
     const before = await active.run(session, () => queryNative(files, false, session.localContext));
     if (before === null || before.every(value => value === null)) return false;
     for (const [index, file] of files.entries()) {
@@ -636,6 +709,24 @@ function hydrateMaterializedState(cached: CachedMaterializedState, history: Buff
   return state as unknown as WorkspaceState;
 }
 
+async function readVerifiedMaterializedState(library: Library, session: VerificationSession, binding: string): Promise<WorkspaceState | null> {
+  const cached = await readProtectedProjection<unknown>(library, "materialized", binding);
+  if (cached === null) return null;
+  const history = await readProtectedProjection<unknown>(library, "materialized-events", binding);
+  if (history === null) return null;
+  if (!isCachedMaterializedState(cached) || !Buffer.isBuffer(history)) {
+    observeCacheReason("materialized-state-invalid");
+    return null;
+  }
+  if (!await filesUnchanged(session)) {
+    observeCacheReason("materialized-state-source-changed");
+    return null;
+  }
+  for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
+  observeCacheReason("materialized-state-hit");
+  return hydrateMaterializedState(cached, history);
+}
+
 export async function tryReadVerifiedMaterializedState(library: Library): Promise<WorkspaceState | null> {
   if (process.platform !== "linux" || library.manifest.consolidation === undefined) return null;
   const boundary = await recordBoundary(library);
@@ -647,12 +738,7 @@ export async function tryReadVerifiedMaterializedState(library: Library): Promis
     if (![...session.files.values()].every(file => file.native != null)) return null;
     const binding = canonicalSha256({ projection: "materialized-library-v9", metadata: session.metadata,
       files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) });
-    const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);
-    const history = cached === null ? null : await readProtectedProjection<Buffer>(library, "materialized-events", binding);
-    if (cached === null || history === null || !await filesUnchanged(session)) return null;
-    for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
-    observeCacheReason("materialized-state-hit");
-    return hydrateMaterializedState(cached, history);
+    return await readVerifiedMaterializedState(library, session, binding);
   } finally {
     session.attestation?.close();
     await Promise.all([...session.files.values()].map(file => file.handle?.close().catch(() => undefined)));
@@ -666,20 +752,19 @@ export async function withSourceVerification(library: Library, operation: () => 
   if (boundary === null) return (await operation()).value;
   const session: VerificationSession = { ...boundary, pending: [], reused: [], projections: new Map(), helperUnavailable: false, files: new Map(), metadataFiles: new Map(), metadata: "" };
   try {
-    if (!await prepareFiles(session)) return (await operation()).value;
+    if (!await prepareFiles(session)) {
+      if (session.datalessSource !== undefined) throw new DatalessSourceFallbackError(session.datalessSource);
+      return (await operation()).value;
+    }
     await prepareAttestation(session);
     const provable = process.platform === "linux" && library.manifest.consolidation !== undefined
       && [...session.files.values()].every(file => file.native != null);
     const binding = provable ? canonicalSha256({ projection: "materialized-library-v9", metadata: session.metadata,
       files: [...session.files.values()].map(file => ({ binding: file.binding, native: file.native })) }) : null;
     if (binding !== null) {
-      const cached = await readProtectedProjection<CachedMaterializedState>(library, "materialized", binding);
-      const history = cached === null ? null : await readProtectedProjection<Buffer>(library, "materialized-events", binding);
-      if (cached !== null && history !== null && await filesUnchanged(session)) {
-        for (const file of session.files.values()) observeVerifiedSegment(0, file.binding.streamId, file.binding.archive === "" ? "live" : "archive");
-        observeCacheReason("materialized-state-hit");
-        return hydrateMaterializedState(cached, history);
-      }
+      const cached = await readVerifiedMaterializedState(library, session, binding);
+      if (cached !== null) return cached;
+      observeCacheReason("materialized-state-fallback");
     }
     const answer = await active.run(session, operation);
     if (!await filesUnchanged(session)) {

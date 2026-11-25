@@ -3,6 +3,7 @@ import { fileContentDigest } from "./local-file-identity.js";
 import type { InvolvedProjects } from "../../protocol/src/index.js";
 import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 // SPDX-License-Identifier: Apache-2.0
+import { workflowStatus } from "./work-validation.js";
 // TCRN-CROSS-STORY-362 — the FTS5 recall core.
 //
 // WHAT THIS REPLACES. Retrieval on this platform was substring matching over card
@@ -144,6 +145,10 @@ export interface RecallSelectionOptions {
   readonly quota?: Readonly<Record<RecallKind, number>> | null;
 }
 
+type RecallQueryScopeCue =
+  | { readonly kind: "version-release"; readonly version: string }
+  | { readonly kind: "file-byte-budget"; readonly filename: string };
+
 /**
  * The measured field weights. Subject/title carries the strongest signal, an author's
  * own restatements of the question (expansions) the next, the closed tag vocabulary
@@ -224,6 +229,7 @@ export const RECALL_EXTERNAL_KEY_SCORE = 99;
 
 const CJK_RUN = /[㐀-鿿豈-﫿]+/gu;
 const ASCII_TOKEN = /[a-z0-9][a-z0-9_.-]+/gu;
+const VERSION_CANDIDATE = /(?<![A-Za-z0-9])v?([0-9]+\.[0-9]+\.[0-9]+)(?![A-Za-z0-9.])/giu;
 const EXTERNAL_KEY_CANDIDATE = /[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)+/gu;
 const RECORD_REFERENCE_CANDIDATE = new RegExp(`([a-z][a-z0-9-]+:[a-z0-9][a-z0-9._-]*|${EXTERNAL_KEY_CANDIDATE.source})(?:#D([1-9][0-9]*)\\b)?`, "giu");
 
@@ -326,7 +332,33 @@ export function recallQueryTokens(text: string): readonly string[] {
 export function recallQueryIsHistorical(query: string): boolean {
   // A negated instruction can mention history without asking a historical question.
   const intent = query.replace(/(?:请勿|不要|不得)[^，,。！？!?；;\n]*/gu, "");
-  return /^\s*历史(?:\s|上|问题)|历史原因|当初|曾经|旧版|退役原因|\bhistor(?:y|ical)\b|\bpreviously\b|\bused to\b/iu.test(intent);
+  return /^\s*历史(?:\s|上|问题)|历史原因|当初|当时|曾经|旧版|退役原因|\bhistor(?:y|ical)\b|\bpreviously\b|\bused to\b/iu.test(intent);
+}
+
+function recallQueryScopeCues(query: string): readonly RecallQueryScopeCue[] {
+  const cues: RecallQueryScopeCue[] = [];
+  const version = [...query.matchAll(VERSION_CANDIDATE)][0]?.[1];
+  if (version !== undefined && /发布|发行|release|publish/iu.test(query)) {
+    cues.push({ kind: "version-release", version });
+  }
+
+  const filename = /\b[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/gu.exec(query)?.[0]?.toLowerCase();
+  const asksBytes = /字节|\bbytes?\b/iu.test(query);
+  const asksBudget = /预算|\bbudget\b|\blimit\b/iu.test(query);
+  if (filename !== undefined && asksBytes && asksBudget) cues.push({ kind: "file-byte-budget", filename });
+  return cues;
+}
+
+function versionQueryTokens(version: string): readonly string[] {
+  return [...new Set([...recallQueryTokens(version), ...recallQueryTokens(`v${version}`)])];
+}
+
+function recallQueryTokensForScope(query: string): readonly string[] {
+  const tokens = new Set(recallQueryTokens(query));
+  for (const cue of recallQueryScopeCues(query)) {
+    if (cue.kind === "version-release") for (const token of versionQueryTokens(cue.version)) tokens.add(token);
+  }
+  return [...tokens];
 }
 
 /**
@@ -501,7 +533,7 @@ function hitMetadata(document: RecallDocument, score: number, query: string): Re
 }
 
 function hitOf(document: RecallDocument, lexicon: DocumentLexicon, vocabulary: WordLookup, score: number, query: string, frequencies: WordLookup, requested: number = 0): RecallHit {
-  const tokens = recallQueryTokens(query);
+  const tokens = recallQueryTokensForScope(query);
   const clauses = document.decisions ?? [];
   const selected = clauses.map((clause, index) => {
     const words = lexicon.clauses[index]!.words;
@@ -763,6 +795,28 @@ export class RecallIndex {
     });
     this.#docClausesCache.set(docId, list);
     return list;
+  }
+
+  #scopeEvidenceBonus(docId: string, cues: readonly RecallQueryScopeCue[]): number {
+    if (cues.length === 0) return 0;
+    const clauses = this.#clausesForDoc(docId);
+    let matchedCues = 0;
+    for (const cue of cues) {
+      const matches = clauses.some(({ originalWords }) => {
+        const hasAny = (tokens: readonly string[]): boolean => tokens.some(token => hasWord(originalWords, this.#wordLookup.get(token)));
+        if (cue.kind === "version-release") {
+          return hasAny(versionQueryTokens(cue.version))
+            && hasAny(["发布", "发行", "release", "publish", "published"]);
+        }
+        return hasWord(originalWords, this.#wordLookup.get(cue.filename))
+          && hasAny(["字节", "byte", "bytes"])
+          && hasAny(["预算", "budget", "limit"]);
+      });
+      if (matches) matchedCues += 1;
+    }
+    // A cue counts only when its named object/version and the requested subject occur in the same
+    // decision. One score unit is the existing calibrated weight of one corpus-unique word.
+    return matchedCues * recallScoreUnit(this.size);
   }
 
   #materializeClauses(): void {
@@ -1159,6 +1213,7 @@ export class RecallIndex {
       hits.push(makeHit(document, RECALL_EXTERNAL_KEY_SCORE, requested));
     }
     const allTokens = [...recallTextTokens(query)];
+    const scopeCues = recallQueryScopeCues(query);
     const identifiers = [...query.matchAll(/[A-Za-z][A-Za-z0-9_]*/gu)]
       .map((match) => match[0])
       .filter((token) => /[a-z][A-Z]|[A-Z][A-Z][a-z]|_/u.test(token))
@@ -1169,7 +1224,11 @@ export class RecallIndex {
       .sort((a, b) => (this.#frequencyLookup.get(a) ?? Number.MAX_SAFE_INTEGER) - (this.#frequencyLookup.get(b) ?? Number.MAX_SAFE_INTEGER)
         || b.length - a.length || values.indexOf(a) - values.indexOf(b))
       .slice(0, 48);
-    const tokens = queryTerms(allTokens);
+    const retrievalTokens = [
+      ...allTokens,
+      ...scopeCues.flatMap((cue) => cue.kind === "version-release" ? versionQueryTokens(cue.version) : []),
+    ];
+    const tokens = queryTerms(retrievalTokens);
     const keyExpression = externalKeyExpression(query);
     if (tokens.length === 0 && keyExpression.length === 0) return hits;
     const byRowId = new Map<number, IndexedRow>();
@@ -1190,7 +1249,7 @@ export class RecallIndex {
       ...(/[a-z][A-Z]|[A-Z][A-Z][a-z]|_/u.test(query) ? [{
         table: "recall_index",
         weights: [weights.title, weights.body, weights.tags, weights.expansions, 0],
-        expression: `{title body tags expansions} : (${matchExpression(queryTerms(recallQueryTokens(query)))})`,
+        expression: `{title body tags expansions} : (${matchExpression(queryTerms(recallQueryTokensForScope(query)))})`,
       }] : []),
     ];
     for (const search of searches) {
@@ -1208,7 +1267,7 @@ export class RecallIndex {
     if (tokens.length > 0 && allTokens.length <= 6 && this.#clauseCount() > 0) {
       // Use the query's actual record/clauses frequencies, including common terms.
       // A unit-only ratio would inflate common words in a one- or two-clause corpus.
-      const clauseTokens = recallQueryTokens(query);
+      const clauseTokens = recallQueryTokensForScope(query);
       const information = (size: number, frequencies: WordLookup): number => clauseTokens.reduce((sum, token) => {
         const count = frequencies.get(token) ?? 0;
         return sum + Math.max(1e-6, Math.log((size - count + 0.5) / (count + 0.5)));
@@ -1305,6 +1364,7 @@ export class RecallIndex {
       const exactIdentifier = allTokens.length <= 6 && identifiers.some((identifier) => hasWord(lexicon.identifiers, this.#wordLookup.get(identifier)))
         && allTokens.every((token) => hasWord(lexicon.words, this.#wordLookup.get(token)));
       const identifierBonus = exactIdentifier ? RECALL_FIELD_WEIGHTS.body * recallScoreUnit(this.size) : 0;
+      const scopeBonus = this.#scopeEvidenceBonus(document.id, scopeCues);
       let coverage = 1;
       if (allTokens.length > 24) {
         const words = lexicon.coverage;
@@ -1315,7 +1375,7 @@ export class RecallIndex {
         const anchored = allTokens.filter((token) => hasWord(anchor, this.#wordLookup.get(token))).length >= 2;
         coverage = anchored ? 1 : matched / total;
       }
-      hits.push(makeHit(document, (-Number(row["score"]) + identifierBonus) * decay * coverage * (coherent ? 1.1 : 1)));
+      hits.push(makeHit(document, (-Number(row["score"]) + identifierBonus + scopeBonus) * decay * coverage * (coherent ? 1.1 : 1)));
       if (hits.length >= maximumHits) break;
     }
     return [
@@ -1543,10 +1603,10 @@ export function recallDocuments(inputs: RecallInputs): readonly RecallDocument[]
       id: record.id,
       kind: "work",
       key: record.externalKey,
-      status: record.status,
+      status: workflowStatus(record),
       title,
       body,
-      tags: `${record.kind} ${record.status} ${record.labels.join(" ")}`.trim(),
+      tags: `${record.kind} ${workflowStatus(record)} ${record.labels.join(" ")}`.trim(),
       expansions: record.contract === undefined ? "" : (record.summary ?? ""),
       summary: summary.length > 0 ? summary : goal,
       recordKind: record.kind,

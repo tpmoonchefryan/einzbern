@@ -4,12 +4,13 @@ import { openPrivateWindowsFile } from "../../../scripts/lib/windows-system.mjs"
 import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
 import { parseStrictInstant } from "../../protocol/src/index.js";
-import { codexPeerReportRecipientProblem, readCodexPeerRole } from "./codex-peer-hooks.js";
+import { codexPeerReportDispatchProblem, readCodexPeerRole } from "./codex-peer-hooks.js";
+import { assertCodexPeerCoordinatorStartup, codexPackApplicationRecovery } from "./codex-peer-batch.js";
 import { codexNativeGuardHealth } from "./codex-native-health.js";
 import { isCodexNativeSpawn } from "./native-tool-evidence.js";
 import { homedir } from "node:os";
 import { deviceHome } from "./device-home.js";
-import { hasCodexSettingsOverride, verifyCodexSettingsIntent } from "./codex-peer-settings.js";
+import { hasCodexReportSessionSetting, verifyCodexSettingsIntent } from "./codex-peer-settings.js";
 import { hasLibraryManifest } from "./ether-library.js";
 import { readRegistry } from "./registry.js";
 import { pathIsInside } from "./path-containment.js";
@@ -166,19 +167,42 @@ import { sameHostSelection, validateHostExecutionRequest } from "./execution-fal
 import type { HostExecutionRequest, HostExecutionDecision } from "./execution-fallback.js";
 import { HOST_NATIVE_PREPARATION_VERSION, validateHostNativePreparation } from "./native-tool-evidence.js";
 import type { HostNativePreparation } from "./native-tool-evidence.js";
+import { bindPackDispatchToNativeArguments, packDispatchRequired, resolvePackDispatchContext } from "./pack-dispatch.js";
 /** Optional audit preparation; no adapter, save transaction or prior success receipt prerequisite. */
-export async function prepareHostNativeDispatch(state: WorkspaceState, requestValue: HostExecutionRequest, tool: { readonly argumentsValue: unknown; readonly selection: HostSelection; readonly peerWorker?: boolean; readonly nativeSessionId?: string; readonly codexSettingsIntent?: unknown; readonly codexObservation?: import("./codex-native-health.js").CodexHookObservation; readonly userHome?: string; readonly cwd?: string }, home?: string): Promise<HostNativePreparation> {
-  const request = validateHostExecutionRequest(requestValue);
+export async function prepareHostNativeDispatch(state: WorkspaceState, requestValue: HostExecutionRequest, tool: { readonly argumentsValue: unknown; readonly selection: HostSelection; readonly peerWorker?: boolean; readonly nativeSessionId?: string; readonly codexCoordinatorStartup?: unknown; readonly codexSettingsIntent?: unknown; readonly codexObservation?: import("./codex-native-health.js").CodexHookObservation; readonly priorPeerReceipt?: unknown; readonly userHome?: string; readonly cwd?: string }, home?: string): Promise<HostNativePreparation> {
+  let request = validateHostExecutionRequest(requestValue);
+  if (tool.priorPeerReceipt !== undefined) {
+    if (!tool.peerWorker || request.capabilities.hostKind !== "codex") throw new HostExecutionError("prior Pack application receipt recovery applies only to a Codex peer worker");
+    if (!request.packBinding) throw new HostExecutionError("a prior Codex peer receipt can only guard a Pack application attempt");
+    const applicationRecovery = codexPackApplicationRecovery(tool.priorPeerReceipt, request.packBinding, state);
+    const supplied = request.packBinding.applicationRecovery;
+    if (supplied && (supplied.priorReceiptDigest !== applicationRecovery.priorReceiptDigest ||
+        supplied.previousAttemptIds.length !== applicationRecovery.previousAttemptIds.length ||
+        supplied.previousAttemptIds.some((id, index) => id !== applicationRecovery.previousAttemptIds[index]))) {
+      throw new HostExecutionError("Pack application recovery differs from the exact prior Codex peer receipt");
+    }
+    request = { ...request, packBinding: { ...request.packBinding, applicationRecovery } };
+  } else if (request.packBinding?.applicationRecovery !== undefined) {
+    throw new HostExecutionError("Pack application recovery needs its exact prior Codex peer receipt before worker preparation");
+  }
+  if (packDispatchRequired(state, request.action, request.phase) && request.packBinding === undefined) {
+    throw new HostExecutionError("INIT-108 is complete; a new implementation dispatch requires a live Pack assignment and frozen capacity roster");
+  }
+  const packDispatch = request.packBinding === undefined ? undefined : resolvePackDispatchContext(state, request.packBinding, request.workId, request.workRevision);
+  if (request.packBinding !== undefined && tool.peerWorker && request.category !== "economy") throw new HostExecutionError("Codex Pack workers must use the Economy category; the Main conversation remains the coordinator");
   validateHostSelection(tool.selection);
-  if (request.capabilities.hostKind === "codex" && request.capabilities.toolName === "mcp__codex_app__send_message_to_thread") {
+  const nativeReport = request.capabilities.toolName === "mcp__codex_app__send_message_to_thread";
+  const appServerReport = request.capabilities.toolName === "turn/start";
+  if (request.capabilities.hostKind === "codex" && (nativeReport || appServerReport)) {
+    if (appServerReport && tool.codexSettingsIntent !== undefined) throw new HostExecutionError("settings intent applies only to a native Codex send_message_to_thread adjustment");
     const sessionId = tool.nativeSessionId ?? process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"];
-    const problem = await codexPeerReportRecipientProblem(home ?? deviceHome(), sessionId, tool.argumentsValue, { libraryId: state.metadata.workspaceId, workId: request.workId, workRevision: request.workRevision });
+    const problem = await codexPeerReportDispatchProblem(home ?? deviceHome(), sessionId, request.capabilities.toolName, tool.argumentsValue, { libraryId: state.metadata.workspaceId, workId: request.workId, workRevision: request.workRevision }, request.action === "coordination");
     if (problem) throw new HostExecutionError(problem.reason);
-    if (tool.codexSettingsIntent !== undefined) {
+    if (nativeReport && tool.codexSettingsIntent !== undefined) {
       if (!sessionId || (request.capabilities.sessionRef !== undefined && request.capabilities.sessionRef !== sessionId)) throw new HostExecutionError("settings preparation needs the actual native session");
       await verifyCodexSettingsIntent(state, tool.codexSettingsIntent, tool.argumentsValue, home ?? deviceHome());
-    } else if (request.action === "coordination" && hasCodexSettingsOverride(tool.argumentsValue)) {
-      throw new HostExecutionError("ordinary Codex coordination sends omit model/thinking; explicit settings adjustments need --codex-settings-intent and their existing Owner decision");
+    } else if (request.action === "coordination" && hasCodexReportSessionSetting(tool.argumentsValue)) {
+      throw new HostExecutionError("ordinary Codex coordination reports omit model, thinking, effort, serviceTier and serviceTierForTurn; explicit settings adjustments use their existing separate authorization path");
     }
   } else if (tool.codexSettingsIntent !== undefined) throw new HostExecutionError("settings intent applies only to a native Codex send_message_to_thread adjustment");
   let codexPeerWorker: { coordinatorId: string } | undefined;
@@ -187,22 +211,28 @@ export async function prepareHostNativeDispatch(state: WorkspaceState, requestVa
     if (sessionId && request.capabilities.sessionRef !== undefined && request.capabilities.sessionRef !== sessionId) throw new HostExecutionError("reported sessionRef differs from the actual native session");
     const role = sessionId ? await readCodexPeerRole(home ?? deviceHome(), sessionId) : { status: "unbound" as const };
     if (role.status === "error") throw new HostExecutionError(role.reason);
+    if (request.action === "validation" && tool.peerWorker && role.status !== "active") throw new HostExecutionError("dual-conversation validation requires the enrolled Economy coordinator");
     if (tool.peerWorker || role.status === "active") {
       if (!sessionId) throw new HostExecutionError("Codex peer worker preparation needs the actual native coordinator session");
       if (role.status === "retired") throw new HostExecutionError("Codex peer coordinator is retired");
+      if (tool.peerWorker && role.status === "unbound") {
+        if (tool.codexCoordinatorStartup === undefined) throw new HostExecutionError("Codex coordinator startup Full Access readback is unknown; provide the actual same-ID thread/start response before the first worker can become ready");
+        assertCodexPeerCoordinatorStartup(tool.codexCoordinatorStartup, sessionId);
+      }
       if (!isCodexNativeSpawn(request.capabilities.toolName)) throw new HostExecutionError("Codex peer worker requires collaboration.spawn_agent, not create_thread/fork_thread");
       const health = await codexNativeGuardHealth({ device: home ?? deviceHome(), home: tool.userHome ?? homedir(), cwd: tool.cwd ?? process.cwd(), ...(tool.codexObservation ? { observation: tool.codexObservation } : {}) });
       if (!health.ready) throw new HostExecutionError(`Codex peer guard not ready: ${health.reasons.join("; ")}`);
       codexPeerWorker = { coordinatorId: sessionId };
     }
   }
-  const context = await workProjectContexts(state, request.workId, home, request);
+  const baseContext = await workProjectContexts(state, request.workId, home, request);
+  const context = packDispatch === undefined ? baseContext : { ...baseContext, packDispatch };
   const decision = context.executionDecision as HostExecutionDecision;
   const executable = executionDecisionEligibility(decision) === "executable" && context.dispatchAdmitted === true;
   if (executable && !sameHostSelection(tool.selection, decision.requestedSelection)) throw new HostExecutionError("tool request selection differs from the resolved selection; construct arguments for the resolved request, not an invented actual model");
   const payload = {
     schemaVersion: HOST_NATIVE_PREPARATION_VERSION, context, decision, ...(codexPeerWorker ? { codexPeerWorker } : {}),
-    attempt: executable ? { id: `local-attempt:${randomUUID()}`, identityKind: "local-correlation" as const, toolName: request.capabilities.toolName, argumentsValue: tool.argumentsValue, requestedAt: new Date().toISOString() } : null,
+    attempt: executable ? { id: `local-attempt:${randomUUID()}`, identityKind: "local-correlation" as const, toolName: request.capabilities.toolName, argumentsValue: packDispatch === undefined ? tool.argumentsValue : bindPackDispatchToNativeArguments(tool.argumentsValue, packDispatch), requestedAt: new Date().toISOString() } : null,
   };
   return validateHostNativePreparation({ ...payload, digest: dotDigest(payload) });
 }

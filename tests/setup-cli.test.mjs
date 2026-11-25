@@ -307,11 +307,10 @@ test("project disconnect keeps the other project's registration and shared wirin
   await assert.rejects(cli(["library-resolve", "--cwd", f.project]), { reasonCode: "LIBRARY_NOT_REGISTERED" });
   assert.deepEqual(await snapshot(roots), filesBefore, "both projects and the user-level wiring stay in place");
   assert.deepEqual(await libraryTreeDigests(f.library), libraryBefore);
-  // The unregistered project was this device's project root (agents.projectRoot), the one that kept
-  // the library's managed AGENTS.md. The declaration names no registered root any more, so the
-  // remaining project is expected to hold the sections itself and has none until it is repaired.
+  // The removed project was this library's selected root. Its tombstone prevents direct output
+  // from silently moving to the remaining root; setup must make that decision explicitly.
   const remaining = (await cli(["doctor", "--project", second.project])).checks;
-  assert.deepEqual(remaining.filter(({ ok }) => !ok).map(({ check, detail }) => [check, detail.causes]), [["managed-sections", ["MANAGED_FILE_MISSING"]]]);
+  assert.deepEqual(remaining.filter(({ ok }) => !ok).map(({ check, detail }) => [check, detail.causes]), [["managed-sections", ["AGENTS_PROJECT_ROOT_REQUIRED"]]]);
 });
 
 test("480-AC4, AC5 through the CLI: device uninstall reports both projects' shared impact, backs up the wiring and removes the selected registration", async (context) => {
@@ -578,37 +577,47 @@ test("project root: the first installation stores it, and another project of the
   assert.deepEqual((await cli(["variable-list", "--workspace", f.library, "--project-id", secondId])).variables.map((variable) => variable.name), ["task.category"]);
   await assert.rejects(lstat(join(second.project, "AGENTS.md")), { code: "ENOENT" });
 
-  // Moving the root is one device setting: the second project takes the sections, the first is refused.
+  // The legacy scalar command now updates only the library registered to this selected path.
   assert.equal((await cli(["machine-settings-set", "--key", "agents.projectRoot", "--value", second.project, "--at", at()])).reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
   assert.equal((await cli(["agents-render", "--project", second.project, "--at", at()])).reasonCode, "AGENTS_RENDERED");
   assert.equal(await hasManagedSection(second.project), true);
   await assert.rejects(cli(["agents-render", "--project", f.project, "--at", at()]), { reasonCode: "MANAGED_SECTION_OUTPUT_UNREGISTERED" });
 });
 
-test("project root: setup takes a registered root in fresh mode only, and asks when a library's roots predate the setting", async (context) => {
+test("project root: explicit and default choices stay within one library, and legacy multi-root setup asks once", async (context) => {
   const [f, second] = await twoProjectFixture(context);
   const third = { ...f, project: join(f.base, "third-project") };
   const stray = join(f.base, "not-registered");
-  for (const directory of [third.project, stray]) await mkdir(directory);
+  const foreign = { ...f, project: join(f.base, "foreign-project"), library: join(f.base, "foreign-project", ".ether") };
+  for (const directory of [third.project, stray, foreign.project]) await mkdir(directory, { recursive: true });
+  await setup(foreign, "fresh", "--artifacts", foreign.library, "--yes", "true");
 
   const refused = await setup(third, "fresh", "--project-root", stray);
   assert.deepEqual(refused.blockers.map((blocker) => [blocker.step, blocker.reasonCode, blocker.path]), [["machine-settings", "SETUP_ANSWER_INVALID", stray]]);
   await assert.rejects(setup(third, "fresh", "--project-root", stray, "--yes", "true"), { reasonCode: "SETUP_BLOCKED" });
-  await assert.rejects(setup(f, "repair", "--project-root", f.project), { reasonCode: "SETUP_OPTION_NOT_APPLICABLE" });
+  const repair = await setup(f, "repair", "--project-root", f.project);
+  assert.equal(repair.resolved.projectRoot, f.project);
 
   // A root this device registered is an answer.
   const named = await setup(third, "fresh", "--project-root", second.project);
   assert.deepEqual(named.blockers, []);
   assert.equal(named.resolved.projectRoot, second.project);
   assert.deepEqual(named.questions.filter((question) => question.id === "projectRoot"), []);
+  const wrongLibrary = await setup(third, "fresh", "--project-root", foreign.project);
+  assert.deepEqual(wrongLibrary.blockers.map(blocker => blocker.reasonCode), ["SETUP_ANSWER_INVALID"]);
+  assert.equal((await setup(third, "fresh")).resolved.projectRoot, f.project, "another library's legacy scalar never becomes this library's default");
 
-  // A device set up before the setting existed: its library has roots here and it holds none.
-  // Taking the new project would stop the engine managing the others, so the plan has no default.
-  await cli(["machine-settings-remove", "--key", "agents.projectRoot", "--at", at()]);
+  // Simulate the pre-upgrade layout: no per-library map and a device-wide root registered to another library.
+  const registryPath = join(f.deviceHome, "registry.json");
+  const legacyRegistry = JSON.parse(await readFile(registryPath, "utf8"));
+  delete legacyRegistry.agentsProjectRoots;
+  await writeFile(registryPath, `${JSON.stringify(legacyRegistry)}\n`);
+  assert.equal((await cli(["machine-settings-set", "--key", "agents.projectRoot", "--value", foreign.project, "--at", at()])).reasonCode, "MACHINE_SETTINGS_WRITE_COMMITTED");
   const unanswered = await setup(third, "fresh");
   assert.deepEqual(unanswered.questions.find((question) => question.id === "projectRoot"), { id: "projectRoot", flag: "--project-root", default: null, choices: null });
   assert.equal(Object.hasOwn(unanswered.resolved, "projectRoot"), false);
   assert.deepEqual(unanswered.blockers.map((blocker) => [blocker.step, blocker.reasonCode]), [["machine-settings", "SETUP_ANSWER_REQUIRED"]]);
+  assert.deepEqual((await setup(third, "fresh", "--project-root", foreign.project)).blockers.map(blocker => blocker.reasonCode), ["SETUP_ANSWER_INVALID"]);
   const answered = await setup(third, "fresh", "--project-root", third.project, "--yes", "true");
   assert.equal(answered.answers.projectRoot, third.project);
   assert.equal(await deviceProjectRoot(), third.project);

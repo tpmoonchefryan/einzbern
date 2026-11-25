@@ -188,9 +188,8 @@ export interface SetupAnswers {
   // Device host-navigation preference (legacy written/declined labels); shared AGENTS
   // content is independently owned by agents.sharedNavigation on its project/library target.
   readonly navigation?: boolean;
-  // This device's project root: the one directory whose AGENTS.md the engine manages
-  // (agents.projectRoot). Not the project being set up (SetupOptions.projectRoot, --project), though
-  // on a device with one project they are the same directory; a relative path is taken from it.
+  // The registered root this library will use for managed AGENTS.md output on this device.
+  // Not necessarily the project being set up; a relative path is taken from that project.
   readonly projectRoot?: string;
 }
 
@@ -199,7 +198,7 @@ export interface ResolvedSetupAnswers {
   readonly cloud: boolean;
   readonly language: string;
   readonly navigation: boolean;
-  // Asked by a first installation only; the other modes leave the device's project root as it is.
+  // This library's selected managed-output root when setup asks or repairs its device-local wiring.
   readonly projectRoot?: string;
 }
 
@@ -448,6 +447,9 @@ export interface SetupPlan {
   readonly engineSwitch?: SetupEngineSwitch;
   // update: existing harness outputs on this device; final diffs use the selected engine.
   readonly managedUpdates?: readonly SetupManagedUpdate[];
+  // update: one selected registered root per library on this device, including roots auto-selected
+  // during a legacy single-root migration. Written before any managed output is refreshed.
+  readonly agentsProjectRootSelections?: readonly { readonly libraryId: string; readonly projectPath: string }[];
   // migrate: the mapping it follows and, for each partition, the library it becomes, the chain's
   // events and head, the gates that are not satisfied and the open work; the registry entries, the
   // device settings that move (migrate-legacy.ts) and what the cleanup takes off (migrate-cleanup.ts).
@@ -612,7 +614,7 @@ export interface SetupModeInput {
 }
 
 /** What a mode's planner answers; planSetup puts it into the plan, with no warnings when the mode names none. */
-export type SetupModePlan = Pick<SetupPlan, "questions" | "resolved" | "engine" | "library" | "writes" | "backups" | "backupDir" | "pendingSections" | "blockers" | "verification" | "engineSwitch" | "managedUpdates" | "migration" | "coordination" | "uninstallImpact" | "dshPlugin" | "executionTarget" | "dot">
+export type SetupModePlan = Pick<SetupPlan, "questions" | "resolved" | "engine" | "library" | "writes" | "backups" | "backupDir" | "pendingSections" | "blockers" | "verification" | "engineSwitch" | "managedUpdates" | "agentsProjectRootSelections" | "migration" | "coordination" | "uninstallImpact" | "dshPlugin" | "executionTarget" | "dot">
   & { readonly warnings?: readonly SetupWarning[] };
 
 interface SetupModeEntry {
@@ -935,12 +937,12 @@ const MODE_TABLE: Readonly<Record<SetupMode, SetupModeEntry>> = Object.freeze({
     apply: (plan: SetupPlan): Promise<SetupApplied> => applyRestoreSetup(plan),
   },
   update: {
-    options: ["archive", "rollback"],
+    options: ["archive", "rollback", "projectRoot"],
     plan: (input: SetupModeInput): Promise<SetupModePlan> => planUpdateSetup(input),
     apply: (plan: SetupPlan): Promise<SetupApplied> => applyUpdateSetup(plan),
   },
   repair: {
-    options: ["cloud", "navigation"],
+    options: ["cloud", "navigation", "projectRoot"],
     plan: (input: SetupModeInput): Promise<SetupModePlan> => planRepairSetup(input),
     apply: (plan: SetupPlan): Promise<SetupApplied> => applyRepairSetup(plan),
   },

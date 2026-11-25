@@ -1417,7 +1417,7 @@ if (!MUTATION) {
       assert.match(await act(document.querySelector('[data-rule-order-save="autonomy"]')), /^✓v\d+$/u);
       assert.deepEqual(ruleCards().slice(0, 2), [["autonomy", "1"], ["batch", "3"]]);
       const moved = await agents();
-      assert.ok(moved.indexOf("rule:autonomy") < moved.indexOf("rule:batch"), "the rule sections follow the order");
+      assert.ok(moved.indexOf("**Autonomy**") < moved.indexOf("**Batch processing**"), "the rule sections follow the order");
       assert.equal(document.querySelector("#agents-md").value, moved, "the editor reads AGENTS.md back");
       type(document.querySelector('[data-rule-order="silent-reporting"]'), "2");
       const toggle = document.querySelector('[data-rule-switch="silent-reporting"]');
@@ -1428,7 +1428,7 @@ if (!MUTATION) {
       const listed = (await cli(["rule-list", "--project", fixture.proseRoot], fixture.deviceEnv)).rules;
       assert.deepEqual(listed.filter((rule) => rule.order !== undefined).map((rule) => [rule.id, rule.state, rule.order]), [["autonomy", "enabled", 1], ["batch", "enabled", 3], ["silent-reporting", "enabled", 2]]);
       const text = await agents();
-      assert.ok(text.indexOf("rule:autonomy") < text.indexOf("rule:silent-reporting") && text.indexOf("rule:silent-reporting") < text.indexOf("rule:batch"), "a rule switched on with an order takes its place");
+      assert.ok(text.indexOf("**Autonomy**") < text.indexOf("**Silent reporting**") && text.indexOf("**Silent reporting**") < text.indexOf("**Batch processing**"), "a rule switched on with an order takes its place");
     } finally { page.child.kill(); await rm(fixture.base, { recursive: true, force: true }); }
   });
 }

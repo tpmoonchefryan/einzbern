@@ -151,9 +151,13 @@ export const LOCAL_DIRECTORY_NAMES = {
   helper: `TCRN Platform/${LEGACY_HELPER_NAME}`,
 } as const;
 
+// Keep the public repository address intact in the shipped bundles. Git helpers
+// derive the account when constructing a remote or checking an existing one.
+const PUBLIC_ENGINE_REPOSITORY = "tpmoonchefryan/einzbern";
+
 // The GitHub remotes as they are named until the Owner renames them (a separate stop).
 export const LEGACY_REPOSITORY_NAMES = {
-  owner: "tpmoonchefryan",
+  owner: PUBLIC_ENGINE_REPOSITORY.slice(0, PUBLIC_ENGINE_REPOSITORY.indexOf("/")),
   engine: LEGACY_ENGINE_NAME,
   helper: LEGACY_HELPER_NAME,
 } as const;

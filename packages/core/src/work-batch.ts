@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
+import { isWorkflowStatus } from "./work-validation.js";
 
 // STORY-300 slice 3: apply an ordered, heterogeneous sequence of work-record writes as
 // one act -- one write lock, one replay, one clock reading and one view projection.
@@ -134,8 +135,24 @@ function shapeProblems(members: readonly unknown[]): readonly WorkBatchProblem[]
     if (!isNonEmptyString(member.id) && !isNonEmptyString(member.externalKey)) {
       problems.push({ index, verb, rule: "reference-required", detail: "id or externalKey names the record to act on" });
     }
+    if (member.expectedRevision !== undefined && (!Number.isSafeInteger(member.expectedRevision) || Number(member.expectedRevision) < 1)) {
+      problems.push({ index, verb, rule: "revision", detail: "expectedRevision must name a positive work revision" });
+    }
+    if (member.implementationCondition !== undefined) {
+      const note = member.implementationCondition;
+      const keys = ["basis", "evidence", "resumeWhen"];
+      if (verb !== "work-annotate" || member.expectedRevision === undefined ||
+        Object.keys(member).some(key => !["verb", "id", "externalKey", "expectedRevision", "implementationCondition"].includes(key)) ||
+        (note !== null && (!isObject(note) || Object.keys(note).some(key => !keys.includes(key)) || !keys.every(key => isNonEmptyString(note[key]))))) {
+        problems.push({ index, verb, rule: "implementation-condition", detail: "record a revision-bound condition with basis, evidence and resumeWhen, or clear it with null" });
+      }
+      return;
+    }
     if (verb === "work-transition") {
-      if (!WORK_STATUSES.includes(member.status as string)) {
+      if (member.blockedCriteria !== undefined && (member.status !== "blocked" || !Array.isArray(member.blockedCriteria) || !member.blockedCriteria.every(isNonEmptyString))) {
+        problems.push({ index, verb, rule: "blocked-criteria", detail: "blockedCriteria must list the unavailable acceptance criteria for a blocked transition" });
+      }
+      if (!isWorkflowStatus(member.status)) {
         problems.push({ index, verb, rule: "status-known", detail: `status=${String(member.status)}` });
       }
       return;

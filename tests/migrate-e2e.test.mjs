@@ -456,7 +456,7 @@ async function migratedMachine(context) {
   return m;
 }
 
-const NAVIGATION_SECTION = /<!-- einzbern:section id=navigation /u;
+const NAVIGATION_SECTION = /<!-- einzbern:section id=agents /u;
 
 /** The managed-section records a library holds, key to state, replayed from genesis. */
 async function sectionRecords(library) {
@@ -481,7 +481,7 @@ test("489 (TCRN-CROSS-SUB-366, problems #4): after a migration, repair with --na
   const library = m.partitions[0].target;
   const agents = join(m.container, "AGENTS.md");
   assert.match(await readFile(agents, "utf8"), NAVIGATION_SECTION);
-  assert.equal((await sectionRecords(library))["AGENTS.md#navigation"], "managed");
+  assert.equal((await sectionRecords(library))["AGENTS.md#agents"], "managed");
 
   // Local integration preference must not remove the shared section or its attested record.
   const repaired = receipt(run(m, ["setup", "--mode", "repair", "--project", m.container, "--navigation", "false", "--at", at(), "--yes", "true"],
@@ -489,7 +489,7 @@ test("489 (TCRN-CROSS-SUB-366, problems #4): after a migration, repair with --na
   assert.equal(repaired.reasonCode, "SETUP_APPLIED");
   assert.match(await readFile(agents, "utf8"), NAVIGATION_SECTION);
   const records = await sectionRecords(library);
-  assert.equal(records["AGENTS.md#navigation"], "managed", "the shared navigation record remains managed");
+  assert.equal(records["AGENTS.md#agents"], "managed", "the shared navigation record remains managed");
   assert.ok(!repaired.written.some((entry) => entry.step === "managed-sections" || entry.step === "library"), "local integration changes no shared state");
   assert.ok(Object.keys(records).length > 0 && Object.values(records).every((state) => state === "managed"), JSON.stringify(records));
   assert.ok((await actorsAfterImport(library)).every((actor) => actor === SETUP_ACTOR), "every event after the old chain names the wizard");
@@ -522,7 +522,7 @@ test("489 (TCRN-CROSS-SUB-366, problems #4): a second device restores the migrat
   assert.equal(restored.reasonCode, "SETUP_APPLIED");
   assert.deepEqual(restored.library, { path: library, libraryId: m.partitions[0].workspaceId, created: false });
   assert.doesNotMatch(await readFile(join(m.container, "AGENTS.md"), "utf8"), NAVIGATION_SECTION);
-  assert.equal(Object.hasOwn(await sectionRecords(library), "AGENTS.md#navigation"), false);
+  assert.equal(Object.hasOwn(await sectionRecords(library), "AGENTS.md#agents"), false);
   const streams = (await readAllStreams(library)).streams;
   const secondId = (await readJson(join(second.device, "device.json"))).deviceId;
   const own = streams.filter((stream) => stream.manifest.deviceId === secondId);
