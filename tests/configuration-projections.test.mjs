@@ -68,7 +68,7 @@ test("refresh uses managed writer, preserves user edits and does not authorize a
   const unknown = await refreshConfigurationProjections(source, { occurredAt: at, outputKeys: ["not-a-registered-output"] });
   assert.ok(unknown.outcomes.some(outcome => outcome.status === "refused"));
   assert.ok(unknown.outcomes.some(outcome => outcome.reason === "not-selected"));
-  await setWorkspaceSetting(lib.path, { key: "agents.generation", value: "none", configurationProjectId: target.projectId, occurredAt: at });
+  await setWorkspaceSetting(lib.path, { key: "agents.generation", value: "none", occurredAt: at });
   const disabled = await refreshConfigurationProjections(source, { occurredAt: at });
   assert.equal(disabled.outcomes[0].reason, "generation-disabled");
   assert.equal(await readFile(file, "utf8"), edited);

@@ -23,6 +23,7 @@
 // lines for prompts the registry does not cover are unchanged and carry no host.
 
 import { appendFileSync, closeSync, constants, fstatSync, mkdirSync, openSync, readSync, statSync } from "node:fs";
+import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
 import { meetsNodeFloor } from "../dist/build/packages/core/src/node-floor.js";
@@ -42,6 +43,34 @@ function absolute(value) {
 function payloadDirectory(cwd, body) {
   const workspacePath = Array.isArray(body?.workspacePaths) ? absolute(body.workspacePaths[0]) : null;
   return absolute(cwd) ?? absolute(body?.cwd) ?? workspacePath ?? process.cwd();
+}
+
+async function needsNavigationPointer(libraryPath, projectRoot, projectId, directory) {
+  if (typeof libraryPath === "string") {
+    const [{ readRecallAuthority }, { libraryAgentsSetting, projectLineage }] = await Promise.all([
+      import("../dist/build/packages/core/src/recall-authority.js"),
+      import("../dist/build/packages/core/src/project-scope.js"),
+    ]);
+    const reading = await readRecallAuthority(libraryPath).catch(() => null);
+    if (reading !== null) {
+      const selected = reading.state.projects.find(project => project.id === projectId && !project.tombstone);
+      const navigation = libraryAgentsSetting(reading.state, "agents.sharedNavigation", projectLineage(reading.state, selected?.id))?.value;
+      if (navigation === "written" || navigation === "declined") return navigation === "declined";
+    }
+  }
+  if (typeof projectRoot !== "string") return true;
+  const [{ pathIsInside }, { NAVIGATION_LINES }] = await Promise.all([
+    import("../dist/build/packages/core/src/path-containment.js"),
+    import("../dist/build/packages/core/src/navigation-lines.js"),
+  ]);
+  const agents = join(projectRoot, "AGENTS.md");
+  try {
+    if (!pathIsInside(projectRoot, await realpath(directory)) || !(await lstat(agents)).isFile()) return true;
+    const text = (await readFile(agents, "utf8")).replaceAll("\r\n", "\n");
+    return !`\n${text}\n`.includes(`\n${NAVIGATION_LINES.join("\n")}\n`);
+  } catch {
+    return true;
+  }
 }
 
 // One line in log/hook.ndjson for one recall, written as the launcher writes its note: the
@@ -68,7 +97,7 @@ function noteRecall(device, event, cwd, reasonCode, host, observation, versions 
  * entry the launcher matched and `cwd` the directory it matched from (the payload's cwd, or this
  * process's, when left out). Returns the text for stdout, or null when the hook prints nothing.
  */
-export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuardObserved = false } = {}) {
+export async function runHookEvent({ event, payload, libraryPath, projectRoot, projectId, cwd, peerGuardObserved = false } = {}) {
   // TCRN-CROSS-STORY-481 R2, R4: the stable launcher refuses older Node.js before it imports this
   // file. Keep this guard for direct callers too: a hook answers nothing, and the CLI is where the
   // floor is reported (ENGINE_NODE_TOO_OLD).
@@ -106,7 +135,7 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
   }
   // DSH retains its existing navigation contract; its next feature batch is separate.
   if (name === "SubagentStart" && host === "dsh") {
-    const result = `${navigationPointerAnswer(host, name).output}\n`;
+    const result = `${navigationPointerAnswer(host, name, await needsNavigationPointer(libraryPath, projectRoot, projectId, payloadDirectory(cwd, body))).output}\n`;
     if (observe !== undefined) {
       const { observation } = await observe(async () => result);
       noteRecall(deviceHome(process.env), event, absolute(cwd) ?? absolute(body.cwd) ?? process.cwd(), "HOOK_RECALL_PROMPT_EMPTY", host, observation, versions);
@@ -198,14 +227,14 @@ export async function runHookEvent({ event, payload, libraryPath, cwd, peerGuard
       }
       noteRecall(device, event, directory, outcome.reasonCode, host, observation, versions);
       if (name === "SubagentStart") {
-        const pointer = navigationPointerAnswer(host, name);
+        const pointer = navigationPointerAnswer(host, name, await needsNavigationPointer(libraryPath, projectRoot, projectId, directory));
         return `${hookProtocolOutput(host, name, [...pointer.lines, ...(outcome.answer?.lines ?? [])])}\n`;
       }
       if (outcome.answer === null) return host === "antigravity" ? "{}\n" : null;
       return `${outcome.answer.output}\n`;
     }
     case "SessionStart":
-      return `${navigationPointerAnswer(host, name).output}\n`;
+      return `${navigationPointerAnswer(host, name, await needsNavigationPointer(libraryPath, projectRoot, projectId, payloadDirectory(cwd, body))).output}\n`;
     default:
       return host === "antigravity" ? "{}\n" : null;
   }

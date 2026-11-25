@@ -230,10 +230,6 @@ export function antigravityHookEventName(raw: string): AntigravityMappedHookEven
   return null;
 }
 
-function expectedEvents(navigation: "always" | "declined" | null | undefined): readonly AntigravityHookEvent[] {
-  return navigation === "declined" ? ["SessionStart", "PreInvocation", "PreToolUse"] : ["PreInvocation", "PreToolUse"];
-}
-
 function wantedAntigravityGroup(request: AntigravityHooksRequest): AntigravityOwnedHookSpec | null {
   if (request.install === false) return null;
   const launcher = hookLauncherPath(request.deviceHome, request.platform);
@@ -256,20 +252,15 @@ function wantedAntigravityGroup(request: AntigravityHooksRequest): AntigravityOw
       ],
     },
   ];
-  if (request.navigation === "declined") {
-    return {
-      SessionStart: [
-        {
-          type: "command",
-          command: hostHookCommand(launcher, "SessionStart", request.userHome, request.platform, "antigravity"),
-          timeout: ANTIGRAVITY_HOOK_TIMEOUT,
-        },
-      ],
-      PreInvocation: preInvocation,
-      PreToolUse: preToolUse,
-    };
-  }
-  return { PreInvocation: preInvocation, PreToolUse: preToolUse };
+  return {
+    SessionStart: [{
+      type: "command",
+      command: hostHookCommand(launcher, "SessionStart", request.userHome, request.platform, "antigravity"),
+      timeout: ANTIGRAVITY_HOOK_TIMEOUT,
+    }],
+    PreInvocation: preInvocation,
+    PreToolUse: preToolUse,
+  };
 }
 
 const ANTIGRAVITY_COMMAND_PREFIX = "node -e \"/*einzbern-hook*/const p=require('node:path');const d=p.resolve(process.env.EINZBERN_HOME||p.resolve(require('node:os').homedir(),'";
@@ -403,7 +394,7 @@ export function mergeAntigravityHookDocument(
   return {
     document: next,
     removed: hadOwned ? [ANTIGRAVITY_OWNED_HOOK_GROUP] : [],
-    ownedEvents: wanted === null ? [] : expectedEvents(request.navigation),
+    ownedEvents: wanted === null ? [] : ["SessionStart", "PreInvocation", "PreToolUse"],
     preservedGroupCount,
   };
 }

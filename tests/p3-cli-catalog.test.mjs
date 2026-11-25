@@ -485,7 +485,7 @@ test("STORY-480/605: setup writes and takes the wizard's flags; doctor reads and
 // TCRN-CROSS-STORY-541 (TCRN-CROSS-SUB-510): twelve, with project-bindings-set and -remove,
 // work-gate-release and work-release. INIT-056 adds the engine-wide policy writer as the thirteenth.
 test("526 GWT5, 541 GWT1, INIT-056: the closed decided-in roster carries its documented valueShape", () => {
-  const optionalWrites = ["dot-extension-source-set", "config-restore-apply", "config-restore-plan", "gates-config-remove", "gates-config-set", "project-bindings-remove", "project-bindings-set", "rule-disable", "rule-enable", "settings-remove", "settings-set", "variable-remove", "variable-set", "work-gate-release", "work-release"];
+  const optionalWrites = ["dot-extension-source-set", "config-restore-apply", "config-restore-plan", "gates-config-remove", "gates-config-set", "project-bindings-remove", "project-bindings-set", "rule-create", "rule-disable", "rule-enable", "rule-update", "settings-remove", "settings-set", "variable-remove", "variable-set", "work-gate-release", "work-release"];
   const writes = ["engine-model-policy-save", "engine-model-policy-set", ...optionalWrites].sort();
   const shaped = COMMAND_CATALOG.flatMap((entry) => entry.flags.filter((flag) => flag.name === "decided-in" && flag.valueShape !== undefined).map((flag) => [entry.name, flag.name]));
   assert.deepEqual(shaped, writes.map((name) => [name, "decided-in"]));
@@ -596,8 +596,8 @@ test("529 GWT2 (TCRN-CROSS-SUB-480): every write that takes the library write lo
   const lockWrites = ["dot-extension-source-set", "config-backup-create", "config-backup-prepare", "config-backup-commit", "config-backup-resume", "config-backup-retire", "config-restore-apply", "shared-submit-advisory-write", "agents-render", "artifact-put", "chain-declare", "gates-config-propose", "gates-config-remove", "gates-config-set",
     "knowledge-article-create", "knowledge-article-refresh", "knowledge-batch", "knowledge-bodies-migrate", "knowledge-capture",
     "knowledge-create", "knowledge-init", "knowledge-rebase", "knowledge-recover", "knowledge-remove", "knowledge-reverify",
-    "minutes-record", "project-bindings-remove", "project-bindings-set", "project-create", "project-delete", "project-update",
-    "proposal-approve", "proposal-reject", "recover", "rule-disable", "rule-enable", "rule-propose", "rule-resolve", "settings-remove", "settings-set", "template-admit",
+    "minutes-record", "minutes-supplement-batch", "project-bindings-remove", "project-bindings-set", "project-create", "project-delete", "project-update",
+    "proposal-approve", "proposal-reject", "recover", "rule-create", "rule-disable", "rule-enable", "rule-propose", "rule-resolve", "rule-update", "settings-remove", "settings-set", "template-admit",
     "variable-remove", "variable-set", "work-annotate", "work-batch", "work-claim", "work-create", "work-delete",
     "work-gate-release", "work-release", "work-transition", "workspace-relocate"];
   const carriers = COMMAND_CATALOG.filter((entry) => entry.flags.some((flag) => flag.name === "timeout-ms")).map((entry) => entry.name);

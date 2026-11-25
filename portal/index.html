@@ -4935,6 +4935,10 @@ const BOOT = __PORTAL_BOOT__;
     const current = entry.deviceValue ?? entry.currentValue ?? "";
     // Named `name`, not `label`: the design proof pins the project controls' own markup by its text.
     const name = settingLabel(settingCopyKey(entry.key));
+    if (entry.controlType === "boolean") {
+      const enabled = (entry.currentValue ?? entry.defaultValue) === "true";
+      return `<label class="tcrn-switch"><input class="tcrn-switch__control" type="checkbox" role="switch" data-machine-control="${esc(entry.key)}" data-cli-action="machine-settings-set" aria-label="${esc(name)}" ${enabled ? "checked" : ""}><span class="tcrn-switch__label">${esc(enabled ? t("config.enabled") : t("config.disabled"))}</span></label>`;
+    }
     if (entry.controlType === "number") return `<label class="tcrn-field"><span class="tcrn-sr-only">${esc(name)}</span><input class="tcrn-input tcrn-number-input" type="number" min="${esc(entry.min)}" ${entry.max === undefined ? "" : `max="${esc(entry.max)}"`} step="1" value="${esc(current)}" placeholder="${esc(entry.defaultValue ?? "")}" data-machine-control="${esc(entry.key)}" data-number-input-component="NumberInput" data-number-input="true" data-number-input-semantic="numeric-entry" data-number-input-visibility="full-value" data-cli-action="machine-settings-set" aria-label="${esc(name)}"></label>`;
     if (entry.controlType === "text") return `<label class="tcrn-field"><span class="tcrn-sr-only">${esc(name)}</span><input class="tcrn-input" value="${esc(current)}" placeholder="${esc(t("config.unset"))}" aria-label="${esc(name)}" data-machine-control="${esc(entry.key)}" data-cli-action="machine-settings-set"></label>`;
     const values = ["", ...deviceOptions(entry)];
@@ -5174,7 +5178,9 @@ const BOOT = __PORTAL_BOOT__;
     return `<div class="tcrn-setting-row" data-setting-row="${esc(entry.key)}" data-setting-shape="compatibility" data-model-policy-legacy="true">${settingRowLabel(entry, settingDescription(entry.key))}<div class="tcrn-setting-row__control"><span class="tcrn-field__hint" data-engine-policy-source="${esc(state.modelPolicyHost)}">${esc(t("modelPolicy.legacySource", { source: stateText }))}</span><pre data-model-policy-legacy-value>${esc(typeof entry.currentValue === "string" ? entry.currentValue : JSON.stringify(entry.currentValue ?? null))}</pre><button type="button" class="tcrn-button tcrn-button--secondary tcrn-button--md" data-model-policy-link="engine-model-policy">${esc(t("modelPolicy.openEditor"))}</button></div><div class="tcrn-setting-row__tools"></div></div>`;
   };
   const settingRow = (entry) => entry.layer === "device" ? deviceSettingRow(entry) : (entry.key.startsWith("models.") || entry.key.startsWith("quota.") || entry.key === "execution.maxConcurrentSubagents") ? modelPolicyCompatibilityRow(entry) : entry.shape === "collection" ? collectionSettingRow(entry) : projectSettingRow(entry);
-  const wireMachineControls = (root) => $$('[data-machine-control]', root).forEach((control) => control.addEventListener("change", () => saveMachineSetting(control.dataset.machineControl, control.value)));
+  const wireMachineControls = (root) => $$('[data-machine-control]', root).forEach((control) => control.addEventListener("change", () => saveMachineSetting(
+    control.dataset.machineControl, control.type === "checkbox" ? String(control.checked) : control.value,
+  )));
   const renderModelPageSettings = () => {
     const root = $("#device-model-settings");
     if (!root) return;

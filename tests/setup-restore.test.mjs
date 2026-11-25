@@ -339,7 +339,7 @@ test("480-R3: each of the other seven checks stops the restore with its own reas
   // 8 sections: the navigation section was changed by hand after the library recorded it.
   const agents = join(f.project, "AGENTS.md");
   const original = await readFile(agents, "utf8");
-  await writeFile(agents, original.replace("This workspace uses Einzbern. Load and follow the Mana Orchestrate skill for applicable work.", "This project is managed by hand."));
+  await writeFile(agents, original.replace("This project is managed by Einzbern.", "This project is managed by hand."));
   const diverged = await refusedWithoutWrites({ restore: f.library }, "sections", "MANAGED_SECTION_PENDING");
   assert.equal(diverged.details.section, "AGENTS.md#agents");
   await writeFile(agents, original);

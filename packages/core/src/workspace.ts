@@ -196,7 +196,7 @@ import type { NormalizedWorkRelations, WorkRelationsInput } from "./work-relatio
 // TCRN-CROSS-STORY-525 (TCRN-CROSS-SUB-446): used only inside functions, like work-relations.js above:
 // work-gates.ts reaches this module again through gates-config.js and config-records.js.
 import { WORK_GATES_KINDS, normalizedWorkGates, workGatesShapeProblem } from "./work-gates.js";
-import { projectLineage, workspaceSettingIdentity, assertScopedSettingWriteConsistent } from "./project-scope.js";
+import { projectLineage, workspaceSettingIdentity, assertScopedSettingWriteConsistent, isLibraryAgentsSetting, legacyLibraryAgentsSettings } from "./project-scope.js";
 import { ConfigRecordError, checkConfigRecordValue, configRecordId, configRecordIdentity, isConfigRecordCollection, isConfigRecordOperation, readConfigRecordEvent, sortConfigRecords } from "./config-records.js";
 import { activeLease, assertProjectLeasesAdmitDelete, assertWorkLeaseAdmits, leaseRemovalDelta, staleProjectLeaseRemovalDeltas, workLease } from "./work-lease.js";
 import type { WorkLease } from "./work-lease.js";
@@ -5860,6 +5860,7 @@ export async function setWorkspaceSetting(workspaceRoot: string, input: {
   readonly value: string;
 } & WorkspaceMutationOptions): Promise<WorkspaceState> {
   assertProjectSettingKey(input.key);
+  if (isLibraryAgentsSetting(input.key)) return changeLibraryAgentsSetting(workspaceRoot, input, input.value);
   let value = input.value;
   if (input.key === "workspace.generatedArtifactsPath" && isAbsolute(value)) {
     if (!input.configurationProjectId) throw new SettingsError("SETTINGS_VALUE_INVALID", "an absolute artifact directory requires an explicit project scope");
@@ -5921,18 +5922,54 @@ export async function removeWorkspaceSetting(workspaceRoot: string, input: {
   readonly key: string;
 } & WorkspaceMutationOptions): Promise<WorkspaceState> {
   assertProjectSettingKey(input.key);
+  if (isLibraryAgentsSetting(input.key)) return changeLibraryAgentsSetting(workspaceRoot, input, null);
   return appendEvent(workspaceRoot, (state) => {
       const current = state.settings.find((record) => record.key === input.key && record.projectId === input.configurationProjectId);
       if (current === undefined) fail("WORKSPACE_INPUT_INVALID", `setting ${input.key} is not set`);
       assertScopedSettingWriteConsistent(state, input.key, null, input.configurationProjectId);
       if (input.key === "engine.requiredVersion") assertContentFloorRetained(state, null);
-      return {
-        payload: buildEventPayload("settings.removed", { key: input.key, updatedAt: input.occurredAt, ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }) } as unknown as JsonValue, undefined, writeAuthorizationExtras(input.authorization)),
-        projects: state.projects,
-        work: state.work,
-        settings: sortWorkspaceSettings(state.settings.filter((entry) => entry.key !== input.key || entry.projectId !== input.configurationProjectId)),
-      };
+      return settingRemovalDelta(state, input, input.configurationProjectId);
     }, input, (root, committed) => projectConfiguration(root, committed));
+}
+
+function settingRemovalDelta(state: WorkspaceState, input: WorkspaceMutationOptions & { readonly key: string }, projectId?: string): MutationDelta {
+  return {
+    payload: buildEventPayload("settings.removed", { key: input.key, updatedAt: input.occurredAt, ...(projectId === undefined ? {} : { projectId }) } as unknown as JsonValue, undefined, writeAuthorizationExtras(input.authorization)),
+    projects: state.projects,
+    work: state.work,
+    settings: sortWorkspaceSettings(state.settings.filter(entry => entry.key !== input.key || entry.projectId !== projectId)),
+  };
+}
+
+/** Move the active legacy rows out of the way when this library first writes or resets the setting. */
+async function changeLibraryAgentsSetting(workspaceRoot: string, input: WorkspaceMutationOptions & { readonly key: string }, value: string | null): Promise<WorkspaceState> {
+  return appendPlannedWrite(workspaceRoot, input, {
+    plan: async (root, state) => {
+      assertScopedSettingWriteConsistent(state, input.key, value, input.configurationProjectId);
+      const current = state.settings.find(record => record.key === input.key && record.projectId === undefined);
+      const legacy = legacyLibraryAgentsSettings(state, input.key);
+      const deltas = legacy.map(record => (next: WorkspaceState) => settingRemovalDelta(next, input, record.projectId));
+      if (value === null) {
+        if (current === undefined && legacy.length === 0) fail("WORKSPACE_INPUT_INVALID", `setting ${input.key} is not set`);
+        if (current !== undefined) deltas.push(next => settingRemovalDelta(next, input));
+      } else {
+        const record = createWorkspaceSettingRecord(input.key, value, (current?.revision ?? 0) + 1, input.occurredAt, root);
+        deltas.push(next => ({
+          payload: buildEventPayload("settings.updated", record as unknown as JsonValue, undefined, writeAuthorizationExtras(input.authorization)),
+          projects: next.projects,
+          work: next.work,
+          settings: sortWorkspaceSettings([...next.settings.filter(entry => entry.key !== record.key || entry.projectId !== undefined), record]),
+        }));
+      }
+      return { deltas, plan: null };
+    },
+    unchanged: async () => true,
+    write: async (root, _state, _plan, append) => {
+      const committed = await append();
+      await projectConfiguration(root, committed);
+      return committed;
+    },
+  });
 }
 
 /**

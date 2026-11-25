@@ -154,7 +154,7 @@ test("INIT091-A2: Antigravity hooks merge only the einzbern group, preserve othe
   assert.equal(relocated.changed, true);
   await applyAntigravityHookPlan(relocated, { at: "2026-11-11T00:01:00Z", deviceHome: f.deviceHome });
   const refreshed = JSON.parse(await readFile(hookFile, "utf8"));
-  assert.equal(refreshed[ANTIGRAVITY_OWNED_HOOK_GROUP].SessionStart, undefined);
+  assert.equal(refreshed[ANTIGRAVITY_OWNED_HOOK_GROUP].SessionStart.length, 1);
   assert.equal(
     refreshed[ANTIGRAVITY_OWNED_HOOK_GROUP].PreInvocation[0].command,
     hostHookCommand(hookLauncherPath(relocatedDevice, process.platform), "UserPromptSubmit", f.home, process.platform, "antigravity"),
@@ -322,7 +322,7 @@ test("INIT091-A2: multi-project repair preserves global hooks for sibling projec
 
   // Project B relies on global hooks.json.
   await repair(projectB, "2026-11-11T00:02:00Z");
-  assert.equal((await inspectAntigravityHookScope(configRoot, "user")).count, 2);
+  assert.equal((await inspectAntigravityHookScope(configRoot, "user")).count, 3);
   assert.equal((await inspectAntigravityHookScope(projectB, "project")).count, 0);
 
   // Project A has an unmanaged local group plus an unedited owned local "einzbern" group.
@@ -334,7 +334,7 @@ test("INIT091-A2: multi-project repair preserves global hooks for sibling projec
   const aFirstPlans = await repair(projectA, "2026-11-11T00:03:00Z");
   assert.equal(aFirstPlans[0].changed, false, "global hooks remain intact when repairing A");
   assert.deepEqual(aFirstPlans[1].removed, [ANTIGRAVITY_OWNED_HOOK_GROUP], "redundant unedited local einzbern group is retired");
-  assert.equal((await inspectAntigravityHookScope(configRoot, "user")).count, 2);
+  assert.equal((await inspectAntigravityHookScope(configRoot, "user")).count, 3);
   assert.equal((await inspectAntigravityHookScope(projectA, "project")).count, 0);
   assert.equal((await inspectAntigravityHookScope(projectB, "project")).count, 0);
 
@@ -348,7 +348,7 @@ test("INIT091-A2: multi-project repair preserves global hooks for sibling projec
   assert.equal(bSecondPlans.every((plan) => !plan.changed), true);
   const aSecondPlans = await repair(projectA, "2026-11-11T00:03:20Z");
   assert.equal(aSecondPlans.every((plan) => !plan.changed), true);
-  assert.equal((await inspectAntigravityHookScope(configRoot, "user")).count, 2);
+  assert.equal((await inspectAntigravityHookScope(configRoot, "user")).count, 3);
   assert.equal((await inspectAntigravityHookScope(projectA, "project")).count, 0);
   assert.equal((await inspectAntigravityHookScope(projectB, "project")).count, 0);
 
@@ -356,7 +356,7 @@ test("INIT091-A2: multi-project repair preserves global hooks for sibling projec
     const docHost = (await runDoctor({ projectRoot, home: f.home, deviceHome: f.deviceHome, platform: process.platform, env: { ...process.env, ANTIGRAVITY_CONFIG_DIR: configRoot } }))
       .find((entry) => entry.check === "hooks-present")
       .detail.hosts.find((host) => host.host === "antigravity");
-    assert.equal(docHost.hooks, 2);
+    assert.equal(docHost.hooks, 3);
     assert.deepEqual(docHost.causes, []);
   }
 });
@@ -385,7 +385,7 @@ test("INIT091-A2: fresh/uninstall wiring honors ANTIGRAVITY_CONFIG_DIR, manages 
     .detail.hosts.find((host) => host.host === "antigravity");
   assert.equal(docSelected.selection, "selected");
   assert.equal(docSelected.applicability, "selected");
-  assert.equal(docSelected.hooks, 2);
+  assert.equal(docSelected.hooks, 3);
   assert.deepEqual(docSelected.causes, []);
 
   // Skill copies lifecycle for Antigravity.

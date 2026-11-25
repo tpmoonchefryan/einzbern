@@ -279,7 +279,7 @@ const libraryName = (library) => library.name ?? null;
 const settingsCatalog = (library = currentLibrary()) => cli(["settings-catalog", "--workspace", library.libraryPath, ...scopeArguments(library)]);
 const vocabulary = () => cli(["vocabulary"]);
 const commands = () => cli(["commands"]);
-const ruleListing = () => cliResult(["rule-list", "--workspace", currentLibrary().libraryPath, ...scopeArguments()]);
+const ruleListing = (library = currentLibrary()) => cliResult(["rule-list", "--workspace", library.libraryPath]);
 
 function readInstant() {
   return new Date().toISOString();
@@ -573,13 +573,18 @@ async function governedWrite(build, environment = {}, selected = currentLibrary(
 
 async function projectWrite(build, environment = {}, selected = currentLibrary(), runtimeRule = false) {
   return targetWrite(selected, async () => {
-    const coordinationRule = runtimeRule && selected.chain?.role === "coordination";
-    // A coordination chain's runtime rule is written through its registration, by the same rule as
-    // a project's prose (TCRN-CROSS-INIT-053 R46 I06).
-    const binding = coordinationRule ? registrationBinding(selected) : proseBinding(selected);
+    if (runtimeRule) {
+      const output = await ruleListing(selected);
+      if (!output.ok) return output;
+      const projectPath = output.body.projectPath ?? (selected.chain?.role === "coordination" ? selected.projectPath : null);
+      if (projectPath === null) return { ok: false, body: bindingRefusal(UNCONFIGURED_BINDING, selected) };
+      if (await realpath(projectPath) !== projectPath) throw startupError("PORTAL_PROSE_ROOT_UNSAFE", { projectPath });
+      const common = ["--project", projectPath, "--at", nextOccurredAt(), "--actor", ACTOR];
+      return cliResult(build(common), environment);
+    }
+    const binding = proseBinding(selected);
     if (binding.entry === null) return { ok: false, body: bindingRefusal(binding, selected) };
-    const bound = binding.entry;
-    const projectPath = coordinationRule ? bound.projectPath : proseRootFor(bound);
+    const projectPath = proseRootFor(binding.entry);
     if (await realpath(projectPath) !== projectPath) throw startupError("PORTAL_PROSE_ROOT_UNSAFE", { projectPath });
     const common = ["--project", projectPath, "--at", nextOccurredAt(), "--actor", ACTOR, ...scopeArguments(selected)];
     return cliResult(build(common), environment);
@@ -587,8 +592,13 @@ async function projectWrite(build, environment = {}, selected = currentLibrary()
 }
 
 // A render with no single output binding stays pending: the write it follows still stands.
-function renderManagedAgents(library = currentLibrary()) {
-  const binding = proseBinding(library);
+async function renderManagedAgents(library = currentLibrary(), libraryRule = false) {
+  if (libraryRule) {
+    const output = await ruleListing(library);
+    if (!output.ok) return output;
+    if (output.body.projectPath !== null) return projectWrite((common) => ["agents-render", ...common], {}, library, true);
+  }
+  const binding = libraryRule ? UNCONFIGURED_BINDING : proseBinding(library);
   if (binding.entry !== null) return projectWrite((common) => ["agents-render", ...common], {}, library);
   const ambiguous = binding.status === "ambiguous";
   return Promise.resolve({ ok: true, body: { ok: true, reasonCode: ambiguous ? AMBIGUOUS_BINDING : "PORTAL_PROJECT_BINDING_UNCONFIGURED", outputBindingStatus: binding.status, pending: true, projectId: library.configurationProjectId ?? null, ...(ambiguous ? { candidates: binding.candidates } : {}) } });
@@ -1298,7 +1308,7 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
         "--action", action,
         ...(body.force === true ? ["--force", "true"] : []),
         ...common,
-      ]);
+      ], ATELIER_SURFACE, currentLibrary(), true);
       const payload = { ...result.body, ok: result.ok };
       if (result.ok) {
         const latest = await rulesProjection();
@@ -1310,10 +1320,16 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
     }
     const ruleRoute = /^\/api\/rules\/([^/]+)$/u.exec(pathname);
     if (request.method === "POST" && ruleRoute !== null) {
+      const selected = currentLibrary();
       const body = await readJsonBody(request);
       const id = decodeURIComponent(ruleRoute[1]);
       const action = String(body.action ?? "");
-      if (!["enable", "disable"].includes(action)) {
+      if (!["create", "update", "enable", "disable"].includes(action)) {
+        send(response, 400, { ok: false, reasonCode: "PORTAL_RULE_ACTION_INVALID", id, action });
+        return;
+      }
+      const editsDefinition = action === "create" || action === "update";
+      if (editsDefinition && [body.title, body.body].some(value => value !== undefined && typeof value !== "string")) {
         send(response, 400, { ok: false, reasonCode: "PORTAL_RULE_ACTION_INVALID", id, action });
         return;
       }
@@ -1321,12 +1337,14 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       // engine places the rule's section by it and keeps it through a later disable. Both run for
       // Atelier (TCRN-CROSS-SUB-422).
       const result = await projectWrite((common) => [
-        action === "enable" ? "rule-enable" : "rule-disable",
+        `rule-${action}`,
         "--id", id,
         ...(action === "disable" && body.force === true ? ["--force", "true"] : []),
-        ...(action === "enable" ? orderArguments(body.order) : []),
+        ...(action === "disable" ? [] : orderArguments(body.order)),
+        ...(editsDefinition && body.title !== undefined ? [`--title=${body.title}`] : []),
+        ...(editsDefinition && body.body !== undefined ? [`--body=${body.body}`] : []),
         ...common,
-      ], ATELIER_SURFACE, currentLibrary(), true);
+      ], ATELIER_SURFACE, selected, true);
       const payload = { ...result.body, ok: result.ok };
       if (result.ok) {
         const latest = await rulesProjection();
@@ -1464,7 +1482,8 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       const declaredScope = (await settingsCatalog(library)).settings.find((entry) => entry.key === key)?.scope;
       const writeTarget = declaredScope === "library" ? { ...library, configurationProjectId: null } : library;
       const result = reset ? await removeSetting(key, writeTarget) : await writeSetting(key, value, writeTarget);
-      const render = result.ok && rendersSystemVariables(key, library) ? await renderManagedAgents(library) : null;
+      const libraryRule = key === "agents.sharedNavigation" || key === "agents.generation";
+      const render = result.ok && (libraryRule || rendersSystemVariables(key, library)) ? await renderManagedAgents(library, libraryRule) : null;
       const collection = COLLECTION_KEYS.includes(key);
       const catalog = result.ok || collection ? await settingsCatalog(library) : null;
       const readback = result.ok ? catalog?.settings.find((entry) => entry.key === key) ?? null : null;

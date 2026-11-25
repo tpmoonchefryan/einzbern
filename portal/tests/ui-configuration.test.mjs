@@ -695,7 +695,7 @@ if (!MUTATION) test("INIT-056 settings expose central metadata and new controls 
     for (const locale of ["en", "zh-CN", "ja", "ko", "fr"]) {
       document.querySelector(`[data-locale-option="${locale}"]`).click();
       for (const [group, key, device, scope] of [
-        ["general", "agents.generation", false, "project"], ["general", "agents.sharedNavigation", false, "project"],
+        ["general", "agents.generation", false, "library"],
         ["storage", "paths.artifacts", true, "device"], ["storage", "paths.knowledgeArticles", true, "device"],
       ]) {
         document.querySelector(`[data-setting-group="${group}"]`).click();
@@ -1011,7 +1011,8 @@ if (!MUTATION) {
       const project = (await cli(["settings-catalog", "--workspace", page.workspace], page.deviceEnv)).settings;
       const device = (await cli(["machine-settings-catalog"], { ...page.deviceEnv, HOME: page.fixture.home, USERPROFILE: page.fixture.home })).settings;
       assert.ok(device.some(entry => entry.key === "agents.projectRoot"), "the compatibility key remains in the machine catalog");
-      const rows = [...project.filter((entry) => entry.key !== "design.consumedVersion"), ...device.filter(entry => entry.key !== "agents.projectRoot").map(entry => ({ ...entry, layer: "device" }))];
+      const rows = [...project.filter(entry => !["design.consumedVersion", "agents.sharedNavigation"].includes(entry.key)),
+        ...device.filter(entry => !["agents.projectRoot", "agents.navigation"].includes(entry.key)).map(entry => ({ ...entry, layer: "device" }))];
       assert.equal(page.document.querySelector('[data-machine-row="agents.projectRoot"]'), null, "manage the library's root through setup");
       const settingsRows = rows.filter((row) => row.group !== "models");
       for (const row of rows) {

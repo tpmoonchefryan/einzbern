@@ -165,7 +165,7 @@ test("INIT085-B2: global/project hook scopes avoid duplicate owned execution and
   const projectOwned = mergeKiroHookDocument(projectCurrent, request(f.project, { home: f.home, deviceHome: f.deviceHome, scope: "project", navigation: "declined" })).document;
   await writeFile(join(f.project, KIRO_HOOKS_FILE), `${JSON.stringify(projectOwned, null, 2)}\n`);
   const scopes = await planKiroHookScopes({ home: f.home, kiroHome, projectRoot: f.project, deviceHome: f.deviceHome, navigation: "declined" });
-  assert.equal(scopes[0].removed.length, 2, "global owned hooks are retired when a workspace already owns the integration");
+  assert.equal(scopes[0].removed.length, 3, "global owned hooks are retired when a workspace already owns the integration");
   assert.equal(scopes[1].changed, false, "an already current workspace keeps its exact owned hooks");
   await applyKiroHookPlan(scopes[0], { at: "2026-11-02T00:01:00Z", deviceHome: f.deviceHome });
   await applyKiroHookPlan(scopes[1], { at: "2026-11-02T00:01:00Z", deviceHome: f.deviceHome });
@@ -199,7 +199,7 @@ test("INIT085-B2: fresh and uninstall wiring uses the selected KIRO_HOME and rem
     home: f.home, projectRoot: f.project, deviceHome: f.deviceHome, at: "2026-11-02T00:01:00Z", navigation: null, install: true,
   });
   const installed = JSON.parse(await readFile(hookPath, "utf8"));
-  assert.equal(installed.hooks.filter(hook => hook.name.startsWith("einzbern-")).length, 2);
+  assert.equal(installed.hooks.filter(hook => hook.name.startsWith("einzbern-")).length, 3);
   installed.hooks.push({ name: "user-owned", trigger: "Stop", action: { type: "agent", prompt: "keep me" } });
   await writeFile(hookPath, `${JSON.stringify(installed, null, 2)}\n`);
 
@@ -267,7 +267,7 @@ test("INIT085-B2: doctor reports Kiro applicability as not-selected or selected 
   await writeFile(projectHooksPath, `${JSON.stringify(installed, null, 2)}\n`);
   const third = (await run()).find(check => check.check === "hooks-present");
   const thirdKiro = third.detail.hosts.find(host => host.host === "kiro");
-  assert.equal(thirdKiro.hooks, 2, "two distinct owned hooks in the active file are not duplicates");
+  assert.equal(thirdKiro.hooks, 3, "the three distinct owned hooks in the active file are not duplicates");
   assert.deepEqual(thirdKiro.causes, []);
   installed.hooks.find(hook => hook.name === "einzbern-read-guard").enabled = false;
   await writeFile(projectHooksPath, `${JSON.stringify(installed, null, 2)}\n`);

@@ -512,7 +512,7 @@ test("489 (TCRN-CROSS-SUB-366, problems #4): a second device restores the migrat
   process.env.EINZBERN_HOME = m.device;
   try {
     const binding = (await readRegistry(m.device)).entries.find((entry) => entry.projectPath === m.container);
-    await setWorkspaceSetting(library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at(), actorId: SETUP_ACTOR, configurationProjectId: binding.projectId });
+    await setWorkspaceSetting(library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at(), actorId: SETUP_ACTOR });
   } finally {
     if (previousDevice === undefined) delete process.env.EINZBERN_HOME;
     else process.env.EINZBERN_HOME = previousDevice;

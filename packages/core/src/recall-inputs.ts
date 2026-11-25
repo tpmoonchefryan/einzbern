@@ -438,7 +438,7 @@ export async function readRecallCards(workspaceRoot: string, options: RecallCard
  * a record with none not indexed, and "all" every decision of every record.
  */
 export function recallInputsFromState(
-  state: Pick<WorkspaceState, "work" | "minutes" | "conferenceMinutes" | "conferences">,
+  state: Pick<WorkspaceState, "work" | "minutes" | "conferenceMinutes" | "conferences"> & Partial<Pick<WorkspaceState, "minutesSupplements">>,
   cards: readonly RecallKnowledgeInput[],
   options: RecallInputOptions = {},
 ): RecallInputs {
@@ -447,6 +447,7 @@ export function recallInputsFromState(
     minutes: state.minutes.filter(entry => entry.projectId === options.projectId),
     conferenceMinutes: state.conferenceMinutes.filter(entry => entry.projectId === options.projectId),
     conferences: state.conferences.filter(entry => entry.projectId === options.projectId),
+    ...(state.minutesSupplements === undefined ? {} : { minutesSupplements: state.minutesSupplements.filter(entry => entry.projectId === options.projectId) }),
   };
   const byId = new Map(state.work.map((record) => [record.id, record]));
   const ledger = decisionLedger(state);

@@ -156,6 +156,7 @@ import {
   readAgentsProjectRootSelection,
   readRegistry,
   registerLibrary,
+  registeredAgentsProjectRoots,
   setAgentsProjectRoots,
   validateAgentsProjectRoot,
   resolveLibrary,
@@ -1774,6 +1775,7 @@ function ruleStatusJson(status: RuleStatus): JsonValue {
     fileVersion: status.fileVersion,
     section: status.section,
     state: status.state,
+    ...(status.custom === true ? { custom: true, title: status.title!, body: status.body! } : {}),
     ...(status.order === undefined ? {} : { order: status.order }),
   };
 }
@@ -1782,7 +1784,7 @@ function ruleStatusJson(status: RuleStatus): JsonValue {
 // section, and where AGENTS.md was backed up before it was replaced.
 function writeRuleChange(io: CliIo, project: { readonly projectRoot: string; readonly libraryPath: string }, change: RuleChange): void {
   io.write(canonicalJson({
-    reasonCode: change.action === "enable" ? "RULE_ENABLED" : "RULE_DISABLED",
+    reasonCode: { create: "RULE_CREATED", update: "RULE_UPDATED", enable: "RULE_ENABLED", disable: "RULE_DISABLED" }[change.action],
     workspaceId: change.state.metadata.workspaceId,
     version: change.state.version,
     headEventHash: change.state.headEventHash,
@@ -1957,6 +1959,8 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   { name: "minutes-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "work-id", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }, { name: "query", required: false, valueKind: "string" }] },
   { name: "minutes-record", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project-id", required: true, valueKind: "string" }, { name: "title", required: true, valueKind: "string" }, { name: "summary", required: true, valueKind: "string" }, ...exactlyOneCatalogFlags("minutes-record"), { name: "decided-by", required: false, valueKind: "list" }, { name: "work-ids", required: false, valueKind: "list" }, { name: "external-key", required: false, valueKind: "string" }, { name: "supersedes", required: false, valueKind: "list" }, { name: "withdraws", required: false, valueKind: "list" }, { name: "coexists", required: false, valueKind: "list" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "minutes-show", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, ...exactlyOneCatalogFlags("minutes-show"), { name: "status", required: false, valueKind: "string" }] },
+  { name: "minutes-supplement-batch", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "from-file", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "minutes-supplement-inventory", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }] },
   { name: "project-bindings-remove", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: true, valueKind: "string" }, { name: "key", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "project-bindings-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project-id", required: true, valueKind: "string" }, { name: "key", required: true, valueKind: "string" }, { name: "value", required: true, valueKind: "json" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "project-context", availability: "cli", mutates: false, flags: [{ name: "reference", required: true, valueKind: "json" }] },
@@ -1973,9 +1977,11 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   // TCRN-CROSS-STORY-483 R2 (with agents-render and rule-resolve): the Command Spell rules of the
   // project the registry resolves from --project (the current directory when left out).
   // rule-disable takes out a section the user changed only with --force.
+  { name: "rule-create", availability: "cli", mutates: true, flags: [{ name: "id", required: true, valueKind: "string" }, { name: "title", required: true, valueKind: "string" }, { name: "body", required: true, valueKind: "string" }, { name: "order", required: false, valueKind: "integer" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "rule-disable", availability: "cli", mutates: true, flags: [{ name: "id", required: true, valueKind: "string" }, { name: "force", required: false, valueKind: "boolean" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "rule-enable", availability: "cli", mutates: true, flags: [{ name: "id", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "order", required: false, valueKind: "integer" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   { name: "rule-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "status", required: false, valueKind: "string" }] },
+  { name: "rule-update", availability: "cli", mutates: true, flags: [{ name: "id", required: true, valueKind: "string" }, { name: "title", required: false, valueKind: "string" }, { name: "body", required: false, valueKind: "string" }, { name: "order", required: false, valueKind: "integer" }, { name: "at", required: true, valueKind: "instant" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }, { name: "decided-in", required: false, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   // TCRN-CROSS-STORY-527 (MIN-257 D6, Q6; TCRN-CROSS-SUB-478): a model proposes enabling (--action
   // enable, the default, with an optional --order) or disabling a rule; the proposal waits for Atelier
   // and enables nothing. proposal-approve and proposal-reject settle a proposal by its key
@@ -2614,7 +2620,11 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     otherRequired.every((name) => hasFlag(rest, name))) {
     const resolved = await resolveLibrary(process.cwd(), undefined, { workspaceFlag: true });
     const acceptsProject = COMMAND_CATALOG.find(entry => entry.name === command)?.flags.some(flag => flag.name === "project-id");
-    rest = ["--workspace", resolved.libraryPath, ...(acceptsProject && resolved.entry.projectId !== undefined && !hasFlag(rest, "project-id") ? ["--project-id", resolved.entry.projectId] : []), ...rest];
+    const keyFlag = command === "settings-set" || command === "settings-remove"
+      ? rest.findIndex(token => token === "--key" || token.startsWith("--key=")) : -1;
+    const settingKey = keyFlag === -1 ? undefined : rest[keyFlag] === "--key" ? rest[keyFlag + 1] : rest[keyFlag]!.slice("--key=".length);
+    const librarySetting = SETTINGS_CATALOG.some(entry => entry.key === settingKey && entry.scope === "library");
+    rest = ["--workspace", resolved.libraryPath, ...(acceptsProject && !librarySetting && resolved.entry.projectId !== undefined && !hasFlag(rest, "project-id") ? ["--project-id", resolved.entry.projectId] : []), ...rest];
   }
   lastWrittenIds = null;
   // requiredShared is the mandatory pair every workspace-event mutation verb demands
@@ -2975,15 +2985,13 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       io.write(canonicalJson(paginate(state, "proposal", listProposals(native, { ...(projectId === undefined ? {} : { projectId }), kind: "rule", status }), values)));
       return;
     }
-    const mapped = (await readRegistry()).entries.filter((entry) => entry.libraryId === state.metadata.workspaceId && (chainIdentity(native)?.role === "coordination" || entry.projectId === projectId));
-    // TCRN-CROSS-STORY-540 (TCRN-CROSS-SUB-505): a coordination library's rules are read against the
-    // AGENTS.md of the project root this device registered for it, with no project as it is
-    // registered, and against no file while it has no such root (managedOutputBinding).
-    const coordination = chainIdentity(native)?.role === "coordination";
-    const candidate = projectId === undefined && !coordination ? undefined : project?.projectRoot ?? (mapped.length === 1 ? mapped[0]!.projectPath : undefined);
-    const projectRoot = candidate === undefined || !coordination ? candidate
+    const libraryId = native.metadata.workspaceId;
+    const [registry, selection, roots] = await Promise.all([readRegistry(), readAgentsProjectRootSelection(libraryId), registeredAgentsProjectRoots(libraryId)]);
+    const candidate = selection.projectPath ?? (selection.source === "unset" && roots.length === 1 ? roots[0] : undefined);
+    const projectRoot = candidate === undefined ? undefined
       : await managedOutputBinding(libraryRoot, candidate, native).then((binding) => binding === "bound" ? candidate : undefined, () => undefined);
-    const rules = await namingSection(() => listRules({ libraryRoot, ...(projectRoot === undefined ? {} : { projectRoot }), ...(projectId === undefined ? {} : { configurationProjectId: projectId }) }));
+    const outputProjectId = registry.entries.find(entry => entry.libraryId === libraryId && entry.projectPath === projectRoot)?.projectId;
+    const rules = await namingSection(() => listRules({ libraryRoot, ...(projectRoot === undefined ? {} : { projectRoot }), ...(outputProjectId === undefined ? {} : { configurationProjectId: outputProjectId }) }));
     if (command === "pending-actions") {
       const scopedWork = native.work.filter((entry) => !entry.tombstone && (projectId === undefined || entry.projectId === projectId));
       const workIds = new Set(scopedWork.map((entry) => entry.id));
@@ -3016,13 +3024,42 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       try { const source = readDotExtensionSource(state); return { status: source === null ? "missing" : "saved-source", source, synchronization: "unverified", reconstruction: "unverified" }; }
       catch (error) { const reason = (error as { reasonCode?: string }).reasonCode; if (reason === undefined) throw error; return { status: "unavailable", reason, source: null }; }
     })();
-    io.write(canonicalJson({ reasonCode: "RULE_LIST_READY", schemaVersion: "einzbern.rule-list.v1", projectPath: projectRoot ?? null, projectId: projectId ?? null, libraryPath: libraryRoot,
+    io.write(canonicalJson({ reasonCode: "RULE_LIST_READY", schemaVersion: "einzbern.rule-list.v1", projectPath: projectRoot ?? null, projectId: projectId ?? null, outputProjectId: outputProjectId ?? null, libraryPath: libraryRoot,
       outputBindingStatus: projectRoot === undefined ? "unconfigured" : "bound", dotRuleSources, dotExtensionSource,
       catalog: BUILT_IN_RULES.map((rule) => ({ id: rule.id, version: rule.version, title: rule.title })),
       rules: rules.map((rule) => ({ ...ruleStatusJson(rule) as Readonly<Record<string, JsonValue>>, source: state.configSources[JSON.stringify(["rule", rule.id])] ?? null })) }));
     return;
   }
 
+  if (command === "rule-create" || command === "rule-update") {
+    const values = parseArguments(rest, ["project-id", "id", "title", "body", "order", "at", "project", "actor", "decided-in", "timeout-ms"]);
+    required(values, command === "rule-create" ? ["id", "title", "body", "at"] : ["id", "at"]);
+    const id = values.id!;
+    const at = values.at!;
+    const order = boundedInteger(values, "order");
+    const permit = assertModelWriteAllowed({ rule: id }, false, process.env, { decidedIn: values["decided-in"] });
+    const project = await resolveAgentsProject(values.project ?? process.cwd());
+    const { createCustomRule, updateCustomRule } = await import("../../core/src/rules.js");
+    const change = await namingSection(() => withWriteLock(project.libraryPath, at, async () => {
+      const input = {
+        libraryRoot: project.libraryPath,
+        projectRoot: project.projectRoot,
+        ...await outputConfigurationOptions(values, project),
+        id,
+        occurredAt: at,
+        ...(order === undefined ? {} : { order }),
+        ...(values.actor === undefined ? {} : { actorId: values.actor }),
+        ...await writeAuthorization(permit, project.libraryPath),
+      };
+      return command === "rule-create" ? createCustomRule({ ...input, title: values.title!, body: values.body! }) : updateCustomRule({
+        ...input,
+        ...(values.title === undefined ? {} : { title: values.title }),
+        ...(values.body === undefined ? {} : { body: values.body }),
+      });
+    }));
+    writeRuleChange(io, project, change);
+    return;
+  }
   if (command === "rule-enable") {
     const values = parseArguments(rest, ["project-id", "id", "at", "project", "order", "actor", "decided-in", "timeout-ms"]);
     required(values, ["id", "at"]);
@@ -4774,6 +4811,33 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       ...(warnings.length === 0 ? {} : { warnings: warnings as unknown as JsonValue }),
       ...await readBackWorkspaceWrite(workspace, state, written.ids ?? []),
     }));
+    return;
+  }
+  if (command === "minutes-supplement-inventory") {
+    const values = parseArguments(rest, ["workspace", "project-id"]);
+    required(values, ["workspace"]);
+    const { minutesSupplementInventory } = await import("../../core/src/minutes-supplement.js");
+    io.write(canonicalJson(await minutesSupplementInventory(values.workspace!, values["project-id"])));
+    return;
+  }
+  if (command === "minutes-supplement-batch") {
+    const values = parseArguments(rest, [...shared, "project-id", "from-file", "actor"]);
+    required(values, [...requiredShared, "from-file"]);
+    let document: unknown;
+    try {
+      document = JSON.parse(await readFile(values["from-file"]!, "utf8"));
+    } catch (error) {
+      fail("WORK_BATCH_MALFORMED", `${values["from-file"]}: ${error instanceof Error ? error.message : "unreadable"}`);
+    }
+    const { applyMinutesSupplementBatch } = await import("../../core/src/minutes-supplement.js");
+    const workspace = values.workspace!;
+    const occurredAt = values.at!;
+    const receipt = await withWriteLock(workspace, occurredAt, () => applyMinutesSupplementBatch(workspace, document, {
+      occurredAt,
+      ...(values.actor === undefined ? {} : { actorId: values.actor }),
+      ...(values["project-id"] === undefined ? {} : { projectId: values["project-id"] }),
+    }));
+    io.write(canonicalJson({ ...receipt, ...writtenIdsField() }));
     return;
   }
   // Every live minutes record, new and historical, in the order recorded; --work-id keeps the ones

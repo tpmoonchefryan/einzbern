@@ -78,6 +78,8 @@ const CONSUMERS = Object.freeze({
   "workspace.generatedArtifactsPath": "artifact-store.ts artifact root resolution",
   "paths.artifacts": "portable-path.ts local artifact binding resolution",
   "paths.knowledgeArticles": "portable-path.ts local knowledge article binding resolution",
+  "execution.codexAllowNonCoordinatorPolling": "codex-peer-hooks.ts polling policy and codex-query-guard.ts continuation gate",
+  "execution.codexDualConversation": "codex-peer-hooks.ts Codex workflow-mode and polling-scope resolver",
   "execution.maxConcurrentAgents": "execution-policy.ts device agent concurrency cap",
   "models.maxConcurrentSubagents": "machine-settings.ts generic subagent concurrency cap; engine-model-policy.ts nullable host override",
   "models.quota.fiveHourParallelOffPercent": "execution-policy.ts generic quota threshold; engine-model-policy.ts nullable host override",
@@ -100,6 +102,7 @@ function semanticType(entry: { readonly key: string; readonly type: string; read
   if (entry.key === "models.escalation.ceiling" || entry.key === "portal.defaultPartition") return "reference";
   if (entry.key === "retrieval.promptLanguages") return "list";
   if (entry.key === "models.escalation.enabled") return "boolean";
+  if (entry.type === "boolean" || entry.controlType === "boolean") return "boolean";
   if (entry.shape === "collection") return "record-list";
   if (entry.controlType === "number" || entry.type === "integer") return "integer";
   if (["enum", "url", "path"].includes(entry.type)) return entry.type as "enum" | "url" | "path";

@@ -130,7 +130,7 @@ test("478-AC1 via agents-render: a section changed by one character stays as it 
   assert.equal(await readFile(claude, "utf8"), renderSection({ id: "claude-import", rev: 1, body: "@AGENTS.md\n" }), "a new CLAUDE.md holds the import section alone");
 
   // The user changes one character of the navigation section; the system variables change in the library.
-  const edited = written.replace("Load and follow", "Load and folow");
+  const edited = written.replace("Load the Mana", "Lod the Mana");
   assert.equal(edited.length, written.length - 1);
   await writeFile(agents, edited);
   const settingsArgs = ["settings-set", "--workspace", library, "--key", "design.authority", "--value", "https://design.example.com/system", "--at", at()];
@@ -196,7 +196,7 @@ test("478-AC3 via the shipped entry: markers that do not parse refuse the whole 
 test("478-R3 via rule-resolve: after keep, agents-render never writes that section; overwrite then needs --force; unmanage leaves the text", async (context) => {
   const { device, project, projectId, agents } = await scratch(context);
   await render(project);
-  const edited = (await readFile(agents, "utf8")).replace("Load and follow", "Load and folow");
+  const edited = (await readFile(agents, "utf8")).replace("Load the Mana", "Loud the Mana");
   await writeFile(agents, edited);
   assert.deepEqual((await render(project)).pending, [{ id: "agents", file: "AGENTS.md" }]);
 
@@ -267,7 +267,7 @@ test("671: a missing whole AGENTS file is restored from enabled sections and exp
   assert.equal(restored.recorded, 0, "restoring bytes keeps the existing shared section revision");
   assert.equal(first.files.find((entry) => entry.file === "AGENTS.md").exists, true);
   assert.equal((await render(project)).files.some((entry) => entry.written), false);
-  await withSurface(ATELIER_SURFACE, () => cli(["settings-set", "--workspace", library, "--project-id", projectId,
+  await withSurface(ATELIER_SURFACE, () => cli(["settings-set", "--workspace", library,
     "--key", "agents.generation", "--value", "none", "--at", at()]));
   await rm(agents);
   assert.deepEqual((await render(project)).files, []);

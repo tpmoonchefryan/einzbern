@@ -178,10 +178,10 @@ function wantedKiroHooks(request: KiroHooksRequest): readonly KiroHookEntry[] {
   if (request.install === false) return [];
   const launcher = hookLauncherPath(request.deviceHome, request.platform);
   const entries: KiroHookEntry[] = [
+    { name: "einzbern-session-start", trigger: "SessionStart", action: { type: "command", command: hostHookCommand(launcher, "SessionStart", request.userHome, request.platform, "kiro") }, timeout: 30, enabled: true },
     { name: "einzbern-prompt-recall", trigger: "UserPromptSubmit", action: { type: "command", command: hostHookCommand(launcher, "UserPromptSubmit", request.userHome, request.platform, "kiro") }, timeout: 30, enabled: true },
     { name: "einzbern-read-guard", trigger: "PreToolUse", matcher: "read", action: { type: "command", command: hostHookCommand(launcher, "PreToolUse", request.userHome, request.platform, "kiro") }, timeout: 30, enabled: true },
   ];
-  if (request.navigation === "declined") entries.unshift({ name: "einzbern-session-start", trigger: "SessionStart", action: { type: "command", command: hostHookCommand(launcher, "SessionStart", request.userHome, request.platform, "kiro") }, timeout: 30, enabled: true });
   return entries;
 }
 

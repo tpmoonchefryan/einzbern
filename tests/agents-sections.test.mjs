@@ -149,13 +149,13 @@ test("478-R5: an import in a code block or a code span, or of another file, is n
   for (const id of ["agents", "rule:autonomy", "variables-system", "variables-custom"]) assert.equal(managedSectionFile(id), AGENTS_FILE, id);
 });
 
-test("478-R4: the navigation section holds one Skill entry and follows the shared project choice", async (context) => {
+test("478-R4 and E05: the navigation section holds three shared lines", async (context) => {
   const { base, project, backups } = await scratch(context);
-  assert.equal(NAVIGATION_LINES.length, 1);
+  assert.equal(NAVIGATION_LINES.length, 3);
   assert.equal(NAVIGATION_SECTION.body, `${NAVIGATION_LINES.join("\n")}\n`);
   assert.match(NAVIGATION_LINES[0], /Einzbern/u);
-  assert.match(NAVIGATION_LINES[0], /Mana Orchestrate/u);
-  assert.doesNotMatch(NAVIGATION_SECTION.body, /recall|--query/u);
+  assert.match(NAVIGATION_LINES[1], /Mana Orchestrate/u);
+  assert.match(NAVIGATION_LINES[2], /Recall first/u);
 
   const root = await library(base);
   await writeFile(join(project, CLAUDE_FILE), "@AGENTS.md\n");
@@ -184,7 +184,7 @@ test("478-R4: the navigation section holds one Skill entry and follows the share
   assert.deepEqual(other.sections.find((section) => section.id === "agents"), { id: "agents", file: AGENTS_FILE, result: "unchanged", state: "managed", line: navigation.startLine });
 });
 
-test("478-AC5: declined adds SessionStart; prompt, subagent and read-guard hooks remain installed", async (context) => {
+test("478-AC5 and E05: SessionStart remains available as the library changes navigation", async (context) => {
   const { device } = await scratch(context);
   const deviceHome = "/srv/einzbern/device";
   for (const host of ["claude-code", "codex"]) {
@@ -195,7 +195,7 @@ test("478-AC5: declined adds SessionStart; prompt, subagent and read-guard hooks
     assert.equal(declined.groups.SubagentStart[0].hooks[0].command, hostHookCommand("/srv/einzbern/device/engine/hook.mjs", "SubagentStart", undefined, "linux"));
     for (const choice of ["written", null, undefined]) {
       const expected = planHostHooks({ host, scope: "user", deviceHome, platform: "linux", ...(choice === undefined ? {} : { navigation: choice }) });
-      assert.deepEqual(Object.keys(expected.groups), ["UserPromptSubmit", "SubagentStart", "PreToolUse", ...(host === "codex" ? ["PostToolUse", "Stop"] : [])], `${host}: ${choice}`);
+      assert.deepEqual(expected.groups, declined.groups, `${host}: ${choice}`);
     }
     const clean = planHostHooks({ host, scope: "project", deviceHome, platform: "linux", navigation: "declined", install: false });
     assert.deepEqual(clean.groups, {}, "a clean-only plan renders no pointer hook either");
@@ -214,15 +214,15 @@ test("478-AC5: declined adds SessionStart; prompt, subagent and read-guard hooks
   const fromDevice = planHostHooks({ host: "claude-code", scope: "user", deviceHome, platform: "linux", navigation: await readAgentsNavigation(device) });
   assert.deepEqual(Object.keys(fromDevice.groups), ["UserPromptSubmit", "SubagentStart", "PreToolUse", "SessionStart"]);
 
-  // Written after declined: remove only the optional session pointer, retaining required hooks.
+  // Both choices retain the startup registration and the user's separate hook.
   const other = { matcher: "startup", hooks: [{ type: "command", command: "echo mine" }] };
   const first = mergeHostHooks({ hooks: { SessionStart: [other] } }, fromDevice);
   assert.deepEqual(first.document.hooks.SessionStart, [other, ...fromDevice.groups.SessionStart]);
   await applyMachineSettingSet({ key: AGENTS_NAVIGATION_SETTING, value: "written", occurredAt: at(), path });
   const written = planHostHooks({ host: "claude-code", scope: "user", deviceHome, platform: "linux", navigation: await readAgentsNavigation(device) });
   const rerendered = mergeHostHooks(first.document, written);
-  assert.deepEqual(rerendered.document.hooks, { SessionStart: [other], UserPromptSubmit: written.groups.UserPromptSubmit, SubagentStart: written.groups.SubagentStart, PreToolUse: written.groups.PreToolUse });
-  assert.deepEqual(rerendered.removedHooks.map((hook) => hook.event).sort(), ["SessionStart"]);
+  assert.deepEqual(rerendered.document, first.document);
+  assert.deepEqual(rerendered.removedHooks, []);
 });
 
 test("478-R3: overwrite puts the engine's text back and records it as the new baseline", async (context) => {

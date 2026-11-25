@@ -103,8 +103,8 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `general` | `design.buildProject` | project | scalar | 8 |
 | `general` | `design.consumedVersion` (historical) | project | scalar | 9 |
 | `general` | `agents.projectRoot` | device | scalar | 10 |
-| `general` | `agents.generation` | project | scalar | 20 |
-| `general` | `agents.sharedNavigation` | project | scalar | 21 |
+| `general` | `agents.generation` | library | scalar | 20 |
+| `general` | `agents.sharedNavigation` | library | scalar | 21 |
 | `general` | `work.contentPolicy` | project | scalar | 22 |
 | `models` | `models.category` | project | collection | 1 |
 | `models` | `models.tiers` | project | collection | 2 |
@@ -124,6 +124,8 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `models` | `execution.maxConcurrentAgents` | device | scalar | 16 |
 | `models` | `execution.maxConcurrentHeavyRuns` | device | scalar | 17 |
 | `models` | `execution.memoryPolicy` | device | scalar | 18 |
+| `models` | `execution.codexDualConversation` | device | scalar | 19 |
+| `models` | `execution.codexAllowNonCoordinatorPolling` | device | scalar | 20 |
 | `knowledge` | `artifact.language` | project | scalar | 1 |
 | `knowledge` | `knowledge.articlesPath` | project | scalar | 2 |
 | `knowledge` | `crest.userPath` | device | scalar | 4 |
@@ -489,10 +491,13 @@ The integrated configuration contract (`configuration-contract-v1.md`) adds thes
 explicitly governed entries. All are Tier-1 Owner choices, written through their
 scope's existing set/remove verbs, never inferred from output files.
 
-- `agents.generation`: project enum, default `managed`, choices `managed` and `none`.
+- `agents.generation`: library enum, default `managed`, choices `managed` and `none`.
   `none` suppresses future managed creation and updates without deleting existing files.
-- `agents.sharedNavigation`: project enum, default `written`, choices `written` and
+- `agents.sharedNavigation`: library enum, default `written`, choices `written` and
   `declined`. This portable declaration is separate from device host integration.
+  Both AGENTS settings fall back to the selected project's historical setting or the nearest
+  declared ancestor when no library value exists. A new library write or reset retires historical
+  project overrides for that key in the same transaction.
 - `paths.artifacts` and `paths.knowledgeArticles`: device absolute directory bindings,
   default unset. `machine-settings-set` validates the absolute path before storage.
   Shared writes use relative paths or `binding:paths.artifacts` /
@@ -506,6 +511,14 @@ scope's existing set/remove verbs, never inferred from output files.
   and host override applies.
 - `models.quota.*`: four generic device quota thresholds. A host may override individual fields;
   blank host values inherit the generic settings. Heavy-run concurrency remains generic only.
+- `execution.codexDualConversation`: device boolean, default `true`. It selects the Codex
+  workflow: Main hands implementation to an independent Economy coordinator when enabled,
+  and coordinates its own native workers when disabled.
+- `execution.codexAllowNonCoordinatorPolling`: device boolean, default `false`, shown only
+  while dual-conversation mode is enabled. It permits other Codex conversations to continue
+  bounded status checks within their authorized task scope; one-time checks remain available.
+  These defaults follow Owner D1 in `EINZBERN-MIN-20261123-ATELIER-REDESIGN-POLLING-FETCH-TAU`
+  and `EINZBERN-STORY-012` E04.
 
 These entries implement the approved integrated configuration migration; their
 catalog defaults, bounds and layout are the executable source of truth. A setting

@@ -16,6 +16,8 @@ import test from "node:test";
 
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { cachePath, materializeWorkspace } from "../dist/build/packages/core/src/index.js";
+import { createWorkspaceSettingRecord } from "../dist/build/packages/core/src/settings.js";
+import { appendEvent } from "../dist/build/packages/core/src/workspace.js";
 
 // TCRN-CROSS-STORY-484 R4: these tests write settings through the CLI, as Atelier does.
 standInForAtelier();
@@ -60,6 +62,50 @@ async function read(home, library) {
 
 const settingValue = (state, key) => state.settings.find((entry) => entry.key === key)?.value ?? null;
 
+test("E14: old AGENTS settings follow the selected lineage until the first library write", async context => {
+  const base = await scratch(context);
+  const library = join(base, "library");
+  const desktop = join(base, "desktop");
+  const laptop = join(base, "laptop");
+  await as(desktop, ["init", "--workspace", library, "--at", at()]);
+  const project = async (external, parent) => {
+    await as(desktop, ["project-create", "--workspace", library, "--external-key", external, "--name", external, "--at", at(), ...(parent ? ["--parent-project-id", parent] : [])]);
+    return (await read(desktop, library)).projects.find(project => project.externalKey === external).id;
+  };
+  const parent = await project("NAV-A");
+  const descendant = await project("NAV-CHILD", parent);
+  const unrelated = await project("NAV-B");
+  const withoutHistory = await project("NAV-NONE");
+  const legacy = async (key, value, id) => {
+    const occurredAt = at();
+    const record = createWorkspaceSettingRecord(key, value, 1, occurredAt, library, id);
+    await appendEvent(library, state => ({
+      payload: { operation: "settings.updated", record }, work: state.work, projects: state.projects,
+      settings: [...state.settings.filter(row => row.key !== key || row.projectId !== id), record],
+    }), { occurredAt });
+  };
+  const catalogValue = async (home, projectId, key) => {
+    const result = await as(home, ["settings-catalog", "--workspace", library, "--project-id", projectId]);
+    return result.settings.find(row => row.key === key);
+  };
+  for (const [key, fallback, changed] of [["agents.sharedNavigation", "written", "declined"], ["agents.generation", "managed", "none"]]) {
+    await legacy(key, changed, parent);
+    await legacy(key, fallback, unrelated);
+    for (const home of [desktop, laptop]) {
+      for (const [target, expected] of [[parent, changed], [descendant, changed], [unrelated, fallback], [withoutHistory, fallback]]) {
+        const row = await catalogValue(home, target, key);
+        assert.deepEqual([row.scope, row.currentValue, row.declaredValue], ["library", expected, null]);
+      }
+    }
+    assert.equal((await refusal(desktop, ["settings-set", "--workspace", library, "--project-id", parent, "--key", key, "--value", fallback, "--at", at()])).reasonCode, "WORKSPACE_INPUT_INVALID");
+    await as(desktop, ["settings-set", "--workspace", library, "--key", key, "--value", changed, "--at", at()]);
+    const rows = (await read(laptop, library)).settings.filter(row => row.key === key);
+    assert.deepEqual(rows.map(({ projectId, value }) => [projectId, value]), [[undefined, changed]]);
+    await as(desktop, ["settings-remove", "--workspace", library, "--key", key, "--at", at()]);
+    assert.equal((await catalogValue(laptop, parent, key)).currentValue, fallback);
+  }
+});
+
 async function treeDigest(root) {
   const rows = [];
   const walk = async (directory) => {
@@ -101,7 +147,7 @@ test("469-AC5: device A sets design.authority and device B, merging the same lib
   assert.equal(settingValue(merged, "design.authority"), "https://design.example/desk");
   const catalog = await as(laptop, ["settings-catalog", "--workspace", library]);
   assert.equal(catalog.settings.find((entry) => entry.key === "design.authority").currentValue, "https://design.example/desk");
-  assert.deepEqual([...new Set(catalog.settings.map((entry) => entry.layer))], ["project", "library"], "the catalog declares project and library scopes");
+  assert.deepEqual([...new Set(catalog.settings.map((entry) => entry.layer))].sort(), ["library", "project"], "the catalog declares project and library scopes");
 
   // The projection shows the merged values and the version vector they were read at.
   const projection = JSON.parse(await readFile(join(library, "config", "project.json"), "utf8"));

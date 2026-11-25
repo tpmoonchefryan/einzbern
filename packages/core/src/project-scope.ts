@@ -43,6 +43,22 @@ export function workspaceSettingIdentity(key: string, projectId?: string): strin
   return projectId === undefined ? key : JSON.stringify([projectId, key]);
 }
 
+export function isLibraryAgentsSetting(key: string): key is "agents.generation" | "agents.sharedNavigation" {
+  return key === "agents.generation" || key === "agents.sharedNavigation";
+}
+
+export function legacyLibraryAgentsSettings(state: Pick<WorkspaceState, "settings" | "projects">, key: string): readonly WorkspaceSettingRecord[] {
+  const live = new Set(state.projects.filter(project => !project.tombstone).map(project => project.id));
+  return state.settings.filter(record => record.key === key && record.projectId !== undefined && live.has(record.projectId));
+}
+
+export function libraryAgentsSetting(state: Pick<WorkspaceState, "settings" | "projects">, key: string, lineage: readonly ProjectRecord[]): WorkspaceSettingRecord | undefined {
+  const stored = state.settings.find(record => record.key === key && record.projectId === undefined);
+  if (stored !== undefined) return stored;
+  const legacy = new Map(state.settings.filter(record => record.key === key).map(record => [record.projectId, record]));
+  return lineage.map(project => legacy.get(project.id)).find(record => record !== undefined);
+}
+
 export function assertSettingScope(state: WorkspaceState, key: string, projectId?: string): void {
   projectLineage(state, projectId);
   if (chainIdentity(state, projectId)?.role === "coordination" && !coordinationRuntimeSetting(settingsCatalogEntry(key).key)) throw new ProjectScopeError("coordination chains expose runtime settings only", { key });
@@ -125,7 +141,8 @@ export function scopedWorkspaceState(state: WorkspaceState, projectId?: string):
     if (coordination && !coordinationRuntimeSetting(entry.key)) continue;
     const libraryLevel = (coordination && chainIdentity(state)?.role !== "shared") || entry.scope === "library";
     const eligible = libraryLevel ? [undefined] : scopes;
-    const record = eligible.map((scope) => state.settings.find((value) => value.key === entry.key && value.projectId === scope)).find((value) => value !== undefined);
+    const record = isLibraryAgentsSetting(entry.key) ? libraryAgentsSetting(state, entry.key, lineage)
+      : eligible.map((scope) => state.settings.find((value) => value.key === entry.key && value.projectId === scope)).find((value) => value !== undefined);
     const fallback = eligible.filter((scope) => scope !== (libraryLevel ? undefined : projectId)).map((scope) => state.settings.find((value) => value.key === entry.key && value.projectId === scope)).find((value) => value !== undefined);
     if (fallback !== undefined) fallbackRecords.push(fallback);
     settingFallbackValues[entry.key] = fallback?.value ?? entry.defaultValue;

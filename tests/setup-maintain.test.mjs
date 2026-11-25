@@ -321,11 +321,11 @@ test("update uses the selected catalog across registered outputs and preserves O
   }
   const backedUp = updated.backups.find(entry => entry.path === join(second.project, "AGENTS.md"));
   assert.equal(await readFile(join(backedUp.into, "AGENTS.md"), "utf8"), before.get(second.project));
-  await setWorkspaceSetting(second.library, { configurationProjectId: projectId(second.project), key: "agents.generation", value: "none", occurredAt: at() });
+  await setWorkspaceSetting(second.library, { key: "agents.generation", value: "none", occurredAt: at() });
   const again = await applySetup(await plan(f, "update", { archive: release.archive }));
   assert.equal(again.written.filter(entry => entry.step === "managed-sections").length, 0, "repeated update does not rewrite identical sections");
   assert.equal(again.managedUpdates.find(output => output.projectPath === second.project)?.reasonCode, "GENERATION_DISABLED");
-  await setWorkspaceSetting(second.library, { configurationProjectId: projectId(second.project), key: "agents.generation", value: "managed", occurredAt: at() });
+  await setWorkspaceSetting(second.library, { key: "agents.generation", value: "managed", occurredAt: at() });
   const absent = join(f.base, "temporarily-unavailable");
   const registryFile = join(f.deviceHome, "registry.json");
   const legacy = JSON.parse(await readFile(registryFile, "utf8"));
@@ -567,8 +567,7 @@ test("shared navigation survives a declined device preference and repair remains
 test("explicit shared navigation decline removes a managed section once, independent of device preference", async (context) => {
   const f = await installed(context);
   const agents = join(f.project, "AGENTS.md");
-  const entry = (await readRegistry(f.deviceHome)).entries.find((item) => item.projectPath === f.project);
-  await setWorkspaceSetting(f.library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at(), configurationProjectId: entry.projectId });
+  await setWorkspaceSetting(f.library, { key: "agents.sharedNavigation", value: "declined", occurredAt: at() });
   const planned = await plan(f, "repair", { answers: { navigation: true } });
   assert.ok(planned.writes.some((item) => item.step === "managed-sections" && item.path === agents));
   const applied = await applySetup(planned);

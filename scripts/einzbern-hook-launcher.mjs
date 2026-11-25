@@ -643,7 +643,7 @@ export async function launch(argv, env) {
   const engine = join(device, ENGINE_DIRECTORY);
   const hook = await import(hookEntryUrl(engine, currentVersion(engine)));
   if (typeof hook.runHookEvent !== "function") throw new HookLaunchError("HOOK_ENTRY_INVALID", "the current engine's hook entry has no runHookEvent");
-  const output = await hook.runHookEvent({ event, payload, libraryPath: entry.libraryPath, cwd: directory, peerGuardObserved });
+  const output = await hook.runHookEvent({ event, payload, libraryPath: entry.libraryPath, projectRoot: entry.projectPath, projectId: entry.projectId, cwd: directory, peerGuardObserved });
   return typeof output === "string" && output.length > 0 ? output : null;
 }
 
