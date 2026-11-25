@@ -376,6 +376,7 @@ if (!MUTATION) {
         assert.equal(options.credentials, "omit");
         seen.push(target);
         if (!online) return Promise.reject(new Error("offline"));
+        if (!target.startsWith(expected)) return Promise.reject(new TypeError("site root does not permit cross-origin reads"));
         if (target === expected + "index.json") return Promise.resolve({ ok: true, json: async () => ({ v: 5, entries: { button: { type: "story" } } }) });
         if (target === expected + "project.json") return Promise.resolve({ ok: true, json: async () => ({ storybookVersion: "10.4.6", repository: "ignored" }) });
         return Promise.resolve({ ok: false, status: 404 });
