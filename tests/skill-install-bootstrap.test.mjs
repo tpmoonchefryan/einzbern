@@ -141,6 +141,20 @@ test("481-AC3, R3: a local archive installs while every fetch throws, and instal
   const commands = spawnSync(process.execPath, [join(engine, "einzbern.mjs"), "commands"], { cwd: base, encoding: "utf8", env: { ...process.env, EINZBERN_HOME: device } });
   assert.equal(commands.status, 0, commands.stderr);
   assert.equal(JSON.parse(commands.stdout).reasonCode, "CLI_CATALOG_READY");
+  const skill = await readFile(join(engine, FRAMEWORK_VERSION, "skill", "mana-orchestrate", "SKILL.md"), "utf8");
+  assert.match(skill, /`e <verb> --help`/u);
+  assert.match(skill, /`e engine-list`: `current\.version`/u);
+  const launch = (...args) => {
+    const result = spawnSync(process.execPath, [join(engine, "einzbern.mjs"), ...args], { cwd: base, encoding: "utf8", env: { ...process.env, EINZBERN_HOME: device } });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  const help = launch("recall", "--help");
+  assert.equal(help.reasonCode, "CLI_CATALOG_READY");
+  assert.equal(help.commands[0].name, "recall");
+  const versions = launch("engine-list");
+  assert.equal(versions.reasonCode, "ENGINE_LIST_READY");
+  assert.equal(versions.current.version, FRAMEWORK_VERSION);
   // The unpacked copy went to the trash, with the manifest it set aside; nothing is left beside it.
   const trashed = await readdir(join(device, "trash"));
   assert.equal(trashed.length, 1);
