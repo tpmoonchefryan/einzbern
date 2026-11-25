@@ -7,9 +7,9 @@ Versioning after the first accepted release.
 
 ### Managed AGENTS.md
 
-- The device setting `agents.projectRoot` names the device's project root: the registered directory that alone keeps its library's managed AGENTS.md. For that library, managed sections are written there only, a write into another of its roots is refused with `MANAGED_SECTION_OUTPUT_UNREGISTERED`, a variable write for a project registered elsewhere stays in the library, and `doctor` passes such a project's `managed-sections` check. Other libraries on the device, and every library while the setting is unset or names an unregistered directory, keep one managed AGENTS.md per registered root as before. The value stays on the device.
-- `setup --mode fresh` asks for the project root with `--project-root <dir>` and stores the answer. The plan suggests the root the device already holds, or the project being set up when it is its library's first on the device. On a device that holds no root while the library already has other projects registered, the plan requires the answer (`SETUP_ANSWER_REQUIRED`). After such an installation, another project installed into the same library takes no managed sections of its own. The other modes leave the stored root as it is and refuse the flag.
-- Unregistering or uninstalling the project that is the device's project root leaves the setting naming an unregistered directory, so the library's remaining projects answer for their own managed sections again; `doctor` reports `MANAGED_FILE_MISSING` for one that never had them until it is repaired or the setting is pointed at it.
+- Each library can select one registered directory on this device to hold its managed AGENTS.md. A managed write to another root of that library returns `MANAGED_SECTION_OUTPUT_UNREGISTERED`. Variable changes there still commit to the library. The device registry stores the selection, and older `agents.projectRoot` values are read for the library that owns the registered path.
+- Fresh setup, update and repair accept `--project-root <dir>`. With no existing selection, setup uses the sole eligible registered root, or the current project on a fresh installation with no registered roots. If the current library has several eligible roots, setup asks once and reuses the answer on later runs.
+- Unregistering or uninstalling the selected root invalidates the selection. Setup only offers eligible registered roots for the next selection.
 
 ## 5.8.0
 

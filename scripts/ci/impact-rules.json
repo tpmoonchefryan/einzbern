@@ -2383,7 +2383,7 @@
     "tests/host-harness.test.mjs": "e666b88eb957b77c17f1dea9e45c9a710a879ee62cebb7497fb71f9cd8f1932a",
     "tests/host-hooks-rollback.test.mjs": "847245ad3fac715a2a516154d59ed6e051304a2da842948bf9d9b8237321109a",
     "tests/host-hooks.test.mjs": "086ac264bcd12d0d2234ddf7bf9ee11ed78ff7242b1d5183c2c20a58c7e06dbe",
-    "tests/host-native-dispatch.test.mjs": "6d4ed723e2d255748526c399b076a2f9c0e70023a20957eca4457089e40cdccb",
+    "tests/host-native-dispatch.test.mjs": "dbe53ef1019eecbea2108d3a5d8c996c031aa8ce8634a7b61735c5a0b35f7a14",
     "tests/host-probe.test.mjs": "32a7ff6e15b2d979ccaee2a6926ed75767c0ef7e0bfea56220049e5fa99cdcd6",
     "tests/host-render.test.mjs": "d0479d3c227a54f09c8f150c9c69ae94cb03aa729f864c74ed6f2257496d7757",
     "tests/host-skill-install.test.mjs": "c086a2c9bba6ccaf09a3f646ec26f22905435a64199a8a04f487d55856069992",

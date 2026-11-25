@@ -118,7 +118,8 @@ test("STORY-711 real CLI gates first Economy worker readiness on a same-ID Full 
     raw: { id: 1, result: { thread: { id: returnedId }, ...(permission === null ? {} : { sandbox: { type: permission } }) } },
     conversationPointer: "/result/thread/id",
   });
-  const env = { ...process.env, EINZBERN_HOME: f.home, HOME: guard.userHome, CODEX_THREAD_ID: economyId };
+  // os.homedir() uses USERPROFILE on Windows and HOME on Unix.
+  const env = { ...process.env, EINZBERN_HOME: f.home, HOME: guard.userHome, USERPROFILE: guard.userHome, CODEX_THREAD_ID: economyId };
   const run = output => spawnSync(process.execPath, [cli, "execution-host-prepare", "--workspace", f.workspace,
     "--request", requestPath, "--arguments", argumentsPath, "--codex-peer-worker", "true",
     "--codex-startup-evidence", startupPath, "--codex-admission", guard.admissionPath, "--output", output], { env, encoding: "utf8" });
