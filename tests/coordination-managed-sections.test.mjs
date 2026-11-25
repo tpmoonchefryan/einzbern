@@ -31,7 +31,7 @@ import {
 } from "../dist/build/packages/core/src/index.js";
 import { managedOutputBinding } from "../dist/build/packages/core/src/agents-sections.js";
 import { managedSectionRecordsFor, parseManagedFile, renderSection } from "../dist/build/packages/core/src/managed-sections.js";
-import { ruleBody } from "../dist/build/packages/core/src/rules-catalog.js";
+import { builtInRule } from "../dist/build/packages/core/src/rules-catalog.js";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 
 let second = 0;
@@ -99,25 +99,25 @@ test("540-GWT1: a coordination library registered for its container writes and r
   assert.deepEqual([enabled.written, enabled.result, enabled.outputBindingStatus, enabled.status.state, enabled.recorded], [true, "create", "bound", "enabled", 2]);
   const text = await readFile(c.agents, "utf8");
   assert.ok(text.startsWith(USER_TEXT), "the Owner's text stays as it was");
-  const section = sectionOf(text, "rule:autonomy");
-  assert.equal(section?.body, ruleBody("autonomy", null));
-  assert.deepEqual(await recordOf(c.library, "rule:autonomy"), { file: "AGENTS.md", id: "rule:autonomy", rev: 1, digest: section.digest, state: "managed" });
+  const section = sectionOf(text, "agents");
+  assert.equal(section?.body, builtInRule("autonomy").principle.en + "\n");
+  assert.deepEqual(await recordOf(c.library, "agents"), { file: "AGENTS.md", id: "agents", rev: 1, digest: section.digest, state: "managed" });
   assert.equal((await listRules({ libraryRoot: c.library, projectRoot: c.root })).find((rule) => rule.id === "autonomy").state, "enabled");
 
   // Coordination renders its selected principles without variable copies.
   const rendered = await renderAgentsSections(c.library, { projectRoot: c.root, navigation: null, backupRoot: c.backups, occurredAt: at() });
   assert.deepEqual(rendered.pending, []);
-  assert.deepEqual(rendered.sections.filter((entry) => entry.file === "AGENTS.md").map((entry) => [entry.id, entry.state]).sort(), [["rule:autonomy", "managed"]]);
+  assert.deepEqual(rendered.sections.filter((entry) => entry.file === "AGENTS.md").map((entry) => [entry.id, entry.state]).sort(), [["agents", "managed"]]);
   for (const id of ["variables-system", "variables-custom"]) assert.equal(await recordOf(c.library, id), null, id);
 
   // A user's change to the section reads user-modified, as a project's does.
-  const edited = (await readFile(c.agents, "utf8")).replace(section.body.split("\n")[2], "An edit of the Owner's.");
+  const edited = (await readFile(c.agents, "utf8")).replace("smallest change", "Owner change");
   await writeFile(c.agents, edited);
   assert.equal((await listRules({ libraryRoot: c.library, projectRoot: c.root })).find((rule) => rule.id === "autonomy").state, "user-modified");
   const forced = await disableRule({ libraryRoot: c.library, projectRoot: c.root, id: "autonomy", force: true, backupRoot: c.backups, occurredAt: at() });
   assert.deepEqual([forced.written, forced.result, forced.outputBindingStatus, forced.status.state], [true, "disabled", "bound", "disabled"]);
-  assert.equal(sectionOf(await readFile(c.agents, "utf8"), "rule:autonomy"), null);
-  assert.equal(await recordOf(c.library, "rule:autonomy"), null, "the section's record goes with it");
+  assert.equal(sectionOf(await readFile(c.agents, "utf8"), "agents"), null);
+  assert.equal(await recordOf(c.library, "agents"), null, "the section's record goes with it");
 });
 
 test("540-GWT1: the coordination library is its own configuration source, so its artifact language picks the rule's text", async (context) => {
@@ -126,7 +126,7 @@ test("540-GWT1: the coordination library is its own configuration source, so its
   const effective = await effectiveProjectState(await materializeWorkspace(c.library));
   assert.deepEqual([effective.settings.find((entry) => entry.key === "artifact.language")?.value, effective.settingSources["artifact.language"]?.kind], ["zh-CN", "library"]);
   await enableRule({ libraryRoot: c.library, projectRoot: c.root, id: "silent-reporting", backupRoot: c.backups, occurredAt: at() });
-  assert.equal(sectionOf(await readFile(c.agents, "utf8"), "rule:silent-reporting")?.body, ruleBody("silent-reporting", "zh-CN"));
+  assert.ok(sectionOf(await readFile(c.agents, "utf8"), "agents").body.includes(builtInRule("silent-reporting").principle.zh));
 });
 
 test("540-GWT1: the CLI resolves a coordination library's registered container through --project and writes there", async (context) => {
@@ -140,11 +140,11 @@ test("540-GWT1: the CLI resolves a coordination library's registered container t
   const rendered = await atelier(["agents-render", "--project", c.root, "--at", at()]);
   assert.equal(rendered.reasonCode, "AGENTS_RENDERED");
   assert.deepEqual(rendered.pending, []);
-  assert.ok(rendered.sections.some(section => section.id === "rule:batch" && section.state === "managed"));
+  assert.ok(rendered.sections.some(section => section.id === "agents" && section.state === "managed"));
   assert.equal(rendered.sections.some(section => section.id.startsWith("variables-")), false);
   const disabled = await atelier(["rule-disable", "--id", "batch", "--project", c.root, "--at", at()]);
   assert.deepEqual([disabled.reasonCode, disabled.written, disabled.outputBindingStatus, disabled.rule.state], ["RULE_DISABLED", true, "bound", "disabled"]);
-  assert.equal(sectionOf(await readFile(c.agents, "utf8"), "rule:batch"), null);
+  assert.ok(!sectionOf(await readFile(c.agents, "utf8"), "agents").body.includes(builtInRule("batch").principle.en));
 });
 
 test("540-GWT1: a root within a library, or one the registry does not hold for the coordination library, is refused with its reason", async (context) => {
@@ -187,9 +187,9 @@ test("540-GWT3: the first render replaces a marked section the library never rec
   await enableRule({ libraryRoot: c.library, projectRoot: c.root, id: "silent-reporting", backupRoot: c.backups, occurredAt: at() });
   await enableRule({ libraryRoot: c.library, projectRoot: c.root, id: "batch", backupRoot: c.backups, occurredAt: at() });
   const text = await readFile(c.agents, "utf8");
-  const batch = sectionOf(text, "rule:batch");
-  assert.deepEqual([batch.body, batch.rev], [ruleBody("batch", null), 5], "replaced by the engine's text, its revision one up");
-  assert.deepEqual(await recordOf(c.library, "rule:batch"), { file: "AGENTS.md", id: "rule:batch", rev: 5, digest: batch.digest, state: "managed" });
+  const batch = sectionOf(text, "agents");
+  assert.ok(batch.body.includes(builtInRule("batch").principle.en));
+  assert.deepEqual(await recordOf(c.library, "agents"), { file: "AGENTS.md", id: "agents", rev: batch.rev, digest: batch.digest, state: "managed" });
   assert.ok(text.includes(changedSilent), "the changed section stays as it is");
   assert.equal((await recordOf(c.library, "rule:silent-reporting"))?.state, "pending");
   const rendered = await renderAgentsSections(c.library, { projectRoot: c.root, navigation: null, backupRoot: c.backups, occurredAt: at() });

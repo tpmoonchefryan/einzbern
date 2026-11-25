@@ -21,6 +21,9 @@ const joinParts = (parts, separator) => parts.join(separator);
 const PRIVATE_VM_HOST = joinParts(["vm-aos", "internal"], ".");
 const PRIVATE_DNS_HOST = joinParts(["aos", "tcrn", "internal"], ".");
 
+// The archived releases carry the reviewed TypeScript compiler output byte for byte.
+const reviewedOwnerLine = `    owner: ${JSON.stringify(LEGACY_REPOSITORY_NAMES.owner)},`;
+
 function fixtureGit(root, arguments_, { raw = false, tolerateStderr = false, input } = {}) {
   const publicEmail = joinParts(["fixture", "@", "users.noreply.github.com"], "");
   const result = spawnSync("git", ["-c", "core.autocrlf=false", ...arguments_], {
@@ -294,8 +297,7 @@ test("classified privacy samples stay path-and-line exact across source, history
     "tests/variables-cli.test.mjs",
     "tests/variables.test.mjs",
   ];
-  const names = await readFile(join(repositoryRoot, "packages/core/src/names.ts"), "utf8");
-  const owner = names.match(/owner:\s*"([^"]+)"/u)?.[1];
+  const owner = LEGACY_REPOSITORY_NAMES.owner;
   assert.ok(owner, "the public owner metadata is present in the reviewed names file");
   const sourceEntries = await Promise.all(sourcePaths.map(async (path) => ({
     label: path,
@@ -400,8 +402,7 @@ test("reviewed mailto sample retains exact source, blob and source-tar boundarie
   const digest = (value) => createHash("sha256").update(value).digest("hex");
   assert.equal(digest(email), "2f761a0ba6fc6541787d69b3833f6979dadb036ef2c610f73e3ecb0ad843eb76");
   assert.equal(digest(normalizePrivacyText(line)), "a7efd70d054a3dd966911e119aa4dccde720f7452a7c16b5724aacd262a8862e");
-  const names = await readFile(join(root, "packages/core/src/names.ts"), "utf8");
-  const owner = names.match(/owner:\s*"([^"]+)"/u)?.[1];
+  const owner = LEGACY_REPOSITORY_NAMES.owner;
   assert.ok(owner);
   const scan = (entry) => {
     const original = {
@@ -474,8 +475,7 @@ test("reviewed mailto sample retains exact source, blob and source-tar boundarie
 
 test("DS publication provenance is classified only at exact inventory source lines", async () => {
   const root = resolve(import.meta.dirname, "..");
-  const names = await readFile(join(root, "packages/core/src/names.ts"), "utf8");
-  const owner = names.match(/owner:\s*"([^"]+)"/u)?.[1];
+  const owner = LEGACY_REPOSITORY_NAMES.owner;
   assert.ok(owner);
   for (const family of ["component", "copy", "limit", "scope"]) {
     const path = `docs/verification/init053-owner-return-${family}-inventory.json`;
@@ -504,27 +504,25 @@ test("DS publication provenance is classified only at exact inventory source lin
   }
 });
 
-test("P8 classifies only the exact compiled public-owner metadata line", async () => {
+test("P8 accepts current public repository metadata and only exact historical owner lines", async () => {
   const repositoryRoot = resolve(import.meta.dirname, "..");
-  const names = await readFile(join(repositoryRoot, "packages/core/src/names.ts"), "utf8");
-  const owner = names.match(/owner:\s*"([^"]+)"/u)?.[1];
-  assert.ok(owner, "the owner value comes from the reviewed source metadata");
-  const sourceOwnerLine = names.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
-  assert.ok(sourceOwnerLine, "the value is the owner field of the public metadata object");
+  const owner = LEGACY_REPOSITORY_NAMES.owner;
+  const sourceOwnerLine = `  owner: ${JSON.stringify(owner)},`;
   assert.equal(createHash("sha256").update(owner, "utf8").digest("hex"), "1b58b39b82f7665f411664797bcc897a75d9a6222ee4a8c97234493324aab74f");
   assert.equal(createHash("sha256").update(sourceOwnerLine, "utf8").digest("hex"), "acbbf0306043799672e383fe5bdfc98bfe0a2b1675085c911fce83869dc4a4be");
+  assert.deepEqual(scanPrivacyEntries([{ label: "packages/core/src/names.ts", kind: "source", content: sourceOwnerLine }], { owner }), []);
 
   const buildPath = "dist/build/packages/core/src/names.js";
   const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
-  assert.ok(ownerLine, "the compiler output carries the reviewed owner field");
-  assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
-  assert.deepEqual(scanPrivacyEntries([{ label: buildPath, kind: "build", content: buildContent }], { owner }), []);
+  assert.ok(buildContent.includes(JSON.stringify(`${owner}/${BRAND.engine.id}`)));
+  assert.deepEqual(scanPrivacyEntries([{ label: "dist/build/current-names.js", kind: "build", content: buildContent }], { owner }), []);
 
-  const changedLine = buildContent.replace(ownerLine, `${ownerLine} // changed`);
-  assert.ok(scanPrivacyEntries([{ label: buildPath, kind: "build", content: changedLine }], { owner })
+  const ownerLine = reviewedOwnerLine;
+  assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
+  assert.deepEqual(scanPrivacyEntries([{ label: buildPath, kind: "build", content: ownerLine }], { owner }), []);
+  assert.ok(scanPrivacyEntries([{ label: buildPath, kind: "build", content: `${ownerLine} // changed` }], { owner })
     .includes(`OWNER_PRIVATE_IDENTIFIER:build:${buildPath}`));
-  assert.ok(scanPrivacyEntries([{ label: "dist/build/packages/core/src/other.js", kind: "build", content: buildContent }], { owner })
+  assert.ok(scanPrivacyEntries([{ label: "dist/build/packages/core/src/other.js", kind: "build", content: ownerLine }], { owner })
     .includes("OWNER_PRIVATE_IDENTIFIER:build:dist/build/packages/core/src/other.js"));
 
   const releaseLabels = [
@@ -568,12 +566,10 @@ test("P8 classifies only the exact compiled public-owner metadata line", async (
 
 // TCRN-CROSS-SUB-357 S1 (INIT-053 R41 B2): the reviewed 2.0.0 package members carry the same compiled
 // owner line and are classified by their own exact labels; nothing else of 2.0.0 or another version is.
-test("P8 classifies only the exact reviewed 2.0.0 package members", async () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..");
+test("P8 classifies only the exact reviewed 2.0.0 package members", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const version = joinParts(["2", "0", "0"], ".");
   const member = (path, packageVersion = version) => joinParts(["dist", "release", `${BRAND.engine.id}-${packageVersion}.tar.gz`, `${BRAND.engine.id}-${packageVersion}`, path], "/");
@@ -611,12 +607,10 @@ test("P8 classifies only the exact reviewed 2.0.0 package members", async () => 
 // and are classified by their own exact labels. The other owner occurrence the review found, in
 // scripts/einzbern.mjs, is the complete helper address, public on its own; nothing else of 2.0.1 or
 // another version is classified.
-test("P8 classifies only the exact reviewed 2.0.1 package members", async () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..");
+test("P8 classifies only the exact reviewed 2.0.1 package members", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const version = joinParts(["2", "0", "1"], ".");
   const member = (path, packageVersion = version) => joinParts(["dist", "release", `${BRAND.engine.id}-${packageVersion}.tar.gz`, `${BRAND.engine.id}-${packageVersion}`, path], "/");
@@ -658,12 +652,10 @@ test("P8 classifies only the exact reviewed 2.0.1 package members", async () => 
 // and are classified by their own exact labels. The other owner occurrence the review found, in
 // scripts/einzbern.mjs, is again the complete helper address, public on its own; nothing else of
 // 2.0.2 or another version is classified.
-test("P8 classifies only the exact reviewed 2.0.2 package members", async () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..");
+test("P8 classifies only the exact reviewed 2.0.2 package members", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const version = joinParts(["2", "0", "2"], ".");
   const member = (path, packageVersion = version) => joinParts(["dist", "release", `${BRAND.engine.id}-${packageVersion}.tar.gz`, `${BRAND.engine.id}-${packageVersion}`, path], "/");
@@ -705,12 +697,10 @@ test("P8 classifies only the exact reviewed 2.0.2 package members", async () => 
 // and are classified by their own exact labels. The other owner occurrence the review found, in
 // scripts/einzbern.mjs, is again the complete helper address, public on its own; nothing else of
 // 2.0.3 or another version is classified.
-test("P8 classifies only the exact reviewed 2.0.3 package members", async () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..");
+test("P8 classifies only the exact reviewed 2.0.3 package members", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const version = joinParts(["2", "0", "3"], ".");
   const member = (path, packageVersion = version) => joinParts(["dist", "release", `${BRAND.engine.id}-${packageVersion}.tar.gz`, `${BRAND.engine.id}-${packageVersion}`, path], "/");
@@ -752,12 +742,10 @@ test("P8 classifies only the exact reviewed 2.0.3 package members", async () => 
 // and are classified by their own exact labels. The other owner occurrence the review found, in
 // scripts/einzbern.mjs, is again the complete helper address, public on its own; nothing else of
 // 2.1.0 or another version is classified.
-test("P8 classifies only the exact reviewed 2.1.0 package members", async () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..");
+test("P8 classifies only the exact reviewed 2.1.0 package members", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const version = joinParts(["2", "1", "0"], ".");
   const member = (path, packageVersion = version) => joinParts(["dist", "release", `${BRAND.engine.id}-${packageVersion}.tar.gz`, `${BRAND.engine.id}-${packageVersion}`, path], "/");
@@ -799,12 +787,10 @@ test("P8 classifies only the exact reviewed 2.1.0 package members", async () => 
 // and are classified by their own exact labels. The other owner occurrence the review found, in
 // scripts/einzbern.mjs, is again the complete helper address, public on its own; nothing else of
 // 2.2.0 or another version is classified.
-test("P8 classifies only the exact reviewed 2.2.0 package members", async () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..");
+test("P8 classifies only the exact reviewed 2.2.0 package members", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const version = joinParts(["2", "2", "0"], ".");
   const member = (path, packageVersion = version) => joinParts(["dist", "release", `${BRAND.engine.id}-${packageVersion}.tar.gz`, `${BRAND.engine.id}-${packageVersion}`, path], "/");
@@ -846,12 +832,10 @@ test("P8 classifies only the exact reviewed 2.2.0 package members", async () => 
 // and are classified by their own exact labels. The other owner occurrence the review found, in
 // scripts/einzbern.mjs, is again the complete helper address, public on its own; nothing else of
 // 2.2.1 or another version is classified.
-test("P8 classifies only the exact reviewed 2.2.1 package members", async () => {
-  const repositoryRoot = resolve(import.meta.dirname, "..");
+test("P8 classifies only the exact reviewed 2.2.1 package members", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const buildContent = await readFile(join(repositoryRoot, buildPath), "utf8");
-  const ownerLine = buildContent.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const version = joinParts(["2", "2", "1"], ".");
   const member = (path, packageVersion = version) => joinParts(["dist", "release", `${BRAND.engine.id}-${packageVersion}.tar.gz`, `${BRAND.engine.id}-${packageVersion}`, path], "/");
@@ -1343,11 +1327,10 @@ test("MIN-238 D4: only the two exact repository addresses under the reviewed own
   assert.deepEqual(scanPrivacyEntries(addressEntries, { owner }), []);
 });
 
-test("reviewed 2.2.3 package owner classification is exact in version, member, origin and line", async () => {
+test("reviewed 2.2.3 package owner classification is exact in version, member, origin and line", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const build = await readFile(resolve(import.meta.dirname, "..", buildPath), "utf8");
-  const ownerLine = build.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine).digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const member = (path, version = "2.2.3") => `dist/release/${BRAND.engine.id}-${version}.tar.gz/${BRAND.engine.id}-${version}/${path}`;
   for (const path of ["atelier/portal.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern.mjs"]) {
@@ -1378,11 +1361,10 @@ test("reviewed 2.2.3 package owner classification is exact in version, member, o
 });
 
 // Current release binding; the historical 2.2.3 review above remains unchanged.
-test("reviewed diagnostic 3.0.0 package owner classification is exact in version, member, origin and line", async () => {
+test("reviewed diagnostic 3.0.0 package owner classification is exact in version, member, origin and line", () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const build = await readFile(resolve(import.meta.dirname, "..", buildPath), "utf8");
-  const ownerLine = build.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine).digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const member = (path, version = "3.0.0") => `dist/release/${BRAND.engine.id}-${version}.tar.gz/${BRAND.engine.id}-${version}/${path}`;
   for (const path of ["atelier/portal.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern.mjs"]) {
@@ -1416,8 +1398,7 @@ test("reviewed diagnostic 3.0.0 package owner classification is exact in version
 for (const reviewedVersion of ["3.1.0", "3.2.0", "3.3.0", "3.3.1", "3.4.0", "4.0.0", "4.4.0", "4.4.1", "4.4.2", "4.5.1", "4.6.0", "5.0.0", "5.0.1"]) test(`reviewed diagnostic ${reviewedVersion} package owner classification is exact in version, member, origin and line`, async () => {
   const owner = LEGACY_REPOSITORY_NAMES.owner;
   const buildPath = "dist/build/packages/core/src/names.js";
-  const build = await readFile(resolve(import.meta.dirname, "..", buildPath), "utf8");
-  const ownerLine = build.split("\n").find((line) => line.includes(owner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine).digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const member = (path, version = reviewedVersion) => `dist/release/${BRAND.engine.id}-${version}.tar.gz/${BRAND.engine.id}-${version}/${path}`;
   const members = ["atelier/portal.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern.mjs"];

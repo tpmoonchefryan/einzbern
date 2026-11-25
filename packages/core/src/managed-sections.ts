@@ -104,6 +104,8 @@ export interface ManagedSectionDecision {
   // The record after this plan; recordChanged says whether it differs from the one passed in.
   readonly record: ManagedSectionRecord;
   readonly recordChanged: boolean;
+  // A migrated marker or a block retired by configuration no longer needs a baseline.
+  readonly forgetRecord?: boolean;
   // Where the section starts in the file as read, when it is there.
   readonly line: number | null;
 }
@@ -277,6 +279,30 @@ export function parseManagedFile(text: string, file?: string): ParsedManagedFile
   return { sections, outside, eol: firstEnding };
 }
 
+// The file with one section's bytes replaced by `replacement`. A section taken out altogether
+// takes one blank line with it, the one the writer put beside it: the one after it, or, at the end
+// of the file, the one before it.
+export function replaceSection(parsed: ParsedManagedFile, index: number, replacement: string): string {
+  const outside = [...parsed.outside];
+  if (replacement === "") {
+    const blank = `${parsed.eol}${parsed.eol}`;
+    const before = outside[index] ?? "";
+    const after = outside[index + 1] ?? "";
+    if ((before === "" || before.endsWith(blank)) && after.startsWith(parsed.eol)) {
+      outside[index + 1] = after.slice(parsed.eol.length);
+    } else if (after === "" && index === parsed.sections.length - 1 && before.endsWith(blank)) {
+      outside[index] = before.slice(0, -parsed.eol.length);
+    }
+  }
+  const parts: string[] = [];
+  for (const [position, section] of parsed.sections.entries()) {
+    parts.push(outside[position] ?? "");
+    parts.push(position === index ? replacement : section.raw);
+  }
+  parts.push(outside[parsed.sections.length] ?? "");
+  return parts.join("");
+}
+
 // A file relative to the project: forward slashes, no empty, current or parent segment, not rooted.
 function isRelativeFileName(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && !value.includes("\\") &&
@@ -338,7 +364,7 @@ function sameRecord(left: ManagedSectionRecord | undefined, right: ManagedSectio
  * A section the user kept or asked to stop managing is never written. `records` are the
  * library's managed-section records; those of other files are ignored.
  */
-export async function planManagedWrite(input: {
+export interface ManagedWriteInput {
   readonly filePath: string;
   readonly file?: string;
   readonly desired: readonly { readonly id: string; readonly body: string }[];
@@ -346,7 +372,17 @@ export async function planManagedWrite(input: {
   // Retire only recorded, intact generated sections; user text keeps its protection.
   readonly retired?: readonly string[];
   readonly restoreMissingFile?: boolean;
-}): Promise<ManagedWritePlan> {
+  /** These sections have a verified predecessor in the file being migrated. */
+  readonly restoreMissingSections?: readonly string[];
+}
+
+export async function planManagedWrite(input: ManagedWriteInput): Promise<ManagedWritePlan> {
+  const before = await readManagedFile(input.filePath, input.file ?? basename(input.filePath));
+  return planManagedText(input, before);
+}
+
+/** Plan against one file snapshot, including when migrating several sections in the same write. */
+export function planManagedText(input: ManagedWriteInput, before: string | null): ManagedWritePlan {
   const file = input.file ?? basename(input.filePath);
   if (!isRelativeFileName(file)) fail("MANAGED_SECTION_INPUT_INVALID", `${file} is not a file name relative to the project`, { file });
   const desired = new Map<string, string>();
@@ -364,7 +400,6 @@ export async function planManagedWrite(input: {
     if (!isManagedSectionId(id) || desired.has(id)) fail("MANAGED_SECTION_INPUT_INVALID", `section ${id} cannot be rendered and retired together`, { file, id });
   }
   const records = new Map(input.records.filter((record) => record.file === file).map((record) => [record.id, record]));
-  const before = await readManagedFile(input.filePath, file);
   const parsed = before === null ? null : parseManagedFile(before, file);
   const inFile = new Map((parsed?.sections ?? []).map((section) => [section.id, section]));
   const eol = parsed?.eol ?? "\n";
@@ -412,7 +447,8 @@ export async function planManagedWrite(input: {
       decide(id, "replace", { file, id, rev, digest: sectionDigest(body), state: "managed" }, section.startLine);
       continue;
     }
-    if (input.restoreMissingFile === true && before === null && record?.state === "managed" && body !== undefined) {
+    if (record?.state === "managed" && body !== undefined
+      && ((before === null && input.restoreMissingFile === true) || input.restoreMissingSections?.includes(id))) {
       const digest = sectionDigest(body);
       const rev = record.digest === digest ? record.rev : record.rev + 1;
       rendered.set(id, renderSection({ id, rev, body }, eol));

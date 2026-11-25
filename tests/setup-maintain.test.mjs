@@ -291,15 +291,14 @@ test("update uses the selected catalog across registered outputs and preserves O
   await enable(f, "batch");
   await enable(f, "residue-cleanup");
   const agents = join(f.project, "AGENTS.md");
-  await writeFile(agents, (await readFile(agents, "utf8")).replace(ruleBody("batch", "zh-CN"), "Owner's edited batch rule\n").replace(ruleBody("residue-cleanup", "zh-CN"), "Owner's kept cleanup rule\n"));
-  await resolveAgentsSection(f.library, { projectRoot: f.project, configurationProjectId: projectId(f.project), id: "rule:residue-cleanup", action: "keep", occurredAt: at() });
+  await writeFile(agents, (await readFile(agents, "utf8")).replace("按依赖分包", "按目标分包"));
   const before = new Map(await Promise.all([f, second].map(async target => [target.project, await readFile(join(target.project, "AGENTS.md"), "utf8")])));
   const parsedBefore = parseManagedFile(before.get(f.project));
   const release = await releaseOf(f.base, NEWER, async tree => {
     const file = join(tree, "dist/build/packages/core/src/rules-catalog.js");
     const text = await readFile(file, "utf8");
-    assert.ok(text.includes("## 自主运行原则 v1"));
-    await writeFile(file, text.replace("## 自主运行原则 v1", "## 自主运行原则 v1\n\nSelected release catalog fixture."));
+    assert.ok(text.includes("- **自主运行**"));
+    await writeFile(file, text.replace("- **自主运行**", "- **自主运行** Selected release catalog fixture."));
   });
   const planned = await plan(f, "update", { archive: release.archive });
   assert.deepEqual(planned.blockers, []);
@@ -309,18 +308,18 @@ test("update uses the selected catalog across registered outputs and preserves O
   assert.equal(updated.engineSwitch.to, NEWER);
   assert.equal(updated.managedUpdates.find(output => output.projectPath === f.project)?.status, "pending");
   assert.equal(updated.managedUpdates.find(output => output.projectPath === second.project)?.status, "updated");
-  assert.ok(updated.pendingSections.some(section => section.file === agents && section.id === "rule:batch"));
+  assert.ok(updated.pendingSections.some(section => section.file === agents && section.id === "agents"));
   assert.ok(updated.warnings.some(warning => warning.reasonCode === "MANAGED_SECTION_REFRESH_INCOMPLETE"));
   for (const target of [f, second]) {
     const after = parseManagedFile(await readFile(join(target.project, "AGENTS.md"), "utf8"));
     assert.deepEqual(after.outside, parseManagedFile(before.get(target.project)).outside, "Owner text is unchanged");
-    assert.match(after.sections.find(section => section.id === "rule:autonomy").body, /Selected release catalog fixture\./u, "render uses the selected engine, not the initiating catalog");
-    assert.ok(!after.sections.some(section => section.id === "rule:goal-writing"), "disabled rules remain absent");
+    const block = after.sections.find(section => section.id === "agents");
+    if (target === second) assert.match(block.body, /Selected release catalog fixture\./u);
+    else assert.equal(block.raw, parsedBefore.sections.find(section => section.id === "agents").raw);
+    assert.ok(!block.body.includes("**目标书写**"), "disabled rules remain absent");
   }
-  const after = parseManagedFile(await readFile(agents, "utf8"));
-  for (const id of ["rule:batch", "rule:residue-cleanup"]) assert.equal(after.sections.find(section => section.id === id).raw, parsedBefore.sections.find(section => section.id === id).raw);
-  const backedUp = updated.backups.find(entry => entry.path === agents);
-  assert.equal(await readFile(join(backedUp.into, "AGENTS.md"), "utf8"), before.get(f.project));
+  const backedUp = updated.backups.find(entry => entry.path === join(second.project, "AGENTS.md"));
+  assert.equal(await readFile(join(backedUp.into, "AGENTS.md"), "utf8"), before.get(second.project));
   await setWorkspaceSetting(second.library, { configurationProjectId: projectId(second.project), key: "agents.generation", value: "none", occurredAt: at() });
   const again = await applySetup(await plan(f, "update", { archive: release.archive }));
   assert.equal(again.written.filter(entry => entry.step === "managed-sections").length, 0, "repeated update does not rewrite identical sections");
@@ -438,7 +437,7 @@ test("480-R4: repair puts back what is missing, and a second repair changes noth
 test("shared navigation survives a declined device preference and repair remains idempotent", async (context) => {
   const f = await installed(context);
   const agents = join(f.project, "AGENTS.md");
-  assert.match(await readFile(agents, "utf8"), /id=navigation/u);
+  assert.match(await readFile(agents, "utf8"), /id=agents/u);
 
   const planned = await plan(f, "repair", { answers: { navigation: false } });
   assert.deepEqual(planned.blockers, []);
@@ -446,14 +445,14 @@ test("shared navigation survives a declined device preference and repair remains
   assert.ok(!planned.writes.some((entry) => entry.step === "managed-sections" || entry.step === "library"), "device preference does not mutate shared project files or declarations");
 
   const applied = await applySetup(planned);
-  assert.match(await readFile(agents, "utf8"), /id=navigation/u);
+  assert.match(await readFile(agents, "utf8"), /id=agents/u);
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, MACHINE_SETTINGS_FILE_NAME), "utf8")).values["agents.navigation"], "declined");
   assert.deepEqual(applied.pendingSections, []);
   assertSelfCheckGreen(applied);
 
   const again = await plan(f, "repair", { answers: { navigation: false } });
   assert.ok(!again.writes.some((entry) => entry.step === "managed-sections" && entry.path === agents), "unchanged shared navigation does not need another write");
-  assert.match(await readFile(agents, "utf8"), /id=navigation/u);
+  assert.match(await readFile(agents, "utf8"), /id=agents/u);
 });
 
 test("explicit shared navigation decline removes a managed section once, independent of device preference", async (context) => {
@@ -465,7 +464,7 @@ test("explicit shared navigation decline removes a managed section once, indepen
   assert.ok(planned.writes.some((item) => item.step === "managed-sections" && item.path === agents));
   const applied = await applySetup(planned);
   assert.deepEqual(applied.pendingSections, []);
-  assert.doesNotMatch(await readFile(agents, "utf8"), /id=navigation/u);
+  assert.doesNotMatch(await readFile(agents, "utf8"), /id=agents/u);
   assertSelfCheckGreen(applied);
   const again = await plan(f, "repair", { answers: { navigation: true } });
   assert.deepEqual(again.writes, [], "explicit shared declination is settled after one repair");
@@ -644,13 +643,13 @@ test("coordination harness sections participate in repair and engine updates", a
   assertSelfCheckGreen(repaired);
   const doctor = repaired.selfCheck.find((entry) => entry.check === "managed-sections");
   assert.deepEqual(doctor.detail.pending, []);
-  assert.ok(doctor.detail.sections.some((entry) => entry.section === "AGENTS.md#navigation" && entry.state === "managed"), "doctor lists the container's sections");
+  assert.ok(doctor.detail.sections.some((entry) => entry.section === "AGENTS.md#agents" && entry.state === "managed"), "doctor lists the container's sections");
 
   const agents = await readFile(join(container, "AGENTS.md"), "utf8");
   assert.doesNotMatch(agents, /execution\.maxConcurrentSubagents|variables-system|variables-custom/u, "configuration is queried on demand");
   assert.doesNotMatch(agents, /models\./u);
   const library = await materializeWorkspace(coordination);
-  const record = library.configRecords.find((entry) => entry.collection === "managed-section" && entry.key === "AGENTS.md#navigation");
+  const record = library.configRecords.find((entry) => entry.collection === "managed-section" && entry.key === "AGENTS.md#agents");
   assert.deepEqual([record?.projectId, record?.value.state], [undefined, "managed"], "recorded for the whole coordination library");
   assert.equal(library.projects.length, projectsBefore, "no setup project binding is made in a coordination library");
   assert.equal((await readRegistry(f.deviceHome)).entries.find((entry) => entry.projectPath === container)?.projectId, undefined);
@@ -746,7 +745,7 @@ test("671: fresh, repair and update read back AGENTS files when shared managed r
   const fixture = await installed(context);
   const agents = join(fixture.project, "AGENTS.md");
   const original = await readFile(agents, "utf8");
-  assert.ok(parseManagedFile(original).sections.some((section) => section.id === "navigation"));
+  assert.ok(parseManagedFile(original).sections.some((section) => section.id === "agents"));
   const release = await releaseOf(fixture.base, NEWER);
   for (const mode of ["repair", "update"]) {
     await rm(agents);

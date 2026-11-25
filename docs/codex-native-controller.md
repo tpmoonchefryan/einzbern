@@ -44,6 +44,60 @@ model group is optional, and an empty group is neither a usable model nor a vali
 selected escalation ceiling. Missing required groups stop this mode, not other
 hosts or unrelated operations. See `specs/engine-model-policy-v1.md`.
 
+## Economy startup and effective permission gate
+
+Create the independent Economy conversation through the selected Codex host's
+currently supported native entry point, requesting Full Access on that new
+conversation. Retain the exact creation arguments and raw host response, and
+bind the returned conversation ID and effective permission observation to the
+same coordinator identity. A request for Full Access alone is not evidence that
+the host granted it. Never change the current Main conversation's permission,
+global configuration, approval policy, hooks or installation to satisfy this
+gate.
+
+For the local Codex App Server schema at version `0.171.0`, `thread/start`
+accepts `sandbox: "danger-full-access"`. Its successful response contains both
+`thread.id` and sibling `sandbox.type`; `dangerFullAccess` is the effective
+Full Access value, while `workspaceWrite` is restricted. Accept the observation
+only when the response's `thread.id` is the exact new conversation ID being
+enrolled. `thread/read` at this version returns thread metadata but no sandbox
+permission, so it cannot independently establish Full Access. If a supported
+host wrapper returns only the ID, strips the sandbox observation, or exposes a
+different schema without a verified same-ID permission readback, record the
+effective permission as unknown. Do not infer it from requested arguments,
+defaults, another conversation, or a prior observation.
+
+The first worker admission uses
+`execution-host-prepare --codex-peer-worker true --codex-startup-evidence <file>`.
+That file retains `{conversationId, sourceRef, raw, conversationPointer}` from
+the actual `thread/start` response. For this schema, the identity pointer must
+be `/result/thread/id` with permission at `/result/sandbox/type`, or the direct
+result pair `/thread/id` and `/sandbox/type`. Preparation compares the returned
+ID with the actual native session ID resolved from `CODEX_THREAD_ID` or
+`CODEX_SESSION_ID` and accepts only `dangerFullAccess`. `workspaceWrite` is
+blocked as restricted; a missing, unrecognized, or mismatched field is unknown
+and leaves preparation unready.
+The coordinator manifest repeats this same receipt, so peer-record cannot
+activate a role from a requested permission or a different conversation. A
+batch-marked first report requires that active role, whose receipt is read and
+validated before handoff preparation. The order is thread start, same-ID
+permission readback, first worker preparation, complete worker receipt, role
+enrollment, then first handoff readiness. Preparation itself invokes neither a
+native handoff nor a worker dispatch.
+
+The first handoff to Main and the first worker dispatch are ready only after the
+new Economy ID is correlated with effective `dangerFullAccess`. A host refusal
+remains denied with its raw response; an explicit restricted result is blocked;
+missing, mismatched, or unrecognized permission evidence is unknown. In all
+three cases, retain the reason and stop this candidate's initial handoff and
+dispatch before either native operation. Do not retry through another
+conversation or method, or modify an existing permission to manufacture a
+success. Keep the host's approval policy as returned. Do not add a
+`sandboxPolicy` override to the first `turn/start` handoff; it could change the
+new conversation's effective permission after startup. Ordinary cross-
+conversation delivery continues to send only the target, body and any
+deduplication identifier supported by that entry point.
+
 ## Batch identity, waiting and recovery
 
 This is an orchestration contract over supported host operations, not a new RPC,
@@ -55,30 +109,44 @@ owned run evidence and reconcile them with actual native receipts:
    conversation identities, package/member scope and policy origin. Bind worker
    agentId/attempt to real dispatch receipts; names, markers and self-reports are
    not authorization. Native turn IDs do not replace application attempts.
-2. Enforce worker caps, device/project limits and actual available host capacity.
+2. Main groups work from the actual source paths, dependencies and ready inputs.
+   Shared write paths and dependent tasks stay in one package and run in a stated
+   order. Each independent ready package gets its own fresh native worker. When
+   capacity permits, dispatch the ready workers before waiting for the first
+   result; record missing inputs or unavailable slots with their actual cause.
+   Freeze the source path set and package order in the batch evidence.
+3. Enforce worker caps, device/project limits and actual available host capacity.
    There is no collector exemption or reserved collection slot. Reduce parallelism
    or split a stage when necessary; never count a missing usage observation as
    spare capacity or bypass a refusal.
-3. The coordinator uses supported bounded waits, respecting wait limits, deadline,
+4. The coordinator uses supported bounded waits, respecting wait limits, deadline,
    failure budget, no-progress boundary and user interruption. Read exact members'
    raw status/results. Preserve completed, failed, cancelled_confirmed, pending
    and unknown. Stale/future observations, query failures, identity drift and
    wrong batch/attempt cannot establish completion or cancellation.
-4. Deduplicate observations and delivery within batch/attempt. Once all members
+5. Deduplicate observations and delivery within batch/attempt. Once all members
    are confirmed terminal, send one batch report containing results, evidence and
    failures through the supported independent-conversation channel. Completion of
    every worker is not success of every package. Keep delivery state separate from
    execution, acceptance and resource release.
-5. On interruption/restart, reconcile existing dispatch and native state before
+6. On interruption/restart, reconcile existing dispatch and native state before
    any action. Reuse the same logical batch/attempt evidence; do not respawn a
    worker because a local acknowledgement is missing. Confirmed delivered reports
    are not replayed. Unknown delivery is queried, never blindly resent or treated
    as permission for the next batch. Late results stay attached to their original
    attempt and cannot advance a replacement batch. Ended workers are not revived.
-6. Deadline, pause/cancel, permission/safety refusal, budget exhaustion, no progress
+7. Deadline, pause/cancel, permission/safety refusal, budget exhaustion, no progress
    and missing capability produce explicit exceptional facts and outstanding
    ownership, not fabricated success or cancellation. Stop only dependent work.
    There is no collector fallback, Stop-to-block loop or helper keepalive.
+
+Main names the existing acceptance work item, exact candidate and start point in
+the handoff. After implementation is integrated and the acceptance stage is
+authorized, Economy dispatches a fresh Main-tier reviewer who did not implement
+the candidate. For a small round, that reviewer runs the required checks, makes
+the acceptance judgment and records lessons in one native final report. Main
+decides whether to close or return the work; implementation receipts and fixtures
+do not substitute for that independent result.
 
 Main resumes for the delivered batch decision and, where authorized, hands off the
 next batch. A missing or uncertain host result remains uncertain; source code and
@@ -120,11 +188,24 @@ authorization, wait for pending workers or revive the retired collector loop.
 
 ## Reports, settings and query exit
 
-An ordinary report sends only `threadId`, `hostId` and `prompt`. Sender task
-selection remains preparation metadata and does not set the recipient's model or
-effort. Native coordination preparation rejects `model`/`thinking` overrides by
-default; new ordinary delivery records also reject them. Historical receipt
-normalization retains the original meaning of stored evidence.
+An ordinary `send_message_to_thread` report sends only `threadId`, optional
+`hostId` and `prompt`. An App Server `turn/start` report sends `threadId` and one
+text entry in `input`, with the schema's optional `clientUserMessageId` for
+deduplication. Preflight each entry against its bound Main, text body and supported
+argument set before sending. Any `model`, `thinking`, `effort`, `serviceTier` or
+`serviceTierForTurn` property is rejected by presence, even when its value matches
+the recipient. Before invoking `codex-rpc.mjs turn/start`, use the existing
+`execution-host-prepare` path with tool name `turn/start`, the actual coordinator
+session and the exact arguments, then pass only those prepared arguments to the
+RPC. Do not forward sender settings through either path. Sender task selection
+remains preparation metadata and does not set recipient settings. New ordinary
+delivery records reject the same five fields; historical receipt normalization
+retains the original meaning of stored evidence.
+
+An unmarked message to another conversation retains its existing recipient
+semantics. A settings adjustment is a separate native attempt that follows the
+existing explicit authorization flow; it does not create an exception for an
+ordinary report. Worker model routing remains a separate dispatch choice.
 
 An explicitly authorized settings adjustment is a separate native attempt, not a
 final batch delivery. Machine-assemble an optional engine-only
@@ -295,6 +376,14 @@ a retired role. Every mutation reads back the saved role. Batch completion is no
 retirement. Enrollment/persistence failures retain the receipt and return nonzero
 `CODEX_PEER_GUARD_NOT_READY`, not ordinary-unbound success.
 
+For future thread/read records, construct `sourceRef` as `thread/read` followed
+by the exact archived response path for that App Server method and reply. Keep
+the response path and retry filename from the actual call (for example,
+`thread/read native/thread-read.economy.dispatch.retry02.stdout.json`) rather
+than substituting a canonical-looking alias. Historical source recognition is
+bounded to known thread/read forms; the reference is provenance and never
+permission evidence.
+
 Setup's existing `--codex-admission` and `doctor --codex-admission` accept current
 native observations. The same option is used by peer-record and worker prepare.
 Machine-assemble `native` as `tcrn.codex-hook-observation.v1` with `observedAt`,
@@ -337,3 +426,15 @@ capability experiment or to invent a new delivery prerequisite.
 Keep a particular run's results and acceptance waivers in its work/PR record, not
 in installed stable rules. PR push and Ready for Review do not authorize merge,
 release or live installation.
+
+
+## Dispatching the next ready implementation packages
+
+Main authorizes the work and frozen inputs. Economy checks actual free slots and fills them before finishing unrelated reporting. `execution-batch-plan --from-file <queue.json>` selects the largest compatible set. For example, `{"freeSlots":2,"availableCandidates":["lib@abc"],"occupiedWrites":[],"packages":[{"id":"ui","authorized":true,"requires":["lib@abc"],"writes":["app/ui"]}]}` selects `ui`. Use the smallest remaining project, device and native capacity after accounting for active workers. Paths are repository-qualified and include directory prefixes. An empty write set denotes read-only work. Keep the native dispatch and release times, the first time authorization, input and a slot coincided, report delivery time and reasons for waiting.
+
+An empty selection returns `nextAction=reconcile-authorized-initiatives`. Main runs `execution-queue-reconcile --workspace <library> --scope <grants.json> [--assessments <observations.json>]` on the complete authorized scope, applies supported state updates, and hands the newly ready packages to the same Economy thread. Release of a slot or receipt of a report reopens this check. Native work and undelivered results retain their original owners. The [queue reconciliation contract](../specs/work-content-v1.md#implementation-queue-reconciliation) describes the inputs and stop outcome.
+
+
+For a native Codex worker, `execution-host-prepare` builds the model and effort arguments from the request selection. Existing explicit selections must agree. Feed an actual hooks capture through `--codex-admission`, including the bare `{native}` capture or a permitted admission envelope. Optionally supply `--codex-usage` with the timestamped rate-limit capture and `--codex-capacity` with the timestamped agent roster. Reuse stable bindings and refresh just the missing or stale observation. Existing permission, capacity, quota and trusted-hook checks still apply. Send Main the ordinary report text and the candidate identity.
+
+The implementer who merges candidates tests the affected interface. Main uses the result to dispatch dependent work. All Epics must be implementation-ready before Economy dispatches fresh independent validators for the INIT. Main makes its decision from those reports.

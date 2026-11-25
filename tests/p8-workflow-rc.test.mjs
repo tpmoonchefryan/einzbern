@@ -50,6 +50,9 @@ import { scanPrivacyEntries } from "../scripts/lib/privacy.mjs";
 import { withExclusiveOutputSession } from "../scripts/lib/safe-io.mjs";
 import { writeUstar } from "../scripts/lib/tar.mjs";
 
+// The archived releases carry the reviewed TypeScript compiler output byte for byte.
+const reviewedOwnerLine = `    owner: ${JSON.stringify(LEGACY_REPOSITORY_NAMES.owner)},`;
+
 function releaseArchiveInputs(bytes = Buffer.from(`formal package ${P8_VERSION}\n`, "utf8")) {
   const digest = createHash("sha256").update(bytes).digest("hex");
   return {
@@ -370,9 +373,8 @@ function withHeader(tar, edit) {
   return archive;
 }
 
-for (const reviewedVersion of ["3.2.0", "3.3.0", "3.3.1", "3.4.0"]) test(`${reviewedVersion} reviewed package labels retain exact decoding and reject adjacent or injected private content`, async () => {
-  const names = await readFile(new URL("../dist/build/packages/core/src/names.js", import.meta.url), "utf8");
-  const ownerLine = names.split("\n").find((line) => line.includes(scanOwner) && /\bowner\s*:/u.test(line));
+for (const reviewedVersion of ["3.2.0", "3.3.0", "3.3.1", "3.4.0"]) test(`${reviewedVersion} reviewed package labels retain exact decoding and reject adjacent or injected private content`, () => {
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(ownerLine).digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const members = ["atelier/portal.mjs", "scripts/einzbern-hook.mjs", "scripts/einzbern.mjs"];
   if (reviewedVersion === "3.4.0") members.push("scripts/library-catalog-worker.mjs");
@@ -417,7 +419,7 @@ test("R48-01 (R47-REG-1): P8 scans the formal package by content, so address-sha
   assert.ok(Buffer.isBuffer(entries.find((entry) => entry.label === `dist/release/${P8_RELEASE_ARTIFACTS[0]}`).content), "privacy.mjs still expands the source archive");
 });
 
-test("R48-01 (R47-REG-1): an address or local path in a member, a header path or a gzip text field is still a finding, and an unknown member still fails", async () => {
+test("R48-01 (R47-REG-1): an address or local path in a member, a header path or a gzip text field is still a finding, and an unknown member still fails", () => {
   const address = joinParts(["person", "@", "example.invalid"], "");
   const localPath = joinParts(["", "Users", "someone", "notes.txt"], "/");
   const clean = { path: "fixture/notes.txt", bytes: Buffer.from("plain text\n", "utf8") };
@@ -439,8 +441,7 @@ test("R48-01 (R47-REG-1): an address or local path in a member, a header path or
 
   // The 2.2.2 package's three compiled names.js owner-line members are fixed by the read-only
   // package evidence. The draft 2.2.4 candidate and every nearby member remain findings.
-  const names = await readFile(new URL("../dist/build/packages/core/src/names.js", import.meta.url), "utf8");
-  const ownerLine = names.split("\n").find((line) => line.includes(scanOwner) && /\bowner\s*:/u.test(line));
+  const ownerLine = reviewedOwnerLine;
   assert.equal(createHash("sha256").update(scanOwner, "utf8").digest("hex"), "1b58b39b82f7665f411664797bcc897a75d9a6222ee4a8c97234493324aab74f");
   assert.equal(createHash("sha256").update(ownerLine, "utf8").digest("hex"), "3861c5826071f54b9b552ac3ff993b91181bf9d91d54dcdfd7f0790fc671bd56");
   const reviewedVersion = "2.2.2";

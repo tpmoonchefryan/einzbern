@@ -5,6 +5,7 @@
 
 import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -27,6 +28,7 @@ import {
   registerLibrary,
   renderAgentsSections,
 } from "../dist/build/packages/core/src/index.js";
+import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { MACHINE_SETTINGS_FILE_NAME } from "../dist/build/packages/core/src/machine-settings.js";
 import { setConfigRecord } from "../dist/build/packages/core/src/config-records.js";
 import { installSkillCopies } from "../dist/build/packages/core/src/skill-copies.js";
@@ -34,6 +36,7 @@ import { DOCTOR_CHECKS, DOCTOR_CHECK_REASON_CODES, DOCTOR_REASON_CODES, runDocto
 import { renderSection, sectionDigest } from "../dist/build/packages/core/src/managed-sections.js";
 import { BUILT_IN_RULES } from "../dist/build/packages/core/src/rules-catalog.js";
 import { canonicalJson } from "../dist/build/packages/protocol/src/index.js";
+import { codexGuardFixture } from "./helpers/host-native-fixture.mjs";
 
 // Anything that fell back to the user's home would land in this empty directory, not the real one.
 const guardHome = mkdtempSync(join(tmpdir(), "einzbern-doctor-guard-home-"));
@@ -93,6 +96,25 @@ function doctor(fixture, options = {}) {
   return runDoctor({ projectRoot: fixture.project, home: fixture.home, deviceHome: fixture.deviceHome, lockTimeoutMs: 50, ...options });
 }
 
+async function doctorCli(fixture, admissionPath) {
+  const previousHome = process.env.HOME;
+  const previousDeviceHome = process.env.EINZBERN_HOME;
+  process.env.HOME = fixture.home;
+  process.env.EINZBERN_HOME = fixture.deviceHome;
+  try {
+    let output = "";
+    await runCli(["doctor", "--project", fixture.project, ...(admissionPath === undefined ? [] : ["--codex-admission", admissionPath])], {
+      write: value => { output += value; },
+    });
+    return JSON.parse(output);
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    if (previousDeviceHome === undefined) delete process.env.EINZBERN_HOME;
+    else process.env.EINZBERN_HOME = previousDeviceHome;
+  }
+}
+
 function byCheck(results, check) {
   return results.find((entry) => entry.check === check);
 }
@@ -112,6 +134,81 @@ function assertOnlyRed(results, check, cause) {
     }
   }
 }
+
+test("doctor CLI reports matching readiness, native observation causes and actionable next steps", async context => {
+  const fixture = await healthy(context);
+  const ready = await doctorCli(fixture);
+  assert.equal(ready.ok, true);
+  assert.equal(ready.reasonCode, "DOCTOR_READY");
+  assert.equal(ready.nextStep, null);
+
+  const native = await codexGuardFixture({ root: fixture.base, home: fixture.deviceHome }, fixture.project);
+  fixture.home = native.userHome;
+  for (const host of HOST_HOOK_FILE_HOSTS) {
+    const plan = planHostHooks({ host, scope: "user", deviceHome: fixture.deviceHome, userHome: fixture.home });
+    await applyHostHooks(await readHostHooks(plan, { root: fixture.home, home: fixture.home }), { at: AT });
+  }
+  const hooksPath = join(fixture.home, ".codex", "hooks.json");
+  const hooksBytes = await readFile(hooksPath);
+  native.native.files = native.native.files.map(file => file.path === hooksPath
+    ? { ...file, sha256: createHash("sha256").update(hooksBytes).digest("hex") }
+    : file);
+  await writeFile(native.admissionPath, JSON.stringify(native.admission));
+  await installSkillCopies({ source: join(fixture.base, "skill"), now: AT, home: fixture.home, deviceHome: fixture.deviceHome });
+  const observed = await doctorCli(fixture, native.admissionPath);
+  assert.equal(observed.ok, true, JSON.stringify(observed));
+  assert.equal(observed.reasonCode, "DOCTOR_READY");
+  assert.equal(observed.nextStep, null);
+  assert.equal(observed.checks.find(check => check.check === "hooks-present").detail.codexGuard.ready, true);
+
+  const admissionPath = join(fixture.base, "codex-admission.json");
+  const missingAdmission = { ...native.admission };
+  delete missingAdmission.native;
+  const staleAdmission = {
+    ...native.admission,
+    native: { ...native.native, observedAt: new Date(Date.now() - 301_000).toISOString() },
+  };
+  const mismatchedAdmission = {
+    ...native.admission,
+    native: {
+      ...native.native,
+      files: native.native.files.map(file => file.path.endsWith("config.toml") ? { ...file, sha256: "0".repeat(64) } : file),
+    },
+  };
+  const cases = [
+    {
+      name: "missing",
+      admission: missingAdmission,
+      expected: "native-hooks-observation-missing",
+      nextStep: "Capture the owning Codex client's current app-server hooks/list response and hook/config byte hashes, then rerun doctor with --codex-admission <path>.",
+    },
+    {
+      name: "stale",
+      admission: staleAdmission,
+      expected: "native observation is stale or future",
+      nextStep: "Capture a fresh owning Codex app-server hooks/list response and hook/config byte hashes, then rerun doctor with --codex-admission <path>; the observation must be within five minutes.",
+    },
+    {
+      name: "config-mismatch",
+      admission: mismatchedAdmission,
+      expected: "hook/config bytes changed since the native observation",
+      nextStep: "Review the current Codex hook/config bytes, then capture a fresh hooks/list response and matching byte hashes before rerunning doctor with --codex-admission <path>.",
+    },
+  ];
+
+  for (const entry of cases) {
+    await writeFile(admissionPath, JSON.stringify(entry.admission), "utf8");
+    const report = await doctorCli(fixture, admissionPath);
+    const failed = report.checks.find(check => !check.ok);
+    assert.equal(report.ok, false, `${entry.name} observation is not healthy`);
+    assert.equal(failed?.check, "hooks-present");
+    assert.equal(report.reasonCode, failed?.reasonCode, "the top-level reason follows the first failed check");
+    assert.equal(report.reasonCode, "DOCTOR_HOOKS_MISMATCH");
+    assert.ok(failed.detail.codexGuard.reasons.some(reason => reason.includes(entry.expected)), JSON.stringify(failed.detail.codexGuard));
+    assert.equal(report.nextStep, failed.nextStep, "the top-level next step follows the first failed check");
+    assert.equal(failed.nextStep, entry.nextStep, `${entry.name} has cause-matched user action`);
+  }
+});
 
 async function libraryId(fixture) {
   return JSON.parse(await readFile(join(fixture.library, "manifest.json"), "utf8")).libraryId;
@@ -374,13 +471,13 @@ test("ordinary doctor waits for a live writer beyond the removed two-second prod
 // section changed by hand pending.
 test("doctor detects a same-version catalog correction even when file, marker and stored digest agree", async context => {
   const fixture = await healthy(context);
-  const catalog = BUILT_IN_RULES.map(rule => rule.id === "autonomy" ? { ...rule, body: { zh: "Earlier managed autonomy\n", en: "Earlier managed autonomy\n" } } : rule);
+  const catalog = BUILT_IN_RULES.map(rule => rule.id === "autonomy" ? { ...rule, principle: { zh: "- **自主运行** 旧版。", en: "- **Autonomy** Earlier wording." } } : rule);
   await enableRule({ libraryRoot: fixture.library, projectRoot: fixture.project, id: "autonomy", catalog, occurredAt: AT });
   const path = join(fixture.project, "AGENTS.md");
   const before = await readFile(path, "utf8");
   const stale = await doctor(fixture);
   assertOnlyRed(stale, "managed-sections", "MANAGED_SECTION_OUTDATED");
-  assert.deepEqual(byCheck(stale, "managed-sections").detail.outdated, ["rule:autonomy"]);
+  assert.deepEqual(byCheck(stale, "managed-sections").detail.outdated, ["agents"]);
   assert.deepEqual(byCheck(stale, "managed-sections").detail.pending, [], "old generated text is not a user edit");
   assert.equal(await readFile(path, "utf8"), before, "doctor does not repair while inspecting");
   await renderAgentsSections(fixture.library, { projectRoot: fixture.project, navigation: null, occurredAt: AT });
@@ -398,14 +495,14 @@ test("540-GWT4: managed-sections checks a coordination library's registered root
   const sections = byCheck(results, "managed-sections").detail;
   assert.deepEqual(sections.pending, []);
   const listed = sections.sections.map((entry) => entry.section);
-  for (const key of ["AGENTS.md#navigation", "AGENTS.md#rule:autonomy"]) assert.ok(listed.includes(key), `doctor lists ${key}`);
+  for (const key of ["AGENTS.md#agents"]) assert.ok(listed.includes(key), `doctor lists ${key}`);
   assert.ok(sections.sections.every((entry) => entry.state === "managed"));
 
   const path = join(fixture.project, "AGENTS.md");
-  await writeFile(path, (await readFile(path, "utf8")).replace("## Autonomous Operation Principle v1", "## Autonomy, as the Owner rewrote it"));
+  await writeFile(path, (await readFile(path, "utf8")).replace("**Autonomy**", "**Owner wording**"));
   const changed = await doctor(fixture);
   assertOnlyRed(changed, "managed-sections", "MANAGED_SECTION_PENDING");
-  assert.deepEqual(byCheck(changed, "managed-sections").detail.pending, ["AGENTS.md#rule:autonomy"]);
+  assert.deepEqual(byCheck(changed, "managed-sections").detail.pending, ["AGENTS.md#agents"]);
 });
 
 // TCRN-CROSS-STORY-548 R4, AC4: with DSH profiles in the home, hooks-present carries a dsh entry

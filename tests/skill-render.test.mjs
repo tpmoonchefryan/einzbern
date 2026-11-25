@@ -37,7 +37,6 @@ const WIZARD_PHRASES = Object.freeze([
   "--yes true",
   "AskUserQuestion",
   "Questions (one screen)",
-  "doctor --project",
   "--managed-sections",
   "--rollback",
   "--mapping",
@@ -181,6 +180,30 @@ test("479-AC3: SKILL.md stays under 6000 bytes and carries none of the wizard te
   }
 });
 
+test("692-AC01: generated Skill gives a source-bound Codex doctor and copyable project/minutes examples", async () => {
+  const markdown = render();
+  for (const example of [
+    "e doctor --project . --codex-admission codex-admission.json",
+    'e rule-list --workspace="$w" --project-id="$p"',
+    'e work-show --workspace="$w" --external-key TCRN-CROSS-STORY-692',
+    "printf '%s' '[\"已核验 1,392 个文件\"]' > decisions.json",
+    'e minutes-record --workspace="$w" --project-id="$p" --title check --summary done --decisions-file decisions.json --actor agent:codex --external-key m$(date +%s)',
+    'owning App Server JSON-RPC `initialize` → `hooks/list` for `$PWD`',
+    "fresh project-bound `--codex-admission`",
+    "raw result",
+    "SHA-256 hook `sourcePath`/config",
+    "docs/codex-native-controller.md",
+    "require `ok=true` and `hooks-present.detail.codexGuard.ready`",
+    "Reobserve within five minutes",
+  ]) {
+    assert.ok(markdown.includes(example), example);
+  }
+  const nativeSchema = (await readFile(join(repositoryRoot, "docs", "codex-native-controller.md"), "utf8")).replace(/\s+/gu, " ");
+  for (const field of ["tcrn.codex-hook-observation.v1", "observedAt", "actual client `version`", "`cwd`", "original public app-server `hooks/list` result in `raw`", "`files` (`path`, byte `sha256`)", "returned hook `sourcePath`", "current user `.codex/config.toml`", "enabled, currentHash trusted", "unchanged observed hook/config bytes"]) assert.ok(nativeSchema.includes(field), field);
+  assert.ok(markdown.includes("`minutes-record --decisions-file <json>` takes a JSON string array"));
+  assert.ok(Buffer.byteLength(markdown, "utf8") <= 6000, `${Buffer.byteLength(markdown, "utf8")} bytes`);
+});
+
 test("479-AC3: SKILL.md points to references/ for install-type tasks only, naming files that exist", async () => {
   const markdown = render();
   const pointer = markdown.split("\n").filter((line) => line.includes("`references/`"));
@@ -252,12 +275,11 @@ test("DOT-R01/R02: generated navigation separates native evidence, rules, schedu
   // INIT065 intentionally replaces the normal dot-only row with a general versioned path.
   // Legacy protocol behavior remains covered by native-tool-evidence and dispatch tests.
   const native = tableRows(markdown).find(([, verbs]) => verbs.includes("`execution-host-prepare`"))[2];
-  for (const phrase of ["normal prompt reports", "Class fallback", "hard limits", "Parent reads before dispatch, child reads before work", "targets=[]", "scope/permission", "machine-assembled raw returns/reports", "attempt association", "unknown/cancel/finality/review", "Dot model selection is host-managed"]) assert.ok(native.includes(phrase), phrase);
+  for (const phrase of ["normal prompt reports", "Class fallback", "hard limits", "Parent reads before dispatch, child reads before work", "targets=[]", "scope/permission", "machine-assembled raw returns/reports", "attempt association", "unknown/cancel/finality/review", "Dot model selection is host-managed", "attempt association and failure outcomes", "--binding", "--prior", "specs/host-fallback-v1.md"]) assert.ok(native.includes(phrase), phrase);
   for (const phrase of ["Sessions read their live work", "at most five new sourced lessons", "repository-relative evidence paths", "No progress in AGENTS", "independent dot target", "Installation, policy changes, restoration and publication need their own approvals", "references/owner-extensions.md", "--decisions-file <json>", "--full true", "verifiedReadback"]) assert.ok(markdown.includes(phrase), phrase);
-  for (const phrase of ["`--binding`", "`--prior`", "specs/host-fallback-v1.md"]) assert.ok(native.includes(phrase), phrase);
   const contract = await readFile(join(repositoryRoot, "specs", "host-fallback-v1.md"), "utf8");
-  for (const phrase of ["normal prompt/report instructions", "never ask the user to hand-fill repeated metadata", "Unknown outcomes require reconciliation before duplicate invocation", "Cancel-accepted records host acknowledgement, not termination", "Pending/unknown tasks keep follow-up responsibility"]) assert.ok(contract.includes(phrase), phrase);
-  assert.ok(markdown.includes("engine bundle `specs/` beside `scripts/`, not this Skill"),
+  for (const phrase of ["normal prompt/report instructions", "never ask the user to hand-fill repeated metadata", "Unknown outcomes require reconciliation before duplicate invocation", "Cancel-accepted records host acknowledgement, not termination", "Pending/unknown tasks keep follow-up responsibility", "execution-host-record --binding <file> [--events <json-array>] [--prior <file>]", "associate it to the existing local attempt"]) assert.ok(contract.includes(phrase), phrase);
+  assert.ok(markdown.includes("Read engine bundle `specs/` beside `scripts/`, not this Skill"),
     "J02: closed inputs come from the actual shipped contracts, not only flag help or source TS");
   const shared = tableRows(markdown).find(([, verbs]) => verbs.includes("`shared-submit-plan`"))[2];
   for (const phrase of ["Complete baseline", "one complete pre-submit refresh", "engine reapply", "serial handoff", "segments before manifest", "verify remote bytes", "complete destination", "observe release", "Advisory is not a lock", "absence/age grants nothing", "Query unknown publication before retry"]) assert.ok(shared.includes(phrase), phrase);

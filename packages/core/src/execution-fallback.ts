@@ -8,6 +8,8 @@ import type { HostAction, HostCapabilities, HostSelection } from "./host-capabil
 import type { ProjectReference } from "../../protocol/src/index.js";
 import { resolveNativePolicyIntentFromSnapshot } from "./engine-model-policy.js";
 import type { EngineModelPolicyFile } from "./engine-model-policy.js";
+import { validatePackDispatchBinding } from "./pack-dispatch.js";
+import type { PackDispatchBinding } from "./pack-dispatch.js";
 
 /** This is a report of existing authority, not a credential minted by the harness. */
 export interface HostExecutionAuthorization {
@@ -43,6 +45,8 @@ export interface HostExecutionRequest {
   readonly permissionDenied?: boolean;
   readonly cancellationRequested?: boolean;
   readonly saveRequirement?: { readonly requiredBeforeExecution: boolean; readonly status: "not-requested" | "pending" | "saved" | "failed" };
+  /** Explicit Pack row and capacity snapshot for a new implementation dispatch. */
+  readonly packBinding?: PackDispatchBinding;
 }
 export interface HostExecutionDecision {
   readonly schemaVersion: typeof HOST_EXECUTION_DECISION_VERSION;
@@ -61,11 +65,11 @@ export interface HostExecutionDecision {
   readonly additionalConfirmationsRequired: boolean;
   readonly contextDigest: string;
 }
-const actions = ["decomposition", "research", "coordination", "implementation"];
+const actions = ["decomposition", "research", "coordination", "implementation", "validation"];
 function instant(v: unknown): void { hostText(v, "instant"); if (!v.endsWith("Z")) throw new HostExecutionError("instant must be UTC"); parseStrictInstant(v); }
 function strings(v: unknown, name: string): asserts v is string[] { if (!Array.isArray(v)) throw new HostExecutionError(`${name} must be an array`); v.forEach(s => hostText(s, name)); }
 export function validateHostExecutionRequest(value: unknown): HostExecutionRequest {
-  const r = hostObject(value, "host request", ["schemaVersion", "workId", "workRevision", "action", "phase", "category", "rejections", "requestedAgents", "capabilities", "selection", "fallbackSelection", "authorization", "context", "projectRef", "sourceScope", "hardLimits", "previousOutcome", "permissionDenied", "cancellationRequested", "saveRequirement"]);
+  const r = hostObject(value, "host request", ["schemaVersion", "workId", "workRevision", "action", "phase", "category", "rejections", "requestedAgents", "capabilities", "selection", "fallbackSelection", "authorization", "context", "projectRef", "sourceScope", "hardLimits", "previousOutcome", "permissionDenied", "cancellationRequested", "saveRequirement", "packBinding"]);
   if (r.schemaVersion !== HOST_EXECUTION_REQUEST_VERSION || !actions.includes(String(r.action)) || !["dispatch", "work"].includes(String(r.phase))) throw new HostExecutionError("unsupported host request version/action/phase");
   hostText(r.workId, "workId"); hostCount(r.workRevision, "workRevision", 1); hostText(r.category, "category"); hostCount(r.rejections, "rejections"); hostCount(r.requestedAgents, "requestedAgents", 1);
   validateHostCapabilities(r.capabilities); validateHostSelection(r.selection); if (r.fallbackSelection !== undefined) validateHostSelection(r.fallbackSelection);
@@ -98,6 +102,10 @@ export function validateHostExecutionRequest(value: unknown): HostExecutionReque
   if (r.saveRequirement !== undefined) {
     const save = hostObject(r.saveRequirement, "saveRequirement", ["requiredBeforeExecution", "status"]);
     if (typeof save.requiredBeforeExecution !== "boolean" || !["not-requested", "pending", "saved", "failed"].includes(String(save.status))) throw new HostExecutionError("invalid save requirement");
+  }
+  if (r.packBinding !== undefined) {
+    validatePackDispatchBinding(r.packBinding);
+    if (r.action !== "implementation" || r.phase !== "dispatch") throw new HostExecutionError("Pack rows are consumed only for implementation dispatches");
   }
   if (r.previousOutcome !== undefined && !["not-executed", "unknown", "running", "terminal"].includes(String(r.previousOutcome))) throw new HostExecutionError("invalid previous outcome");
   for (const key of ["permissionDenied", "cancellationRequested"]) if (r[key] !== undefined && typeof r[key] !== "boolean") throw new HostExecutionError(`${key} must be boolean`);

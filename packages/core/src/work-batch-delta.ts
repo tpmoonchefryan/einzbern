@@ -4,7 +4,7 @@
 // This module deliberately has no callback registration or package-index export.
 import { PROTOCOL_LIMITS, canonicalExternalKey, deriveStableId } from "../../protocol/src/index.js";
 import { normalizeInvolvedProjects } from "./involved-projects.js";
-import { createWorkDelta, annotateWorkDelta, transitionWorkDelta } from "./workspace.js";
+import { createWorkDelta, annotateWorkDelta, implementationConditionDelta, transitionWorkDelta } from "./workspace.js";
 import type { MutationDelta, WorkspaceState } from "./workspace.js";
 import type { WorkRelationsInput } from "./work-relations.js";
 import type { WorkBatchOptions } from "./work-batch.js";
@@ -100,11 +100,18 @@ export function resolveWorkBatchMemberDelta(member: Readonly<Record<string, unkn
   if (member.verb === "work-transition") {
     return transitionWorkDelta({
       id,
+      ...(member.expectedRevision === undefined ? {} : { expectedRevision: member.expectedRevision as number }),
       status: member.status as never,
+      ...(member.blockedCriteria === undefined ? {} : { blockedCriteria: member.blockedCriteria as readonly string[] }),
       ...(member.summary === undefined ? {} : { summary: member.summary as string }),
       occurredAt,
       ...(actorId === undefined ? {} : { actorId }),
     });
+  }
+  if (member.implementationCondition !== undefined) {
+    return implementationConditionDelta({ id, expectedRevision: member.expectedRevision as number,
+      condition: member.implementationCondition as { basis: string; evidence: string; resumeWhen: string } | null,
+      occurredAt, ...(actorId === undefined ? {} : { actorId }) });
   }
   return annotateWorkDelta({
     id,

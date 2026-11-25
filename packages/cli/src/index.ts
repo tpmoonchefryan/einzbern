@@ -1,7 +1,7 @@
 import { isProjectArtifactBinding, resolveProjectArtifactBinding } from "../../core/src/portable-path.js";
 import { MEMORY_LEASE_VARIABLE } from "../../../scripts/lib/memory-budget.mjs";
 import { readWorkContentImpact } from "../../core/src/work-requirements.js";
-import { workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
+import { WORK_ACCEPTANCE_STAGES, workContent, workContentDraft, workContentMissing } from "../../core/src/work-content.js";
 import type { ContentWorkKind } from "../../core/src/work-content.js";
 import { workContentContext, workContentContextSegment } from "../../core/src/work-content-context.js";
 import { readWorkContentPolicy, defaultWorkContentTemplate, workContentRolloutReadiness } from "../../core/src/work-content-templates.js";
@@ -237,8 +237,10 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ProtocolError, assertStrictInstant, canonicalExternalKey, canonicalJson, canonicalSha256, deriveStableId } from "../../protocol/src/index.js";
+import { isWorkflowStatus, workflowStatus } from "../../core/src/work-validation.js";
+import type { WorkflowStatus } from "../../core/src/work-validation.js";
 import { isWorkStatus } from "../../protocol/src/index.js";
-import type { JsonValue, PlannedDeliveryKind, WorkRecord, WorkStatus } from "../../protocol/src/index.js";
+import type { JsonValue, WorkKind, WorkRecord, WorkStatus } from "../../protocol/src/index.js";
 // ProjectRecord is a core type, not a protocol one. The protocol package never exported
 // it, so this import resolved to nothing; import elision hid the mistake from every
 // runtime check the repo had.
@@ -337,7 +339,7 @@ function sprintReference(value: string): { readonly workspaceId: string; readonl
 // TCRN-CROSS-STORY-472 R1: the kinds a new record may take. Incident and Release stay readable
 // (work-list --kind still filters by them) but are refused as new records, with the remedy the
 // engine gives for the same refusal.
-const CREATABLE_WORK_KINDS: readonly string[] = ["Initiative", "Epic", "Story", "Subtask"];
+const CREATABLE_WORK_KINDS: readonly string[] = ["Initiative", "Epic", "Story", "Subtask", "Pack"];
 const RETIRED_WORK_KINDS: readonly string[] = ["Incident", "Release"];
 const WORK_KIND_RETIRED_REMEDY = "open a Story with a fixes relation (work-create --kind Story --fixes <work id>)";
 
@@ -491,7 +493,58 @@ function decisionsFromFile(path: string): readonly string[] {
   return document as readonly string[];
 }
 
+function isJsonArrayOrMalformedArray(value: string | undefined): boolean {
+  const candidate = value?.trimStart();
+  if (!candidate?.startsWith("[")) return false;
+  try {
+    return Array.isArray(JSON.parse(candidate));
+  } catch {
+    // A closed numeric label is a list only if its first item has independent text.
+    const numericLabel = /^\[\d+\]/u.exec(candidate);
+    if (numericLabel) {
+      let rest = (candidate.slice(numericLabel[0].length).split(",", 1)[0] ?? "").trimStart();
+      while (rest.startsWith("]") || rest.startsWith("[")) {
+        if (rest.startsWith("]")) {
+          rest = rest.slice(1).trimStart();
+          continue;
+        }
+        let depth = 0;
+        let inString = false;
+        let escaped = false;
+        let end = -1;
+        for (let index = 0; index < rest.length; index += 1) {
+          const char = rest[index];
+          if (inString) {
+            if (escaped) escaped = false;
+            else if (char === "\\") escaped = true;
+            else if (char === '"') inString = false;
+          } else if (char === '"') inString = true;
+          else if (char === "[") depth += 1;
+          else if (char === "]" && --depth === 0) {
+            end = index;
+            break;
+          }
+        }
+        if (end < 0) return isJsonArrayOrMalformedArray(rest);
+        // A balanced suffix can still be a malformed array, or it can be a text label.
+        if (!isJsonArrayOrMalformedArray(rest.slice(0, end + 1))) return false;
+        rest = rest.slice(end + 1).trimStart();
+      }
+      return rest.length === 0;
+    }
+    const contents = candidate.slice(1).trimStart();
+    if (/^(?:,|"|\{|\[|\d|-)/u.test(contents)) return true;
+    const firstToken = contents.split(/[\s,\]]/u, 1)[0] ?? "";
+    return ["true", "false", "null"].some((literal) =>
+      literal === firstToken || (!candidate.includes("]") && literal.startsWith(firstToken)));
+  }
+}
+
 function decisionsFromList(value: string | undefined): readonly string[] {
+  // Reject arrays before listValue splits their commas, without rejecting bracketed text labels.
+  if (isJsonArrayOrMalformedArray(value)) {
+    fail("CLI_ARGUMENT_MALFORMED", "decisions looks like a JSON array; use --decisions-file with a JSON array of decision texts");
+  }
   const decisions = listValue(value);
   if (decisions.slice(1).some((decision) => /^(?:--)?[A-Za-z_][\w.-]*\s*=/u.test(decision.trim()))) {
     fail("CLI_ARGUMENT_MALFORMED", "decisions contains comma-separated parameter fragments; use --decisions-file with a JSON array of complete decision texts");
@@ -591,7 +644,7 @@ function workSummary(record: WorkRecord): Readonly<Record<string, unknown>> {
     id: record.id,
     externalKey: record.externalKey,
     kind: record.kind,
-    status: record.status,
+    status: workflowStatus(record),
     projectId: record.projectId,
     parentId: record.parentId,
     revision: record.revision,
@@ -631,6 +684,7 @@ function truncateUtf8(value: string, maximumBytes: number): string {
 // are searched too.
 function workSearchText(record: WorkRecord): string {
   const fields = storyFields(record);
+  const content = workContent(record);
   return [
     record.externalKey,
     record.title ?? "",
@@ -640,6 +694,7 @@ function workSearchText(record: WorkRecord): string {
     fields.goal ?? "",
     fields.acceptance ?? "",
     fields.body ?? "",
+    content?.packPlan === undefined ? "" : canonicalJson(content.packPlan),
   ].join("\n").toLowerCase();
 }
 
@@ -698,7 +753,11 @@ function workDraft(
   parentId?: string,
   variant?: "standard" | "defect",
 ): Readonly<Record<string, unknown>> {
-  const content = workContentDraft(kind as ContentWorkKind, variant === undefined ? {} : { variant });
+  const draft = workContentDraft(kind as ContentWorkKind, variant === undefined ? {} : { variant });
+  const content = kind === "Pack" ? draft : { ...draft, details: {
+    ...draft.details, evidenceStage: "", decisionStage: "",
+    ...(kind === "Initiative" ? { acceptanceScope: "initiative", decisionStage: "development" } : {}),
+  } };
   const policy = readWorkContentPolicy(state, projectId);
   const configuredTemplate = policy?.defaults[kind as ContentWorkKind];
   const contentTemplate = configuredTemplate === undefined ? defaultWorkContentTemplate(kind as ContentWorkKind)
@@ -729,6 +788,12 @@ function workDraft(
     template: scopeTemplate,
     optional: true,
     content, missing: [...workContentMissing(content, "write"), ...(contentTemplate === null ? ["configured-template-unavailable"] : [])], inheritedContext,
+    ...(kind === "Pack" ? {} : { acceptancePlanning: {
+      stages: WORK_ACCEPTANCE_STAGES,
+      evidenceStage: "Earliest stage at which each criterion can produce evidence.",
+      decisionStage: "Decision gated by those criteria. Split mixed stages into separate work.",
+      postRelease: "Use a linked follow-up outside the delivery tree. Set details.observationTrigger, verificationOwner and evidenceRecord.",
+    } }),
     contentPolicy: policy, contentTemplate,
     contentRolloutReadiness: workContentRolloutReadiness(state, policy?.rollout ?? null, { engineVersion: FRAMEWORK_VERSION, manifestMinEngineVersion: state.library?.minEngineVersion ?? null, requireCurrentBoundary: false }),
     note: policy === null ? WORK_DRAFT_NOTE : "Typed content uses the applicable project template; drafts may be incomplete. Completion is required only at done.",
@@ -879,7 +944,7 @@ function batchDoneWorkIds(document: unknown): readonly string[] {
   for (const member of members as readonly unknown[]) {
     if (member === null || typeof member !== "object") continue;
     const entry = member as Readonly<Record<string, unknown>>;
-    if (entry.status !== "done" || (entry.verb !== "work-transition" && entry.verb !== "work-create")) continue;
+    if ((entry.status !== "done" && entry.status !== "validated") || (entry.verb !== "work-transition" && entry.verb !== "work-create")) continue;
     const id = entry.verb === "work-create" && typeof entry.externalKey === "string" && entry.externalKey.length > 0
       ? deriveStableId("work", canonicalExternalKey(entry.externalKey))
       : typeof entry.id === "string" && entry.id.length > 0
@@ -1871,7 +1936,7 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   { name: "work-show", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, ...exactlyOneCatalogFlags("work-show")] },
   // TCRN-CROSS-STORY-485 R4: work-transition and work-batch take --project, the project the gates of a
   // Story going to done run in.
-  { name: "work-transition", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "status", required: true, valueKind: "string" }, { name: "summary", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
+  { name: "work-transition", availability: "cli", mutates: true, flags: [{ name: "blocked-criteria", required: false, valueKind: "list" }, { name: "workspace", required: false, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "id", required: true, valueKind: "string" }, { name: "status", required: true, valueKind: "string" }, { name: "summary", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "actor", required: false, valueKind: "string" }, { name: "timeout-ms", required: false, valueKind: "integer" }] },
   // TCRN-CROSS-STORY-470 R3: move a library; the old place keeps a tombstone and refuses writes.
   { name: "workspace-consolidate", availability: "cli", mutates: true, flags: [{ name: "mapping", required: true, valueKind: "string" }, { name: "to", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: true, valueKind: "string" }, { name: "yes", required: false, valueKind: "boolean" }] },
   { name: "workspace-consolidate-clean", availability: "cli", mutates: true, flags: [{ name: "to", required: true, valueKind: "string" }, { name: "copies", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }, { name: "yes", required: false, valueKind: "boolean" }] },
@@ -1999,6 +2064,26 @@ export function assertDeclaredOutputCategory(command: string, output: string): v
     "CLI_AUTHORITY_OUTPUT_UNDECLARED",
     `${command} emits host trust state (${fields.join(",")}) without a catalog mutates or authorityBearing declaration`,
   );
+}
+
+function doctorNextStep(check: DoctorCheck): string | null {
+  if (check.check !== "hooks-present" || check.ok) return null;
+  const guard = check.detail.codexGuard;
+  if (guard === null || Array.isArray(guard) || typeof guard !== "object") return null;
+  const candidateReasons = (guard as { readonly [key: string]: JsonValue }).reasons;
+  if (!Array.isArray(candidateReasons)) return null;
+  const reasons = candidateReasons.filter((reason): reason is string => typeof reason === "string");
+
+  if (reasons.includes("native-hooks-observation-missing")) {
+    return "Capture the owning Codex client's current app-server hooks/list response and hook/config byte hashes, then rerun doctor with --codex-admission <path>.";
+  }
+  if (reasons.includes("Error: native observation is stale or future")) {
+    return "Capture a fresh owning Codex app-server hooks/list response and hook/config byte hashes, then rerun doctor with --codex-admission <path>; the observation must be within five minutes.";
+  }
+  if (reasons.includes("Error: hook/config bytes changed since the native observation")) {
+    return "Review the current Codex hook/config bytes, then capture a fresh hooks/list response and matching byte hashes before rerunning doctor with --codex-admission <path>.";
+  }
+  return null;
 }
 
 export async function runCli(arguments_: readonly string[], io: CliIo): Promise<void> {
@@ -3051,11 +3136,18 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const codexAdmission = values["codex-admission"] === undefined ? undefined : JSON.parse(await readFile(resolve(values["codex-admission"]), "utf8")) as NonNullable<SetupOptions["codexAdmission"]>;
     if (codexAdmission && executionTarget !== "traditional") fail("CLI_ARGUMENT_MALFORMED", "Codex admission only applies to traditional doctor");
     const checks: readonly DoctorCheck[] = await runDoctor({ projectRoot: projectPath, executionTarget: executionTarget as SetupExecutionTarget, ...(codexAdmission ? { codexAdmission } : {}) });
+    const firstFailedCheck = checks.find((check) => !check.ok);
+    const reasonCode = firstFailedCheck === undefined ? "DOCTOR_READY" : firstFailedCheck.reasonCode;
+    const nextStep = firstFailedCheck === undefined ? null : doctorNextStep(firstFailedCheck);
+    const reportedChecks = checks.map((check) => {
+      const checkNextStep = doctorNextStep(check);
+      return checkNextStep === null ? check : { ...check, nextStep: checkNextStep };
+    });
     const applicability = executionTarget === DOT_INSTALLATION_TARGET ? {
       executionTarget,
       notApplicableChecks: DOCTOR_TRADITIONAL_CHECKS.map((check) => ({ check, reason: "Traditional host integration is not required by chatgpt-dot." })),
     } : {};
-    io.write(canonicalJson({ reasonCode: "DOCTOR_READY", ok: checks.every((check) => check.ok), projectPath, checks: checks as unknown as JsonValue, ...applicability }));
+    io.write(canonicalJson({ reasonCode, ok: firstFailedCheck === undefined, nextStep, projectPath, checks: reportedChecks as unknown as JsonValue, ...applicability }));
     return;
   }
   if (command === "library-list") {
@@ -4046,7 +4138,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
           occurredAt: at,
           projectId: values["project-id"] ?? "",
           externalKey: values["external-key"] ?? "",
-          kind: values.kind as PlannedDeliveryKind,
+          kind: values.kind as WorkKind,
           parentId: nullableValue(values["parent-id"]),
           ...(values.status ? { status: values.status as WorkStatus } : {}),
           ...(values.scope !== undefined ? { scope: values.scope } : {}),
@@ -4128,9 +4220,10 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   if (command === "work-transition") {
     // TCRN-CROSS-STORY-485 R4: --project names the project the gates run in, for a Story going to
     // done (the registry's project for the library when left out).
-    const values = parseArguments(rest, [...shared, "id", "status", "summary", "project", "actor"]);
+    const values = parseArguments(rest, [...shared, "id", "status", "summary", "project", "actor", "blocked-criteria"]);
     required(values, [...requiredShared, "id", "status"]);
-    if (values.status !== undefined && !isWorkStatus(values.status)) fail("CLI_ARGUMENT_MALFORMED", `status=${values.status}`);
+    if (values["blocked-criteria"] !== undefined && values.status !== "blocked") fail("CLI_ARGUMENT_MALFORMED", "blocked-criteria requires blocked");
+    if (values.status !== undefined && !isWorkflowStatus(values.status)) fail("CLI_ARGUMENT_MALFORMED", `status=${values.status}`);
     const workspace = values.workspace ?? "";
     const at = values.at ?? "";
     const { state, gates } = await withWriteLock(workspace, at, async () => {
@@ -4142,7 +4235,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       // write itself would hold it: while another actor's unexpired lease binds the item, the
       // transition is refused with WORK_LEASED and no gate is judged. TCRN-CROSS-SUB-496: only at an
       // --at the write takes; any other --at goes on as in a library with no lease.
-      const before = values.status === "done" ? await materializeWorkspace(workspace) : null;
+      const before = values.status === "done" || values.status === "validated" ? await materializeWorkspace(workspace) : null;
       if (before !== null) {
         if (writeInstant(at)) assertWorkLeaseAdmits(before, values.id ?? "", values.actor ? values.actor : undefined, at);
         assertWorkGatesClear(before, [values.id ?? ""]);
@@ -4152,7 +4245,8 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
         : await doneGates(before, [values.id ?? ""], [], values.project);
       return {
         state: await transitionWork(workspace, {
-          occurredAt: at, id: values.id ?? "", status: values.status as WorkStatus,
+          occurredAt: at, id: values.id ?? "", status: values.status as WorkflowStatus,
+          ...(values["blocked-criteria"] === undefined ? {} : { blockedCriteria: listValue(values["blocked-criteria"]) }),
           ...(values.summary !== undefined ? { summary: values.summary } : {}),
           ...(values.actor ? { actorId: values.actor } : {}),
         }),
@@ -4161,7 +4255,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     });
     const transitioned = state.work.find((entry) => entry.id === (values.id ?? ""))!;
     // TCRN-CROSS-STORY-476 R4: a record that reached done asks whether there is knowledge to extract.
-    const [hint] = values.status === "done" ? await knowledgeHints(workspace, at, state, [{ workId: transitioned.id }]) : [];
+    const [hint] = values.status === "done" || values.status === "validated" ? await knowledgeHints(workspace, at, state, [{ workId: transitioned.id }]) : [];
     writeState(io, state, workSummary(transitioned), undefined, {
       ...(hint === undefined ? {} : { knowledgeHint: hint }),
       ...(gates === null ? {} : { doneGates: gates }),
@@ -4277,8 +4371,8 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       fail("CLI_ARGUMENT_MALFORMED", "search");
     }
     // Incident and Release are no longer created, and records of both still read: the filter keeps them.
-    if (values.kind !== undefined && !["Initiative", "Epic", "Story", "Subtask", "Incident", "Release"].includes(values.kind)) fail("CLI_ARGUMENT_MALFORMED", `kind=${values.kind}`);
-    if (values.status !== undefined && !isWorkStatus(values.status)) fail("CLI_ARGUMENT_MALFORMED", `status=${values.status}`);
+    if (values.kind !== undefined && !["Initiative", "Epic", "Story", "Subtask", "Pack", "Incident", "Release"].includes(values.kind)) fail("CLI_ARGUMENT_MALFORMED", `kind=${values.kind}`);
+    if (values.status !== undefined && !isWorkflowStatus(values.status)) fail("CLI_ARGUMENT_MALFORMED", `status=${values.status}`);
     const relation = values.relation === undefined ? undefined : relationArgument(values.relation);
     // INIT-008: filter members of a sprint. The flag carries the qualified reference in the
     // same library:<id>#work:<id> spelling used to annotate; we compare the parsed object
@@ -4299,7 +4393,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
       (involved === undefined || hasInvolvedProject(entry, involved)) &&
       (values["project-id"] === undefined || entry.projectId === values["project-id"]) &&
       (values.kind === undefined || entry.kind === values.kind) &&
-      (values.status === undefined || entry.status === values.status) &&
+      (values.status === undefined || workflowStatus(entry) === values.status) &&
       // TCRN-CROSS-STORY-363: search reaches the four fields a record can be named
       // by. It matched externalKey and scope alone, which meant a keyword present
       // only in the title -- the field a human actually reads -- returned nothing,
@@ -4344,7 +4438,13 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const state = await validateWorkspace(values.workspace ?? "");
     const externalKey = values["external-key"]?.toUpperCase();
     const record = state.work.find((entry) => !entry.tombstone && (externalKey === undefined ? entry.id === values.id : entry.externalKey === externalKey));
-    if (!record) fail("WORKSPACE_INPUT_INVALID", `work ${values.id ?? values["external-key"] ?? ""} is unavailable`);
+    if (!record) {
+      const misplacedExternalKey = values.id === undefined ? undefined : state.work.find((entry) => !entry.tombstone && entry.externalKey === values.id!.toUpperCase());
+      if (misplacedExternalKey !== undefined) {
+        fail("WORKSPACE_INPUT_INVALID", `work key ${misplacedExternalKey.externalKey} is an external key; use --external-key ${misplacedExternalKey.externalKey} instead of --id`);
+      }
+      fail("WORKSPACE_INPUT_INVALID", `work ${values.id ?? values["external-key"] ?? ""} is unavailable`);
+    }
     const advisory = workAdvisory(record);
     const aliases = recordAliases(state, record.id);
     const rejectedEvents = (state.library?.rejectedEvents ?? []).filter((entry) => entry.recordId === record.id);

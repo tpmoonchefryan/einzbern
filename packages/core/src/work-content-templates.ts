@@ -15,7 +15,8 @@ export interface WorkContentPolicy {
   readonly enabledAt: string;
   readonly scopeWorkIds: readonly string[];
   readonly inFlightWorkIds: readonly string[];
-  readonly defaults: Readonly<Record<ContentWorkKind, { readonly templateId: string; readonly templateVersion: number }>>;
+  /** Pack defaults are optional so existing four-kind policies remain byte-compatible. */
+  readonly defaults: Readonly<Record<Exclude<ContentWorkKind, "Pack">, { readonly templateId: string; readonly templateVersion: number }> & Partial<Record<"Pack", { readonly templateId: string; readonly templateVersion: number }>>>;
   readonly decision: string;
 }
 export function defaultWorkContentTemplate(kind: ContentWorkKind): TemplateDefinition {
@@ -29,7 +30,7 @@ export function validateWorkContentPolicy(value: unknown): WorkContentPolicy {
   assertStrictInstant(p.enabledAt);
   for (const key of ["scopeWorkIds", "inFlightWorkIds"]) if (!Array.isArray(p[key]) || !(p[key] as unknown[]).every(v => typeof v === "string" && /^work:[a-f0-9]{24}$/u.test(v)) || new Set(p[key] as string[]).size !== (p[key] as string[]).length) contentFail("WORK_CONTENT_POLICY_INVALID", `${key} must contain unique work ids`);
   if (typeof p.defaults !== "object" || p.defaults === null || Array.isArray(p.defaults)) contentFail("WORK_CONTENT_POLICY_INVALID", "defaults required");
-  if (Object.keys(p.defaults).some(k => !["Initiative", "Epic", "Story", "Subtask"].includes(k))) contentFail("WORK_CONTENT_POLICY_INVALID", "unknown default kind");
+  if (Object.keys(p.defaults).some(k => !["Initiative", "Epic", "Story", "Subtask", "Pack"].includes(k))) contentFail("WORK_CONTENT_POLICY_INVALID", "unknown default kind");
   for (const kind of ["Initiative", "Epic", "Story", "Subtask"]) {
     const d = (p.defaults as Record<string, unknown>)[kind] as Record<string, unknown> | undefined;
     if (!d || Object.keys(d).some(k => !["templateId", "templateVersion"].includes(k)) || typeof d.templateId !== "string" || !/^[a-z][a-z0-9.-]+$/u.test(d.templateId) || !Number.isSafeInteger(d.templateVersion) || Number(d.templateVersion) < 1) contentFail("WORK_CONTENT_POLICY_INVALID", `default ${kind} missing or invalid`);

@@ -20,6 +20,10 @@ export function hasCodexSettingsOverride(value: unknown): boolean {
   const args = object(value);
   return args !== null && ["model", "thinking"].some(key => Object.hasOwn(args, key));
 }
+export function hasCodexReportSessionSetting(value: unknown): boolean {
+  const args = object(value);
+  return args !== null && ["model", "thinking", "effort", "serviceTier", "serviceTierForTurn"].some(key => Object.hasOwn(args, key));
+}
 
 /** Source correlation under the existing local trust model, not authentication or
  * a machine judgment of the decision's natural-language authorization scope. */

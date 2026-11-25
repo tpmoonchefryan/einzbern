@@ -352,10 +352,16 @@ export async function listKnowledgeMetadataFast(
   const treesPromise = proof === null ? Promise.all(roots.map((root) => localTreeIdentity(root))) : undefined;
   const boundary = crestMetaBoundary(roots, workspace.headEventHash, treesPromise, proof?.binding);
   try {
-    const saved = await readProtectedProjection<CachedCrestMeta>(library, "crest-meta", boundary);
-    if (saved !== null && (proof === null || await proof.finish())) {
-      observeCacheReason("crest-projection-hit");
-      return buildCachedProjectAnswer(saved, workspace, query);
+    const binding = await boundary();
+    const saved = binding === null ? null : await readProtectedProjection<CachedCrestMeta>(library, "crest-meta", binding);
+    if (saved !== null) {
+      const sourceStillMatches = proof !== null
+        ? await proof.finish()
+        : binding === await crestMetaBoundary(roots, workspace.headEventHash)();
+      if (sourceStillMatches) {
+        observeCacheReason("crest-projection-hit");
+        return buildCachedProjectAnswer(saved, workspace, query);
+      }
     }
   } finally { proof?.close(); }
   const { listKnowledgeMetadata } = await import("./knowledge-core.js");

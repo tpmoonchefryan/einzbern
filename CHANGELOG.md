@@ -8,9 +8,34 @@ Versioning after the first accepted release.
 ### Devin host
 
 - Devin (CLI and Devin Desktop) is a supported host. When its user configuration directory exists, setup, update and repair write Einzbern's commands into the `hooks` key of its `config.json`: prompt recall, the read window for its `read` tool, and the navigation pointer when shared navigation is declined. Other keys and hooks are preserved; a configuration that is not strict JSON is refused and left unchanged.
-- A Devin hook run is recorded as host `devin`. Devin also runs the Claude Code registration it imports; that run answers nothing while Devin's own registration is installed, so one prompt is recalled once, and it is never routed to Codex coordination.
+- A Devin hook run is recorded as host `devin`. Devin also runs the Claude Code registration it imports; that run yields only when Devin's configuration has a matching handler for the same event, so a partial installation cannot suppress prompt recall. It is never routed to Codex coordination.
 - Devin dispatches subagents by profile, not by model. Setup renders one `einzbern-<category>-<order>` profile per tier row of the device policy's `devin` host, and `execution-policy-resolve --host devin` names the profile for the resolved row with its installed status. Edited profiles are kept and reported.
 - `execution-host-prepare`, `execution-host-record` and `execution-host-evidence` accept `hostKind: devin`. Doctor reports Devin's selection, versions, hooks and profiles. Devin coordinates in a single main conversation with native completion notifications. See `specs/devin-host-v1.md` for the contract and its evidence boundary.
+
+## 5.8.0
+
+Einzbern and Mana Orchestrate ship in lockstep at 5.8.0.
+
+### Work planning and acceptance
+
+- Record the earliest stage that supplies evidence and which decision depends on it. Work admission checks stage order for criteria, delivery children and explicit hard predecessors. Linked post-release work records the trigger, verification owner and expected receipt for evidence that depends on publication, adoption or a business event.
+- Track implementation that is ready for independent validation and the resulting validated state. Finalize accepted delivery work from children to parents with the current work evidence and required gates. Existing work without stage declarations keeps its recorded scope.
+
+### Codex coordination and Pack dispatch
+
+- Reconcile the authorized implementation queue, recording work revisions, ready packages, conditions and blockers against real capacity. Separate the implementation wave from INIT-level independent validation and keep model and effort selection on the native dispatch request.
+- Require a newly started Economy coordinator to have same-thread Full Access evidence before handoff or dispatch. Check plain-text report arguments before either supported send path, and preserve delivery receipts and historical coordinator evidence across attempts.
+- Prepare an explicit Pack and its assignments before dispatch. Bind preparation to the actual assignment and preserve results and native receipts when a coordinator takes over or a later application attempt continues.
+
+### Command diagnostics and Skill examples
+
+- Reject an array passed to minutes-record through the comma-list option before any write. The file option preserves each decision's text, order and count. Ordinary comma lists, including bracketed labels, remain supported.
+- Explain which Codex observation is missing, stale or mismatched in doctor, and distinguish a work external key used with the wrong flag from a correctly formed query with no match. Generated Skill examples cover project rules, work lookup, doctor and structured minutes.
+
+### Recall and source verification
+
+- Retain full source verification whenever an input has changed or cannot be verified. Reuse equivalent materialized and Crest projection results when their source and receipt still match, and rebuild or fall back when they diverge.
+- Treat a Darwin File Provider placeholder as unavailable before the general source reader opens it. Keep the full-read path for materialized sources and report native evidence only for the environments actually observed.
 
 ## 5.0.1
 

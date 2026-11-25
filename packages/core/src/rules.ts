@@ -1,3 +1,4 @@
+import { planPrinciples, principleLine, PRINCIPLES_ID, ruleLine } from "./agents-principles.js";
 import { assertNotDotAgentsTarget } from "./dot-agents.js";
 import { effectiveProjectState } from "./project-chain.js";
 import { scopedWorkspaceState } from "./project-scope.js";
@@ -7,11 +8,9 @@ import { scopedWorkspaceState } from "./project-scope.js";
 // a project has switched on, and the state each of them is in. Every rule is off until it is
 // enabled: a library that holds no record of a rule has it disabled. Enabling a rule records it in
 // the library's rule collection (config-records.ts) as {enabled: true, version}, at the version
-// this engine ships, and writes its text, in the project's artifact language, into the project's
-// AGENTS.md as the managed section rule:<id> through the managed-section writer
-// (managed-sections.ts). Disabling it records {enabled: false, version} and takes the section out
-// of the file with its markers (agents-sections.ts); a section the user changed goes only with
-// force.
+// this engine ships. The writer places its one-line principle in the shared agents section of
+// AGENTS.md in the project's artifact language. Disabling removes the selected line and records
+// {enabled: false, version}. Legacy rule:<id> sections retain their ownership during migration.
 //
 // A rule's state is read from three places, the rule's record, the section's record and the
 // section as it now stands in AGENTS.md, against this engine's catalog body (rules-catalog.ts):
@@ -31,8 +30,8 @@ import { scopedWorkspaceState } from "./project-scope.js";
 // writer for existing registered harness outputs, preserving Owner text and local section ownership.
 //
 // TCRN-CROSS-STORY-508 R7 (MIN-236 D7): a rule's record may also hold an order, a positive integer
-// that places the rule's section among the rule sections of AGENTS.md (agents-sections.ts,
-// orderRuleSections). rule-enable sets it when it is given and keeps the recorded one otherwise, and
+// that places its line among the principles in AGENTS.md. rule-enable sets it when given and
+// keeps the recorded one otherwise, and
 // rule-disable keeps it, so a rule enabled again takes its old place.
 //
 // TCRN-CROSS-STORY-489 (TCRN-CROSS-SUB-366): enabling and disabling write AGENTS.md before they
@@ -55,10 +54,9 @@ import { scopedWorkspaceState } from "./project-scope.js";
 import { join } from "node:path";
 
 import { compareCanonicalText } from "../../protocol/src/index.js";
-import { AGENTS_FILE, RULE_SECTION_PREFIX, commitPlanned, filesAsPlanned, managedOutputBinding, orderRuleSections, planSectionTakeOut, putBackUnrecorded, ruleOrders, writeSectionPlan } from "./agents-sections.js";
-import type { ManagedOutputBinding, SectionChangeResult, SectionPlan } from "./agents-sections.js";
+import { AGENTS_FILE, RULE_SECTION_PREFIX, AgentsSectionError, commitPlanned, filesAsPlanned, managedOutputBinding, putBackUnrecorded } from "./agents-sections.js";
+import type { ManagedOutputBinding, SectionChangeResult } from "./agents-sections.js";
 import { configRecord, configRecords, removeConfigRecordDelta, setConfigRecordDelta } from "./config-records.js";
-import type { ConfigRecordValue } from "./config-records.js";
 import { applyManagedWrite, managedSectionRecordKey, managedSectionRecordsFor, parseManagedFile, planManagedWrite, sectionDigest } from "./managed-sections.js";
 import type { ManagedSectionRecord, ManagedSectionResult, ManagedWritePlan, ParsedSection } from "./managed-sections.js";
 import { BUILT_IN_RULES } from "./rules-catalog.js";
@@ -161,11 +159,6 @@ function artifactLanguage(state: Pick<WorkspaceState, "settings">): string | nul
   return state.settings.find((setting) => setting.key === "artifact.language")?.value ?? null;
 }
 
-// A rule's text in that language: Chinese for zh-CN, English for every other value and when unset.
-function ruleText(rule: BuiltInRule, language: string | null): string {
-  return language === "zh-CN" ? rule.body.zh : rule.body.en;
-}
-
 function recordedRule(state: Pick<WorkspaceState, "configRecords">, id: string): RuleRecordValue | null {
   const record = configRecord(state, "rule", id);
   return record === null ? null : record.value as unknown as RuleRecordValue;
@@ -213,20 +206,27 @@ export function ruleState(input: {
 }
 
 function statusOf(state: Pick<WorkspaceState, "configRecords" | "settings">, inFile: ReadonlyMap<string, ParsedSection>, catalog: readonly BuiltInRule[], id: string, outputConfigured = true): RuleStatus {
-  const section = ruleSectionId(id);
   const record = recordedRule(state, id);
-  const inFileSection = inFile.get(section) ?? null;
-  const shipped = catalog.find((rule) => rule.id === id);
-  const shippedVersion = shipped?.version ?? null;
-  const sectionRecord = managedSectionRecordsFor(state, AGENTS_FILE).find((entry) => entry.id === section) ?? null;
+  const shipped = catalog.find(rule => rule.id === id);
+  const legacy = ruleSectionId(id);
+  const section = inFile.has(legacy) || !shipped ? legacy : PRINCIPLES_ID;
+  const physical = inFile.get(section) ?? null;
+  const sectionRecord = managedSectionRecordsFor(state, AGENTS_FILE).find(entry => entry.id === section) ?? null;
+  const language = artifactLanguage(state);
+  let status = ruleState({ record, shippedVersion: shipped?.version ?? null, section: physical, sectionRecord, outputConfigured });
+  if (physical && shipped && (status === "enabled" || status === "update-available")) {
+    const line = section === PRINCIPLES_ID ? ruleLine(physical.body, shipped) : undefined;
+    if (section !== PRINCIPLES_ID) status = "update-available";
+    else if (!line) status = "removed-from-file";
+    else status = sectionDigest(line) === sectionDigest(principleLine(shipped, language)) ? "enabled" : "update-available";
+  }
   return {
     id,
-    version: shippedVersion,
+    version: shipped?.version ?? null,
     recordedVersion: record?.version ?? null,
-    fileVersion: inFileSection?.rev ?? null,
+    fileVersion: status === "disabled" || status === "removed-from-file" ? null : physical?.rev ?? null,
     section,
-    // TCRN-CROSS-STORY-540 (TCRN-CROSS-SUB-505): a coordination library's rule too.
-    state: ruleState({ record, shippedVersion, shippedDigest: shipped === undefined ? null : sectionDigest(ruleText(shipped, artifactLanguage(state))), section: inFileSection, sectionRecord, outputConfigured }),
+    state: status,
     ...(record?.order === undefined ? {} : { order: record.order }),
   };
 }
@@ -322,8 +322,8 @@ async function commitRecordOnlyRule(root: string, append: () => Promise<Workspac
 }
 
 /**
- * Enable a rule the engine ships: record it as enabled at the shipped version, and write its text
- * in the project's artifact language into AGENTS.md as the section rule:<id>. The section goes
+ * Enable a rule at the shipped version and render its principle into the shared agents section
+ * of AGENTS.md in the project's artifact language. The section goes
  * through the managed-section writer, so a section the user changed is left as it is and waits
  * (pending), one the user kept is never written again, one whose markers the user removed is not
  * put back, and a file that does not exist is created. A library that records the rule at a
@@ -331,8 +331,7 @@ async function commitRecordOnlyRule(root: string, append: () => Promise<Workspac
  * writes an older text over a newer one.
  *
  * TCRN-CROSS-STORY-508 R7: `order` sets the rule's order; left out, the rule keeps the order its
- * record holds. The rule sections of AGENTS.md are then arranged in the rules' order
- * (orderRuleSections), so a rule enabled with an order takes its place among them.
+ * record holds. The shared section uses this order for its principle lines.
  *
  * TCRN-CROSS-STORY-489: when the records cannot be committed, AGENTS.md returns to what it held,
  * and a file the enable created is taken away, before the error goes on.
@@ -342,182 +341,84 @@ async function commitRecordOnlyRule(root: string, append: () => Promise<Workspac
  * library stands where it was read and the file holds what was read, and the enable is planned again
  * otherwise (workspace.ts, appendPlannedWrite).
  */
-export async function enableRule(input: RuleChangeInput & { readonly order?: number }): Promise<RuleChange> {
+export function enableRule(input: RuleChangeInput & { readonly order?: number }): Promise<RuleChange> {
+  return changeRule(input, true);
+}
+
+export function disableRule(input: RuleChangeInput & { readonly force?: boolean }): Promise<RuleChange> {
+  return changeRule(input, false);
+}
+
+interface BoundRulePlan {
+  readonly kind: "project";
+  readonly plan: ManagedWritePlan;
+  readonly result: ManagedSectionResult | "disabled";
+  readonly recorded: number;
+  readonly deltas: number;
+}
+
+/** Stage the rule declaration and render the whole block against it in one transaction. */
+async function changeRule(input: RuleChangeInput & { readonly order?: number; readonly force?: boolean }, enabled: boolean): Promise<RuleChange> {
   await assertNotDotAgentsTarget(input.projectRoot);
   const catalog = input.catalog ?? BUILT_IN_RULES;
-  const rule = catalog.find((entry) => entry.id === input.id) ?? fail("RULE_UNKNOWN", `the engine ships no rule ${JSON.stringify(input.id)}`, {
-    id: String(input.id),
-    known: catalog.map((entry) => entry.id).join(","),
-  });
-  // Checked before the lock, so a refused order writes neither the file nor the library.
-  if (input.order !== undefined && !isOrder(input.order)) {
-    fail("RULE_RECORD_INVALID", `the order of rule ${rule.id} is a positive integer`, { id: rule.id, field: "order" });
-  }
-  return appendPlannedWrite<RecordOnlyRulePlan | EnableRulePlan, RuleChange>(input.libraryRoot, input, {
+  const rule = catalog.find(entry => entry.id === input.id);
+  if (enabled && !rule) fail("RULE_UNKNOWN", `the engine ships no rule ${JSON.stringify(input.id)}`, { id: input.id, known: catalog.map(r => r.id).join(",") });
+  if (input.order !== undefined && !isOrder(input.order)) fail("RULE_RECORD_INVALID", "a rule order must be a positive integer", { id: input.id, field: "order" });
+  const scope = { ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }),
+    ...(input.authorization === undefined ? {} : { authorization: input.authorization }) };
+  return appendPlannedWrite<RecordOnlyRulePlan | BoundRulePlan, RuleChange>(input.libraryRoot, input, {
     plan: async (root, nativeState) => {
-      // TCRN-CROSS-STORY-540 (TCRN-CROSS-SUB-505): a coordination library's rule as a project's.
       const state = await effectiveProjectState(nativeState, input.configurationProjectId);
-      const binding = state.settings.find((entry) => entry.key === "agents.generation")?.value === "none"
-        ? "unconfigured" : await managedOutputBinding(root, input.projectRoot, nativeState);
-      const recorded = recordedRule(state, rule.id);
-      if (recorded !== null && recorded.version > rule.version) {
-        fail("RULE_VERSION_NEWER", `the library records rule ${rule.id} at version ${recorded.version}; this engine ships version ${rule.version}`, {
-          id: rule.id,
-          recordedVersion: String(recorded.version),
-          version: String(rule.version),
-        });
+      const recorded = recordedRule(state, input.id);
+      if (!recorded && !rule) fail("RULE_UNKNOWN", `unknown rule ${input.id}`, { id: input.id, known: catalog.map(r => r.id).join(",") });
+      if (enabled && recorded && rule && recorded.version > rule.version) {
+        fail("RULE_VERSION_NEWER", `the library records a newer version of ${input.id}`, { id: input.id, recordedVersion: String(recorded.version), version: String(rule.version) });
       }
+      const version = enabled ? rule!.version : recorded?.version ?? rule!.version;
       const order = input.order ?? recorded?.order;
-      if (binding === "unconfigured") return planRecordOnlyRule(state, input, true, rule.version, order);
-      const value: ConfigRecordValue = { enabled: true, version: rule.version, ...(order === undefined ? {} : { order }) };
-      // The rules' orders as they will stand once this rule is recorded.
-      const orders = new Map(ruleOrders(state));
-      if (order !== undefined) orders.set(rule.id, order);
-      const section = ruleSectionId(rule.id);
-      const plan = orderRuleSections(await planManagedWrite({
-        filePath: join(input.projectRoot, AGENTS_FILE),
-        file: AGENTS_FILE,
-        desired: [{ id: section, body: ruleText(rule, artifactLanguage(state)) }],
-        records: managedSectionRecordsFor(state, AGENTS_FILE),
-      }), orders);
-      const decision = plan.sections.find((entry) => entry.id === section);
-      const deltas: ((state: WorkspaceState) => MutationDelta)[] = [];
-      if (recorded === null || !recorded.enabled || recorded.version !== rule.version || recorded.order !== order) {
-        deltas.push(setConfigRecordDelta({ ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), ...(input.authorization === undefined ? {} : { authorization: input.authorization }), collection: "rule", key: rule.id, value }));
+      const binding = state.settings.some(s => s.key === "agents.generation" && s.value === "none") ? "unconfigured" : await managedOutputBinding(root, input.projectRoot, nativeState);
+      if (binding === "unconfigured") return planRecordOnlyRule(state, input, enabled, version, order);
+      const value = { enabled, version, ...(order === undefined ? {} : { order }) };
+      const next = { settings: state.settings, configRecords: [...state.configRecords.filter(r => r.collection !== "rule" || r.key !== input.id), { collection: "rule" as const, key: input.id, value }] };
+      const plan = await planPrinciples(input.projectRoot, next, { catalog, ...(enabled ? {} : { disable: { id: input.id, force: input.force === true } }) });
+      const legacy = ruleSectionId(input.id);
+      const inFile = sectionsOfText(plan.before);
+      const current = statusOf(state, inFile, catalog, input.id);
+      const target = inFile.has(legacy) ? legacy : PRINCIPLES_ID;
+      const decision = plan.sections.find(d => d.id === target);
+      if (!enabled && !input.force && (plan.pending.includes(legacy) || current.state === "user-modified" || current.state === "pending" ||
+        (inFile.has(legacy) && decision?.record.state === "user-owned"))) {
+        throw new AgentsSectionError("MANAGED_SECTION_FORCE_REQUIRED", `disabling ${input.id} would affect a changed section`, { file: AGENTS_FILE, section: target, state: current.state });
       }
-      // Only this section's record: the other sections of the file are agents-render's to record.
-      if (decision?.recordChanged === true) {
-        deltas.push(setConfigRecordDelta({ ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), ...(input.authorization === undefined ? {} : { authorization: input.authorization }), collection: "managed-section", key: managedSectionRecordKey(AGENTS_FILE, section), value: decision.record }));
+      const deltas: ((state: WorkspaceState) => MutationDelta)[] = [];
+      if ((enabled || recorded !== null) && (recorded?.enabled !== enabled || recorded.version !== version || recorded.order !== order)) {
+        deltas.push(setConfigRecordDelta({ ...scope, collection: "rule", key: input.id, value }));
+      }
+      for (const d of plan.sections.filter(d => d.recordChanged)) {
+        const key = managedSectionRecordKey(AGENTS_FILE, d.id);
+        deltas.push(d.forgetRecord ? removeConfigRecordDelta({ ...scope, collection: "managed-section", key })
+          : setConfigRecordDelta({ ...scope, collection: "managed-section", key, value: d.record }));
       }
       const all = [...deltas, ...(input.alongside ?? [])];
-      return { deltas: all, plan: { kind: "project", section, plan, result: decision?.result ?? "unchanged", recorded: deltas.length, deltas: all.length } };
+      const result = enabled ? (plan.sections.find(d => d.id === (plan.pending.includes(legacy) ? legacy : PRINCIPLES_ID))?.result ?? "unchanged")
+        : (plan.write || deltas.length ? "disabled" : "unchanged");
+      return { deltas: all, plan: { kind: "project", plan, result, recorded: deltas.length, deltas: all.length } };
     },
-    unchanged: async (planned) => planned.kind === "record-only" || await filesAsPlanned([planned.plan]),
+    unchanged: async planned => planned.kind === "record-only" || await filesAsPlanned([planned.plan]),
     write: async (root, nativeState, planned, append) => {
-      if (planned.kind === "record-only") return commitRecordOnlyRule(root, append, input, true, planned);
-      const { section, plan } = planned;
+      if (planned.kind === "record-only") return commitRecordOnlyRule(root, append, input, enabled, planned);
+      const { plan } = planned;
       const applied = await applyManagedWrite(plan, { now: input.occurredAt, ...(input.backupRoot === undefined ? {} : { backupRoot: input.backupRoot }) });
       let committed: WorkspaceState;
-      try {
-        committed = await commitPlanned(root, append, planned.deltas);
-      } catch (error) {
+      try { committed = await commitPlanned(root, append, planned.deltas); }
+      catch (error) {
         await putBackUnrecorded(root, nativeState, applied.written ? [plan] : []);
         throw error;
       }
-      return {
-        id: rule.id,
-        section,
-        file: AGENTS_FILE,
-        action: "enable",
-        result: planned.result,
-        written: applied.written,
-        backupPath: applied.backupPath,
-        recorded: planned.recorded,
-        outputBindingStatus: "bound",
-        status: statusOf(scopedWorkspaceState(committed, input.configurationProjectId), sectionsOfText(applied.written ? plan.after : plan.before), catalog, rule.id),
-        state: committed,
-      };
-    },
-  });
-}
-
-// TCRN-CROSS-SUB-499: a project's rule enable, planned: AGENTS.md's plan and what the managed-section
-// writer decided for the rule's section.
-interface EnableRulePlan {
-  readonly kind: "project";
-  readonly section: string;
-  readonly plan: ManagedWritePlan;
-  readonly result: ManagedSectionResult;
-  readonly recorded: number;
-  readonly deltas: number;
-}
-
-// TCRN-CROSS-SUB-499: a project's rule disable, planned: the plan that takes the rule's section out.
-interface DisableRulePlan {
-  readonly kind: "project";
-  readonly section: string;
-  readonly planned: SectionPlan;
-  readonly recorded: number;
-  readonly deltas: number;
-}
-
-/**
- * Disable a rule: take its section out of AGENTS.md with its markers, stop recording the section,
- * and record the rule as disabled, its order kept. A section the user changed (it differs from the
- * engine's text, waits, or was kept) goes only with force, and MANAGED_SECTION_FORCE_REQUIRED
- * otherwise; a section whose markers are gone only loses its record. A rule the engine does not ship
- * can be disabled while the library records it. When the records cannot be committed, the section
- * goes back into AGENTS.md as the file held it, the user's change with it, before the error goes on
- * (TCRN-CROSS-STORY-489). TCRN-CROSS-STORY-538 GWT3 (TCRN-CROSS-SUB-499): planned outside the library
- * write lock, as enableRule is, and written under it only while the library and AGENTS.md stand as
- * they were read.
- */
-export async function disableRule(input: RuleChangeInput & { readonly force?: boolean }): Promise<RuleChange> {
-  await assertNotDotAgentsTarget(input.projectRoot);
-  const catalog = input.catalog ?? BUILT_IN_RULES;
-  return appendPlannedWrite<RecordOnlyRulePlan | DisableRulePlan, RuleChange>(input.libraryRoot, input, {
-    plan: async (root, nativeState) => {
-      // TCRN-CROSS-STORY-540 (TCRN-CROSS-SUB-505): a coordination library's rule as a project's.
-      const state = await effectiveProjectState(nativeState, input.configurationProjectId);
-      const binding = state.settings.find((entry) => entry.key === "agents.generation")?.value === "none"
-        ? "unconfigured" : await managedOutputBinding(root, input.projectRoot, nativeState);
-      const recorded = isRuleId(input.id) ? recordedRule(state, input.id) : null;
-      const shipped = catalog.find((entry) => entry.id === input.id);
-      if (recorded === null && shipped === undefined) {
-        fail("RULE_UNKNOWN", `neither the engine nor the library knows a rule ${JSON.stringify(input.id)}`, {
-          id: String(input.id),
-          known: catalog.map((entry) => entry.id).join(","),
-        });
-      }
-      // With nowhere to write, the rule is recorded disabled at the version it holds, or else the one
-      // this engine ships, its order kept.
-      if (binding === "unconfigured") return planRecordOnlyRule(state, input, false, recorded?.version ?? shipped!.version, recorded?.order);
-      const section = ruleSectionId(input.id);
-      const records = managedSectionRecordsFor(state, AGENTS_FILE);
-      const planned = await planSectionTakeOut({
-        projectRoot: input.projectRoot,
-        id: section,
-        records,
-        at: input.occurredAt,
-        ...(input.force === undefined ? {} : { force: input.force }),
-        ...(input.backupRoot === undefined ? {} : { backupRoot: input.backupRoot }),
-      });
-      const deltas: ((state: WorkspaceState) => MutationDelta)[] = [];
-      if (planned.recordChanged && records.some((record) => record.id === section)) {
-        deltas.push(removeConfigRecordDelta({ ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), ...(input.authorization === undefined ? {} : { authorization: input.authorization }), collection: "managed-section", key: managedSectionRecordKey(AGENTS_FILE, section) }));
-      }
-      if (recorded !== null && recorded.enabled) {
-        // The order stays with the record (TCRN-CROSS-STORY-508 R7).
-        const value: ConfigRecordValue = { enabled: false, version: recorded.version, ...(recorded.order === undefined ? {} : { order: recorded.order }) };
-        deltas.push(setConfigRecordDelta({ ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), ...(input.authorization === undefined ? {} : { authorization: input.authorization }), collection: "rule", key: input.id, value }));
-      }
-      const all = [...deltas, ...(input.alongside ?? [])];
-      return { deltas: all, plan: { kind: "project", section, planned, recorded: deltas.length, deltas: all.length } };
-    },
-    unchanged: async (planned) => planned.kind === "record-only" || await filesAsPlanned([planned.planned.plan]),
-    write: async (root, nativeState, planned, append) => {
-      if (planned.kind === "record-only") return commitRecordOnlyRule(root, append, input, false, planned);
-      const { change, wrote } = await writeSectionPlan(planned.planned, input.occurredAt, input.backupRoot);
-      let committed: WorkspaceState;
-      try {
-        committed = await commitPlanned(root, append, planned.deltas);
-      } catch (error) {
-        await putBackUnrecorded(root, nativeState, wrote === null ? [] : [wrote]);
-        throw error;
-      }
-      return {
-        id: input.id,
-        section: planned.section,
-        file: AGENTS_FILE,
-        action: "disable",
-        result: change.written || planned.recorded > 0 ? "disabled" : "unchanged",
-        written: change.written,
-        backupPath: change.backupPath,
-        recorded: planned.recorded,
-        outputBindingStatus: "bound",
-        status: statusOf(scopedWorkspaceState(committed, input.configurationProjectId), await sectionsOfAgentsFile(input.projectRoot), catalog, input.id),
-        state: committed,
-      };
+      const status = statusOf(await effectiveProjectState(committed, input.configurationProjectId), sectionsOfText(plan.after ?? plan.before), catalog, input.id);
+      return { id: input.id, section: status.section, file: AGENTS_FILE, action: enabled ? "enable" : "disable",
+        result: planned.result, written: applied.written, backupPath: applied.backupPath, recorded: planned.recorded,
+        outputBindingStatus: "bound", status, state: committed };
     },
   });
 }

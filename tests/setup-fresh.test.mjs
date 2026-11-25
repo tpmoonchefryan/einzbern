@@ -297,7 +297,7 @@ test("480-AC1: the default answers install the library, the registry entry, both
   const claude = await readFile(join(f.project, "CLAUDE.md"), "utf8");
   assert.match(claude, /<!-- einzbern:section id=claude-import rev=1 digest=[0-9a-f]{64} -->\n@AGENTS\.md\n<!-- einzbern:section-end id=claude-import -->/u);
   const agents = await readFile(join(f.project, "AGENTS.md"), "utf8");
-  assert.match(agents, /<!-- einzbern:section id=navigation rev=1 digest=[0-9a-f]{64} -->\nThis workspace uses Einzbern\./u);
+  assert.match(agents, /<!-- einzbern:section id=agents rev=1 digest=[0-9a-f]{64} -->\nThis workspace uses Einzbern\./u);
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "written");
   // Nothing in the project names this machine's paths, and the project's own host settings are untouched.
   for (const file of ["AGENTS.md", "CLAUDE.md"]) assert.ok(!(await readFile(join(f.project, file), "utf8")).includes(f.base), file);
@@ -348,7 +348,7 @@ test("480-AC2: a second run with the same answers plans no write and writes noth
   assert.deepEqual(await snapshot([join(f.home, ".claude", "skills"), join(f.home, ".agents", "skills")]), copies);
   assert.equal((await einzbernHooks(join(f.home, ".claude", "settings.json"))).length, 3);
   assert.equal((await einzbernHooks(join(f.home, ".codex", "hooks.json"))).length, 5);
-  assert.equal((before[3].match(/einzbern:section id=navigation /gu) ?? []).length, 1);
+  assert.equal((before[3].match(/einzbern:section id=agents /gu) ?? []).length, 1);
   assertSelfCheckGreen(second);
 });
 
@@ -430,7 +430,7 @@ test("480-R2: a library outside the project gets the project's host write roots;
   assert.deepEqual(JSON.parse(await readFile(roots[0], "utf8")).permissions.additionalDirectories, [relative(f.project, library).replaceAll("\\", "/")]);
   assert.ok((await readFile(roots[1], "utf8")).includes(JSON.stringify(relative(join(f.project, ".codex"), library).replaceAll("\\", "/"))));
   // Device decline changes local hooks, not the shared project navigation declaration.
-  assert.match(await readFile(join(f.project, "AGENTS.md"), "utf8"), /id=navigation /u);
+  assert.match(await readFile(join(f.project, "AGENTS.md"), "utf8"), /id=agents /u);
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "declined");
   assert.deepEqual((await einzbernHooks(join(f.home, ".claude", "settings.json"))).map(([event]) => event).sort(), ["PreToolUse", "SessionStart", "SubagentStart", "UserPromptSubmit"]);
   const again = await plan(f, { artifacts: library, navigation: false });
@@ -575,7 +575,7 @@ test("fresh defaults reuse one external library for different projects with sepa
   await writeFile(document, changed);
   const edited = (await check(f.project)).find(entry => entry.check === "managed-sections");
   assert.equal(edited.ok, false);
-  assert.deepEqual(edited.detail.pending, ["AGENTS.md#navigation"]);
+  assert.deepEqual(edited.detail.pending, ["AGENTS.md#agents"]);
   assertSelfCheckGreen({ selfCheck: await check(secondRoot) });
 });
 

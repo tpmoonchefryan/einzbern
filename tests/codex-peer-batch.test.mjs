@@ -9,9 +9,16 @@ import { recordCodexPeerBatch as recordAtCutoff, normalizeCodexPeerBatch, codexP
 import { canonicalSha256 } from "../dist/build/packages/protocol/src/index.js";
 import { nativeFixture, selection, codexGuardFixture } from "./helpers/host-native-fixture.mjs";
 import { runCodexPeerHook, stageCodexPeerReceipt } from "../dist/build/packages/core/src/codex-peer-hooks.js";
+import { runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
 
 const recordCodexPeerBatch = input => recordAtCutoff({ observationCutoff: new Date().toISOString(), ...input });
 const at = "2026-10-30T00:00:00Z";
+const coordinatorStartup = (conversationId = "fixture-economy", permission = "dangerFullAccess", returnedId = conversationId) => ({
+  conversationId,
+  sourceRef: "fixture:thread-start-response",
+  raw: { id: 1, result: { thread: { id: returnedId }, ...(permission === null ? {} : { sandbox: { type: permission } }) } },
+  conversationPointer: "/result/thread/id",
+});
 const response = (state, id = `host-${state}`) => ({ id, at: new Date().toISOString(), kind: "host-response", sourceTool: "collaboration.spawn_agent", raw: { state, terminal: true }, status: { pointer: "/state", mapping: { [state]: state } }, terminal: { pointer: "/terminal", values: ["true"], contract: "Synthetic terminal receipt contract" } });
 async function fixture(t) {
   const f = await nativeFixture(t);
@@ -21,16 +28,379 @@ async function fixture(t) {
   const policy = await applyEngineModelPolicySet({ home: f.home, host: "codex", actor: "agent:fixture", occurredAt: at,
     authorization: { target: "models.engine-policy", decidedIn: `minutes:${"a".repeat(24)}#D1`, libraryId: f.state.metadata.workspaceId },
     policy: { ...draft, tiers: draft.tiers.map(row => row.category === "flagship" ? row : { ...row, ...selection.tuple }) } });
-  const preparation = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: { prompt: "Synthetic receipt fixture only" }, peerWorker: true, nativeSessionId: "fixture-economy", codexObservation: f.native, userHome: f.userHome }, f.home);
+  const startup = coordinatorStartup();
+  const preparation = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: { prompt: "Synthetic receipt fixture only" }, peerWorker: true, nativeSessionId: "fixture-economy", codexCoordinatorStartup: startup, codexObservation: f.native, userHome: f.userHome }, f.home);
   assert.ok(preparation.attempt);
   const record = recordHostNativeEvents(preparation, []);
   const manifest = { schemaVersion: "tcrn.codex-peer-manifest.v1", host: "codex", batchId: "fixture-batch", attemptId: "fixture-batch-attempt", workId: f.work.id, workRevision: f.work.revision, policyDigest: policy.hosts.codex.digest,
-    main: { conversationId: "fixture-main", sourceRef: "fixture:main-observation", raw: { id: "fixture-main" }, conversationPointer: "/id" }, coordinator: { conversationId: "fixture-economy", sourceRef: "fixture:coordinator-observation", raw: { id: "fixture-economy" }, conversationPointer: "/id" },
+    main: { conversationId: "fixture-main", sourceRef: "fixture:main-observation", raw: { id: "fixture-main" }, conversationPointer: "/id" }, coordinator: startup,
     members: [{ attemptId: preparation.attempt.id, workId: f.work.id, workRevision: f.work.revision, conversationId: null }] };
-  return { ...f, preparation, input: { manifest, records: [record], policy, capacity: { limit: 3, active: 3 }, workRevisions: [{ id: f.work.id, revision: f.work.revision }] } };
+  return { ...f, preparation, coordinatorStartup: startup, input: { manifest, records: [record], policy, capacity: { limit: 3, active: 3 }, workRevisions: [{ id: f.work.id, revision: f.work.revision }] } };
 }
 const observed = (state, id = `host-${state}`, conversationId = "fixture-worker") => ({ ...response(state, id), raw: { state, terminal: true, conversationId }, providerId: { pointer: "/conversationId" } });
 const finish = f => recordHostNativeEvents(f.preparation, [f.completedEvent ??= observed("completed")]);
+function resealReceipt(receipt) {
+  const payload = structuredClone(receipt);
+  delete payload.digest;
+  payload.digest = canonicalSha256(payload);
+  return payload;
+}
+function legacyThreadReadReceipt(receipt, {
+  coordinatorId = "fixture-economy",
+  readbackId = coordinatorId,
+  sandboxType,
+  sourceRef = "Codex App Server thread/read fixture",
+  omitNativeId = false,
+  omitReadState = false,
+} = {}) {
+  const payload = structuredClone(receipt);
+  const result = {
+    thread: { id: readbackId },
+    ...(omitReadState ? {} : { readState: { firstUnread: null, revision: "fixture-read" } }),
+  };
+  if (sandboxType !== undefined) result.sandbox = { type: sandboxType };
+  payload.manifest.coordinator = {
+    conversationId: coordinatorId,
+    sourceRef,
+    raw: { ...(omitNativeId ? {} : { id: 2 }), result },
+    conversationPointer: "/result/thread/id",
+  };
+  payload.reportPrefix = `Einzbern-Codex-Peer-Manifest-SHA256: ${canonicalSha256(payload.manifest)}\n`;
+  return resealReceipt(payload);
+}
+function roleEnvelope(receipt, fields = {}) {
+  const payload = {
+    schemaVersion: "einzbern.codex-peer-role.v1",
+    host: "codex",
+    coordinatorId: "fixture-economy",
+    mainId: "fixture-main",
+    libraryId: "workspace:fixture-library",
+    status: "active",
+    actor: "agent:fixture",
+    recordedAt: at,
+    decidedIn: null,
+    previousDigest: null,
+    ...fields,
+    receipt,
+  };
+  return { ...payload, digest: canonicalSha256(payload) };
+}
+function roleAnchor(role, fields = {}) {
+  return {
+    schemaVersion: "einzbern.codex-peer-enrollment.v1",
+    coordinatorId: role.coordinatorId,
+    mainId: role.mainId,
+    libraryId: role.libraryId,
+    status: role.status,
+    ...fields,
+  };
+}
+async function writeRoleFiles(device, sessionId, role, { anchor = roleAnchor(role) } = {}) {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { codexPeerRoleDirectory } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  const directory = codexPeerRoleDirectory(device, sessionId);
+  await mkdir(directory, { recursive: true });
+  const rolePath = join(directory, "role.json");
+  const anchorPath = join(directory, "anchor.json");
+  await writeFile(rolePath, `${JSON.stringify(role)}\n`);
+  if (anchor !== null) await writeFile(anchorPath, `${JSON.stringify(anchor)}\n`);
+  return { directory, rolePath, anchorPath };
+}
+
+test("STORY-711 startup gate reads same-ID effective sandbox before worker preparation can become ready", async t => {
+  const f = await fixture(t);
+  const workerRequest = f.request;
+  const prepare = startup => prepareHostNativeDispatch(f.state, workerRequest, {
+    selection, argumentsValue: { prompt: "Synthetic startup-gate candidate only" }, peerWorker: true,
+    nativeSessionId: "fixture-economy", ...(startup === undefined ? {} : { codexCoordinatorStartup: startup }),
+    codexObservation: f.native, userHome: f.userHome,
+  }, f.home);
+  const rejected = [
+    { startup: undefined, reason: /startup Full Access readback is unknown/u },
+    { startup: coordinatorStartup("fixture-economy", "workspaceWrite"), reason: /restricted \(workspaceWrite\)/u },
+    { startup: coordinatorStartup("fixture-economy", null), reason: /permission is unknown/u },
+    { startup: coordinatorStartup("fixture-other"), reason: /differs from the actual native session/u },
+    { startup: coordinatorStartup("fixture-economy", "dangerFullAccess", "fixture-other"), reason: /differs from the retained thread\/start response/u },
+  ];
+  // These fake native adapters sit after the real preflight boundary. A rejected candidate must not reach either call.
+  const nativeCalls = { handoffs: 0, workerDispatches: 0 };
+  const handoffAndDispatch = async startup => {
+    const prepared = await prepare(startup);
+    nativeCalls.handoffs += 1;
+    nativeCalls.workerDispatches += 1;
+    return prepared;
+  };
+  for (const candidate of rejected) {
+    await assert.rejects(handoffAndDispatch(candidate.startup), candidate.reason);
+    assert.deepEqual(nativeCalls, { handoffs: 0, workerDispatches: 0 });
+  }
+  const ready = await handoffAndDispatch(coordinatorStartup());
+  assert.ok(ready.attempt);
+  assert.deepEqual(ready.codexPeerWorker, { coordinatorId: "fixture-economy" });
+  assert.deepEqual(nativeCalls, { handoffs: 1, workerDispatches: 1 });
+});
+
+test("STORY-711 coordinator role enrollment rejects restricted or unverifiable startup receipts", async t => {
+  const f = await fixture(t);
+  const { persistCodexPeerRole, readCodexPeerRole } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  const receipt = recordCodexPeerBatch(f.input);
+  for (const startup of [
+    coordinatorStartup("fixture-economy", "workspaceWrite"),
+    coordinatorStartup("fixture-economy", null),
+    coordinatorStartup("fixture-economy", "dangerFullAccess", "other-thread"),
+  ]) {
+    assert.throws(() => recordCodexPeerBatch({ ...f.input, manifest: { ...f.input.manifest, coordinator: startup } }), /workspaceWrite|unknown|differs from the retained/u);
+    await assert.rejects(persistCodexPeerRole({
+      receipt: { ...receipt, manifest: { ...receipt.manifest, coordinator: startup } },
+      device: f.home,
+      sessionId: "fixture-economy",
+      libraryId: f.state.metadata.workspaceId,
+      actor: "agent:fixture",
+    }), /workspaceWrite|unknown|differs from the retained/u);
+    assert.equal((await readCodexPeerRole(f.home, "fixture-economy")).status, "unbound", "rejected enrollment creates no durable role");
+  }
+  const success = recordCodexPeerBatch(f.input);
+  assert.equal(success.manifest.coordinator.conversationId, "fixture-economy");
+});
+
+test("STORY-711 legacy v2 role recovery stays anchored to an intact same-ID thread/read receipt", async t => {
+  const f = await fixture(t);
+  const { readFile, writeFile, rm } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { persistCodexPeerRole, readCodexPeerRole } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  const originalReceipt = recordCodexPeerBatch(f.input);
+  const legacy = legacyThreadReadReceipt(originalReceipt);
+  const role = roleEnvelope(legacy, { libraryId: f.state.metadata.workspaceId });
+  const files = await writeRoleFiles(f.home, "fixture-economy", role);
+  const originalRoleBytes = await readFile(files.rolePath, "utf8");
+  const recovered = await readCodexPeerRole(f.home, "fixture-economy");
+  assert.equal(recovered.status, "active");
+  assert.equal(recovered.role.receipt.digest, legacy.digest);
+  assert.equal(Object.hasOwn(recovered.role.receipt.manifest.coordinator.raw.result, "sandbox"), false, "recovery preserves missing permission as unknown");
+  assert.equal(await readFile(files.rolePath, "utf8"), originalRoleBytes, "recovery is read-only");
+  await assert.rejects(persistCodexPeerRole({
+    receipt: legacy,
+    device: f.home,
+    sessionId: "fixture-economy",
+    libraryId: f.state.metadata.workspaceId,
+    actor: "agent:fixture",
+  }), /missing its same-ID effective sandbox field/u, "the recovery exception cannot enroll a new role");
+
+  const sourceRef = "native/thread-read.economy.raw.json";
+  const filenameLegacy = legacyThreadReadReceipt(originalReceipt, { sourceRef });
+  const filenameRole = roleEnvelope(filenameLegacy, { libraryId: f.state.metadata.workspaceId });
+  const filenameFiles = await writeRoleFiles(f.home, "fixture-economy", filenameRole);
+  const filenameRoleBytes = await readFile(filenameFiles.rolePath, "utf8");
+  const filenameRecovered = await readCodexPeerRole(f.home, "fixture-economy");
+  assert.equal(filenameRecovered.status, "active", "the previously accepted response filename restores an already-enrolled role");
+  assert.equal(filenameRecovered.role.receipt.digest, filenameLegacy.digest);
+  assert.equal(await readFile(filenameFiles.rolePath, "utf8"), filenameRoleBytes, "filename-form recovery is read-only");
+  await assert.rejects(readFile(join(f.root, sourceRef)), { code: "ENOENT" }, "sourceRef is provenance; recovery does not read the caller-supplied path");
+  await assert.rejects(persistCodexPeerRole({
+    receipt: filenameLegacy,
+    device: f.home,
+    sessionId: "fixture-economy",
+    libraryId: f.state.metadata.workspaceId,
+    actor: "agent:fixture",
+  }), /missing its same-ID effective sandbox field/u, "filename-form recovery cannot enroll a new role");
+
+  const dispatchSourceRef = "native/thread-read.economy.dispatch.raw.json";
+  const dispatchLegacy = legacyThreadReadReceipt(originalReceipt, { sourceRef: dispatchSourceRef });
+  const dispatchRole = roleEnvelope(dispatchLegacy, { libraryId: f.state.metadata.workspaceId });
+  const dispatchFiles = await writeRoleFiles(f.home, "fixture-economy", dispatchRole);
+  const dispatchRoleBytes = await readFile(dispatchFiles.rolePath, "utf8");
+  const dispatchRecovered = await readCodexPeerRole(f.home, "fixture-economy");
+  assert.equal(dispatchRecovered.status, "active", "the archived dispatch response filename restores an already-enrolled role");
+  assert.equal(dispatchRecovered.role.receipt.digest, dispatchLegacy.digest);
+  assert.equal(await readFile(dispatchFiles.rolePath, "utf8"), dispatchRoleBytes, "dispatch filename recovery is read-only");
+  await assert.rejects(readFile(join(f.root, dispatchSourceRef)), { code: "ENOENT" }, "dispatch sourceRef is provenance and is never opened as permission evidence");
+  await assert.rejects(persistCodexPeerRole({
+    receipt: dispatchLegacy,
+    device: f.home,
+    sessionId: "fixture-economy",
+    libraryId: f.state.metadata.workspaceId,
+    actor: "agent:fixture",
+  }), /missing its same-ID effective sandbox field/u, "dispatch filename recovery cannot enroll a new role");
+  await writeFile(filenameFiles.rolePath, filenameRoleBytes);
+
+  const calls = { handoffs: 0, workerDispatches: 0 };
+  const preflight = () => prepareHostNativeDispatch(f.state, f.request, {
+    selection,
+    argumentsValue: { prompt: "Synthetic legacy-role regression only" },
+    peerWorker: true,
+    nativeSessionId: "fixture-economy",
+    codexObservation: f.native,
+    userHome: f.userHome,
+  }, f.home);
+  assert.ok((await preflight()).attempt, "an intact enrolled legacy role restores its normal local preflight");
+  const runNativeCandidate = async () => {
+    const prepared = await preflight();
+    calls.handoffs += 1;
+    calls.workerDispatches += 1;
+    return prepared;
+  };
+  const assertDeniedWithoutNativeCalls = async (expectedReason) => {
+    await assert.rejects(runNativeCandidate(), expectedReason);
+    assert.deepEqual(calls, { handoffs: 0, workerDispatches: 0 });
+  };
+
+  const tamperedReceipt = structuredClone(filenameRole);
+  tamperedReceipt.receipt.reportPrefix = "tampered";
+  const { digest: _tamperedDigest, ...tamperedPayload } = tamperedReceipt;
+  tamperedReceipt.digest = canonicalSha256(tamperedPayload);
+  await writeFile(filenameFiles.rolePath, `${JSON.stringify(tamperedReceipt)}\n`);
+  await assertDeniedWithoutNativeCalls(/known coordinator role cannot be recovered|receipt differs from retained native evidence/u);
+
+  await rm(filenameFiles.anchorPath);
+  await writeFile(filenameFiles.rolePath, filenameRoleBytes);
+  await assertDeniedWithoutNativeCalls(/ENOENT|invalid enrollment anchor/u);
+
+  const mismatchedReceipt = legacyThreadReadReceipt(originalReceipt, { readbackId: "fixture-other", sourceRef });
+  const mismatchedRole = roleEnvelope(mismatchedReceipt, { libraryId: f.state.metadata.workspaceId });
+  await writeRoleFiles(f.home, "fixture-economy", mismatchedRole);
+  await assertDeniedWithoutNativeCalls(/differs from the enrolled role|thread\/read ID differs/u);
+
+  const restrictedReceipt = legacyThreadReadReceipt(originalReceipt, { sandboxType: "workspaceWrite", sourceRef });
+  const restrictedRole = roleEnvelope(restrictedReceipt, { libraryId: f.state.metadata.workspaceId });
+  await writeRoleFiles(f.home, "fixture-economy", restrictedRole);
+  await assertDeniedWithoutNativeCalls(/legacy coordinator thread\/read result contains unsupported fields/u);
+
+  const unknownSourceReceipt = legacyThreadReadReceipt(originalReceipt, { sourceRef: "native/thread-read.economy.dispatch.response.json" });
+  const unknownSourceRole = roleEnvelope(unknownSourceReceipt, { libraryId: f.state.metadata.workspaceId });
+  await writeRoleFiles(f.home, "fixture-economy", unknownSourceRole);
+  await assertDeniedWithoutNativeCalls(/legacy coordinator receipt does not match the enrolled thread\/read identity/u);
+
+  const missingReadStateReceipt = legacyThreadReadReceipt(originalReceipt, { sourceRef, omitReadState: true });
+  const missingReadStateRole = roleEnvelope(missingReadStateReceipt, { libraryId: f.state.metadata.workspaceId });
+  await writeRoleFiles(f.home, "fixture-economy", missingReadStateRole);
+  await assertDeniedWithoutNativeCalls(/legacy coordinator thread\/read receipt is incomplete/u);
+
+  const missingNativeIdReceipt = legacyThreadReadReceipt(originalReceipt, { sourceRef, omitNativeId: true });
+  const missingNativeIdRole = roleEnvelope(missingNativeIdReceipt, { libraryId: f.state.metadata.workspaceId });
+  await writeRoleFiles(f.home, "fixture-economy", missingNativeIdRole);
+  await assertDeniedWithoutNativeCalls(/legacy coordinator thread\/read receipt has no native response id/u);
+
+  const wrongAnchorRole = roleEnvelope(filenameLegacy, { libraryId: f.state.metadata.workspaceId });
+  const wrongAnchor = roleAnchor(wrongAnchorRole, { mainId: "fixture-other-main" });
+  await writeRoleFiles(f.home, "fixture-economy", wrongAnchorRole, { anchor: wrongAnchor });
+  await assertDeniedWithoutNativeCalls(/invalid role identity, version or digest/u);
+});
+
+test("execution-codex-peer-evidence reads only an exact v2 receipt in linked role history", async t => {
+  const f = await fixture(t);
+  const { mkdir, readFile, writeFile } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  const { resolveCodexPeerHistoricalReceipt } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  const terminal = recordCodexPeerBatch({ ...f.input, records: [finish(f)] });
+  const legacy = legacyThreadReadReceipt(terminal);
+  const filenameLegacyPayload = structuredClone(legacy);
+  filenameLegacyPayload.manifest.batchId = "filename-history-batch";
+  filenameLegacyPayload.manifest.attemptId = "filename-history-attempt";
+  filenameLegacyPayload.manifest.coordinator.sourceRef = "native/thread-read.economy.raw.json";
+  filenameLegacyPayload.reportPrefix = `Einzbern-Codex-Peer-Manifest-SHA256: ${canonicalSha256(filenameLegacyPayload.manifest)}\n`;
+  const filenameLegacy = resealReceipt(filenameLegacyPayload);
+  const oldRole = roleEnvelope(legacy, { libraryId: f.state.metadata.workspaceId });
+  const filenameRole = roleEnvelope(filenameLegacy, { libraryId: f.state.metadata.workspaceId, previousDigest: oldRole.digest });
+  const dispatchLegacyPayload = structuredClone(legacy);
+  dispatchLegacyPayload.manifest.batchId = "dispatch-history-batch";
+  dispatchLegacyPayload.manifest.attemptId = "dispatch-history-attempt";
+  dispatchLegacyPayload.manifest.coordinator.sourceRef = "native/thread-read.economy.dispatch.raw.json";
+  dispatchLegacyPayload.reportPrefix = `Einzbern-Codex-Peer-Manifest-SHA256: ${canonicalSha256(dispatchLegacyPayload.manifest)}\n`;
+  const dispatchLegacy = resealReceipt(dispatchLegacyPayload);
+  const dispatchRole = roleEnvelope(dispatchLegacy, { libraryId: f.state.metadata.workspaceId, previousDigest: filenameRole.digest });
+  const currentReceipt = recordCodexPeerBatch({
+    ...f.input,
+    manifest: { ...f.input.manifest, batchId: "current-role-batch", attemptId: "current-role-attempt" },
+  });
+  const currentRole = roleEnvelope(currentReceipt, { libraryId: f.state.metadata.workspaceId, previousDigest: dispatchRole.digest });
+  const files = await writeRoleFiles(f.home, "fixture-economy", currentRole);
+  const historyDirectory = join(files.directory, "history");
+  await mkdir(historyDirectory, { recursive: true });
+  await writeFile(join(historyDirectory, `${oldRole.digest}.json`), `${JSON.stringify(oldRole)}\n`);
+  await writeFile(join(historyDirectory, `${filenameRole.digest}.json`), `${JSON.stringify(filenameRole)}\n`);
+  await writeFile(join(historyDirectory, `${dispatchRole.digest}.json`), `${JSON.stringify(dispatchRole)}\n`);
+
+  const roleBytesBefore = await readFile(files.rolePath, "utf8");
+  const anchorBytesBefore = await readFile(files.anchorPath, "utf8");
+  await writeFile(join(historyDirectory, `${filenameRole.digest}.json`), `${JSON.stringify(filenameRole)}\n`);
+  let workspaceResolutions = 0;
+  const context = {
+    home: f.home,
+    resolveWorkspace: async () => { workspaceResolutions++; throw new Error("evidence entry must not resolve a workspace"); },
+  };
+  const runEvidence = async (filename, value) => {
+    const evidencePath = join(f.home, filename);
+    await writeFile(evidencePath, `${JSON.stringify(value)}\n`);
+    return runNativeToolCommand("execution-codex-peer-evidence", { "from-file": evidencePath }, context);
+  };
+
+  const recovered = await runEvidence("historical-receipt.json", legacy);
+  assert.equal(recovered.digest, legacy.digest);
+  assert.equal(recovered.manifest.attemptId, legacy.manifest.attemptId);
+  assert.equal(recovered.manifest.batchId, legacy.manifest.batchId);
+  assert.equal(recovered.records[0].execution, "completed");
+  assert.equal(recovered.records[0].executionFinality, "confirmed");
+  assert.equal(recovered.records[0].occupancy, "released");
+  assert.equal(recovered.deliveryStatus, legacy.deliveryStatus);
+  assert.equal(recovered.occupancy, legacy.occupancy);
+  assert.deepEqual(recovered.delivery, legacy.delivery);
+  assert.deepEqual(recovered.manifest.coordinator.raw, legacy.manifest.coordinator.raw, "historical output retains the exact embedded native readback");
+
+  const filenameRecovered = await runEvidence("historical-filename-receipt.json", filenameLegacy);
+  assert.equal(filenameRecovered.digest, filenameLegacy.digest);
+  assert.equal(filenameRecovered.manifest.attemptId, filenameLegacy.manifest.attemptId);
+  assert.equal(filenameRecovered.manifest.batchId, filenameLegacy.manifest.batchId);
+  assert.equal(filenameRecovered.manifest.coordinator.sourceRef, filenameLegacy.manifest.coordinator.sourceRef);
+  assert.deepEqual(filenameRecovered.delivery, filenameLegacy.delivery);
+  assert.deepEqual(await resolveCodexPeerHistoricalReceipt(f.home, filenameLegacy), {
+    status: "matched", identity: { coordinatorId: "fixture-economy", mainId: "fixture-main" },
+  });
+
+  const dispatchRecovered = await runEvidence("historical-dispatch-filename-receipt.json", dispatchLegacy);
+  assert.equal(dispatchRecovered.digest, dispatchLegacy.digest);
+  assert.equal(dispatchRecovered.manifest.attemptId, dispatchLegacy.manifest.attemptId);
+  assert.equal(dispatchRecovered.manifest.batchId, dispatchLegacy.manifest.batchId);
+  assert.equal(dispatchRecovered.manifest.coordinator.sourceRef, "native/thread-read.economy.dispatch.raw.json");
+  assert.deepEqual(dispatchRecovered.manifest.coordinator.raw, dispatchLegacy.manifest.coordinator.raw);
+  assert.deepEqual(dispatchRecovered.delivery, dispatchLegacy.delivery);
+  assert.deepEqual(await resolveCodexPeerHistoricalReceipt(f.home, dispatchLegacy), {
+    status: "matched", identity: { coordinatorId: "fixture-economy", mainId: "fixture-main" },
+  });
+
+  const wrongBatch = structuredClone(legacy);
+  wrongBatch.manifest.batchId = "other-batch";
+  await assert.rejects(runEvidence("wrong-batch.json", resealReceipt(wrongBatch)), /recorded in the enrolled role under another batch/u);
+
+  const tampered = structuredClone(legacy);
+  tampered.reportPrefix = "tampered";
+  await assert.rejects(runEvidence("tampered.json", resealReceipt(tampered)), /differs from the exact receipt stored in enrolled role history/u);
+
+  const unknownOrigin = structuredClone(legacy);
+  unknownOrigin.manifest.attemptId = "unknown-origin-attempt";
+  await assert.rejects(runEvidence("unknown-origin.json", resealReceipt(unknownOrigin)), /missing its same-ID effective sandbox field/u);
+
+  const unknownSource = structuredClone(dispatchLegacy);
+  unknownSource.manifest.coordinator.sourceRef = "native/thread-read.economy.dispatch.response.json";
+  unknownSource.reportPrefix = `Einzbern-Codex-Peer-Manifest-SHA256: ${canonicalSha256(unknownSource.manifest)}\n`;
+  const unknownSourceReceipt = resealReceipt(unknownSource);
+  assert.deepEqual(await resolveCodexPeerHistoricalReceipt(f.home, unknownSourceReceipt), { status: "unknown-origin" });
+  await assert.rejects(runEvidence("unknown-source.json", unknownSourceReceipt), /missing its same-ID effective sandbox field/u);
+
+  const wrongIdentity = structuredClone(dispatchLegacy);
+  wrongIdentity.manifest.main.conversationId = "fixture-other-main";
+  wrongIdentity.manifest.main.raw.id = "fixture-other-main";
+  wrongIdentity.reportPrefix = `Einzbern-Codex-Peer-Manifest-SHA256: ${canonicalSha256(wrongIdentity.manifest)}\n`;
+  const wrongIdentityReceipt = resealReceipt(wrongIdentity);
+  assert.deepEqual(await resolveCodexPeerHistoricalReceipt(f.home, wrongIdentityReceipt), { status: "unknown-origin" });
+  await assert.rejects(runEvidence("wrong-identity.json", wrongIdentityReceipt), /missing its same-ID effective sandbox field/u);
+
+  assert.throws(() => recordCodexPeerBatch({ ...f.input, records: [finish(f)], prior: legacy }), /missing its same-ID effective sandbox field/u,
+    "a historical read does not make the old attempt a resumable predecessor");
+  assert.equal(await readFile(files.rolePath, "utf8"), roleBytesBefore, "the evidence entry never rewrites the enrolled role");
+  assert.equal(await readFile(files.anchorPath, "utf8"), anchorBytesBefore, "the evidence entry never rewrites the enrollment anchor");
+  assert.equal(workspaceResolutions, 0, "receipt evidence neither reads live work nor prepares a dispatch");
+});
 
 function queryResponse(tool, input, status = "inProgress") {
   return tool.endsWith("read_thread") ? { thread: { id: input.threadId, hostId: input.hostId ?? "local" }, page: { order: "newest_first" }, turns: [{ status }] }
@@ -161,7 +531,7 @@ test("main-first handoff and later coordinator receipt recover without main stag
   const handoff = JSON.parse(await readFile(join(f.home, "codex-peer-handoffs", handoffKey + ".json"), "utf8"));
   assert.equal(handoff.targetId, "fixture-economy");
   await new Promise(resolve => setTimeout(resolve, 2));
-  const preparation = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: {}, peerWorker: true, nativeSessionId: "fixture-economy", codexObservation: f.native, userHome: f.userHome }, f.home);
+  const preparation = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: {}, peerWorker: true, nativeSessionId: "fixture-economy", codexCoordinatorStartup: f.coordinatorStartup, codexObservation: f.native, userHome: f.userHome }, f.home);
   f.input.manifest.members[0].attemptId = preparation.attempt.id;
   f.input.records = [recordHostNativeEvents(preparation, [])];
   await stageCodexPeerReceipt(recordCodexPeerBatch(f.input), f.home, "fixture-economy");
@@ -266,6 +636,35 @@ async function deliveryFor(f, events = [], action = "coordination", message = `$
   return { record: recordHostNativeEvents(preparation, events), recipientPointer: "/recipient", correlationPointer: "/message", batchId: f.input.manifest.batchId, batchAttemptId: f.input.manifest.attemptId };
 }
 
+test("STORY-711 first batch handoff stays unready until the Full Access receipt is enrolled", async t => {
+  const f = await fixture(t);
+  const { persistCodexPeerRole, readCodexPeerRole, runCodexPeerHook } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  const toolName = "mcp__codex_app__send_message_to_thread";
+  const request = { ...f.request, action: "coordination", category: "main", capabilities: { ...f.request.capabilities, toolName, sessionRef: "fixture-economy" } };
+  const argumentsValue = { threadId: "fixture-main", hostId: "local", prompt: `${codexPeerReportPrefix(f.input.manifest)}Synthetic first handoff` };
+  const prepare = () => prepareHostNativeDispatch(f.state, request, { selection, argumentsValue, nativeSessionId: "fixture-economy" }, f.home);
+  const preToolUse = () => runCodexPeerHook("PreToolUse", { session_id: "fixture-economy", turn_id: "first-handoff", tool_name: toolName, tool_input: argumentsValue }, f.home);
+  let handoffs = 0;
+  let workerDispatches = 0;
+  assert.equal((await readCodexPeerRole(f.home, "fixture-economy")).status, "unbound");
+  await assert.rejects(prepare(), /current native coordinator session's active durable role/u);
+  const denied = await preToolUse();
+  assert.equal(denied.reasonCode, "HOOK_PEER_REPORT_BINDING_DENIED");
+  assert.equal(JSON.parse(denied.output).hookSpecificOutput.permissionDecision, "deny");
+  assert.equal(handoffs, 0);
+  assert.equal(workerDispatches, 0);
+
+  await persistCodexPeerRole({ receipt: recordCodexPeerBatch(f.input), device: f.home, sessionId: "fixture-economy", libraryId: f.state.metadata.workspaceId, actor: "agent:fixture" });
+  const active = await readCodexPeerRole(f.home, "fixture-economy");
+  assert.equal(active.status, "active");
+  assert.equal(active.role.receipt.manifest.coordinator.raw.result.sandbox.type, "dangerFullAccess");
+  const ready = await prepare();
+  assert.ok(ready.attempt);
+  assert.equal((await preToolUse()).output, null, "an enrolled receipt with same-ID Full Access is ready for first handoff");
+  assert.equal(handoffs, 0, "preflight does not call the native send adapter");
+  assert.equal(workerDispatches, 0, "preflight does not call the native worker adapter");
+});
+
 test("batch-marked coordinator sends preflight the durable main before preparation or native side effects", async t => {
   const f = await fixture(t);
   const { persistCodexPeerRole, codexPeerRoleDirectory } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
@@ -327,21 +726,114 @@ test("ordinary send preparation and new batch delivery cannot copy sender settin
   const request = { ...f.request, action: "coordination", capabilities: { ...f.request.capabilities, toolName: "mcp__codex_app__send_message_to_thread" } };
   const args = { threadId: "fixture-main", hostId: "local", prompt: "Ordinary result" };
   assert.ok((await prepareHostNativeDispatch(f.state, request, { selection, argumentsValue: args }, f.home)).attempt);
-  for (const extra of [{ model: "fixture-sender-model" }, { thinking: "max" }, { model: "fixture-sender-model", thinking: "max" }]) {
-    await assert.rejects(prepareHostNativeDispatch(f.state, request, { selection, argumentsValue: { ...args, ...extra } }, f.home), /omit model\/thinking/);
+  const settings = { model: "gpt-6.2-sol", thinking: "max", effort: "max", serviceTier: "default", serviceTierForTurn: "default" };
+  for (const [field, value] of Object.entries(settings)) {
+    await assert.rejects(prepareHostNativeDispatch(f.state, request, { selection, argumentsValue: { ...args, [field]: value } }, f.home), /omit model, thinking, effort/u);
   }
   const ordinary = await deliveryFor(f);
   const { digest: old, ...payload } = ordinary.record.preparation;
-  payload.attempt = { ...payload.attempt, argumentsValue: { ...payload.attempt.argumentsValue, model: "fixture-sender-model" } };
-  const preparation = { ...payload, digest: canonicalSha256(payload) };
-  const changed = { ...ordinary, record: recordHostNativeEvents(preparation, []) };
-  assert.throws(() => recordCodexPeerBatch({ ...f.input, records: [finish(f)], delivery: changed }), /omit model\/thinking/);
+  for (const [field, value] of Object.entries(settings)) {
+    const candidate = { ...payload, attempt: { ...payload.attempt, argumentsValue: { ...payload.attempt.argumentsValue, [field]: value } } };
+    const preparation = { ...candidate, digest: canonicalSha256(candidate) };
+    const changed = { ...ordinary, record: recordHostNativeEvents(preparation, []) };
+    assert.throws(() => recordCodexPeerBatch({ ...f.input, records: [finish(f)], delivery: changed }), /omit model, thinking, effort/u);
+  }
+  const historicalPayload = { ...payload, attempt: { ...payload.attempt, argumentsValue: { ...payload.attempt.argumentsValue, model: "fixture-sender-model" } } };
+  const historicalPreparation = { ...historicalPayload, digest: canonicalSha256(historicalPayload) };
+  const changed = { ...ordinary, record: recordHostNativeEvents(historicalPreparation, []) };
   const current = recordCodexPeerBatch({ ...f.input, records: [finish(f)], delivery: ordinary });
   const { digest: omitted, ...historical } = current;
   historical.delivery = changed;
   const historicalReceipt = { ...historical, digest: canonicalSha256(historical) };
   assert.equal(normalizeCodexPeerBatch(historicalReceipt).delivery.record.preparation.attempt.argumentsValue.model, "fixture-sender-model", "historical normalization preserves its original evidence meaning");
   assert.equal(recordCodexPeerBatch({ ...f.input, records: [], prior: historicalReceipt }).deliveryStatus, "unknown");
+});
+
+test("ordinary native and App Server reports preflight the bound Main and allow only delivery arguments", async t => {
+  const f = await fixture(t);
+  const { persistCodexPeerRole } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  await persistCodexPeerRole({ receipt: recordCodexPeerBatch(f.input), device: f.home, sessionId: "fixture-economy", libraryId: f.state.metadata.workspaceId, actor: "agent:fixture" });
+
+  const nativeTool = "mcp__codex_app__send_message_to_thread";
+  const nativeRequest = { ...f.request, action: "coordination", category: "main", capabilities: { ...f.request.capabilities, toolName: nativeTool, sessionRef: "fixture-economy" } };
+  const turnStartRequest = { ...nativeRequest, capabilities: { ...nativeRequest.capabilities, toolName: "turn/start" } };
+  const nativeArgs = { threadId: "fixture-main", hostId: "local", prompt: "Ordinary result" };
+  const turnStartArgs = { threadId: "fixture-main", input: [{ type: "text", text: "Ordinary result" }], clientUserMessageId: "fixture-message-1" };
+  const turnStartArgsWithEmptyTextElements = {
+    ...turnStartArgs,
+    input: [{ ...turnStartArgs.input[0], text_elements: [] }],
+  };
+  let nativeSends = 0;
+  let appServerSends = 0;
+
+  const sendNative = async argumentsValue => {
+    const result = await runCodexPeerHook("PreToolUse", {
+      session_id: "fixture-economy", turn_id: "report-turn", tool_name: nativeTool, tool_input: argumentsValue,
+    }, f.home);
+    if (result.output !== null) throw new Error(JSON.parse(result.output).hookSpecificOutput.permissionDecisionReason);
+    nativeSends++;
+    return structuredClone(argumentsValue);
+  };
+  const startTurn = async argumentsValue => {
+    const preparation = await prepareHostNativeDispatch(f.state, turnStartRequest, {
+      selection, argumentsValue, nativeSessionId: "fixture-economy",
+    }, f.home);
+    assert.ok(preparation.attempt);
+    appServerSends++;
+    return structuredClone(preparation.attempt.argumentsValue);
+  };
+
+  assert.deepEqual(await sendNative(nativeArgs), nativeArgs, "native send preserves the supported recipient and body mapping");
+  assert.equal(nativeSends, 1);
+  assert.deepEqual(await startTurn(turnStartArgs), turnStartArgs, "turn/start preserves threadId, text input and the supported deduplication ID");
+  assert.equal(appServerSends, 1);
+  const emptyTextElementsResult = await startTurn(turnStartArgsWithEmptyTextElements);
+  assert.deepEqual(emptyTextElementsResult, turnStartArgsWithEmptyTextElements, "turn/start preserves an explicitly empty text_elements field");
+  assert.equal(JSON.stringify(emptyTextElementsResult), JSON.stringify(turnStartArgsWithEmptyTextElements));
+  const withoutTextElements = structuredClone(emptyTextElementsResult);
+  delete withoutTextElements.input[0].text_elements;
+  assert.deepEqual(withoutTextElements, turnStartArgs, "omitted and explicitly empty text_elements map to identical delivery arguments apart from that field");
+  assert.equal(JSON.stringify(withoutTextElements), JSON.stringify(turnStartArgs), "the supported delivery mapping is character-for-character identical after removing only text_elements");
+  assert.equal(appServerSends, 2);
+
+  const settings = [
+    ["model", "gpt-6.2-sol"],
+    ["thinking", "max"],
+    ["effort", "max"],
+    ["serviceTier", "default"],
+    ["serviceTierForTurn", "default"],
+  ];
+  for (const [field, value] of settings) {
+    await assert.rejects(sendNative({ ...nativeArgs, [field]: value }), new RegExp(field));
+    await assert.rejects(startTurn({ ...turnStartArgs, [field]: value }), new RegExp(field));
+  }
+  await assert.rejects(sendNative({ ...nativeArgs, prompt: `${codexPeerReportPrefix(f.input.manifest)}First-round ordinary report fixture`, serviceTierForTurn: "default" }), /serviceTierForTurn/u);
+  await assert.rejects(startTurn({
+    threadId: turnStartArgs.threadId,
+    input: [{ type: "text", text: `${codexPeerReportPrefix(f.input.manifest)}First-round ordinary report fixture` }],
+    model: "gpt-6.2-sol",
+    effort: "max",
+    serviceTierForTurn: "default",
+  }), /omit model, thinking, effort/u, "the first real turn/start counterexample's recipient settings are rejected by field presence");
+  assert.equal(nativeSends, 1, "every rejected native payload is stopped before the send call");
+  assert.equal(appServerSends, 2, "every rejected turn/start payload is stopped before the RPC call");
+
+  await assert.rejects(sendNative({ ...nativeArgs, clientUserMessageId: "unsupported-by-native-tool" }), /unsupported/u);
+  await assert.rejects(startTurn({ ...turnStartArgs, hostId: "local" }), /unsupported/u);
+  await assert.rejects(sendNative({ ...nativeArgs, prompt: "" }), /prompt/u);
+  const rejectedTurnStartInputs = [
+    { ...turnStartArgs, input: [{ type: "image", text: "Ordinary result" }] },
+    { ...turnStartArgs, input: [{ ...turnStartArgs.input[0], text_elements: [{ byteRange: { start: 0, end: 6 } }] }] },
+    { ...turnStartArgs, input: [{ ...turnStartArgs.input[0], text_elements: [{ byteRange: { start: 0 } }] }] },
+    { ...turnStartArgs, input: [{ ...turnStartArgs.input[0], text_elements: null }] },
+    { ...turnStartArgs, input: [{ ...turnStartArgs.input[0], extraInputField: true }] },
+    { ...turnStartArgs, unexpectedTopLevelField: true },
+  ];
+  for (const argumentsValue of rejectedTurnStartInputs) {
+    await assert.rejects(startTurn(argumentsValue), /ordinary|unsupported/u);
+  }
+  assert.equal(nativeSends, 1);
+  assert.equal(appServerSends, 2, "every rejected turn/start payload is stopped before the RPC call");
 });
 
 test("exact settings adjustment uses a live Owner source, preserves class authorization and reconciles unknown attempts", async t => {
@@ -537,7 +1029,7 @@ test("delivery requires actual coordination action and exact current-manifest te
   const delivery = await deliveryFor(f);
   const confirmedDelivery = { ...delivery, record: recordHostNativeEvents(delivery.record.preparation, [response("completed")]) };
   assert.equal(recordCodexPeerBatch({ ...f.input, records, delivery: confirmedDelivery }).deliveryStatus, "confirmed");
-  const otherPreparation = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: { prompt: "Different worker batch" }, peerWorker: true, nativeSessionId: "fixture-economy", codexObservation: f.native, userHome: f.userHome }, f.home);
+  const otherPreparation = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: { prompt: "Different worker batch" }, peerWorker: true, nativeSessionId: "fixture-economy", codexCoordinatorStartup: f.coordinatorStartup, codexObservation: f.native, userHome: f.userHome }, f.home);
   const manifest = { ...f.input.manifest, batchId: "other-batch", attemptId: "other-batch-attempt", members: [{ ...f.input.manifest.members[0], attemptId: otherPreparation.attempt.id }] };
   const otherRecords = [recordHostNativeEvents(otherPreparation, [observed("completed", "other-result", "other-worker")])];
   assert.throws(() => recordCodexPeerBatch({ ...f.input, manifest, records: otherRecords, delivery: { ...confirmedDelivery, batchId: manifest.batchId, batchAttemptId: manifest.attemptId } }), /does not bind/u);
@@ -688,7 +1180,7 @@ test("unknown, drifted or ambiguous native identity never releases a fixed membe
 
 test("colliding identities retain both claimants regardless of record order and reserve missing fixed members", async t => {
   const f = await fixture(t);
-  const second = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: { prompt: "Second synthetic worker" }, peerWorker: true, nativeSessionId: "fixture-economy", codexObservation: f.native, userHome: f.userHome }, f.home);
+  const second = await prepareHostNativeDispatch(f.state, f.request, { selection, argumentsValue: { prompt: "Second synthetic worker" }, peerWorker: true, nativeSessionId: "fixture-economy", codexCoordinatorStartup: f.coordinatorStartup, codexObservation: f.native, userHome: f.userHome }, f.home);
   const manifest = { ...f.input.manifest, members: [...f.input.manifest.members, { ...f.input.manifest.members[0], attemptId: second.attempt.id }] };
   const firstRecord = recordHostNativeEvents(f.preparation, [observed("completed", "first")]);
   const secondRecord = recordHostNativeEvents(second, [observed("completed", "second")]);
@@ -724,7 +1216,7 @@ test("v2 peer workers reject independent tools; legacy saved receipts remain rea
     const next = { ...payload, attempt: { ...payload.attempt, toolName }, decision: { ...payload.decision, request: { ...payload.decision.request, capabilities: { ...payload.decision.request.capabilities, toolName } } } };
     next.context = { ...next.context, executionDecision: next.decision };
     assert.throws(() => recordHostNativeEvents({ ...next, digest: canonicalSha256(next) }, []), /collaboration.spawn_agent/);
-    await assert.rejects(prepareHostNativeDispatch(f.state, next.decision.request, { selection, argumentsValue: {}, peerWorker: true, nativeSessionId: "fixture-economy", userHome: f.userHome, codexObservation: f.native }, f.home), /collaboration.spawn_agent/);
+    await assert.rejects(prepareHostNativeDispatch(f.state, next.decision.request, { selection, argumentsValue: {}, peerWorker: true, nativeSessionId: "fixture-economy", codexCoordinatorStartup: f.coordinatorStartup, userHome: f.userHome, codexObservation: f.native }, f.home), /collaboration.spawn_agent/);
   }
   const alias = structuredClone(payload);
   alias.attempt.toolName = "multi_agent_v1.spawn_agent";
@@ -837,12 +1329,14 @@ test("public preparation rejects unsupported/unknown admission and failed durabl
   const cli = fileURLToPath(new URL("../scripts/einzbern.mjs", import.meta.url));
   const env = { ...process.env, EINZBERN_HOME: f.home, HOME: f.userHome, CODEX_THREAD_ID: "fixture-economy" };
   const request = join(f.root, "unsupported-request.json"), argumentsPath = join(f.root, "unsupported-arguments.json");
+  const startupEvidence = join(f.root, "coordinator-startup-evidence.json");
   await writeFile(request, JSON.stringify(f.request));
   await writeFile(argumentsPath, JSON.stringify({ selection, argumentsValue: {} }));
+  await writeFile(startupEvidence, JSON.stringify(f.coordinatorStartup));
   for (const state of ["unknown", "unsupported"]) {
     const admission = join(f.root, `${state}-admission.json`);
     await writeFile(admission, JSON.stringify({ ...f.admission, state }));
-    const run = spawnSync(process.execPath, [cli, "execution-host-prepare", "--workspace", f.workspace, "--request", request, "--arguments", argumentsPath, "--codex-peer-worker", "true", "--codex-admission", admission, "--output", join(f.root, state + "-binding.json")], { env, encoding: "utf8" });
+    const run = spawnSync(process.execPath, [cli, "execution-host-prepare", "--workspace", f.workspace, "--request", request, "--arguments", argumentsPath, "--codex-peer-worker", "true", "--codex-startup-evidence", startupEvidence, "--codex-admission", admission, "--output", join(f.root, state + "-binding.json")], { env, encoding: "utf8" });
     assert.equal(run.status, 1);
     assert.match(run.stderr, /guard not ready/);
   }

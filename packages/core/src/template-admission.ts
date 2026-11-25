@@ -173,7 +173,7 @@ export interface TemplateBinding {
 }
 
 const ALL_WORK_KINDS: readonly WorkKind[] = Object.freeze([
-  "Epic", "Incident", "Initiative", "Knowledge", "Release", "Review", "Story", "Subtask",
+  "Epic", "Incident", "Initiative", "Knowledge", "Pack", "Release", "Review", "Story", "Subtask",
 ]);
 function templateBasis(template: TemplateDefinition): Readonly<Record<string, JsonValue>> {
   return {
@@ -208,7 +208,7 @@ export function validateTemplateDefinition(value: unknown): TemplateDefinition {
     fail("TEMPLATE_ADMISSION_INVALID", "template.appliesTo contains an unknown work kind");
   }
   if (document.schemaVersion === "tcrn.template.v2" && document.contentSchema !== "tcrn.work-content.v1") fail("TEMPLATE_ADMISSION_INVALID", "unsupported content schema");
-  if (document.schemaVersion === "tcrn.template.v2" && appliesTo.some(kind => !["Initiative", "Epic", "Story", "Subtask"].includes(kind))) fail("TEMPLATE_ADMISSION_INVALID", "minimum content supports the four active work kinds");
+  if (document.schemaVersion === "tcrn.template.v2" && appliesTo.some(kind => !["Initiative", "Epic", "Story", "Subtask", "Pack"].includes(kind))) fail("TEMPLATE_ADMISSION_INVALID", "minimum content supports the active work kinds");
   const headings = document.schemaVersion === "tcrn.template.v2" && Array.isArray(document.headings) && document.headings.length === 0 ? [] : orderedUniqueStrings(document.headings, "template.headings", 64);
   const originalHeadings = document.headings as readonly unknown[];
   // Headings are an ordered template contract, so unlike set-valued metadata they

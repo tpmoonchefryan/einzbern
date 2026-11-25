@@ -96,12 +96,12 @@ test("fresh mode removes explicitly declined shared navigation, preserving user 
   assert.equal(first.reasonCode, "SETUP_APPLIED");
   const firstText = await readFile(agentsPath, "utf8");
   assert.ok(firstText.startsWith(userPrefix));
-  assert.ok(parseManagedFile(firstText, "AGENTS.md").sections.some((section) => section.id === "navigation"));
+  assert.ok(parseManagedFile(firstText, "AGENTS.md").sections.some((section) => section.id === "agents"));
 
   const userSuffix = "\n# Local additions\nPreserve this paragraph byte for byte.\n";
   await writeFile(agentsPath, `${firstText}${userSuffix}`);
   const beforeDecline = await readFile(agentsPath, "utf8");
-  const navigation = parseManagedFile(beforeDecline, "AGENTS.md").sections.find((section) => section.id === "navigation");
+  const navigation = parseManagedFile(beforeDecline, "AGENTS.md").sections.find((section) => section.id === "agents");
   assert.ok(navigation);
 
   const localOnlyPlan = await freshPlan(f, false);
@@ -135,7 +135,7 @@ test("fresh mode removes explicitly declined shared navigation, preserving user 
   assert.deepEqual(Object.keys(claudeHooks).sort(), ["PreToolUse", "SessionStart", "SubagentStart", "UserPromptSubmit"]);
   assert.equal(JSON.parse(await readFile(join(f.deviceHome, "machine-settings.json"), "utf8")).values["agents.navigation"], "declined");
   const state = await materializeWorkspace(join(f.project, ".ether"));
-  assert.equal(state.configRecords.some((record) => record.collection === "managed-section" && record.key === "AGENTS.md#navigation"), false);
+  assert.equal(state.configRecords.some((record) => record.collection === "managed-section" && record.key === "AGENTS.md#agents"), false);
 
   assert.deepEqual((await freshPlan(f, false)).writes, [], "shared decline is idempotent");
 
@@ -144,14 +144,14 @@ test("fresh mode removes explicitly declined shared navigation, preserving user 
   const acceptedAgain = await applySetup(await freshPlan(f, true));
   assert.equal(acceptedAgain.reasonCode, "SETUP_APPLIED");
   const beforeEdit = await readFile(agentsPath, "utf8");
-  const managedNavigation = parseManagedFile(beforeEdit, "AGENTS.md").sections.find((section) => section.id === "navigation");
+  const managedNavigation = parseManagedFile(beforeEdit, "AGENTS.md").sections.find((section) => section.id === "agents");
   assert.ok(managedNavigation);
   const editedText = beforeEdit.replace(managedNavigation.raw, managedNavigation.raw.replace("This workspace uses Einzbern.", "The team edited this navigation section."));
   await writeFile(agentsPath, editedText);
 
   await setSharedNavigation("declined");
   const editedDeclinePlan = await freshPlan(f, false);
-  assert.ok(editedDeclinePlan.pendingSections.some((section) => section.file === "AGENTS.md" && section.id === "navigation"));
+  assert.ok(editedDeclinePlan.pendingSections.some((section) => section.file === "AGENTS.md" && section.id === "agents"));
   const editedDecline = await applySetup(editedDeclinePlan);
   assert.equal(await readFile(agentsPath, "utf8"), editedText);
   assert.equal(check(editedDecline, "hooks-present").ok, true);

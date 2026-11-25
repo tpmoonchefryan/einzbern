@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { isCodexNativeSpawn } from "./codex-tool-identity.js";
 export { isCodexNativeSpawn, isCodexIndependentCreate } from "./codex-tool-identity.js";
 import { dotDigest, dotInstant, dotObject, dotRefs, dotSha, dotText, validateRevisionBinding, validateDotExecutionRequest, resolveDotExecutionAdmission } from "./dot-execution.js";
+import { validatePackDispatchContext } from "./pack-dispatch.js";
 import type { DotAdmission, RevisionBinding } from "./dot-execution.js";
 import type { ProjectReference } from "../../protocol/src/index.js";
 
@@ -450,6 +451,17 @@ export function validateHostNativePreparation(value: unknown): HostNativePrepara
   }
   const context = p.context as Record<string, unknown>;
   if (!context || context.workId !== decision.request.workId || context.workRevision !== decision.request.workRevision || dotDigest(context.executionDecision) !== dotDigest(decision)) throw new HostExecutionError("decision differs from project context");
+  if (decision.request.packBinding !== undefined) {
+    const pack = validatePackDispatchContext(context.packDispatch);
+    const binding = decision.request.packBinding;
+    if (pack.pack.id !== binding.packId || pack.pack.revision !== binding.packRevision || pack.assignment.id !== binding.assignmentId ||
+        pack.batch.batchId !== binding.batchId || pack.batch.batchAttemptId !== binding.batchAttemptId ||
+        dotDigest(pack.batch.assignmentIds) !== dotDigest(binding.assignmentIds) || dotDigest(pack.batch.capacity) !== dotDigest(binding.capacity) ||
+        dotDigest(pack.batch.applicationRecovery ?? null) !== dotDigest(binding.applicationRecovery ?? null) ||
+        !pack.sourceContexts.some(source => source.work.id === decision.request.workId && source.work.revision === decision.request.workRevision)) {
+      throw new HostExecutionError("Pack dispatch context differs from the admitted request or original work revision");
+    }
+  } else if (context.packDispatch !== undefined) throw new HostExecutionError("Pack context requires its explicit dispatch binding");
   if (p.attempt !== null) {
     if (executionDecisionEligibility(decision) !== "executable" || context.dispatchAdmitted !== true) throw new HostExecutionError("nonexecutable preparation cannot start an attempt");
     const a = hostObject(p.attempt, "host attempt", ["id", "identityKind", "toolName", "argumentsValue", "requestedAt"]);

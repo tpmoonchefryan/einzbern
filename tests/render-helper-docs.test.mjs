@@ -121,6 +121,12 @@ test("486-AC2: the skill directory is skill-render's output for the same version
   }
   const markdown = await readFile(join(out, ...SKILL.split("/"), "SKILL.md"), "utf8");
   assert.ok(markdown.includes(`${BRAND.engine.name} ${version}:`), "SKILL.md is generated for the version given");
+  assert.ok(markdown.includes("e doctor --project . --codex-admission codex-admission.json"));
+  assert.ok(markdown.includes('e rule-list --workspace="$w" --project-id="$p"'));
+  assert.ok(markdown.includes('e work-show --workspace="$w" --external-key TCRN-CROSS-STORY-692'));
+  assert.ok(markdown.includes("printf '%s' '[\"已核验 1,392 个文件\"]' > decisions.json"));
+  assert.ok(markdown.includes('e minutes-record --workspace="$w" --project-id="$p" --title check --summary done --decisions-file decisions.json --actor agent:codex --external-key m$(date +%s)'));
+  for (const phrase of ['owning App Server JSON-RPC `initialize` → `hooks/list` for `$PWD`', "fresh project-bound `--codex-admission`", "raw result", "SHA-256 hook `sourcePath`/config", "docs/codex-native-controller.md", "Reobserve within five minutes", "require `ok=true` and `hooks-present.detail.codexGuard.ready`"]) assert.ok(markdown.includes(phrase), phrase);
 });
 
 test("486-R2: package.json names the helper, carries the engine's version and the skill's description A", async (context) => {

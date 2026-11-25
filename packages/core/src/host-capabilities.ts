@@ -4,7 +4,7 @@ import { parseStrictInstant } from "../../protocol/src/index.js";
 export const HOST_EXECUTION_REQUEST_VERSION = "tcrn.host-execution-request.v1" as const;
 export const HOST_EXECUTION_DECISION_VERSION = "tcrn.host-execution-decision.v1" as const;
 export type HostKind = "codex" | "claude" | "dot" | "kiro-cli" | "antigravity" | "devin";
-export type HostAction = "decomposition" | "research" | "coordination" | "implementation";
+export type HostAction = "decomposition" | "research" | "coordination" | "implementation" | "validation";
 export type HostTuple = { readonly runner: string; readonly model: string; readonly effort: string };
 export type HostSelection = { readonly kind: "explicit"; readonly tuple: HostTuple } | { readonly kind: "host-managed" };
 export interface HostCapabilities {

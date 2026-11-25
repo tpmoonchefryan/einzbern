@@ -37,7 +37,8 @@
           "Epic",
           "Initiative",
           "Story",
-          "Subtask"
+          "Subtask",
+          "Pack"
         ]
       }
     },

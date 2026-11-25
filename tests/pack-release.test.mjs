@@ -1,4 +1,4 @@
-import { BRANCH_LIFECYCLE_BODY, ruleBody } from "../dist/build/packages/core/src/rules-catalog.js";
+import { BRANCH_LIFECYCLE_BODY, BUILT_IN_RULES, ruleBody } from "../dist/build/packages/core/src/rules-catalog.js";
 // SPDX-License-Identifier: Apache-2.0
 // TCRN-CROSS-STORY-481 R2, AC1: scripts/pack-release.mjs writes einzbern-<version>.tar.gz and its
 // .sha256. Two packs of one tree are the same bytes. Unpacked into a directory that holds nothing
@@ -554,7 +554,7 @@ test("coding guidance resolves from both installed host copies to the relocated 
   assert.deepEqual(installed.copies.map(copy => copy.host), ["claude", "codex"]);
   for (const copy of installed.copies) {
     const markdown = await readFile(copy.path + "/SKILL.md", "utf8");
-    const reference = markdown.match(/Coding tasks: read `([^`]+)`/u)?.[1];
+    const reference = markdown.match(/^Coding: `([^`]+)`\.$/mu)?.[1];
     assert.equal(reference, "specs/coding-style-v1.md");
     assert.deepEqual(
       await readFile(join(tree, reference)),
@@ -960,7 +960,7 @@ test("INIT-062 packaged CLI distributes the universal rule revision to ordinary 
     invoke(["agents-render", "--project", project, "--at", at]);
     const generic = await readFile(join(project, "AGENTS.md"), "utf8");
     for (const id of ["autonomy", "residue-cleanup"]) {
-      const expected = ruleBody(id, language);
+      const expected = BUILT_IN_RULES.find((rule) => rule.id === id).principle[language === "zh-CN" ? "zh" : "en"];
       assert.ok(generic.includes(expected), `${id} ${language} reaches the ordinary-host AGENTS body`);
     }
     assert.ok((await readFile(join(project, "CLAUDE.md"), "utf8")).includes("@AGENTS.md"));
@@ -987,7 +987,7 @@ test("INIT-062 packaged CLI distributes the universal rule revision to ordinary 
     assert.match(independent, /Mana Orchestrate Skill/u);
     const dotInput = JSON.parse(await readFile(inputPath, "utf8"));
     const dotSkill = await readFile(dotInput.manaSkillPath, "utf8");
-    const codingReference = dotSkill.match(/Coding tasks: read `([^`]+)`/u)?.[1];
+    const codingReference = dotSkill.match(/^Coding: `([^`]+)`\.$/mu)?.[1];
     assert.equal(codingReference, "specs/coding-style-v1.md");
     assert.deepEqual(await readFile(join(tree, codingReference)), await readFile(join(repositoryRoot, codingReference)));
     const procedures = await readFile(join(tree, "specs/resource-cleanup-v1.md"), "utf8");

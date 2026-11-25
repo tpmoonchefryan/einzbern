@@ -38,11 +38,15 @@ export function resolveWorkRequirement(work: readonly WorkRecord[], ref: Require
 export function workRequirementProblems(work: readonly WorkRecord[], record: WorkRecord): readonly string[] {
   const content = workContent(record); if (!content) return [];
   const problems: string[] = []; const children = work.filter(w => w.parentId === record.id && !w.tombstone);
+  const rootId = ancestry(work, record.id).at(-1);
+  const root = work.find(row => row.id === rootId && row.kind === "Initiative" && !row.tombstone);
+  const central = root && workContent(root)?.details.acceptanceScope === "initiative";
+  const requiredRoles = central ? ["implementation"] as const : ["implementation", "verification"] as const;
   for (const r of content.requirements) {
     for (const id of r.sourceIds) if (!content.sources.some(s => s.id === id)) problems.push(`requirement:${r.id}:source:${id}:missing`);
     if (r.disposition !== "required" && !r.decision?.trim()) problems.push(`requirement:${r.id}:decision:missing`);
     if (r.disposition === "required" && (children.length > 0 || record.kind === "Initiative" || record.kind === "Epic")) {
-      for (const role of ["implementation", "verification"] as const) if (!content.allocations.some(a => a.workId === record.id && a.requirementId === r.id && a.version === r.version && a.responsibility === role && children.some(c => c.id === a.childId))) problems.push(`requirement:${r.id}:allocation:${role}:unresolved`);
+      for (const role of requiredRoles) if (!content.allocations.some(a => a.workId === record.id && a.requirementId === r.id && a.version === r.version && a.responsibility === role && children.some(c => c.id === a.childId))) problems.push(`requirement:${r.id}:allocation:${role}:unresolved`);
     }
   }
   for (const a of content.allocations) {
@@ -61,8 +65,8 @@ export interface WorkContentChangeImpact {
   readonly affectedEvidence: readonly { readonly workId: string; readonly acceptanceId: string; readonly locator: string }[];
   readonly requiresDecision: boolean;
 }
-function bindingMeaning(content: WorkContent): Pick<WorkContent, "kind" | "variant" | "goal" | "scope" | "constraints" | "details"> {
-  return { kind: content.kind, variant: content.variant, goal: content.goal, scope: content.scope, constraints: content.constraints, details: content.details };
+function bindingMeaning(content: WorkContent): Pick<WorkContent, "kind" | "variant" | "goal" | "scope" | "constraints" | "details" | "packPlan"> {
+  return { kind: content.kind, variant: content.variant, goal: content.goal, scope: content.scope, constraints: content.constraints, details: content.details, ...(content.packPlan === undefined ? {} : { packPlan: content.packPlan }) };
 }
 function approvalSources(content: WorkContent): readonly WorkSource[] { return content.sources.filter(s => ["approved-draft", "decision"].includes(s.kind) && s.extraction === "complete"); }
 // Compare allocation sets without changing the historical acceptance-evidence projection above.

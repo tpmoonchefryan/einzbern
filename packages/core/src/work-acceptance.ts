@@ -14,7 +14,7 @@ function workAcceptanceMeaning(work: readonly WorkRecord[], record: WorkRecord, 
   const seen = new Set<string>(); let current: WorkRecord | undefined = record;
   while (current && !seen.has(current.id)) {
     seen.add(current.id); const c = workContent(current);
-    constraints.push({ workId: current.id, meaning: c ? { kind: c.kind, variant: c.variant, goal: c.goal, scope: c.scope, constraints: c.constraints, details: c.details } : Object.fromEntries(["advisory:scope", "advisory:goal", "advisory:acceptance", "advisory:body"].map(key => [key, current!.extensions[key]?.value ?? null])) });
+    constraints.push({ workId: current.id, meaning: c ? { kind: c.kind, variant: c.variant, goal: c.goal, scope: c.scope, constraints: c.constraints, details: c.details, ...(c.packPlan === undefined ? {} : { packPlan: c.packPlan }) } : Object.fromEntries(["advisory:scope", "advisory:goal", "advisory:acceptance", "advisory:body"].map(key => [key, current!.extensions[key]?.value ?? null])) });
     const parent: string | null = current.parentId; current = parent === null ? undefined : work.find(w => w.id === parent && !w.tombstone);
   }
   return { acceptance, effective, constraints };

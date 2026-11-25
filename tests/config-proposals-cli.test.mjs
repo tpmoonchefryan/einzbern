@@ -159,7 +159,9 @@ test("527 GWT2: Atelier's approval declares the gate with the proposal's authori
   const enabled = await asAtelier(() => settle("proposal-approve", paths, `rule:${RULE}`, rule.proposal.proposedAt, ["--project", paths.project]));
   assert.equal(enabled.rule.state, "enabled");
   assert.equal(enabled.written, true);
-  assert.match(await readFile(paths.agents, "utf8"), new RegExp(`rule:${RULE}`, "u"));
+  const agents = await readFile(paths.agents, "utf8");
+  assert.match(agents, /<!-- einzbern:section id=agents /u);
+  assert.ok(agents.includes(BUILT_IN_RULES.find((entry) => entry.id === RULE).principle.en));
   const after = await materializeWorkspace(paths.library);
   assert.deepEqual(after.events.slice(-3).map((event) => [event.payload.record.collection, event.payload.decidedIn]), [
     ["rule", `proposal:rule:${RULE}@${rule.proposal.proposedAt}`],

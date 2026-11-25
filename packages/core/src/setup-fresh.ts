@@ -1,3 +1,4 @@
+import { planPrinciples } from "./agents-principles.js";
 import { codexNativeGuardHealth } from "./codex-native-health.js";
 import { SETUP_MODEL_POLICY_ONBOARDING } from "./setup.js";
 import { spawnSync } from "node:child_process";
@@ -57,7 +58,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "nod
 // The barrel is loaded first, so every module below is evaluated in the order the engine's own entry
 // evaluates it, whichever module a caller imports first.
 import { FRAMEWORK_VERSION } from "./framework-version.js";
-import { AGENTS_FILE, CLAUDE_FILE, agentsFileSections, disableAgentsSection, managedOutputBinding, planClaudeImport, renderAgentsSections } from "./agents-sections.js";
+import { AGENTS_FILE, CLAUDE_FILE, disableAgentsSection, managedOutputBinding, planClaudeImport, renderAgentsSections } from "./agents-sections.js";
 import { writeFileAtomic } from "./atomic-file.js";
 import { DOT_INSTALLATION_TARGET, applyDotAgents, assertNotDotAgentsTarget, planDotAgents } from "./dot-agents.js";
 import { suggestCloudHosted } from "./cloud-roots.js";
@@ -87,7 +88,7 @@ import { AGENTS_NAVIGATION_SETTING, MACHINE_SETTINGS_FILE_NAME, applyMachineSett
 import type { AgentsNavigationChoice } from "./machine-settings.js";
 import { readEngineModelPolicyFile } from "./engine-model-policy.js";
 import type { ModelsTierRecord } from "./models-tiers.js";
-import { managedSectionRecordsFor, parseManagedFile, planManagedWrite } from "./managed-sections.js";
+import { managedSectionRecordsFor, parseManagedFile } from "./managed-sections.js";
 import type { ManagedWritePlan } from "./managed-sections.js";
 import { BRAND } from "./names.js";
 import { gitRemoteOf, normalizeGitRemote, readRegistry, registryPathsPortable, registerLibrary } from "./registry.js";
@@ -717,7 +718,7 @@ async function planRoots(recorder: SetupRecorder, projectRoot: string, libraryPa
   }
 }
 
-async function planSections(recorder: SetupRecorder, projectRoot: string, state: LibraryState, navigation: AgentsNavigationChoice): Promise<{
+async function planSections(recorder: SetupRecorder, projectRoot: string, state: LibraryState, _navigation: AgentsNavigationChoice): Promise<{
   readonly pending: readonly { readonly file: string; readonly id: string }[];
   readonly recordsChange: boolean;
 }> {
@@ -725,12 +726,7 @@ async function planSections(recorder: SetupRecorder, projectRoot: string, state:
   if (state.settings.find((entry) => entry.key === "agents.generation")?.value === "none") return { pending: [], recordsChange: false };
   const agentsPath = join(projectRoot, AGENTS_FILE);
   const plans: (ManagedWritePlan | null)[] = [
-    await recorder.attempt("managed-sections", agentsPath, () => planManagedWrite({
-      filePath: agentsPath,
-      file: AGENTS_FILE,
-      desired: agentsFileSections(state, navigation).sections.map((section) => ({ id: section.id, body: section.body })),
-      records: managedSectionRecordsFor(state, AGENTS_FILE),
-    })),
+    await recorder.attempt("managed-sections", agentsPath, () => planPrinciples(projectRoot, state)),
     await recorder.attempt("managed-sections", join(projectRoot, CLAUDE_FILE), () => planClaudeImport(projectRoot, managedSectionRecordsFor(state, CLAUDE_FILE))),
   ];
   const pending: { readonly file: string; readonly id: string }[] = [];

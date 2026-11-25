@@ -80,7 +80,7 @@ test("INIT-053 AC2: batch enabled at v2 reads update-available at the route, and
   const agentsPath = join(fixture.proseRoot, "AGENTS.md");
   await cli(["rule-enable", "--project", fixture.proseRoot, "--id", "batch", "--at", "2026-08-11T15:20:00Z", "--actor", "agent:test"], { ...fixture.deviceEnv, EINZBERN_SURFACE: "atelier" });
   const enabled = await readFile(agentsPath, "utf8");
-  const v3 = managedSection(enabled, "rule:batch");
+  const v3 = managedSection(enabled, "agents");
   assert.equal(sectionDigest(v3.body), v3.digest, "the digest taken here is the engine's");
   const v2Body = normalizedSection(await readFile(join(portalRoot, "..", "tests", "fixtures", "rules", "batch-v2.zh.md"), "utf8"));
   assert.notEqual(v2Body, normalizedSection(v3.body));
@@ -90,7 +90,7 @@ test("INIT-053 AC2: batch enabled at v2 reads update-available at the route, and
   await forgeOwnStream(fixture.workspace, (events) => events.map((event) => {
     const record = event.payload?.operation === "config.record.set" ? event.payload.record : null;
     if (record?.collection === "rule" && record.key === "batch") { record.value.version = 2; forged += 1; }
-    if (record?.collection === "managed-section" && record.key === "AGENTS.md#rule:batch") { record.value.digest = v2Digest; forged += 1; }
+    if (record?.collection === "managed-section" && record.key === "AGENTS.md#agents") { record.key = "AGENTS.md#rule:batch"; record.value.id = "rule:batch"; record.value.digest = v2Digest; forged += 1; }
     return { occurredAt: event.occurredAt, payload: event.payload, clock: event.clock };
   }));
   assert.equal(forged, 2, "the rule's record and its section's record");
@@ -269,8 +269,15 @@ test("rules routes expose state, enable a rule, judge a saved edit as user-modif
   assert.equal(enabled.body.reasonCode, "RULE_ENABLED");
   assert.equal(batchOf(enabled.body).state, "enabled");
   const original = await readFile(agentsPath, "utf8");
-  assert.match(original, /id=rule:batch/u);
-  const edited = original.replace("Batch Processing", "Batch processing");
+  assert.match(original, /id=agents/u);
+  const batchLine = original.split(/\r?\n/u).find((line) => line.startsWith("- **"));
+  assert.ok(batchLine, "the enabled batch principle is rendered in the managed block");
+  const labelEnd = batchLine.indexOf("**", 3) + 2;
+  const body = batchLine.slice(labelEnd);
+  const firstUppercase = body.search(/[A-Z]/u);
+  assert.notEqual(firstUppercase, -1, "the principle has editable prose after its label");
+  const editedLine = `${batchLine.slice(0, labelEnd)}${body.slice(0, firstUppercase)}${body[firstUppercase].toLowerCase()}${body.slice(firstUppercase + 1)}`;
+  const edited = original.replace(batchLine, editedLine);
   assert.equal([...edited].filter((character, index) => character !== [...original][index]).length, 1, "one character of the rule's text");
 
   // AC2: the save is judged: user-modified, the file is the bytes saved, and nothing is pending
@@ -293,14 +300,14 @@ test("rules routes expose state, enable a rule, judge a saved edit as user-modif
   // and goes pending.
   const variable = await request(url, "/api/variables", writeOptions(boot.token, "POST", { name: "deploy.host", type: "string", value: "build.example.com", exports: ["agents"] }));
   assert.equal(variable.body.reasonCode, "VARIABLE_WRITE_COMMITTED");
-  assert.deepEqual(variable.body.render.pending, [{ id: "rule:batch", file: "AGENTS.md" }]);
+  assert.deepEqual(variable.body.render.pending, [{ id: "agents", file: "AGENTS.md" }]);
   const pending = await request(url, "/api/rules", readOptions(boot.token));
   assert.equal(batchOf(pending.body).state, "pending");
-  assert.deepEqual(pending.body.pending, [{ id: "rule:batch", file: "AGENTS.md", ruleId: "batch" }]);
-  assert.equal(managedSection(await readFile(agentsPath, "utf8"), "rule:batch").raw, managedSection(edited, "rule:batch").raw);
+  assert.deepEqual(pending.body.pending, [{ id: "agents", file: "AGENTS.md", ruleId: null }]);
+  assert.equal(managedSection(await readFile(agentsPath, "utf8"), "agents").raw, managedSection(edited, "agents").raw);
 
   // keep makes the section the user's: it reads user-modified, and the engine writes it no more.
-  const kept = await request(url, "/api/rules/resolve", writeOptions(boot.token, "POST", { section: "rule:batch", action: "keep" }));
+  const kept = await request(url, "/api/rules/resolve", writeOptions(boot.token, "POST", { section: "agents", action: "keep" }));
   assert.equal(kept.body.reasonCode, "MANAGED_SECTION_RESOLVED");
   assert.deepEqual(kept.body.pending, []);
   assert.equal(batchOf(kept.body).state, "user-modified");
@@ -310,13 +317,13 @@ test("rules routes expose state, enable a rule, judge a saved edit as user-modif
   const settled = await readFile(agentsPath, "utf8");
   assert.doesNotMatch(settled, /stage\.example\.com/u);
   assert.equal(again.body.readback.value, "stage.example.com", "configuration readback retains the saved value");
-  assert.equal(managedSection(settled, "rule:batch").raw, managedSection(edited, "rule:batch").raw, "the kept section is the user's text");
+  assert.equal(managedSection(settled, "agents").raw, managedSection(edited, "agents").raw, "the kept section is the user's text");
   assert.equal(batchOf((await request(url, "/api/rules", readOptions(boot.token))).body).state, "user-modified");
 
   const forcedOff = await request(url, "/api/rules/batch", writeOptions(boot.token, "POST", { action: "disable", force: true }));
   assert.equal(forcedOff.body.reasonCode, "RULE_DISABLED");
   assert.equal(forcedOff.body.rules.find((rule) => rule.id === "batch").state, "disabled");
-  assert.doesNotMatch(await readFile(join(fixture.proseRoot, "AGENTS.md"), "utf8"), /id=rule:batch/u);
+  assert.doesNotMatch(await readFile(join(fixture.proseRoot, "AGENTS.md"), "utf8"), /\*\*Batch processing\*\*/u);
 });
 
 
@@ -722,7 +729,7 @@ test("SUB-338 (STORY-483 AC3): batch enabled at v1 reads update-available at the
   const agentsPath = join(fixture.proseRoot, "AGENTS.md");
   await cli(["rule-enable", "--project", fixture.proseRoot, "--id", "batch", "--at", "2026-08-11T15:20:00Z", "--actor", "agent:test"], { ...fixture.deviceEnv, EINZBERN_SURFACE: "atelier" });
   const enabled = await readFile(agentsPath, "utf8");
-  const v3 = managedSection(enabled, "rule:batch");
+  const v3 = managedSection(enabled, "agents");
   assert.equal(sectionDigest(v3.body), v3.digest, "the digest taken here is the engine's");
   const v1Body = normalizedSection(await readFile(join(portalRoot, "..", "tests", "fixtures", "rules", "batch-v1.zh.md"), "utf8"));
   assert.notEqual(v1Body, normalizedSection(v3.body));
@@ -732,7 +739,7 @@ test("SUB-338 (STORY-483 AC3): batch enabled at v1 reads update-available at the
   await forgeOwnStream(fixture.workspace, (events) => events.map((event) => {
     const record = event.payload?.operation === "config.record.set" ? event.payload.record : null;
     if (record?.collection === "rule" && record.key === "batch") { record.value.version = 1; forged += 1; }
-    if (record?.collection === "managed-section" && record.key === "AGENTS.md#rule:batch") { record.value.digest = v1Digest; forged += 1; }
+    if (record?.collection === "managed-section" && record.key === "AGENTS.md#agents") { record.key = "AGENTS.md#rule:batch"; record.value.id = "rule:batch"; record.value.digest = v1Digest; forged += 1; }
     return { occurredAt: event.occurredAt, payload: event.payload, clock: event.clock };
   }));
   assert.equal(forged, 2, "the rule's record and its section's record");

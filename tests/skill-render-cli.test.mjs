@@ -141,6 +141,12 @@ test("479-AC1, AC3 through the CLI: every verb the generated table names is list
   assert.match(markdown, /specs\/batch-execution-v1\.md/);
   assert.match(markdown, /Sessions read their live work/u);
   assert.match(markdown, /docs\/codex-native-controller\.md/u);
+  assert.ok(markdown.includes("e doctor --project . --codex-admission codex-admission.json"));
+  assert.ok(markdown.includes('e rule-list --workspace="$w" --project-id="$p"'));
+  assert.ok(markdown.includes('e work-show --workspace="$w" --external-key TCRN-CROSS-STORY-692'));
+  assert.ok(markdown.includes("printf '%s' '[\"已核验 1,392 个文件\"]' > decisions.json"));
+  assert.ok(markdown.includes('e minutes-record --workspace="$w" --project-id="$p" --title check --summary done --decisions-file decisions.json --actor agent:codex --external-key m$(date +%s)'));
+  for (const phrase of ['owning App Server JSON-RPC `initialize` → `hooks/list` for `$PWD`', "fresh project-bound `--codex-admission`", "raw result", "SHA-256 hook `sourcePath`/config", "docs/codex-native-controller.md", "Reobserve within five minutes", "require `ok=true` and `hooks-present.detail.codexGuard.ready`"]) assert.ok(markdown.includes(phrase), phrase);
   assert.ok(Buffer.byteLength(markdown, "utf8") < 6000, "J17 preserves the ordinary Skill quality budget");
   for (const verb of verbs) assert.ok(listed.includes(verb), `${verb} is listed by commands`);
   assert.ok(listed.includes("skill-render"), "skill-render is itself listed by commands");

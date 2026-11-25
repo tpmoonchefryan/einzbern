@@ -8985,6 +8985,19 @@
         ]
       },
       {
+        "name": "execution-batch-plan",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "from-file",
+            "required": true,
+            "valueKind": "string",
+            "valueShape": "Observed free slots, frozen candidate inputs and package write sets."
+          }
+        ]
+      },
+      {
         "name": "execution-codex-peer-evidence",
         "availability": "cli",
         "mutates": false,
@@ -9112,6 +9125,18 @@
             "valueShape": "HostExecutionRequest v1 JSON"
           },
           {
+            "name": "codex-usage",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "Timestamped native rate-limit capture"
+          },
+          {
+            "name": "codex-capacity",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "Timestamped native roster and observed limit"
+          },
+          {
             "name": "arguments",
             "required": true,
             "valueKind": "string",
@@ -9123,6 +9148,12 @@
             "valueKind": "boolean"
           },
           {
+            "name": "codex-startup-evidence",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "Same-ID Codex App Server thread/start response retained as {conversationId, sourceRef, raw, conversationPointer}"
+          },
+          {
             "name": "codex-admission",
             "required": false,
             "valueKind": "string"
@@ -9132,6 +9163,12 @@
             "required": false,
             "valueKind": "string",
             "valueShape": "Existing Owner decision and exact settings target source; never a query permission"
+          },
+          {
+            "name": "prior-peer-receipt",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "Exact validated prior Pack receipt required before a new Codex Pack application attempt"
           },
           {
             "name": "output",
@@ -9412,6 +9449,30 @@
             "required": true,
             "valueKind": "string",
             "valueShape": "Create-new private local preparation file outside device/library roots; refused preparations are retained. No dispatch."
+          }
+        ]
+      },
+      {
+        "name": "execution-queue-reconcile",
+        "availability": "cli",
+        "mutates": false,
+        "flags": [
+          {
+            "name": "workspace",
+            "required": true,
+            "valueKind": "string"
+          },
+          {
+            "name": "scope",
+            "required": true,
+            "valueKind": "string",
+            "valueShape": "All current authorized INIT grants, independent of the queue."
+          },
+          {
+            "name": "assessments",
+            "required": false,
+            "valueKind": "string",
+            "valueShape": "Revision-bound findings and native attempt/report observations."
           }
         ]
       },
@@ -13018,6 +13079,11 @@
         "availability": "cli",
         "mutates": true,
         "flags": [
+          {
+            "name": "blocked-criteria",
+            "required": false,
+            "valueKind": "list"
+          },
           {
             "name": "workspace",
             "required": false,

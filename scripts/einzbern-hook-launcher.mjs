@@ -465,6 +465,14 @@ async function readInput() {
 // Held equal to packages/core/src/devin-host.ts (devinConfigRoot) and host-hooks.ts (the devin
 // binding hostHookCommand writes). The stable launcher imports nothing from a versioned engine.
 const DEVIN_HOST_BINDING = "process.env.EINZBERN_HOST='devin'";
+const DEVIN_EVENT_NAMES = Object.freeze({
+  "user-prompt-submit": "UserPromptSubmit",
+  "pre-tool-use": "PreToolUse",
+  "post-tool-use": "PostToolUse",
+  "subagent-start": "SubagentStart",
+  "session-start": "SessionStart",
+  stop: "Stop",
+});
 
 function devinConfigFile(env, home = homedir()) {
   const inside = (path) => {
@@ -476,24 +484,95 @@ function devinConfigFile(env, home = homedir()) {
   return join(inside(env.XDG_CONFIG_HOME) ? resolve(env.XDG_CONFIG_HOME) : join(home, ".config"), "devin", "config.json");
 }
 
-/** Whether Devin's own configuration holds an Einzbern hook command bound to devin. */
-export function devinRegistrationInstalled(env = process.env, home = homedir()) {
+function stripJsonComments(text) {
+  let result = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    const next = text[index + 1];
+    if (quoted) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+    } else if (char === '"') {
+      quoted = true;
+      result += char;
+    } else if (char === "/" && next === "/") {
+      result += "  ";
+      index += 1;
+      while (index + 1 < text.length && text[index + 1] !== "\n" && text[index + 1] !== "\r") { result += " "; index += 1; }
+    } else if (char === "/" && next === "*") {
+      result += "  ";
+      index += 1;
+      while (index + 1 < text.length && !(text[index] === "*" && text[index + 1] === "/")) {
+        result += text[index] === "\n" || text[index] === "\r" ? text[index] : " ";
+        index += 1;
+      }
+      if (index + 1 < text.length) { result += "  "; index += 1; }
+    } else result += char;
+  }
+  return result;
+}
+
+function stripJsonTrailingCommas(text) {
+  let result = "";
+  let quoted = false;
+  let escaped = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quoted) {
+      result += char;
+      if (escaped) escaped = false;
+      else if (char === "\\") escaped = true;
+      else if (char === '"') quoted = false;
+      continue;
+    }
+    if (char === '"') { quoted = true; result += char; continue; }
+    if (char === ",") {
+      let next = index + 1;
+      while (/\s/u.test(text[next] ?? "")) next += 1;
+      if (text[next] === "}" || text[next] === "]") { result += " "; continue; }
+    }
+    result += char;
+  }
+  return result;
+}
+
+function parseDevinConfig(text) {
+  return JSON.parse(stripJsonTrailingCommas(stripJsonComments(text)));
+}
+
+function commandMatchesDevinEvent(command, event) {
+  const word = Object.hasOwn(DEVIN_EVENT_NAMES, event) ? event : null;
+  if (word === null || !command.includes("/*einzbern-hook*/") || !command.includes(DEVIN_HOST_BINDING)) return false;
+  return new RegExp(`(?:^|\\s)${word}\\s*$`, "u").test(command.trim());
+}
+
+/** Whether Devin's configuration holds the matching Einzbern hook for this event. */
+export function devinRegistrationInstalled(env = process.env, home = homedir(), event) {
   let text;
   try {
     text = readFileSync(devinConfigFile(env, home), "utf8");
   } catch {
     return false;
   }
+  let hooks;
   try {
-    const hooks = JSON.parse(text)?.hooks;
-    if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) return false;
-    return Object.values(hooks).some((groups) => Array.isArray(groups) && groups.some((group) => Array.isArray(group?.hooks)
-      && group.hooks.some((hook) => typeof hook?.command === "string" && hook.command.includes("/*einzbern-hook*/") && hook.command.includes(DEVIN_HOST_BINDING))));
+    hooks = parseDevinConfig(text)?.hooks;
   } catch {
-    // Setup writes only strict JSON. A file edited into JSON with comments afterwards is searched
-    // as text, so the two registrations still do not both answer.
-    return text.includes("/*einzbern-hook*/") && text.includes(DEVIN_HOST_BINDING);
+    return false;
   }
+  if (hooks === null || typeof hooks !== "object" || Array.isArray(hooks)) return false;
+  const eventNames = event === undefined
+    ? Object.entries(DEVIN_EVENT_NAMES).map(([word, name]) => [name, word])
+    : Object.hasOwn(DEVIN_EVENT_NAMES, event) ? [[DEVIN_EVENT_NAMES[event], event]] : [];
+  return eventNames.some(([name, word]) => {
+    const groups = hooks[name];
+    return Array.isArray(groups) && groups.some((group) => Array.isArray(group?.hooks)
+      && group.hooks.some((hook) => typeof hook?.command === "string" && commandMatchesDevinEvent(hook.command, word)));
+  });
 }
 
 function noteDevinYield(device, event, payload) {
@@ -517,10 +596,10 @@ export async function launch(argv, env) {
   if (typeof event !== "string" || event.length === 0) throw new HookLaunchError("HOOK_EVENT_MISSING", "the hook command names no event");
   const payload = await readInput();
   const device = deviceDirectory(env);
-  // Devin runs two registrations of this launcher: its own, bound to devin, and the Claude Code
-  // one it imports. When its own is installed the imported run answers nothing, so one prompt is
-  // recalled once. Without its own, the imported run goes on and is recorded as devin.
-  if (!env.EINZBERN_HOST && env.DEVIN_PROJECT_DIR && devinRegistrationInstalled(env)) {
+  // Devin runs the Claude Code registration it imports as well as its own. Yield only when this
+  // exact event already has a matching Devin-bound command, so a partial install cannot suppress
+  // recall for an event that Devin itself does not handle.
+  if (!env.EINZBERN_HOST && env.DEVIN_PROJECT_DIR && devinRegistrationInstalled(env, undefined, event)) {
     if (event === "user-prompt-submit") noteDevinYield(device, event, payload);
     return null;
   }

@@ -110,6 +110,36 @@ test("Crest set: 1110 members, three fresh warm clients, gap changes, and restar
   assert.equal(restart.full, true); assert.notEqual(restart.epoch, cold.epoch); assert.equal(restart.initial.reads.length, 1111);
 });
 
+test("Crest set: a same-size content change in a >256 KiB member invalidates the warm proof", { skip: !enabled, timeout: 60000 }, async t => {
+  const f = await fixture(t, 1), member = join(f.crest, "member-0.json");
+  const originalBytes = Buffer.alloc(300 * 1024, 0x41);
+  await fs.writeFile(member, originalBytes);
+  const cold = await readClient(f, "large-member-cold");
+  assert.equal(cold.full, true); assert.equal(cold.valid, true);
+  assert.equal(cold.state.bytes, originalBytes.length);
+  const warm = await readClient(f, "large-member-warm");
+  assert.equal(warm.full, false); assert.equal(warm.valid, true);
+  const changedBytes = Buffer.from(originalBytes);
+  changedBytes[changedBytes.length - 1] = 0x42;
+  await fs.writeFile(member, changedBytes);
+  const changed = await readClient(f, "large-member-content-change");
+  assert.equal(changed.full, true); assert.equal(changed.valid, false);
+  assert.notEqual(changed.state.digest, warm.state.digest);
+  const rebuilt = await readClient(f, "large-member-rebuild");
+  assert.equal(rebuilt.full, true); assert.equal(rebuilt.valid, true);
+  const rewarm = await readClient(f, "large-member-rewarm");
+  assert.equal(rewarm.full, false); assert.equal(rewarm.valid, true);
+  await record({ label: "large-member-content-evidence", path: "crest/member-0.json", bytes: originalBytes.length,
+    beforeSha256: createHash("sha256").update(originalBytes).digest("hex"), afterSha256: createHash("sha256").update(changedBytes).digest("hex"),
+    initialResultDigest: warm.state.digest, changedResultDigest: changed.state.digest,
+    cold: { full: cold.full, valid: cold.valid, reads: cold.initial.reads.length },
+    warm: { full: warm.full, valid: warm.valid, reads: warm.initial.reads.length },
+    invalidated: { full: changed.full, valid: changed.valid, reads: changed.initial?.reads.length ?? 0,
+      reason: changed.attestorReasons },
+    rebuilt: { full: rebuilt.full, valid: rebuilt.valid, reads: rebuilt.initial.reads.length },
+    rewarm: { full: rewarm.full, valid: rewarm.valid, reads: rewarm.initial.reads.length } });
+});
+
 for (const change of ["delete", "rename", "parent", "hardlink", "metadata", "content", "mmap", "ignored", "overflow"]) {
   test(`Crest set: client gap ${change} invalidates the whole set and uses the complete reader`, { skip: !enabled, timeout: 60000 }, async t => {
     const f = await fixture(t);

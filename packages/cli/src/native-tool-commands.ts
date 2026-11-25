@@ -1,9 +1,13 @@
-import { recordCodexPeerBatch, normalizeCodexPeerBatch } from "../../core/src/codex-peer-batch.js";
+import { codexWorkerArguments, observedCodexCapacity, observedCodexUsage, observedHooks } from "../../core/src/codex-dispatch-input.js";
+import { reconcileImplementationQueue } from "../../core/src/implementation-queue.js";
+import { planImplementationBatch } from "../../core/src/implementation-batch.js";
+import { isCodexNativeSpawn } from "../../core/src/native-tool-evidence.js";
+import { recordCodexPeerBatch, normalizeCodexPeerBatch, normalizeCodexPeerBatchForEnrolledRole } from "../../core/src/codex-peer-batch.js";
 import type { CodexPeerBatchInput } from "../../core/src/codex-peer-batch.js";
 import type { CodexPeerBatch } from "../../core/src/codex-peer-batch.js";
 import { recordAntigravitySwarmBatch, normalizeAntigravitySwarmBatch, stageAntigravitySwarmGuardFromBatch } from "../../core/src/antigravity-swarm-batch.js";
 import type { AntigravitySwarmBatch, AntigravitySwarmBatchInput } from "../../core/src/antigravity-swarm-batch.js";
-import { persistCodexPeerRole } from "../../core/src/codex-peer-hooks.js";
+import { persistCodexPeerRole, resolveCodexPeerHistoricalReceipt } from "../../core/src/codex-peer-hooks.js";
 import { codexNativeGuardHealth } from "../../core/src/codex-native-health.js";
 import type { CodexHookObservation } from "../../core/src/codex-native-health.js";
 import { verifyWriteAuthorization } from "../../core/src/write-authorization.js";
@@ -13,6 +17,7 @@ import { deviceHome } from "../../core/src/device-home.js";
 import { readEngineModelPolicyFile } from "../../core/src/engine-model-policy.js";
 import { validateHostExecutionRequest } from "../../core/src/execution-fallback.js";
 import { prepareHostNativeDispatch } from "../../core/src/dispatch-workflow.js";
+import { resolvePackDispatchContext } from "../../core/src/pack-dispatch.js";
 import { stageCodexSettingsIntent } from "../../core/src/codex-peer-settings.js";
 import { recordHostNativeEvents, normalizeHostNativeRecord } from "../../core/src/native-tool-evidence.js";
 import type { HostNativeEvent } from "../../core/src/native-tool-evidence.js";
@@ -41,6 +46,8 @@ import type { WorkspaceState, WorkspaceWriteLockOptions } from "../../core/src/w
 
 const flag = (name: string, required: boolean, valueKind = "path", valueShape?: string): RuntimeCommandFlag => ({ name, required, valueKind: valueKind === "path" ? "string" : valueKind, ...(valueShape === undefined ? {} : { valueShape }) });
 export const NATIVE_TOOL_COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.freeze([
+  { name: "execution-queue-reconcile", availability: "cli", mutates: false, flags: [flag("workspace", true), flag("scope", true, "path", "All current authorized INIT grants, independent of the queue."), flag("assessments", false, "path", "Revision-bound findings and native attempt/report observations.")] },
+  { name: "execution-batch-plan", availability: "cli", mutates: false, flags: [flag("from-file", true, "path", "Observed free slots, frozen candidate inputs and package write sets.")] },
   { name: "execution-antigravity-preflight", availability: "cli", mutates: true, flags: [flag("binding", true, "path", "Saved HostExecutionPreparation v1 JSON; validates Antigravity CLI scope without launching a process."), flag("reserve-output", false, "path", "Optionally reserve the private create-new evidence destination before launching Antigravity CLI.")] },
   { name: "execution-antigravity-record", availability: "cli", mutates: true, flags: [flag("binding", true, "path", "Saved Antigravity HostExecutionPreparation v1 JSON."), flag("result", false, "path", "Actual Antigravity child process return JSON; omit only for a refused preflight."), flag("output", true, "path", "Create-new private Antigravity process evidence outside device/library roots.")] },
   { name: "execution-antigravity-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true, "path", "Antigravity process evidence JSON.")] },
@@ -48,7 +55,7 @@ export const NATIVE_TOOL_COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] 
   { name: "execution-antigravity-swarm-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true)] },
   { name: "execution-codex-peer-record", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("manifest", true), flag("records", true), flag("capacity", true), flag("codex-admission", false), flag("role-change", false), flag("actor", false, "string"), flag("delivery", false), flag("prior", false), flag("output", true)] },
   { name: "execution-codex-peer-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true)] },
-  { name: "execution-host-prepare", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("request", true, "path", "HostExecutionRequest v1 JSON"), flag("arguments", true, "path", "{selection, argumentsValue} actual request JSON"), flag("codex-peer-worker", false, "boolean"), flag("codex-admission", false), flag("codex-settings-intent", false, "path", "Existing Owner decision and exact settings target source; never a query permission"), flag("output", true)] },
+  { name: "execution-host-prepare", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("request", true, "path", "HostExecutionRequest v1 JSON"), flag("codex-usage", false, "path", "Timestamped native rate-limit capture"), flag("codex-capacity", false, "path", "Timestamped native roster and observed limit"), flag("arguments", true, "path", "{selection, argumentsValue} actual request JSON"), flag("codex-peer-worker", false, "boolean"), flag("codex-startup-evidence", false, "path", "Same-ID Codex App Server thread/start response retained as {conversationId, sourceRef, raw, conversationPointer}"), flag("codex-admission", false), flag("codex-settings-intent", false, "path", "Existing Owner decision and exact settings target source; never a query permission"), flag("prior-peer-receipt", false, "path", "Exact validated prior Pack receipt required before a new Codex Pack application attempt"), flag("output", true)] },
   { name: "execution-host-record", availability: "cli", mutates: true, flags: [flag("binding", true), flag("events", false, "path", "HostNativeEvent array; absent preserves pending"), flag("prior", false), flag("output", true)] },
   { name: "execution-host-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true)] },
   { name: "execution-kiro-preflight", availability: "cli", mutates: true, flags: [flag("binding", true, "path", "Saved HostExecutionPreparation v1 JSON; validates Kiro V3 scope without launching a process."), flag("reserve-output", false, "path", "Optionally reserve the private create-new evidence destination before launching Kiro.")] },
@@ -77,6 +84,12 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
   const catalog = NATIVE_TOOL_COMMAND_CATALOG.find(entry => entry.name === command); if (!catalog) return null;
   for (const key of Object.keys(values)) if (!catalog.flags.some(entry => entry.name === key)) throw new Error(`unsupported --${key}`);
   for (const f of catalog.flags) if (f.required && !values[f.name]?.trim()) throw new Error(`--${f.name} is required`);
+  if (command === "execution-queue-reconcile") {
+    const workspace = await context.resolveWorkspace(values.workspace!);
+    const assessments = values.assessments === undefined ? {} : await input(values.assessments);
+    return json(reconcileImplementationQueue(workspace.state, await input(values.scope!), assessments));
+  }
+  if (command === "execution-batch-plan") return json(planImplementationBatch(await input(values["from-file"]!)));
   if (command === "execution-antigravity-swarm-evidence") return json(normalizeAntigravitySwarmBatch(await input(values["from-file"]!)));
   if (command === "execution-antigravity-swarm-record") {
     const workspace = await context.resolveWorkspace(values.workspace!);
@@ -100,7 +113,20 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
     }
     return json(result);
   }
-  if (command === "execution-codex-peer-evidence") return json(normalizeCodexPeerBatch(await input(values["from-file"]!)));
+  if (command === "execution-codex-peer-evidence") {
+    const value = await input(values["from-file"]!);
+    try {
+      return json(normalizeCodexPeerBatch(value));
+    } catch (error) {
+      let recovery;
+      try { recovery = await resolveCodexPeerHistoricalReceipt(context.home ?? deviceHome(), value); }
+      catch { throw error; }
+      if (recovery.status === "matched") return json(normalizeCodexPeerBatchForEnrolledRole(value, recovery.identity));
+      if (recovery.status === "wrong-batch") throw new Error("legacy v2 receipt attempt is recorded in the enrolled role under another batch");
+      if (recovery.status === "tampered") throw new Error("legacy v2 receipt differs from the exact receipt stored in enrolled role history");
+      throw error;
+    }
+  }
   if (command === "execution-codex-peer-record") {
     const workspace = await context.resolveWorkspace(values.workspace!);
     const manifest = await input(values.manifest!) as CodexPeerBatchInput["manifest"];
@@ -109,14 +135,25 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
     const delivery = values.delivery === undefined ? undefined : await input(values.delivery!) as CodexPeerBatchInput["delivery"];
     const prior = values.prior === undefined ? undefined : await input(values.prior);
     const policy = await readEngineModelPolicyFile(context.home);
-    const referenced = new Set([manifest?.workId, ...(Array.isArray(manifest?.members) ? manifest.members.map(member => member?.workId) : [])]);
+    const referenced = new Set([manifest?.workId, manifest?.pack?.packId, ...(Array.isArray(manifest?.members) ? manifest.members.map(member => member?.workId) : [])]);
     const workRevisions = workspace.state.work.filter(row => !row.tombstone && referenced.has(row.id)).map(row => ({ id: row.id, revision: row.revision }));
     let result: unknown;
     const observationCutoff = new Date().toISOString();
-    try { result = recordCodexPeerBatch({ observationCutoff, manifest, records, capacity, policy, workRevisions, ...(delivery === undefined ? {} : { delivery }), ...(prior === undefined ? {} : { prior }) }); }
+    try {
+      if (manifest.pack) {
+        for (const member of manifest.members) {
+          resolvePackDispatchContext(workspace.state, {
+            packId: manifest.pack.packId, packRevision: manifest.pack.packRevision, assignmentId: member.assignmentId,
+            batchId: manifest.batchId, batchAttemptId: manifest.attemptId,
+            assignmentIds: manifest.pack.assignmentIds, capacity: manifest.pack.capacity,
+          }, member.workId, member.workRevision);
+        }
+      }
+      result = recordCodexPeerBatch({ observationCutoff, manifest, records, capacity, policy, workRevisions, ...(delivery === undefined ? {} : { delivery }), ...(prior === undefined ? {} : { prior }) });
+    }
     catch (error) { result = { reasonCode: "CODEX_PEER_RECORD_INVALID", observationCutoff, manifest, records, capacity, ...(delivery === undefined ? {} : { delivery }), ...(prior === undefined ? {} : { prior }), validation: { status: "invalid" }, problems: [String(error)] }; }
     await writeDispatchArtifact(values.output!, result, [workspace.root], context.home);
-    if ((result as { schemaVersion?: unknown }).schemaVersion === "tcrn.codex-peer-batch.v2") {
+    if (["tcrn.codex-peer-batch.v2", "tcrn.codex-peer-batch.v3"].includes(String((result as { schemaVersion?: unknown }).schemaVersion))) {
       try {
         const change = values["role-change"] === undefined ? undefined : dotObject(await input(values["role-change"]), "peer role lifecycle", ["operation", "decidedIn"]);
         if (change && !["retire", "activate", "recover"].includes(String(change.operation))) throw new Error("unknown peer role lifecycle operation");
@@ -143,13 +180,29 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
   }
   if (command === "execution-host-prepare") {
     const workspace = await context.resolveWorkspace(values.workspace!);
-    const request = validateHostExecutionRequest(await input(values.request!));
+    const raw = await input(values.request!) as Record<string, unknown>;
+    const caps = raw.capabilities as Record<string, unknown> | undefined;
+    let requestValue: unknown = raw;
+    if (values["codex-usage"] || values["codex-capacity"]) {
+      if (caps?.hostKind !== "codex") throw new Error("Codex observations require a Codex request");
+      const usage = values["codex-usage"] ? observedCodexUsage(await input(values["codex-usage"])) : undefined;
+      const capacity = values["codex-capacity"] ? observedCodexCapacity(await input(values["codex-capacity"])) : undefined;
+      requestValue = { ...raw, capabilities: { ...caps, ...(usage ? { usage } : {}), ...(capacity ? { platformCapacity: capacity } : {}) } };
+    }
+    const request = validateHostExecutionRequest(requestValue);
     const tool = dotObject(await input(values.arguments!), "tool request", ["selection", "argumentsValue"]);
     if (!Object.hasOwn(tool, "argumentsValue")) throw new Error("actual tool arguments are required");
     if (values["codex-peer-worker"] !== undefined && !["true", "false"].includes(values["codex-peer-worker"])) throw new Error("codex-peer-worker must be true or false");
     const admission = values["codex-admission"] === undefined ? undefined : await input(values["codex-admission"]) as { native?: CodexHookObservation; state?: string; trust?: string; preToolUse?: boolean };
     const settingsIntent = values["codex-settings-intent"] === undefined ? undefined : await input(values["codex-settings-intent"]);
-    const result = await prepareHostNativeDispatch(workspace.state, request, { ...(tool as { selection: HostSelection; argumentsValue: unknown }), peerWorker: values["codex-peer-worker"] === "true", ...(settingsIntent === undefined ? {} : { codexSettingsIntent: settingsIntent }), ...(admission?.state === "supported" && admission.trust === "permitted" && admission.preToolUse === true && admission.native ? { codexObservation: admission.native } : {}) }, context.home);
+    const priorPeerReceipt = values["prior-peer-receipt"] === undefined ? undefined : await input(values["prior-peer-receipt"]);
+    if (values["codex-startup-evidence"] !== undefined && values["codex-peer-worker"] !== "true") throw new Error("--codex-startup-evidence applies only to --codex-peer-worker true");
+    const startupEvidence = values["codex-startup-evidence"] === undefined ? undefined : await input(values["codex-startup-evidence"]);
+    const preparedTool = request.capabilities.hostKind === "codex" && isCodexNativeSpawn(request.capabilities.toolName)
+      ? codexWorkerArguments(request, { selection: tool.selection, argumentsValue: tool.argumentsValue })
+      : tool as { selection: HostSelection; argumentsValue: unknown };
+    const hooks = observedHooks(admission);
+    const result = await prepareHostNativeDispatch(workspace.state, request, { ...preparedTool, peerWorker: values["codex-peer-worker"] === "true", ...(startupEvidence === undefined ? {} : { codexCoordinatorStartup: startupEvidence }), ...(settingsIntent === undefined ? {} : { codexSettingsIntent: settingsIntent }), ...(priorPeerReceipt === undefined ? {} : { priorPeerReceipt }), ...(hooks ? { codexObservation: hooks } : {}) }, context.home);
     await writeDispatchArtifact(values.output!, result, [workspace.root], context.home);
     if (settingsIntent !== undefined && result.attempt) {
       const sessionId = process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"];

@@ -239,11 +239,20 @@ test("INIT109-4: a Devin hook run is recorded as devin and its read tool keeps t
 test("INIT109-5: under Devin the imported Claude Code registration yields to Devin's own and never takes the Codex path", async (t) => {
   const f = await fixture(t);
   await mkdir(f.config, { recursive: true });
-  assert.equal(launcher.devinRegistrationInstalled({}, f.home), false);
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "user-prompt-submit"), false);
   const plan = await planDevinHooks({ home: f.home, env: {}, deviceHome: f.deviceHome, navigation: "written" });
   await applyHostHooks(plan, { at: "2026-11-21T00:00:00Z", backupRoot: join(f.deviceHome, "backups") });
-  assert.equal(launcher.devinRegistrationInstalled({}, f.home), true);
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "user-prompt-submit"), true);
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "pre-tool-use"), true);
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "subagent-start"), false, "a hook for another event cannot claim this event");
   const installed = await readFile(f.configFile, "utf8");
+  const document = JSON.parse(installed);
+  await writeFile(f.configFile, JSON.stringify({ hooks: { PreToolUse: document.hooks.PreToolUse } }));
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "user-prompt-submit"), false, "PreToolUse alone leaves imported prompt recall available");
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "pre-tool-use"), true);
+  await writeFile(f.configFile, JSON.stringify({ hooks: { UserPromptSubmit: document.hooks.PreToolUse } }));
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "user-prompt-submit"), false, "the event group must agree with the launcher's event argument");
+  await writeFile(f.configFile, installed);
 
   const run = (event, env) => spawnSync(process.execPath, [join(repositoryRoot, "scripts", "einzbern-hook-launcher.mjs"), event], {
     cwd: f.project,
@@ -262,11 +271,11 @@ test("INIT109-5: under Devin the imported Claude Code registration yields to Dev
 
   // A comment added later makes the file JSON with comments; the registration is still found.
   await writeFile(f.configFile, `// edited by the user\n${installed}`);
-  assert.equal(launcher.devinRegistrationInstalled({}, f.home), true);
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "user-prompt-submit"), true);
   // Only the unbound Claude Code command: nothing of Devin's own is installed.
   const unbound = installed.replaceAll(BOUND, "");
   await writeFile(f.configFile, unbound);
-  assert.equal(launcher.devinRegistrationInstalled({}, f.home), false);
+  assert.equal(launcher.devinRegistrationInstalled({}, f.home, "user-prompt-submit"), false);
 
   // Without Devin's own registration the imported run goes on. Even when the host withholds the
   // Claude Code variable it is not taken for Codex: no Codex coordination state appears.

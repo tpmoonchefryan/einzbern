@@ -911,6 +911,7 @@ export * from "./involved-projects.js";
 export * from "./project-chain.js";
 
 export { prepareDispatch, recordDispatch, writeDispatchArtifact } from "./dispatch-workflow.js";
+export { resolvePackDispatchContext } from "./pack-dispatch.js";
 
 export * from "./consolidate.js";
 export * from "./consolidation-format.js";

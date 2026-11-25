@@ -96,9 +96,9 @@ test("540 GWT5: a coordination library selected in Atelier shows the container's
   assert.equal(enabled.body.rules.find((rule) => rule.id === "autonomy")?.state, "enabled");
   let text = await readFile(fixture.agents, "utf8");
   assert.ok(text.startsWith(OWNER_TEXT.trimEnd()), "the Owner's own text stays");
-  assert.ok(section(text, "rule:autonomy"), "the rule's section is written into the container's AGENTS.md");
+  assert.ok(section(text, "agents"), "the rule's section is written into the container's AGENTS.md");
   let events = await eventsSince(fixture, from);
-  assert.deepEqual(events.filter((event) => event.surface === "atelier").map((event) => [event.record.collection, event.record.key]), [["rule", "autonomy"], ["managed-section", "AGENTS.md#rule:autonomy"]], "the rule and its managed section are recorded in the library, for Atelier");
+  assert.deepEqual(events.filter((event) => event.surface === "atelier").map((event) => [event.record.collection, event.record.key]), [["rule", "autonomy"], ["managed-section", "AGENTS.md#agents"]], "the rule and its managed section are recorded in the library, for Atelier");
 
   from = await eventCount(fixture);
   const variable = await request(fixture.url, "/api/variables", write("POST", { name: "sample", type: "string", value: "hello", description: "A sample", exports: ["agents"] }));
@@ -131,13 +131,13 @@ test("540 GWT5: a coordination library selected in Atelier shows the container's
   assert.equal(language.response.status, 200, JSON.stringify(language.body));
   assert.deepEqual([language.body.ok, language.body.render?.reasonCode], [true, "AGENTS_RENDERED"]);
   const translated = await readFile(fixture.agents, "utf8");
-  assert.notEqual(section(translated, "rule:autonomy"), section(text, "rule:autonomy"), "the principle follows the configured language");
+  assert.notEqual(section(translated, "agents"), section(text, "agents"), "the principle follows the configured language");
   assert.equal(section(translated, "variables-system"), null);
 
   // The rule is switched off from the same page, and the file follows.
   const disabled = await request(fixture.url, "/api/rules/autonomy", write("POST", { action: "disable" }));
   assert.equal(disabled.response.status, 200, JSON.stringify(disabled.body));
-  assert.equal(section(await readFile(fixture.agents, "utf8"), "rule:autonomy"), null, "a rule switched off leaves the container's AGENTS.md");
+  assert.doesNotMatch(await readFile(fixture.agents, "utf8"), /\*\*自主运行\*\*/u);
 });
 
 test("540 GWT5: a coordination library registered only as its own path has no container file; a rule change is recorded alone and nothing is written in the library", async (context) => {
