@@ -19,6 +19,7 @@ import { pathToFileURL } from "node:url";
 import test, { after } from "node:test";
 
 import { FRAMEWORK_VERSION, computeInstallTreeDigest } from "../dist/build/packages/core/src/index.js";
+import { BRAND } from "../dist/build/packages/core/src/names.js";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const installScript = join(repositoryRoot, "skill/mana-orchestrate/scripts/install.mjs");
@@ -141,7 +142,7 @@ test("481-AC3, R3: a local archive installs while every fetch throws, and instal
   const commands = spawnSync(process.execPath, [join(engine, "einzbern.mjs"), "commands"], { cwd: base, encoding: "utf8", env: { ...process.env, EINZBERN_HOME: device } });
   assert.equal(commands.status, 0, commands.stderr);
   assert.equal(JSON.parse(commands.stdout).reasonCode, "CLI_CATALOG_READY");
-  const skill = await readFile(join(engine, FRAMEWORK_VERSION, "skill", "mana-orchestrate", "SKILL.md"), "utf8");
+  const skill = await readFile(join(engine, FRAMEWORK_VERSION, "skill", BRAND.helper.id, "SKILL.md"), "utf8");
   assert.match(skill, /`e <verb> --help`/u);
   assert.match(skill, /`e engine-list`: `current\.version`/u);
   const launch = (...args) => {
