@@ -251,7 +251,17 @@ export interface ListRulesInput {
  */
 export async function listRules(input: ListRulesInput): Promise<readonly RuleStatus[]> {
   const state = await effectiveProjectState(await materializeWorkspace(input.libraryRoot), input.configurationProjectId);
-  return ruleStatuses(state, input.projectRoot === undefined ? new Map() : await sectionsOfAgentsFile(input.projectRoot), input.catalog ?? BUILT_IN_RULES, input.projectRoot !== undefined);
+  return listRulesFromProjectState(state, input.projectRoot, input.catalog);
+}
+
+/** Read the rule files against a project state the caller has already materialized and scoped. */
+export async function listRulesFromProjectState(
+  state: Pick<WorkspaceState, "configRecords" | "settings">,
+  projectRoot?: string,
+  catalog: readonly BuiltInRule[] = BUILT_IN_RULES,
+): Promise<readonly RuleStatus[]> {
+  const sections = projectRoot === undefined ? new Map() : await sectionsOfAgentsFile(projectRoot);
+  return ruleStatuses(state, sections, catalog, projectRoot !== undefined);
 }
 
 export interface RuleChangeInput extends WorkspaceMutationOptions {

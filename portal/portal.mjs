@@ -317,6 +317,7 @@ const WORK_PAGE_LIMIT = workReadBudget("TCRN_PORTAL_WORK_PAGE_RECORDS", 100);
 const WORK_PAGE_CONCURRENCY = workReadBudget("TCRN_PORTAL_WORK_PAGE_CONCURRENCY", 4);
 const WORK_READ_ATTEMPTS = workReadBudget("TCRN_PORTAL_WORK_READ_ATTEMPTS", 3);
 const WORK_PAGE_OVERSIZED = "CLI_WORK_LIST_OVERSIZED";
+const TRY_COMPLETE_WORK_READ = CLI === BUNDLED_CLI && process.env.TCRN_PORTAL_WORK_PAGE_RECORDS === undefined;
 
 function workPageIdentity(page) {
   return {
@@ -337,13 +338,17 @@ const sameWorkPage = (left, right) => left.workspaceId === right.workspaceId && 
 async function readWorkPage(libraryPath, offset, limit) {
   let size = limit;
   for (;;) {
-    const read = await cliResult(["work-list", "--workspace", libraryPath, "--limit", String(size), "--offset", String(offset)]);
+    const read = await cliResult([
+      "work-list", "--workspace", libraryPath,
+      ...(size === null ? [] : ["--limit", String(size)]),
+      "--offset", String(offset),
+    ]);
     if (read.ok) {
       const identity = workPageIdentity(read.body);
       if (identity.total === null) return { state: "failed", source: { ok: false, reasonCode: "PORTAL_WORK_PAGE_MALFORMED", offset } };
-      return { state: "read", size, identity, records: Array.isArray(read.body.records) ? read.body.records : [] };
+      return { state: "read", size: size ?? WORK_PAGE_LIMIT, identity, records: Array.isArray(read.body.records) ? read.body.records : [] };
     }
-    if (read.body?.reasonCode !== WORK_PAGE_OVERSIZED || size <= 1) return { state: "failed", source: read.body };
+    if (read.body?.reasonCode !== WORK_PAGE_OVERSIZED || size === null || size <= 1) return { state: "failed", source: read.body };
     size = Math.max(1, Math.floor(size / 2));
   }
 }
@@ -392,8 +397,8 @@ async function readWorkStretches(libraryPath, first, stretches) {
 // or unsettled (the pages did not add up to one version of the library: it moved, or a page
 // repeated or skipped a record). The answers are taken in offset order: the first stretch that did
 // not read is the one reported, and a record seen twice is found as the records are put together.
-async function readWorkPages(libraryPath) {
-  const head = await readWorkPage(libraryPath, 0, WORK_PAGE_LIMIT);
+async function readWorkPages(libraryPath, initialPage) {
+  const head = initialPage ?? await readWorkPage(libraryPath, 0, WORK_PAGE_LIMIT);
   if (head.state !== "read") return head;
   const first = head.identity;
   if (head.records.length === 0 && first.total > 0) return { state: "unsettled", cause: "short-page" };
@@ -421,8 +426,13 @@ async function readWorkPages(libraryPath) {
 async function workProjection() {
   const selected = currentLibrary();
   let outcome = { state: "unsettled", cause: "moved" };
+  // Each CLI invocation materializes the library. The bundled CLI can answer from one
+  // materialization when the whole inventory fits its output budget.
+  let initialPage = TRY_COMPLETE_WORK_READ ? await readWorkPage(selected.libraryPath, 0, null) : undefined;
+  if (initialPage?.state === "failed" && initialPage.source?.reasonCode === WORK_PAGE_OVERSIZED) initialPage = undefined;
   for (let attempt = 1; attempt <= WORK_READ_ATTEMPTS && outcome.state === "unsettled"; attempt += 1) {
-    outcome = await readWorkPages(selected.libraryPath);
+    outcome = await readWorkPages(selected.libraryPath, initialPage);
+    initialPage = undefined;
   }
   if (outcome.state === "failed") return { ok: false, reasonCode: "PORTAL_WORK_READ_FAILED", source: outcome.source, records: [], total: 0 };
   if (outcome.state === "unsettled") {
@@ -453,11 +463,19 @@ async function knowledgeProjection(status = "valid") {
   const records = [];
   let listing;
   let total;
+  let snapshot;
+  let pageLimit = CLI === BUNDLED_CLI ? RUNTIME_CAPACITY.safeInteger : 100;
+  const args = ["knowledge-list", "--workspace", selected.libraryPath, "--at", at, "--selection", "all", "--status", status, "--allow-trailing", "true"];
   const seen = new Set();
   const digest = createHash("sha256").update("[", "utf8");
   // Page until the declared inventory is complete; never present a prefix as the inventory.
   do {
-    listing = await cliResult(["knowledge-list", "--workspace", selected.libraryPath, "--at", at, "--selection", "all", "--status", status, "--allow-trailing", "true", "--limit", "100", "--offset", String(records.length)]);
+    listing = await cliResult([...args, "--limit", String(pageLimit), "--offset", String(records.length),
+      ...(CLI === BUNDLED_CLI && snapshot !== undefined ? ["--snapshot", snapshot] : [])]);
+    if (!listing.ok && listing.body?.reasonCode === "INPUT_OVERSIZED" && pageLimit > 1) {
+      pageLimit = pageLimit === RUNTIME_CAPACITY.safeInteger ? 100 : Math.floor(pageLimit / 2);
+      continue;
+    }
     if (!listing.ok) break;
     if (listing.body?.knowledgeStore === "absent") {
       if (records.length > 0) listing = { ok: false, body: { ok: false, reasonCode: "PORTAL_KNOWLEDGE_PAGINATION_CHANGED" } };
@@ -467,6 +485,7 @@ async function knowledgeProjection(status = "valid") {
     const count = listing.body?.total;
     if (!Array.isArray(page) || !Number.isSafeInteger(count) || count < 0 ||
         (total !== undefined && total !== count) || records.length + page.length > count ||
+        (snapshot !== undefined && listing.body?.snapshot !== snapshot) ||
         (page.length === 0 && records.length < count) ||
         page.some((record) => typeof record?.id !== "string")) {
       listing = { ok: false, body: { ok: false, reasonCode: "PORTAL_KNOWLEDGE_PAGINATION_CHANGED" } };
@@ -481,12 +500,13 @@ async function knowledgeProjection(status = "valid") {
       break;
     }
     total = count;
+    if (typeof listing.body?.snapshot === "string") snapshot = listing.body.snapshot;
     for (const [index, entry] of entries.entries()) {
       if (records.length + index > 0) digest.update(",", "utf8");
       digest.update(entry, "utf8");
     }
     records.push(...page);
-  } while (records.length < total);
+  } while (total === undefined || records.length < total);
   if (listing.ok) listing = { ...listing, body: { ...listing.body, records, total: total ?? 0, offset: 0, truncated: false, resultDigest: digest.update("]\n", "utf8").digest("hex") } };
   return {
     ok: listing.ok,
