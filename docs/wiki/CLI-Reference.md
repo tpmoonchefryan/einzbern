@@ -381,6 +381,8 @@
 | `--workspace` | 可选 | `string` |
 | `--limit` | 可选 | `integer` |
 | `--offset` | 可选 | `integer` |
+| `--search` | 可选 | `string` |
+| `--newest-first` | 可选 | `boolean` |
 
 ## `execution-antigravity-evidence`
 
@@ -1236,6 +1238,17 @@
 | `--id` | 可选 | `string` | `exactly-one-of(--id,--external-key)` |
 | `--external-key` | 可选 | `string` | `exactly-one-of(--id,--external-key)` |
 | `--status` | 可选 | `string` |  |
+
+## `pending-actions`
+
+- 可用范围：`cli`。
+- 是否写入：否。
+
+| 旗标 | 必填 | 取值类型 |
+| --- | --- | --- |
+| `--workspace` | 可选 | `string` |
+| `--project` | 可选 | `string` |
+| `--project-id` | 可选 | `string` |
 
 ## `project-bindings-remove`
 

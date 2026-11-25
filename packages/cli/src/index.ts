@@ -888,7 +888,13 @@ function eventPage(state: Awaited<ReturnType<typeof validateWorkspace>>, values:
   const windowed = values.limit === undefined
     ? { ...values, limit: String(EVENT_PAGE_DEFAULT_LIMIT) }
     : values;
-  const page = paginate(state, "event", state.events, windowed);
+  const normalized = (value: string) => value.normalize("NFKC").toLowerCase().trim();
+  const query = normalized(values.search ?? "");
+  const matching = query === "" ? state.events : state.events.filter((event) =>
+    [event.id, event.deviceId ?? "", event.streamId, event.occurredAt, JSON.stringify(event.payload)]
+      .some((value) => normalized(value).includes(query)));
+  const events = booleanValue(values["newest-first"], "newest-first") ? matching.toReversed() : matching;
+  const page = paginate(state, "event", events, windowed);
   try {
     return canonicalJson(page);
   } catch (error) {
@@ -1771,7 +1777,8 @@ export const COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] = Object.fre
   { name: "engine-model-policy-set", availability: "cli", mutates: true, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "host", required: true, valueKind: "string" }, { name: "policy", required: true, valueKind: "json" }, { name: "at", required: true, valueKind: "instant" }, { name: "actor", required: true, valueKind: "string" }, { name: "decided-in", required: true, valueKind: "string", valueShape: DECIDED_IN_VALUE_SHAPE }] },
   { name: "engine-rollback", availability: "cli", mutates: true, flags: [{ name: "at", required: true, valueKind: "instant" }] },
   { name: "engine-update", availability: "cli", mutates: true, flags: [{ name: "from", required: true, valueKind: "string" }, { name: "sha256", required: true, valueKind: "string" }, { name: "version", required: true, valueKind: "string" }, { name: "at", required: true, valueKind: "instant" }] },
-  { name: "event-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }] },
+  { name: "event-list", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "limit", required: false, valueKind: "integer" }, { name: "offset", required: false, valueKind: "integer" }, { name: "search", required: false, valueKind: "string" }, { name: "newest-first", required: false, valueKind: "boolean" }] },
+  { name: "pending-actions", availability: "cli", mutates: false, flags: [{ name: "workspace", required: false, valueKind: "string" }, { name: "project", required: false, valueKind: "string" }, { name: "project-id", required: false, valueKind: "string" }] },
   { name: "execution-evidence", availability: "cli", mutates: false, flags: [{ name: "from-file", required: true, valueKind: "string", valueShape: "Path to JSON {handoff, hostResult}; see specs/dispatch-admission-evidence-v1.md in the engine archive. Association only, not host authentication. Exit 0: complete association; exit 1: invalid, unavailable, or unreadable input." }] },
   { name: "execution-policy-resolve", availability: "cli", mutates: false, flags: [{ name: "host", required: true, valueKind: "string" }, { name: "category", required: true, valueKind: "string" }, { name: "rejections", required: true, valueKind: "integer" }, { name: "project-budget", required: false, valueKind: "integer" }, { name: "usage", required: false, valueKind: "json" }] },
   { name: "execution-prepare", availability: "cli", mutates: true, flags: [
@@ -2853,8 +2860,8 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // changed goes only with --force true. A file they replace is backed up first.
   // TCRN-CROSS-STORY-513 R1 (TCRN-CROSS-SUB-422): both writes run for Atelier only; a model's run is
   // refused with MODEL_WRITE_REFUSED once its arguments parse, before the project is resolved.
-  if (command === "rule-list") {
-    const values = parseArguments(rest, ["project", "workspace", "project-id", "status"]);
+  if (command === "rule-list" || command === "pending-actions") {
+    const values = parseArguments(rest, command === "rule-list" ? ["project", "workspace", "project-id", "status"] : ["project", "workspace", "project-id"]);
     const status = listStatus(values);
     const project = values.project !== undefined || values.workspace === undefined ? await resolveAgentsProject(values.project ?? process.cwd()) : null;
     const libraryRoot = values.workspace ?? project!.libraryPath;
@@ -2877,6 +2884,28 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const projectRoot = candidate === undefined || !coordination ? candidate
       : await managedOutputBinding(libraryRoot, candidate, native).then((binding) => binding === "bound" ? candidate : undefined, () => undefined);
     const rules = await namingSection(() => listRules({ libraryRoot, ...(projectRoot === undefined ? {} : { projectRoot }), ...(projectId === undefined ? {} : { configurationProjectId: projectId }) }));
+    if (command === "pending-actions") {
+      const scopedWork = native.work.filter((entry) => !entry.tombstone && (projectId === undefined || entry.projectId === projectId));
+      const workIds = new Set(scopedWork.map((entry) => entry.id));
+      const proposals = listProposals(native, { status: "pending", ...(projectId === undefined ? {} : { projectId }) });
+      const counts = {
+        workValidation: scopedWork.filter((entry) => workflowStatus(entry) === "pending-validate").length,
+        gateProposals: proposals.filter((proposal) => proposal.kind === "gate").length,
+        ruleProposals: proposals.filter((proposal) => proposal.kind === "rule").length,
+        managedSections: projectRoot === undefined ? null : new Set(rules.filter((rule) => rule.state === "pending").map((rule) => rule.section)).size,
+        migratedGates: native.gates.filter((gate) => !gate.tombstone && gate.status !== "satisfied" && (projectId === undefined || gate.workId !== null && workIds.has(gate.workId))).length,
+        chainIdentity: chainIdentity(native) === null ? 1 : 0,
+      };
+      io.write(canonicalJson({
+        reasonCode: "PENDING_ACTIONS_READY",
+        workspaceId: native.metadata.workspaceId,
+        version: native.version,
+        headEventHash: native.headEventHash,
+        projectId: projectId ?? null,
+        counts,
+      }));
+      return;
+    }
     const ruleLanguage = state.settings.find(entry => entry.key === "artifact.language")?.value;
     const dotRuleSources = (() => {
       if (typeof ruleLanguage !== "string" || !["zh-CN", "en", "ja", "ko", "fr"].includes(ruleLanguage)) return { status: "unavailable", reason: "artifact-language-unconfigured", enabledRules: null };
@@ -4537,7 +4566,7 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
   // the concatenation of every page is exactly the array `export` would have
   // emitted and feeds validateEventChain unmodified.
   if (command === "event-list") {
-    const values = parseArguments(rest, ["workspace", "limit", "offset"]);
+    const values = parseArguments(rest, ["workspace", "limit", "offset", "search", "newest-first"]);
     required(values, ["workspace"]);
     const state = await validateWorkspace(values.workspace ?? "");
     io.write(eventPage(state, values));

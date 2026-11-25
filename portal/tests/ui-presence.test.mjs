@@ -1224,7 +1224,7 @@ if (!MUTATION) {
     try {
       const tabs = [...page.document.querySelectorAll("[data-workspace-tab]")].map((tab) => tab.dataset.workspaceTab);
       // TCRN-CROSS-SUB-513 (TCRN-CROSS-STORY-541) adds the Library tab: chain identity and the registry.
-      assert.deepEqual(tabs, ["overview", "work", "knowledge", "library"]);
+      assert.deepEqual(tabs, ["overview", "work", "knowledge", "activity", "library"]);
       assert.deepEqual([...page.document.querySelectorAll("[data-workspace-panel]")].map((panel) => panel.dataset.workspacePanel), tabs);
       for (const selector of ['[data-ui="evolution-dashboard"]', "#evolution-retirement", "#evolution-eval", "#evolution-hosts", "#audit-button", "#dashboard-audit", "#drawer-audit", '[data-ui="dispatch-config-surface"]']) {
         assert.equal(page.document.querySelector(selector), null, `${selector} must be absent`);
