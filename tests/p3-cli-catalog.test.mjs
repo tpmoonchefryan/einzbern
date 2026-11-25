@@ -578,7 +578,7 @@ test("527 Q6: the proposal verbs are cataloged with their required flags, and no
   assert.deepEqual(flags("gates-config-propose"), [
     ["workspace", false, "string"], ["at", true, "instant"], ["name", true, "string"], ["action", false, "string"], ["command", false, "string"], ["root", false, "string"],
     ["repository", false, "string"], ["covers", false, "list"], ["required", false, "boolean"], ["enabled", false, "boolean"], ["release-only", false, "boolean"], ["order", false, "integer"],
-    ["actor", true, "string"], ["project-id", false, "string"], ["timeout-ms", false, "integer"],
+    ["actor", true, "string"], ["project-id", false, "string"], ["timeout-ms", false, "integer"], ["reuse", false, "json"],
   ]);
   assert.deepEqual(flags("rule-propose"), [
     ["id", true, "string"], ["action", false, "string"], ["order", false, "integer"], ["at", true, "instant"], ["workspace", false, "string"], ["project", false, "string"],

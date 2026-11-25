@@ -414,8 +414,11 @@ if (!MUTATION) {
       action("cancel").click();
       assert.equal(document.querySelector(selector).value, current);
       action("fill").click();
+      page.hold(path => path === "/api/vocabulary");
       action("save").click();
-      await waitFor(() => panelState() === "available" && writes.length === 2, "only documentation saved");
+      await waitFor(() => panelState() === "available" && writes.length === 2 && page.held() === 1, "documentation read back before the settings page refresh");
+      assert.equal(document.querySelector(selector).value, expected);
+      assert.equal(page.release(), 1);
       await page.waitForSettled();
       assert.ok(writes.every(write => write.libraryPath === page.workspace && write.libraryId === writes[0].libraryId));
       assert.deepEqual(writes.map(({ key, value }) => ({ key, value })), [{ key: "design.authority", value: address }, { key: "design.productionDocs", value: expected }]);
@@ -427,7 +430,7 @@ if (!MUTATION) {
       assert.equal(action("fill"), null);
       assert.equal(document.querySelector(selector).value, expected);
       assert.equal(writes.length, 2);
-    } finally { await page.cleanup(); }
+    } finally { page.release(); await page.cleanup(); }
   });
 }
 

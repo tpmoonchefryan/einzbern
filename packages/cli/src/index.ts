@@ -1135,29 +1135,34 @@ async function verificationPlanFields(plan: Awaited<ReturnType<typeof planGates>
   return { verification: await gateVerificationPlan(plan, options) };
 }
 
-function localGateExecution(values: Readonly<Record<string, string>>): typeof runGates {
+async function withLocalGateExecution<T>(
+  values: Readonly<Record<string, string>>,
+  operation: (executeRun: typeof runGates) => Promise<T>,
+): Promise<T> {
   const timeoutMs = boundedInteger(values, "gate-timeout-ms");
-  return async (plan, options) => {
-    const holdForRun = plan.release || !plan.gates.some(gate => gate.reuse !== undefined);
-    let slot: Awaited<ReturnType<typeof acquireHeavySlot>> | undefined;
-    try {
-      return await runGates(plan, {
+  let slot: Awaited<ReturnType<typeof acquireHeavySlot>> | undefined;
+  try {
+    return await operation((plan, options) => {
+      const holdForBatch = plan.release || !plan.gates.some(gate => gate.reuse !== undefined);
+      return runGates(plan, {
         ...options,
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
         admit: async () => {
           const active = slot ?? await acquireHeavySlot({ command: "gates-run" });
-          if (holdForRun) slot = active;
+          if (holdForBatch) slot = active;
           return {
             env: {
               [HEAVY_SLOT_VARIABLE]: `${active.token}:${active.path}`,
               [MEMORY_LEASE_VARIABLE]: process.env[MEMORY_LEASE_VARIABLE],
             },
-            ...(holdForRun ? {} : { release: () => active.release() }),
+            ...(slot === undefined ? { release: () => active.release() } : {}),
           };
         },
       });
-    } finally { slot?.release(); }
-  };
+    });
+  } finally {
+    slot?.release();
+  }
 }
 
 async function packageVerificationPlan(values: Readonly<Record<string, string>>, native: Awaited<ReturnType<typeof validateWorkspace>>): Promise<{
@@ -1362,7 +1367,7 @@ async function prepareGates(values: Readonly<Record<string, string>>, execute: b
 > {
   const native = await validateWorkspace(values.workspace ?? "");
   if (values["checks-from"] !== undefined) return packageVerificationPlan(values, native);
-  const targets = await workGateTargets(native, values, execute, localGateExecution(values));
+  const targets = await withLocalGateExecution(values, executeRun => workGateTargets(native, values, execute, executeRun));
   if (targets !== null) return { targets };
   const state = await effectiveProjectState(native, values["project-id"]);
   const workIds = values["work-id"] === undefined ? [] : listValue(values["work-id"]);
@@ -5171,11 +5176,11 @@ async function dispatchCli(arguments_: readonly string[], io: CliIo): Promise<vo
     const prepared = await prepareGates(values, true);
     if ("targets" in prepared) { io.write(canonicalJson(prepared.targets)); return; }
     const { state, plan, projectId } = prepared;
-    const { run, recordPath } = await localGateExecution(values)(plan, {
+    const { run, recordPath } = await withLocalGateExecution(values, executeRun => executeRun(plan, {
       libraryId: state.metadata.workspaceId,
       ...(projectId === undefined ? {} : { projectId }),
       at: values.at!,
-    });
+    }));
     io.write(canonicalJson({
       reasonCode: "GATES_RUN_COMPLETED",
       workspaceId: state.metadata.workspaceId,

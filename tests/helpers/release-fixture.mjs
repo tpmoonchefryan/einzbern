@@ -81,7 +81,7 @@ export async function createRepos(name) {
   for (const directory of ["scripts", "portal", "skill"]) {
     cpSync(join(REPOSITORY_ROOT, directory), join(engineRoot, directory), { recursive: true });
   }
-  for (const path of ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "native/linux-source-lease.c", "packages/core/src/names.ts", "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md", "docs/design/continuous-source-attestor.md", ...SPECIFICATIONS.map(name => `specs/${name}`)]) {
+  for (const path of ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.txt", "native/linux-source-lease.c", "packages/core/src/names.ts", "docs/codex-native-controller.md", "docs/antigravity-swarm-controller.md", "docs/design/memory-admission.md", "docs/design/continuous-source-attestor.md", "docs/verification-evidence.md", ...SPECIFICATIONS.map(name => `specs/${name}`)]) {
     await writeText(engineRoot, path, await readFile(join(REPOSITORY_ROOT, path), "utf8"));
   }
   await writeText(engineRoot, "packages/core/src/framework-version.ts", await readFile(join(REPOSITORY_ROOT, "packages/core/src/framework-version.ts"), "utf8"));

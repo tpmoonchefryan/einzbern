@@ -146,8 +146,9 @@ test("486-R4: render-readme writes the five root READMEs, and --check compares w
 // 2026-10-31: refresh current snapshots for the Owner-reviewed usage section and translations;
 // the independent historical STORY-495 fixtures and their digests remain unchanged.
 // STORY-667 updates the current hook descriptions in the five templates. The STORY-495 archive above stays pinned.
+// INIT-003 links the verification evidence workflow from the primary template.
 const ETHER_TEMPLATE_SHA256 = {
-  "README.md": "b948aa294d6088b00162fbb5a937b0224cf6d89f6b2955f1c5dde0d4296b5dfb",
+  "README.md": "e02b374787d2d4d938ba10463f73425b280d4c193fe3fe3d06fbe560aa8f43e1",
   "README.en.md": "a73b2314973163d54907f00271542cb6752462bf96c2d7c3da33dad327bd9794",
   "README.ja.md": "1ee6806f62d62692243c3a24503cab5ef3fde9604accbac17f5221cb93b7c83c",
   "README.ko.md": "e9cfd83c2b5a8b0a01a2085e21a884d96c61bd60843289973020a0dfb58930d3",

@@ -10028,6 +10028,11 @@
             "name": "timeout-ms",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "reuse",
+            "required": false,
+            "valueKind": "json"
           }
         ]
       },
@@ -10154,6 +10159,11 @@
             "name": "timeout-ms",
             "required": false,
             "valueKind": "integer"
+          },
+          {
+            "name": "reuse",
+            "required": false,
+            "valueKind": "json"
           }
         ]
       },
@@ -10194,6 +10204,11 @@
           },
           {
             "name": "project-id",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "checks-from",
             "required": false,
             "valueKind": "string"
           }
@@ -10243,6 +10258,16 @@
             "name": "project-id",
             "required": false,
             "valueKind": "string"
+          },
+          {
+            "name": "checks-from",
+            "required": false,
+            "valueKind": "string"
+          },
+          {
+            "name": "gate-timeout-ms",
+            "required": false,
+            "valueKind": "integer"
           }
         ]
       },

@@ -1020,7 +1020,7 @@ test("real repository README, every ordinary Wiki and original PR33 retain exact
   assert.deepEqual(Object.keys(rules.docs).sort(), ["README.md", ...ordinaryWiki].sort());
   const expectedDocuments = Object.fromEntries(ordinaryWiki.map((document) => [document, sorted([...integrity, ...names("privacy-boundary push-wiki wiki-pages")])]));
   expectedDocuments["README.md"] = sorted([...integrity, ...common, ...names("gates-plan gates-run inc238-markdown-link-gate")]);
-  expectedDocuments["docs/wiki/CLI-Reference.md"] = sorted([...integrity, ...common, ...names("push-wiki wiki-cli-reference wiki-pages")]);
+  expectedDocuments["docs/wiki/CLI-Reference.md"] = sorted([...integrity, ...common, ...names("gate-evidence-reuse gate-run push-wiki wiki-cli-reference wiki-pages")]);
   expectedDocuments["docs/wiki/Glossary.md"] = sorted([...expectedDocuments["docs/wiki/Glossary.md"], ...names("names-alias-table")]);
   expectedDocuments["docs/wiki/Home.md"] = sorted([...expectedDocuments["docs/wiki/Home.md"], ...names("inc238-markdown-link-gate")]);
   const privacy = names(`bootstrap bundle ci-artifact-transport ci-baseline-evidence ci-bootstrap ci-bootstrap-prerequisites ci-evidence-retention ci-git-source-blobs ci-impact-plan ci-light-contract ci-light-evidence ci-selective-runner ci-test-roster

@@ -5015,9 +5015,9 @@ const BOOT = __PORTAL_BOOT__;
     if (designAuthorityRead.context !== context) designAuthorityRead = { context, status: "idle" };
     host.hidden = !designAuthorityUrl() || state.settings?.chain?.role === "coordination" || state.settingGroup !== settingGroup("design.authority");
     if (host.hidden) { host.innerHTML = ""; return; }
-    const { status, url, count, version, components, warning, httpStatus } = designAuthorityRead;
+    const { status, url, count, version, components, warning, httpStatus, saving } = designAuthorityRead;
     const field = $("[data-setting-control='design.productionDocs']", $("#settings-rows"));
-    const action = (key, label, primary = false) => `<button type="button" class="tcrn-button tcrn-button--${primary ? "primary" : "quiet"} tcrn-button--sm" data-design-authority-action="${key}">${esc(label)}</button>`;
+    const action = (key, label, primary = false) => `<button type="button" class="tcrn-button tcrn-button--${primary ? "primary" : "quiet"} tcrn-button--sm" data-design-authority-action="${key}"${saving ? " disabled" : ""}>${esc(label)}</button>`;
     const componentLabels = { available: t("design.components.available"), missing: t("design.components.missing"), unverified: t("design.components.unverified") };
     const warnings = { http: t("design.warnStatus", { status: httpStatus }), schema: t("design.warnSchema"), url: t("design.warnBadUrl"), unreachable: t("design.warnUnreachable") };
     const outcome = status === "available" || status === "staged"
@@ -5042,13 +5042,23 @@ const BOOT = __PORTAL_BOOT__;
       designAuthorityRead.status = "available";
       renderSettings();
     });
-    $('[data-design-authority-action="save"]', host)?.addEventListener("click", async (event) => {
+    $('[data-design-authority-action="save"]', host)?.addEventListener("click", async () => {
       if (state.librarySwitching || state.settingsWritePending || context !== designAuthorityContext()) return;
-      event.currentTarget.disabled = true;
-      await saveSetting(productionDocsKey, url);
-      if (context !== designAuthorityContext()) return;
-      if (currentSetting(productionDocsKey)?.currentValue === url) designAuthorityRead.status = "available";
+      const staged = designAuthorityRead;
+      staged.saving = true;
       renderDesignAuthority();
+      const sameDraft = () => designAuthorityRead === staged && context === designAuthorityContext();
+      try {
+        await mutateSetting(productionDocsKey, { value: url }, readback => {
+          if (!sameDraft() || readback?.key !== productionDocsKey || readback.currentValue !== url) return;
+          state.settings.settings = state.settings.settings.map(entry => entry.key === productionDocsKey ? readback : entry);
+          staged.status = "available";
+          renderDesignAuthority();
+        });
+      } finally {
+        staged.saving = false;
+        if (sameDraft()) renderDesignAuthority();
+      }
     });
   };
   // A settings row for each shape and layer. A project-level key keeps the controls it always had; a
@@ -7151,7 +7161,7 @@ const BOOT = __PORTAL_BOOT__;
   const focusPromptLanguage = () => {
     $("[data-prompt-language-dropdown] .tcrn-multi-select-dropdown__trigger")?.focus?.();
   };
-  const mutateSetting = async (key, payload) => {
+  const mutateSetting = async (key, payload, onReadback) => {
     if (state.settingsWritePending || state.librarySwitching) return;
     const epoch = state.libraryEpoch || 0;
     const focus = rememberFocus($("#settings-rows"));
@@ -7164,6 +7174,7 @@ const BOOT = __PORTAL_BOOT__;
       if ((state.libraryEpoch || 0) !== epoch) return;
       state.promptLanguageDraft = null;
       showReceipt(result);
+      if (result.ok === true && !unkept(result)) onReadback?.(result.readback);
       await refresh();
       if (rendersSystemVariables(key)) await loadAgents();
       return result;

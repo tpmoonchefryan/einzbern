@@ -50,7 +50,7 @@ async function setup(t) {
   const plan = async (gates, mode = {}) => ({
     ...await planGates({ ...scope, projectRoot, gates, base, workIds: [workId] }), ...mode,
   });
-  const run = (planned) => runGates(planned, { ...scope, at: new Date(Date.UTC(2026, 10, 22, 0, 0, ++tick)).toISOString() });
+  const run = (planned) => runGates(planned, { ...scope, outputBytes: 1_024, at: new Date(Date.UTC(2026, 10, 22, 0, 0, ++tick)).toISOString() });
   return { root, projectRoot, git, base, invocations, scope, gate, plan, run };
 }
 
@@ -58,12 +58,17 @@ const modes = (run) => Object.fromEntries(run.gates.map(gate => [gate.name, gate
 
 test("same working bytes across commit, subsequent independent plan executes only changed and new checks", async (t) => {
   const f = await setup(t);
-  const artifact = f.gate("artifact", "artifact");
+  const artifact = f.gate("artifact", "artifact", "process.stderr.write('X'.repeat(2048));");
   const doctor = f.gate("doctor", "registry");
   const plan = await f.plan([artifact, doctor], { evidenceOnly: true });
   const { run: cold } = await f.run(plan);
   assert.deepEqual(modes(cold), { artifact: "executed", doctor: "executed" });
   assert.deepEqual(cold.reds, []);
+  const rawLog = join(gateRunsDirectory(libraryId, f.scope.deviceHome), cold.gates[0].outputFile);
+  const rawOutput = await readFile(rawLog, "utf8");
+  assert.equal(rawOutput.replaceAll("X", ""), "fixed release artifact\n\n");
+  assert.equal(rawOutput.length - "fixed release artifact\n\n".length, 2_048);
+  assert.equal(cold.gates[0].truncated, false);
   assert.equal(await latestGateRun(f.scope), null);
   assert.equal((await readGateEvidence(gateRunsDirectory(libraryId, f.scope.deviceHome), cold.runId, libraryId, workId)).runId, cold.runId);
   assert.equal(await readGateEvidence(gateRunsDirectory(libraryId, f.scope.deviceHome), cold.runId, libraryId, alternateWork), null);

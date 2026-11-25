@@ -13,15 +13,18 @@ import { resetRecallCache } from "../dist/build/packages/core/src/recall.js";
 
 async function prepareFixture({ execute, reject = false, role = "coordination", noRun = false }) {
   const source = await readFile(new URL("../packages/cli/src/index.ts", import.meta.url), "utf8");
-  const start = source.indexOf("async function prepareGates(");
-  const end = source.indexOf("\ntype GatesLibrary", start);
-  assert.ok(start >= 0 && end > start);
-  const js = ts.transpileModule(source.slice(start, end), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+  const parsed = ts.createSourceFile("index.ts", source, ts.ScriptTarget.Latest, true);
+  const functions = ["withLocalGateExecution", "prepareGates"].map(name => {
+    const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.ok(declaration, name);
+    return declaration.getText();
+  });
+  const js = ts.transpileModule(functions.join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
   const calls = [];
   const state = { metadata: { workspaceId: "fixture" }, work: [] };
   const prepare = runInNewContext(`${js}\nprepareGates`, {
     validateWorkspace: async () => state,
-    chainIdentity: () => ({ role }),
+    boundedInteger: () => undefined,
     HEAVY_SLOT_VARIABLE: "EINZBERN_HEAVY_SLOT",
     MEMORY_LEASE_VARIABLE: "EINZBERN_MEMORY_LEASE",
     process: { env: { EINZBERN_MEMORY_LEASE: "fixture-memory-envelope" } },
@@ -29,15 +32,17 @@ async function prepareFixture({ execute, reject = false, role = "coordination", 
     workGateTargets: async (_state, _values, run, executeRun) => {
       calls.push("prepare");
       if (run && role === "coordination" && !noRun) {
-        await executeRun({}, { env: { EINZBERN_PROJECT_CONTEXT: "fixture-context" } });
-        await executeRun({}, {});
+        await executeRun({ gates: [{}] }, { env: { EINZBERN_PROJECT_CONTEXT: "fixture-context" } });
+        await executeRun({ gates: [{}] }, {});
       }
       return role === "coordination" ? { ok: true } : null;
     },
     runGates: async (_plan, options) => {
+      const admitted = await options.admit();
+      assert.equal(admitted.env.EINZBERN_HEAVY_SLOT, "fixture-token:/fixture/slot");
+      assert.equal(admitted.env.EINZBERN_MEMORY_LEASE, "fixture-memory-envelope");
+      assert.equal(admitted.release, undefined);
       if (options.env !== undefined) {
-        assert.equal(options.env.EINZBERN_HEAVY_SLOT, "fixture-token:/fixture/slot");
-        assert.equal(options.env.EINZBERN_MEMORY_LEASE, "fixture-memory-envelope");
         assert.equal(options.env.EINZBERN_PROJECT_CONTEXT, "fixture-context");
       }
       calls.push("execute");

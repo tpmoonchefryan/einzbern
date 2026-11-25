@@ -35,6 +35,7 @@ import { RUNTIME_CAPACITY } from "../../../scripts/lib/runtime-capacity.mjs";
 import { spawnCommand as spawn } from "../../../skill/mana-orchestrate/scripts/process-launch.mjs";
 import type { ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { writeFileSync } from "node:fs";
 import { lstat, mkdir, open, readdir, readFile, readlink, realpath } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -299,11 +300,16 @@ interface GateProcess {
 }
 
 function runGateProcess(command: readonly string[], cwd: string, timeoutMs: number, outputBytes: number, env: NodeJS.ProcessEnv, outputFd?: number): Promise<GateProcess> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let bytes = 0;
     let truncated = false;
     const append = (chunk: Buffer): void => {
+      if (outputFd !== undefined) {
+        // Keep the log file owned by the parent. Managed children require private pipes.
+        writeFileSync(outputFd, chunk);
+        return;
+      }
       const room = outputBytes - bytes;
       if (chunk.length > room) truncated = true;
       if (room <= 0) return;
@@ -316,15 +322,26 @@ function runGateProcess(command: readonly string[], cwd: string, timeoutMs: numb
     let timer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     let child: ChildProcess | undefined;
+    let outputFailure: { readonly error: unknown } | undefined;
+    const acceptOutput = (chunk: Buffer): void => {
+      if (settled || outputFailure !== undefined) return;
+      try {
+        append(chunk);
+      } catch (error) {
+        outputFailure = { error };
+        if (child !== undefined) terminate(child, "SIGKILL");
+      }
+    };
     const finish = (exitCode: number | null, signal: string | null, failure: string | null): void => {
       if (settled) return;
+      if (failure !== null) acceptOutput(Buffer.from(`einzbern: the gate could not run: ${failure}\n`, "utf8"));
       settled = true;
       if (timer !== undefined) clearTimeout(timer);
       if (killTimer !== undefined) clearTimeout(killTimer);
       // Whatever the gate left running in its process group ends with it.
       if (child !== undefined) terminate(child, "SIGTERM");
-      if (failure !== null) append(Buffer.from(`einzbern: the gate could not run: ${failure}\n`, "utf8"));
-      resolve({ exitCode, signal, timedOut, output: Buffer.concat(chunks), truncated });
+      if (outputFailure !== undefined) reject(outputFailure.error);
+      else resolve({ exitCode, signal, timedOut, output: Buffer.concat(chunks), truncated });
     };
     const [executable, ...args] = command;
     try {
@@ -333,7 +350,7 @@ function runGateProcess(command: readonly string[], cwd: string, timeoutMs: numb
         detached: process.platform !== "win32",
         env,
         shell: false,
-        stdio: ["ignore", outputFd ?? "pipe", outputFd ?? "pipe"],
+        stdio: ["ignore", "pipe", "pipe"],
         windowsHide: true,
       });
     } catch (error) {
@@ -342,8 +359,8 @@ function runGateProcess(command: readonly string[], cwd: string, timeoutMs: numb
       return;
     }
     const started = child;
-    started.stdout?.on("data", append);
-    started.stderr?.on("data", append);
+    started.stdout?.on("data", acceptOutput);
+    started.stderr?.on("data", acceptOutput);
     started.once("error", (error: NodeJS.ErrnoException) => finish(null, null, error.code ?? error.message));
     started.once("close", (exitCode: number | null, signal: NodeJS.Signals | null) => finish(exitCode, signal, null));
     started.once("spawn", () => {
@@ -639,7 +656,6 @@ async function resolveGateCheck(
     const started = performance.now();
     if (decision.inputDigest !== null) raw = await open(outputPath, "wx", 0o600);
     const outcome = await runGateProcess(command, cwd, timeoutMs, outputBytes, gateEnvironment, raw?.fd);
-    if (raw && outcome.output.length > 0) await raw.writeFile(outcome.output);
     const durationMs = Math.max(0, Math.round(performance.now() - started));
     const finishedAt = new Date().toISOString();
     if (!raw) await writeFileAtomic(outputPath, outcome.output);
