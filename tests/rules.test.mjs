@@ -10,11 +10,12 @@
 
 import "./helpers/device-home.mjs";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { asPinnedDevice } from "./helpers/device-home.mjs";
 import { dotEnabledRuleSources, renderDotAgents } from "../dist/build/packages/core/src/dot-agents.js";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
 import { createProject, initializeLibrary, materializeWorkspace, scopedWorkspaceState } from "../dist/build/packages/core/src/index.js";
@@ -602,6 +603,53 @@ test("INIT003 rule records consolidate across project roots and remain isolated 
   const isolated = await createProject(otherLibrary, { externalKey: "ISOLATED-RULES", name: "Isolated rules fixture", occurredAt: at() });
   const isolatedId = isolated.projects.find(project => project.externalKey === "ISOLATED-RULES").id;
   assert.equal((await listRules({ libraryRoot: otherLibrary, projectRoot: isolatedProject, configurationProjectId: isolatedId })).some(rule => rule.id === "custom-privacy"), false);
+});
+
+test("INIT003 a second device reads the library custom rule and renders the same selected rule locally", async context => {
+  const firstDeviceId = "c".repeat(32);
+  const secondDeviceId = "e".repeat(32);
+  await asPinnedDevice(async () => {
+    const paths = await scratch(context);
+    const secondLibrary = join(paths.base, "device-two-library");
+    await cp(paths.library, secondLibrary, { recursive: true });
+    const secondProject = join(paths.base, "device-two-project");
+    await mkdir(secondProject);
+    await writeFile(join(secondProject, "AGENTS.md"), USER_TEXT);
+
+    await createCustomRule({ libraryRoot: paths.library, projectRoot: paths.project, configurationProjectId: paths.projectId,
+      id: "custom-portable", title: "Portable custom rule", body: "Keep this definition in the shared library.", order: 6, occurredAt: at() });
+    await writeFile(join(secondProject, "AGENTS.md"), await readFile(paths.agents, "utf8"));
+
+    // A sync client copies this device's append-only stream into the other device's library copy.
+    const sourceStream = join(paths.library, "akasha", firstDeviceId);
+    await cp(sourceStream, join(secondLibrary, "akasha", firstDeviceId), { recursive: true });
+
+    await asPinnedDevice(async home => {
+      await registerLibrary({ projectPath: secondProject, projectId: paths.projectId, libraryPath: secondLibrary, agentsProjectRoot: secondProject, registeredAt: at(), gitRemote: null }, home);
+      const readback = await listRules({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId });
+      const shared = readback.find(rule => rule.id === "custom-portable");
+      assert.deepEqual([shared?.custom, shared?.title, shared?.body, shared?.order, shared?.state], [true, "Portable custom rule", "Keep this definition in the shared library.", 6, "enabled"]);
+      const rendered = await setCustomRuleEnabled({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId,
+        id: "custom-portable", enabled: true, occurredAt: at() });
+      assert.deepEqual([rendered.status.state, rendered.status.order, rendered.written], ["enabled", 6, false]);
+      assert.match(await readFile(join(secondProject, "AGENTS.md"), "utf8"), /Portable custom rule/u);
+
+      const edited = await updateCustomRule({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId,
+        id: "custom-portable", title: "Edited on device two", body: "The edit syncs back with the library record.", order: 8, occurredAt: at() });
+      assert.deepEqual([edited.status.title, edited.status.order, edited.status.state], ["Edited on device two", 8, "enabled"]);
+      const disabled = await setCustomRuleEnabled({ libraryRoot: secondLibrary, projectRoot: secondProject, configurationProjectId: paths.projectId,
+        id: "custom-portable", enabled: false, occurredAt: at() });
+      assert.equal(disabled.status.state, "disabled");
+    }, secondDeviceId);
+
+    await cp(join(secondLibrary, "akasha", secondDeviceId), join(paths.library, "akasha", secondDeviceId), { recursive: true });
+    await writeFile(paths.agents, await readFile(join(secondProject, "AGENTS.md"), "utf8"));
+    const backOnFirst = await listRules({ libraryRoot: paths.library, projectRoot: paths.project, configurationProjectId: paths.projectId });
+    const syncedBack = backOnFirst.find(rule => rule.id === "custom-portable");
+    assert.deepEqual([syncedBack?.custom, syncedBack?.title, syncedBack?.body, syncedBack?.order, syncedBack?.state],
+      [true, "Edited on device two", "The edit syncs back with the library record.", 8, "disabled"]);
+    assert.doesNotMatch(await readFile(paths.agents, "utf8"), /Edited on device two/u);
+  }, firstDeviceId);
 });
 
 test("INIT003 migration refuses conflicting custom definitions and leaves the managed file unchanged", async context => {

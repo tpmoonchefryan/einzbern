@@ -2523,7 +2523,7 @@
     "tests/root-boundaries.test.mjs": "c09ecd54f7d789d8b3501ac72f8809b0c15a14c88c2e41d9af8c627605e01c20",
     "tests/rules-catalog.test.mjs": "aa14776cfb47c1ab60fbd66c82a788d88c243915e871bd8e879ee6f5d115ccaf",
     "tests/rules-cli.test.mjs": "7c0c602c9c5fe364ba0fbfa735eb27aa75a4af046f5b643e75b8dd7789a98959",
-    "tests/rules.test.mjs": "ba86162e0d1a28e9063adf44b929f0a3616c05971f1fc8f319339d45e1c6e235",
+    "tests/rules.test.mjs": "55a96fd79e2d10831e0613c46df2e6535d219e3264bb16cca7b86ebc085357c7",
     "tests/runtime-input-contract.test.mjs": "39f59ed05e9636d71a77775b397deccd575d177daed275bdc6eca6ed0fe95033",
     "tests/s212-template-admission.test.mjs": "873e3e500adc4f204dade8ebfa3e83591103c6577b4a8f5a5dea5c79af791e2a",
     "tests/s213-settings.test.mjs": "1045b4777c99aa5dd8db06958e4bcfeecc64b041366ef2b10aab7b90997465f7",
