@@ -28,7 +28,7 @@ const PROMPT = "How should the zebrafish tank be filled?";
 const QUIET = "rename parser module, rerun compiler";
 const at = (second) => `2026-10-14T12:00:${String(second).padStart(2, "0")}Z`;
 const idOf = (key) => deriveStableId("work", key);
-const STORY_LINE = `[Story planned] Zebrafish tank · HOOK-STORY · ${idOf("HOOK-STORY")} · Wetland epic ‹ Aviary initiative`;
+const STORY_LINE = `Story · HOOK-STORY · Zebrafish tank · ${idOf("HOOK-STORY")}`;
 // TCRN-CROSS-STORY-548 R3: host follows reasonCode, an additive field of einzbern.hook-log.v1.
 const RECALL_KEYS = ["schemaVersion", "at", "event", "cwd", "reasonCode", "host"];
 // What a v1 reader written before the host field takes from each line.

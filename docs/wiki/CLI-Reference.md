@@ -1204,6 +1204,7 @@
 | `--status` | 可选 | `string` |
 | `--limit` | 可选 | `integer` |
 | `--offset` | 可选 | `integer` |
+| `--query` | 可选 | `string` |
 
 ## `minutes-record`
 

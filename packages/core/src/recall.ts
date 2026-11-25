@@ -578,7 +578,7 @@ function hitOf(document: RecallDocument, lexicon: DocumentLexicon, vocabulary: W
   };
   return {
     ...hitMetadata(document, score, query),
-    lead: requested > 0 && selected?.number !== requested ? "" : decision === undefined ? document.lead : `D${decision.number} ${decision.text}`,
+    lead: requested > 0 && selected?.number !== requested ? "" : decision === undefined ? document.lead : `D${decision.number} ${decision.text || decision.metadata?.title || ""}`.trimEnd(),
     ...(decision === undefined || requested > 0 && selected?.number !== requested ? {} : { decision }),
   };
 }

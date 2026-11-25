@@ -1234,6 +1234,16 @@ const server = createServer((request, response) => requestContext.run({ epoch: s
       send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
       return;
     }
+    if (request.method === "GET" && pathname === "/api/minutes") {
+      const args = ["minutes-list", "--workspace", currentLibrary().libraryPath, "--limit", "24", ...scopeArguments()];
+      const query = url.searchParams.get("q")?.trim();
+      if (query) args.push("--query", query);
+      const offset = url.searchParams.get("offset");
+      if (offset !== null) args.push("--offset", offset);
+      const result = await cliResult(args);
+      send(response, result.ok ? 200 : 409, { ...result.body, ok: result.ok });
+      return;
+    }
     if (request.method === "GET" && pathname === "/api/pending-actions") {
       const selected = currentLibrary();
       const binding = proseBinding(selected);

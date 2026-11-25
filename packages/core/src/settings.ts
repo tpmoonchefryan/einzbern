@@ -157,6 +157,7 @@ export type SettingKey =
   | "retrieval.promptLanguages"
   | "retrieval.scopeExcerptBytes"
   | "retrieval.tau"
+  | "retrieval.minutesMetadataOnly"
   | "storage.segmentBytes"
   | "storage.snapshotEveryEvents"
   | "work.contentPolicy"
@@ -628,6 +629,18 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     order: 2,
   },
   {
+    key: "retrieval.minutesMetadataOnly",
+    type: "enum",
+    controlType: "boolean",
+    layerKind: SETTINGS_LAYER_KIND,
+    defaultValue: "false",
+    allowedValues: ["true", "false"],
+    trueValue: "true",
+    falseValue: "false",
+    group: "retrieval",
+    order: 5,
+  },
+  {
     key: "storage.segmentBytes",
     type: "string",
     controlType: "number",
@@ -663,14 +676,17 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
 ];
 
 export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = Object.freeze(
-  catalogEntries.slice().sort((left, right) => compareCanonicalText(left.key, right.key)).map((entry) => Object.freeze({
-    ...entry,
-    layer: ["engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents"].includes(entry.key) ? "library" as const : SETTINGS_PROJECT_LAYER,
-    scope: ["engine.requiredVersion", "storage.segmentBytes", "storage.snapshotEveryEvents"].includes(entry.key) ? "library" as const : "project" as const,
-    modelWritable: entry.modelWritable ?? false,
-    shape: entry.shape ?? "scalar",
-    ...(entry.allowedValues === undefined ? {} : { allowedValues: Object.freeze([...entry.allowedValues]) }),
-  })),
+  catalogEntries.slice().sort((left, right) => compareCanonicalText(left.key, right.key)).map((entry) => {
+    const libraryScoped = ["engine.requiredVersion", "retrieval.minutesMetadataOnly", "storage.segmentBytes", "storage.snapshotEveryEvents"].includes(entry.key);
+    return Object.freeze({
+      ...entry,
+      layer: libraryScoped ? "library" as const : SETTINGS_PROJECT_LAYER,
+      scope: libraryScoped ? "library" as const : "project" as const,
+      modelWritable: entry.modelWritable ?? false,
+      shape: entry.shape ?? "scalar",
+      ...(entry.allowedValues === undefined ? {} : { allowedValues: Object.freeze([...entry.allowedValues]) }),
+    });
+  }),
 );
 
 /**

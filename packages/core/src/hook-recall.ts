@@ -38,7 +38,9 @@ import { NAVIGATION_LINES } from "./navigation-lines.js";
 import { CODEX_HOOK_EVENTS, HOST_HOOK_EVENTS, HOST_HOOK_HOSTS, HOST_HOOK_POINTER_EVENTS } from "./host-hooks.js";
 import type { HostHookHost } from "./host-hooks.js";
 import { preparePersistentRecall, recallPersistent, recallDocuments } from "./recall.js";
-import { readRecallCards, recallContextLines, recallDecisionHints, recallInputsFromState } from "./recall-inputs.js";
+import { readRecallCards, recallCandidateEntries, recallCandidateRef, recallDecisionHints, recallInputsFromState, recallMinutesMetadataOnly } from "./recall-inputs.js";
+import { decisionLedger, minutesById } from "./minutes.js";
+import type { RecallHit } from "./recall.js";
 import { resolveLibrary } from "./registry.js";
 import type { ResolvedLibrary } from "./registry.js";
 import { SETTINGS_CATALOG } from "./settings.js";
@@ -214,11 +216,12 @@ export async function promptRecallOutcome(request: PromptRecallRequest): Promise
     const tau = numericSetting(state, "retrieval.tau", (value) => Number.isFinite(value) && value >= 0);
     const scopeExcerptBytes = numericSetting(state, "retrieval.scopeExcerptBytes", (value) => Number.isSafeInteger(value) && value > 0);
     perPromptBytes = numericSetting(state, "injection.perPromptBytes", (value) => Number.isSafeInteger(value) && value > 0);
+    const minutesMetadataOnly = recallMinutesMetadataOnly(rawState.settings);
     result = await recallPersistent({
       // Its own index: the recall verb's documents are built another way and must not answer here.
       cacheKey: `prompt-hook:${state.metadata.workspaceId}:${state.configurationProjectId ?? "library"}`,
-      checkpoint: `${state.headEventHash}:${digest}`,
-      documents: () => recallDocuments(recallInputsFromState(state, cards, { scopeExcerptBytes, ...(projectId === undefined ? {} : { projectId }) })),
+      checkpoint: `${state.headEventHash}:${digest}${minutesMetadataOnly ? ":minutes=metadata" : ""}`,
+      documents: () => recallDocuments(recallInputsFromState(state, cards, { scopeExcerptBytes, minutesMetadataOnly, ...(projectId === undefined ? {} : { projectId }) })),
       query: prompt,
       tau,
     }, library.libraryPath, prepared);
@@ -226,11 +229,39 @@ export async function promptRecallOutcome(request: PromptRecallRequest): Promise
     await prepared?.handle.close().catch(() => {});
     throw error;
   }
-  // TCRN-CROSS-SUB-426 (MIN-239 D5, D6): the index holds valid decisions only, so the hook never
-  // recalls an obsolete one; a work or card hit that points at one says which decision replaced it.
-  const lines = recallContextLines(recallDecisionHints(state, cards, result.records), perPromptBytes);
+  const hits = recallDecisionHints(state, cards, result.records);
+  const successors = recallSuccessorCandidates(state, hits, projectId);
+  const lines = recallCandidateEntries([...hits, ...successors], perPromptBytes).map(entry => entry.line);
   if (lines.length === 0) return { answer: null, reasonCode: "HOOK_RECALL_NO_HITS" };
   return { answer: { lines, output: hookProtocolOutput(request.host, request.event ?? "UserPromptSubmit", lines) }, reasonCode: "HOOK_RECALL_ANSWERED" };
+}
+
+function recallSuccessorCandidates(state: Awaited<ReturnType<typeof effectiveProjectState>>, hits: readonly RecallHit[], projectId?: string): readonly RecallHit[] {
+  const requested = hits.flatMap(hit => (hit.obsoleteDecisions ?? []).map(hint => hint.supersededBy));
+  if (requested.length === 0) return [];
+  const ledger = decisionLedger(state);
+  const seen = new Set(hits.map(recallCandidateRef));
+  const successors: RecallHit[] = [];
+  for (let reference of requested) {
+    while (reference !== null && !seen.has(reference)) {
+      seen.add(reference);
+      const entry = ledger.decisions.get(reference);
+      if (entry === undefined || (projectId !== undefined && entry.projectId !== projectId)) break;
+      if (entry.status !== "valid") {
+        reference = entry.supersededBy;
+        continue;
+      }
+      const record = minutesById(state, reference);
+      successors.push({
+        kind: "minutes", key: record.externalKey ?? record.id, id: record.id, status: "valid",
+        title: record.title, summary: "", score: 0, recordKind: "minutes", parentChain: [], lead: "",
+        decision: { number: entry.number, text: "", reference, scope: record.projectId, status: "valid",
+          ...(entry.metadata === undefined ? {} : { metadata: entry.metadata }) },
+      });
+      break;
+    }
+  }
+  return successors;
 }
 
 /**

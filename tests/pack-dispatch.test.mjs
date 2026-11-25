@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
 import { prepareHostNativeDispatch } from "../dist/build/packages/core/src/dispatch-workflow.js";
 import { recordHostNativeEvents } from "../dist/build/packages/core/src/native-tool-evidence.js";
+import { recordMinutes } from "../dist/build/packages/core/src/workspace.js";
 import { applyEngineModelPolicySet, engineModelPolicyOnboarding } from "../dist/build/packages/core/src/engine-model-policy.js";
 import { recordCodexPeerBatch, normalizeCodexPeerBatch } from "../dist/build/packages/core/src/codex-peer-batch.js";
 import { packDispatchRequired, resolvePackDispatchContext, validatePackDispatchContext } from "../dist/build/packages/core/src/pack-dispatch.js";
@@ -60,8 +61,19 @@ function withPack(f) {
 test("general host preparation retains the live Pack row and frozen native capacity", async t => {
   const f = await nativeFixture(t);
   const pack = withPack(f);
-  const context = { home: f.home, resolveWorkspace: async () => ({ root: f.workspace, state: pack.state }) };
-  const requestWork = pack.initiative;
+  const minutesKey = "DISPATCH-MIN-601";
+  const recorded = await recordMinutes(f.workspace, {
+    occurredAt: "2026-11-25T10:00:00Z", projectId: pack.initiative.projectId, externalKey: minutesKey, title: "Fixture relay",
+    summary: "Checkpoint review", decisions: ["An original decision passage to read separately."],
+    decisionMetadata: [{ title: "Checkpoint restart", tags: ["replay"] }], decidedBy: [], linkedWorkIds: [],
+  });
+  const reference = `${recorded.minutes[0].id}#D1`;
+  const requestWork = { ...pack.initiative, extensions: { ...pack.initiative.extensions,
+    "advisory:goal": { required: false, value: `Follow ${minutesKey}` },
+  } };
+  const state = { ...pack.state, minutes: recorded.minutes, headEventHash: recorded.headEventHash,
+    work: pack.state.work.map(row => row.id === requestWork.id ? requestWork : row) };
+  const context = { home: f.home, resolveWorkspace: async () => ({ root: f.workspace, state }) };
   const request = { ...f.request, workId: requestWork.id, workRevision: requestWork.revision, action: "implementation", phase: "dispatch", packBinding: pack.binding,
     authorization: { ...f.request.authorization, workIds: [requestWork.id] },
     sourceScope: { repository: "fixture:repository", writableRoots: [f.root], permission: "granted" },
@@ -94,6 +106,10 @@ test("general host preparation retains the live Pack row and frozen native capac
   assert.equal(prepared.decision.request.packBinding.assignmentId, pack.assignment.id);
   assert.match(prepared.attempt.argumentsValue.prompt, new RegExp(pack.assignment.id, "u"));
   assert.match(prepared.attempt.argumentsValue.prompt, new RegExp(pack.packRecord.externalKey, "u"));
+  assert.deepEqual(prepared.context.recallCandidates, { workspaceId: recorded.metadata.workspaceId, references: [reference] });
+  assert.ok(prepared.attempt.argumentsValue.prompt.includes(`minutes · ${minutesKey} · Checkpoint restart · ${reference}`));
+  assert.ok(prepared.attempt.argumentsValue.prompt.includes("You may continue without reading any."));
+  assert.ok(!prepared.attempt.argumentsValue.prompt.includes(recorded.minutes[0].decisions[0]));
 
   const nativeArguments = { task_name: "sub793-r05-native-message", message: "Synthetic Pack preparation fixture", fork_turns: "none" };
   const nativeArgumentsPath = join(f.root, "pack-native-arguments.json");

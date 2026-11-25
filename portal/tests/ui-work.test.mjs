@@ -93,6 +93,31 @@ if (!MUTATION) test("INIT-003 Atelier activity and pending actions use the read-
   } finally { await page.cleanup(); }
 });
 
+if (!MUTATION) test("INIT-003 minutes search shows the same scoped records as the engine", async () => {
+  const page = await preparePage();
+  try {
+    const { document, window, workspace, deviceEnv } = page;
+    const decisions = await writeScratch(page.fixture, "minutes-record", ["--project-id", page.fixture.projectId,
+      "--title", "Quartz relay", "--summary", "Seasonal review", "--external-key", "UI-MIN-801",
+      "--decisions", "Keep the original routing decision."]);
+    document.querySelector('[data-page-target="dashboard"]').click();
+    document.querySelector('[data-workspace-tab="minutes"]').click();
+    const form = document.querySelector("#minutes-search");
+    const query = document.querySelector("#minutes-query");
+    const results = document.querySelector("#minutes-results");
+    query.value = "UI-MIN-801";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    const expected = await cli(["minutes-list", "--workspace", workspace, "--project-id", page.fixture.projectId, "--query", query.value], deviceEnv);
+    assert.deepEqual(expected.records.map(row => row.id), [decisions.id]);
+    await waitFor(() => results.querySelector("summary")?.textContent.includes("UI-MIN-801"), "the scoped minutes result", 30_000);
+    assert.equal(results.querySelectorAll("details").length, 1);
+    assert.ok(results.textContent.includes("Keep the original routing decision."));
+    query.value = "no-such-zorbendar";
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }));
+    await waitFor(() => results.textContent.includes("No minutes match this search."), "the empty minutes result", 30_000);
+  } finally { await page.cleanup(); }
+});
+
 if (!MUTATION) test("INIT-003 recall preview shows the same candidate and terms as the engine", async () => {
   const page = await preparePage();
   try {

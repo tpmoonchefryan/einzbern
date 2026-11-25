@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { runCli } from "../dist/build/packages/cli/src/index.js";
-import { captureKnowledgeUnit, createProject, createWork, initializeKnowledgeStore, initializeLibrary, recordMinutes } from "../dist/build/packages/core/src/index.js";
+import { captureKnowledgeUnit, createProject, createWork, initializeKnowledgeStore, initializeLibrary, recordMinutes, setWorkspaceSetting } from "../dist/build/packages/core/src/index.js";
 import { RecallIndex, recall, recallDocuments, recallQueryTokens, recallScoreUnit, resetRecallCache, segmentForIndex } from "../dist/build/packages/core/src/recall.js";
 import { formatRecallLine, recallContextLines, recallInputsFromState } from "../dist/build/packages/core/src/recall-inputs.js";
 import { deriveStableId } from "../dist/build/packages/protocol/src/index.js";
@@ -119,6 +119,42 @@ test("candidate references batch-read their own content and expand only on reque
   assert.deepEqual(full.records[0].record.decisions.map((row) => row.number), [1, 2]);
   assert.deepEqual(full.records[1].context.records.map((row) => row.workId), [story.id, epic.id, parent.id]);
   assert.equal(full.headEventHash, direct.headEventHash);
+});
+
+test("minutes search shares recall matching and preserves original text through the metadata switch", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "recall-minutes-search-"));
+  t.after(async () => { resetRecallCache(); await rm(root, { recursive: true, force: true }); });
+  await initializeLibrary({ root, createdAt: at });
+  const project = (await createProject(root, { occurredAt: at, externalKey: "MINUTES-SEARCH-PROJECT", name: "Minutes search" })).projects[0];
+  const common = { occurredAt: at, projectId: project.id };
+  await setWorkspaceSetting(root, { occurredAt: at, key: "retrieval.tau", value: "0" });
+  const text = "Keep the plexitarian original passage.";
+  const record = (await recordMinutes(root, {
+    ...common, externalKey: "SEARCH-MIN-601", title: "Relay inventory", summary: "Review the inventory",
+    decisions: [text], decisionMetadata: [{ title: "Auroral retention", tags: ["lumencompat"] }], decidedBy: [], linkedWorkIds: [],
+  })).minutes[0];
+  const call = async (verb, args) => {
+    let output = "";
+    await runCli([verb, "--workspace", root, ...args], { write(chunk) { output += chunk; } });
+    return JSON.parse(output);
+  };
+  const minuteIds = async query => (await call("minutes-list", ["--query", query, "--project-id", project.id])).records.map(row => row.id);
+  const recallRefs = async query => (await call("recall", ["--query", query, "--project-id", project.id, "--view", "candidates", "--at", at])).context;
+  const expected = `minutes · SEARCH-MIN-601 · Auroral retention · ${record.id}#D1`;
+  for (const query of ["lumencompat", "SEARCH-MIN-601#D1", "Auroral retention", "Relay inventory", "plexitarian"]) {
+    assert.deepEqual(await minuteIds(query), [record.id]);
+    assert.deepEqual(await recallRefs(query), [expected]);
+  }
+
+  await setWorkspaceSetting(root, { occurredAt: at, key: "retrieval.minutesMetadataOnly", value: "true", authorization: { surface: "atelier" } });
+  assert.deepEqual(await minuteIds("plexitarian"), []);
+  assert.deepEqual(await recallRefs("plexitarian"), []);
+  for (const query of ["lumencompat", "SEARCH-MIN-601#D1", "Auroral retention", "Relay inventory"]) {
+    assert.deepEqual(await minuteIds(query), [record.id]);
+    assert.deepEqual(await recallRefs(query), [expected]);
+  }
+  const read = await call("recall-read", ["--refs", `${record.id}#D1`, "--at", at]);
+  assert.equal(read.records[0].record.decisions[0].text, text);
 });
 
 test("a 2060B second candidate cannot block a 788B third candidate in 1600B", () => {

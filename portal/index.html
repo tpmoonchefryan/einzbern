@@ -4240,7 +4240,7 @@ button:disabled { cursor: not-allowed; }
             <header class="tcrn-page-header tcrn-page__head"><div class="tcrn-page-header__body"><div class="tcrn-page-header__title"><h1 class="tcrn-heading tcrn-heading--2" data-i18n="page.dashboard">Workspace status</h1><p class="tcrn-text tcrn-page__lede" data-i18n="dashboard.lede">Doctor's eight checks and the selected library state.</p></div><div class="tcrn-page-header__actions tcrn-page__actions"><span class="tcrn-badge tcrn-badge--positive" id="health-chip"><span id="health-chip-text" data-i18n="health.healthy">healthy</span></span></div></div></header>
           </div>
           <div class="tcrn-page-hierarchy__section-tabs" data-page-hierarchy-region="section-tabs" data-page-hierarchy-slot="section-tabs">
-            <div class="tcrn-section-tabs" role="tablist" data-ui="workspace-tabs" aria-label="Workspace views"><button class="tcrn-button" role="tab" aria-selected="true" data-selected="true" data-workspace-tab="overview" data-i18n="dashboard.overview">Status</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="work" data-i18n="dashboard.work">Work</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="knowledge" data-i18n="dashboard.knowledge">Knowledge</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="activity" data-i18n="activity.title">Activity</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="library" data-i18n="dashboard.libraryTab">Library</button></div>
+            <div class="tcrn-section-tabs" role="tablist" data-ui="workspace-tabs" aria-label="Workspace views"><button class="tcrn-button" role="tab" aria-selected="true" data-selected="true" data-workspace-tab="overview" data-i18n="dashboard.overview">Status</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="work" data-i18n="dashboard.work">Work</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="knowledge" data-i18n="dashboard.knowledge">Knowledge</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="minutes" data-i18n="minutes.title">Minutes</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="activity" data-i18n="activity.title">Activity</button><button class="tcrn-button" role="tab" aria-selected="false" data-selected="false" data-workspace-tab="library" data-i18n="dashboard.libraryTab">Library</button></div>
           </div>
           <div class="tcrn-page-hierarchy__lower-content" data-page-hierarchy-region="lower-content" data-page-hierarchy-slot="content">
         <div data-workspace-panel="overview">
@@ -4263,6 +4263,17 @@ button:disabled { cursor: not-allowed; }
           </form>
           <div id="work-target-editor" class="tcrn-surface"></div><div id="work-content-editor" class="tcrn-surface"></div></div></div>
         <div data-workspace-panel="knowledge" hidden><div class="tcrn-surface" data-ui="knowledge-view"><div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 data-i18n="dashboard.knowledgeTitle">Knowledge inventory</h2><p class="tcrn-text" data-i18n="dashboard.knowledgeNote">Cards and article indexes, metadata only.</p></div><span class="tcrn-badge" id="knowledge-count">—</span></div><div id="knowledge-view-content"></div></div></div>
+        <div data-workspace-panel="minutes" hidden>
+          <article class="tcrn-surface" aria-labelledby="minutes-heading">
+            <div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="minutes-heading" data-i18n="minutes.title">Minutes</h2></div></div>
+            <form id="minutes-search" class="tcrn-action-row" role="search" data-i18n-aria-label="minutes.search">
+              <label class="tcrn-field"><span class="tcrn-sr-only" data-i18n="minutes.search">Search minutes</span><input id="minutes-query" class="tcrn-input" type="search" data-i18n-placeholder="minutes.search"></label>
+              <button type="submit" class="tcrn-button tcrn-button--primary tcrn-button--sm" data-i18n="activity.find">Search</button>
+            </form>
+            <div id="minutes-results" aria-live="polite"></div>
+            <div class="tcrn-action-row"><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="minutes-previous" data-i18n="activity.previous">Previous</button><button type="button" class="tcrn-button tcrn-button--quiet tcrn-button--sm" id="minutes-next" data-i18n="activity.next">Next</button></div>
+          </article>
+        </div>
         <div data-workspace-panel="activity" hidden>
           <article class="tcrn-surface" aria-labelledby="activity-heading">
             <div class="tcrn-surface__head"><div class="tcrn-surface__head-content"><h2 id="activity-heading" data-i18n="activity.title">Activity</h2></div></div>
@@ -6575,6 +6586,7 @@ const BOOT = __PORTAL_BOOT__;
     runHost.innerHTML = `<div><div data-gate-run-row><span>${esc(t("gates.runAt"))}: <time datetime="${esc(run.at)}">${esc(new Date(run.at).toLocaleString(state.locale))}</time></span><span class="tcrn-text">${esc(t("gates.runId"))}: <code>${esc(run.runId)}</code></span><span class="tcrn-badge ${run.reds?.length ? "tcrn-badge--danger" : "tcrn-badge--positive"}">${passed}/${outcomes.length} · ${esc(run.reds?.length ? t("gates.runFailed") : t("gates.runOk"))}</span></div><div class="tcrn-definition-list tcrn-definition-list--dense">${outcomes.map((gate) => `<div class="tcrn-definition-list__item"><span>${esc(gate.name)}${gate.required ? ` · ${esc(t("gates.required"))}` : ""}</span><span class="tcrn-badge ${gate.ok ? "tcrn-badge--positive" : "tcrn-badge--danger"}">${esc(gate.ok ? t("gates.runOk") : t("gates.runFailed"))}</span></div>`).join("") || `<div class="tcrn-state-surface">${esc(t("gates.lastRunEmpty"))}</div>`}</div></div>`;
   };
   const activity = { target: null, query: "", offset: 0, result: null, loading: false, serial: 0 };
+  let minutesRead = null;
   let pendingActions = { target: null, loading: false, result: null };
   const overviewTarget = () => JSON.stringify(pageTarget());
   const renderPendingActions = () => {
@@ -6650,6 +6662,43 @@ const BOOT = __PORTAL_BOOT__;
       }
     }
   };
+  const renderMinutes = () => {
+    const host = $("#minutes-results");
+    const current = minutesRead?.target === overviewTarget() ? minutesRead : null;
+    const result = current?.result;
+    $("#minutes-previous").disabled = !result?.ok || current.offset === 0;
+    $("#minutes-next").disabled = !result?.ok || !result.truncated;
+    if (!result?.ok) {
+      host.innerHTML = `<p class="tcrn-state-surface">${esc(t(current === null || current.loading ? "config.loading" : "config.readUnavailable"))}</p>`;
+      return;
+    }
+    host.innerHTML = result.records.length === 0
+      ? `<p class="tcrn-state-surface">${esc(t("minutes.empty"))}</p>`
+      : result.records.map(record => `<details class="tcrn-disclosure-panel"><summary class="tcrn-disclosure-panel__title"><strong>${esc(record.title)}</strong> <span>${esc(record.externalKey ?? record.id)}</span></summary><p>${esc(record.summary)}</p>${record.decisions.map(decision => `<section><h3>${esc(decision.title ? `D${decision.number} ${decision.title}` : `D${decision.number}`)}</h3>${decision.tags?.length ? `<p>${esc(decision.tags.join(" · "))}</p>` : ""}<p>${esc(decision.text)}</p></section>`).join("")}</details>`).join("");
+  };
+  const loadMinutes = async (offset = 0) => {
+    const query = $("#minutes-query").value.trim();
+    const target = overviewTarget();
+    const expectedHead = offset > 0 && minutesRead?.target === target && minutesRead?.query === query ? minutesRead.result?.headEventHash : null;
+    const read = minutesRead = { target, query, offset, loading: true, result: null };
+    renderMinutes();
+    try {
+      const search = new URLSearchParams({ q: query, offset: String(offset) });
+      const result = await api(`/api/minutes?${search}`);
+      if (read !== minutesRead || target !== overviewTarget() || unkept(result)) return;
+      if (result.ok && expectedHead && expectedHead !== result.headEventHash) {
+        void loadMinutes();
+        return;
+      }
+      read.result = result;
+    } catch { /* Keep the query available for retry. */ }
+    finally {
+      if (read === minutesRead) {
+        read.loading = false;
+        renderMinutes();
+      }
+    }
+  };
   const renderDashboard = () => {
     const doctorFocus = rememberFocus($("#health-list"));
     const status = state.status || {};
@@ -6694,6 +6743,7 @@ const BOOT = __PORTAL_BOOT__;
     renderLibraryView();
     renderPendingActions();
     renderActivity();
+    renderMinutes();
     $("#activity-search").onsubmit = (event) => {
       event.preventDefault();
       void loadActivity($("#activity-query").value);
@@ -6702,11 +6752,20 @@ const BOOT = __PORTAL_BOOT__;
     $("#activity-next").onclick = () => {
       if (activity.result?.truncated) void loadActivity(activity.query, activity.offset + activity.result.records.length);
     };
+    $("#minutes-search").onsubmit = (event) => {
+      event.preventDefault();
+      void loadMinutes();
+    };
+    $("#minutes-previous").onclick = () => void loadMinutes(Math.max(0, (minutesRead?.offset ?? 0) - 24));
+    $("#minutes-next").onclick = () => {
+      if (minutesRead?.result?.truncated) void loadMinutes(minutesRead.offset + minutesRead.result.records.length);
+    };
     bindTabList($('[data-ui="workspace-tabs"]'), {
       selected: state.dashboardTab,
       onSelect: (tab) => {
         state.dashboardTab = tab.dataset.workspaceTab;
         if (state.dashboardTab === "activity") void loadActivity($("#activity-query").value);
+        if (state.dashboardTab === "minutes") void loadMinutes();
         if (state.dashboardTab === "overview") void loadPendingActions();
       },
       onSync: (tab) => {
@@ -7257,6 +7316,7 @@ const BOOT = __PORTAL_BOOT__;
       renderDashboard(); renderSettings(); renderCollections(); renderModelPolicy(); renderVariables(); renderVocabulary(); rebuildSearchIndex();
       if (state.dashboardTab === "overview") void loadPendingActions();
       if (state.dashboardTab === "activity" && activity.target !== overviewTarget()) void loadActivity($("#activity-query").value);
+      if (state.dashboardTab === "minutes" && minutesRead?.target !== overviewTarget()) void loadMinutes();
     } catch (error) {
       if ((state.libraryEpoch || 0) !== epoch || state.settingsRead !== read) return;
       if (modelPolicyReadCurrent(policyTarget)) acceptModelPolicyRead(policyTarget, { ok: false, httpStatus: 503, reasonCode: "PORTAL_MODEL_POLICY_READ_UNAVAILABLE", error: String(error?.message ?? error) });
@@ -7603,6 +7663,8 @@ const BOOT = __PORTAL_BOOT__;
     activity.target = null;
     activity.serial += 1;
     renderActivity();
+    minutesRead = null;
+    renderMinutes();
     clearWorkValidation();
     state.receipt = null;
     state.operationDetailsOpen = false;
