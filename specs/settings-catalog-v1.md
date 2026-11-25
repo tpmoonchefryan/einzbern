@@ -42,9 +42,9 @@ Catalog `layer` and `scope` describe three ownership levels:
   ten in all. There `settings-catalog` lists exactly these ten, each with `scope` and
   `layer` `library`; they are read and written for the whole library (a write naming a
   `projectId` refuses as above) and never inherited as development configuration.
-- **device**: `portal.*`, `crest.userPath`, `agents.navigation` and
+- **device**: `portal.*`, `crest.userPath`, `agents.navigation`, legacy scalar `agents.projectRoot` and
   `execution.maxConcurrentHeavyRuns` are kept in this device's `machine-settings.json`, never in
-  the library. Project setting verbs refuse
+  the library. The selected root is stored per library in `registry.json`. Project setting verbs refuse
   them with the existing device-level remedy.
 
 A registry entry binds a real filesystem project root to its stable native `projectId`;
@@ -104,6 +104,7 @@ TCRN-CROSS-STORY-508 R3, are catalogued.
 | `general` | `design.buildService` | project | scalar | 7 |
 | `general` | `design.buildProject` | project | scalar | 8 |
 | `general` | `design.consumedVersion` | project | scalar | 9 |
+| `general` | `agents.projectRoot` | device | scalar | 10 |
 | `general` | `agents.generation` | project | scalar | 20 |
 | `general` | `agents.sharedNavigation` | project | scalar | 21 |
 | `general` | `work.contentPolicy` | project | scalar | 22 |
@@ -675,6 +676,31 @@ is read from the file and the records. Any other root, or one within a library, 
 (`MANAGED_SECTION_OUTPUT_UNREGISTERED`, `MANAGED_SECTION_OUTPUT_INSIDE_LIBRARY`).
 A coordination library this device registered no such root for has none: a rule change
 there records the rule alone, with `outputBindingStatus: "unconfigured"` in its receipt.
+
+The registry's `agentsProjectRoots` map stores a device-local selection per library id. A value is
+the real absolute path of one eligible registered project root; `null` is a tombstone left when
+the selected root is unregistered or otherwise invalidated, so the legacy scalar cannot silently
+revive it. This applies to project and coordination libraries alike. Every managed-output writer
+for a selected library writes only there and refuses other roots with
+`MANAGED_SECTION_OUTPUT_UNREGISTERED`; a library with no effective selection cannot write a
+managed section until setup chooses one. Other libraries use their own entries. A legacy
+`machine-settings.json` `agents.projectRoot` scalar remains a compatibility hint and is accepted
+only by the library that registers that path. `machine-settings-set` keeps working by updating the
+same library's map entry. The registry still resolves a directory to its library and project; the
+selection only says which of that library's registered roots keeps the managed file. It is local
+to this device and never written into a library or AGENTS.md, because a project may have a
+different path on another device.
+
+`setup --mode fresh`, `update` and `repair` accept `--project-root <dir>`. Explicit answers and
+defaults use the same real-path and same-library validation: only the current project or an
+eligible root registered to its library is accepted (`SETUP_ANSWER_INVALID` otherwise). Fresh
+setup uses the current project when the library has no roots, reuses an effective selection, or
+adopts the sole eligible root; if multiple roots exist without a selection, it asks once with
+`SETUP_ANSWER_REQUIRED`. Update and repair migrate old device settings by the same per-library
+rule: one eligible root is selected automatically, while multiple roots for the current library
+require one answer and persist it for later updates. A null tombstone is never treated as a default.
+No selection creates a file; AGENTS.md is created by the next explicit managed-section write
+(`agents-render`, a rule change, setup).
 
 System and custom variable values are queried on demand through `settings-catalog` and
 `variable-list` for the actual target, with scope and source; they are no longer copied

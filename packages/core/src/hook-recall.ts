@@ -85,17 +85,21 @@ export function hookEventName(word: unknown): string | null {
  * unset and never fails the hook. Unset, Claude Code gives every hook command it runs
  * CLAUDE_PROJECT_DIR, and Codex is the other grouped-file host. Kiro commands bind their host
  * explicitly; each protocol is rendered by hookProtocolOutput for its documented output shape.
+ * Devin runs the Claude Code registration it imports and gives it CLAUDE_PROJECT_DIR as well, so
+ * its own DEVIN_PROJECT_DIR is read first: without it such a run is recorded as Claude Code.
  */
 export function hookHost(env: NodeJS.ProcessEnv = process.env): HostHookHost {
   const declared = env["EINZBERN_HOST"];
   if (typeof declared === "string" && (HOST_HOOK_HOSTS as readonly string[]).includes(declared)) return declared as HostHookHost;
+  const devinDirectory = env["DEVIN_PROJECT_DIR"];
+  if (typeof devinDirectory === "string" && devinDirectory.length > 0) return "devin";
   const projectDirectory = env["CLAUDE_PROJECT_DIR"];
   return typeof projectDirectory === "string" && projectDirectory.length > 0 ? "claude-code" : "codex";
 }
 
 /**
  * The context a host reads from stdout for `event`. Claude Code, Codex and DSH use the shared JSON
- * additionalContext shape; Kiro CLI reads the same lines as plain text from its hook action;
+ * additionalContext shape, which Devin documents too; Kiro CLI reads the same lines as plain text from its hook action;
  * Antigravity reads injectSteps[].systemMessage.systemMessage JSON.
  */
 export function hookProtocolOutput(host: HostHookHost, event: string, lines: readonly string[]): string {

@@ -88,6 +88,17 @@ on machine-settings/device-clean remains the user home, not the device directory
 `agents.generation=none` stops future managed output creation/updates; it never
 silently deletes existing files. `agents.sharedNavigation` controls the portable
 navigation declaration; device `agents.navigation` only selects host integration.
+The device registry's `agentsProjectRoots` map selects one registered managed-output
+root per library id. Each value is the real absolute project path local to that device;
+`null` is an invalidation tombstone that prevents an unregistered root from returning via
+the legacy machine setting. `readAgentsProjectRootSelection` returns the effective root
+and its source; `registeredAgentsProjectRoots` enumerates eligible roots;
+`validateAgentsProjectRoot` and `setAgentsProjectRoots` validate and atomically persist
+selections. A legacy `agents.projectRoot` scalar is accepted only for the library that
+registers that path, and the compatibility CLI setter updates that library's map entry.
+Fresh setup, update and repair share same-library validation. Update or repair migrates
+an old selection, adopts a sole eligible root automatically, and asks once when the
+current library has multiple eligible roots. No absolute path is exported with a library.
 New general-group display orders are 20 and 21, after existing design fields.
 Other existing managed sections are preserved according to the normal user-edit
 and explicit-removal rules. Re-render affected targets explicitly after changing

@@ -467,6 +467,7 @@ test("STORY-480/605: setup writes and takes the wizard's flags; doctor reads and
     ["execution-target", false, "string"], ["dot-input", false, "string"], ["approved-plan-digest", false, "string"],
     ["mode", true, "string"], ["project", true, "string"], ["at", true, "instant"], ["artifacts", false, "string"],
     ["cloud", false, "boolean"], ["restore", false, "string"], ["language", false, "string"], ["navigation", false, "boolean"],
+    ["project-root", false, "string"],
     ["archive", false, "string"], ["rollback", false, "boolean"], ["managed-sections", false, "string"], ["mapping", false, "string"],
     ["yes", false, "boolean"],
   ]);
