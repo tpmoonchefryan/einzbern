@@ -7,7 +7,7 @@ import { withFileLock } from "./file-lock.js";
 import { minutesById } from "./minutes.js";
 import { readCodexPeerRole, resolveCodexPollingPolicy } from "./codex-peer-hooks.js";
 import { normalizeCodexPeerBatch, recordCodexPeerBatch, type CodexPeerBatch } from "./codex-peer-batch.js";
-import { readEngineModelPolicyFile } from "./engine-model-policy.js";
+import { readEngineModelPolicyForReceipt } from "./engine-model-policy.js";
 import { materializeWorkspace, type WorkspaceState } from "./workspace.js";
 import { batchReport, deliverBatch, nativeWorkerTurns, nativeBatchHandoff, type RecipientReceipt, type ReturnIntent, type NativeWorkerTurn } from "./codex-batch-return.js";
 import { withLocalCodex } from "./codex-local-rpc.js";
@@ -219,9 +219,10 @@ export async function advanceBatchRun(device: string, actor: string | undefined,
             if (!batch.allTerminal && !observed.records.length) return;
             const state = await materializeWorkspace(c.workspace);
             decision(state, c);
-            const ids = new Set([batch.manifest.workId,...batch.manifest.members.map(w => w.workId)]);
+            const ids = new Set([batch.manifest.workId, batch.manifest.pack?.packId, ...batch.manifest.members.map(w => w.workId)]);
             const workRevisions = state.work.filter(w => ids.has(w.id) && !w.tombstone).map(w => ({ id: w.id, revision: w.revision }));
-            batch = recordCodexPeerBatch({ ...batch, workRevisions, records: observed.records, policy: await readEngineModelPolicyFile(device), observationCutoff: new Date().toISOString(), prior: batch });
+            const policy = await readEngineModelPolicyForReceipt("codex", batch.manifest.policyDigest, device);
+            batch = recordCodexPeerBatch({ ...batch, workRevisions, records: observed.records, policy, observationCutoff: new Date().toISOString(), prior: batch });
             await writeFileAtomic(e.receiptFile, JSON.stringify(batch) + "\n");
             if (!batch.reportEligible) { e.error = batch.blockedReasons.join(", ") || null; return; }
             const since = batch.records.map(r => r.preparation.attempt!.requestedAt).sort()[0]!;

@@ -400,8 +400,7 @@ function assertPolicyQuotaCompatibility(file: EngineModelPolicyFile, values: Rea
   }
 }
 
-/** The current device's single file; an absent file means no engine policy has been configured yet. */
-export async function readEngineModelPolicyFile(home: string = deviceHome()): Promise<EngineModelPolicyFile> {
+async function readDevicePolicySnapshot(home: string): Promise<EngineModelPolicyFile> {
   let text: string;
   try {
     text = await readFile(engineModelPolicyPath(home), "utf8");
@@ -411,7 +410,19 @@ export async function readEngineModelPolicyFile(home: string = deviceHome()): Pr
   }
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { fail("ENGINE_MODEL_POLICY_FILE_INVALID", `${engineModelPolicyPath(home)} is not JSON`); }
-  return validateEngineModelPolicyFile(parsed);
+  return validateEngineModelPolicySnapshot(parsed);
+}
+
+/** The current device's single file; an absent file means no engine policy has been configured yet. */
+export async function readEngineModelPolicyFile(home: string = deviceHome()): Promise<EngineModelPolicyFile> {
+  return validateEngineModelPolicyFile(await readDevicePolicySnapshot(home));
+}
+
+/** Retain a receipt's encoding when the actual device policy still has the bound host digest. */
+export async function readEngineModelPolicyForReceipt(host: string, digest: string, home: string = deviceHome()): Promise<EngineModelPolicyFile> {
+  const snapshot = await readDevicePolicySnapshot(home);
+  if (snapshot.hosts[hostId(host)]?.digest === digest) return snapshot;
+  return validateEngineModelPolicyFile(snapshot);
 }
 
 /** Build a catalog from one validated snapshot, including a write's lock-held readback. */

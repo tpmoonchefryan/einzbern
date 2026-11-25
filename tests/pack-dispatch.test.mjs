@@ -490,6 +490,35 @@ test("Codex peer receipts retain Pack outcomes across coordinator handoff and ne
   assert.equal(failureReceipt.records[1].preparation.context.packDispatch.assignment.id, assignmentIds[1]);
   assert.equal(normalizeCodexPeerBatch(handedOff).digest, handedOff.digest);
   assert.equal(normalizeCodexPeerBatch(failureReceipt).digest, failureReceipt.digest);
+
+  const paths = Object.fromEntries(["manifest", "records", "capacity", "prior"].map(name => [name, join(f.root, "continuation-" + name + ".json")]));
+  await Promise.all([
+    writeFile(paths.manifest, JSON.stringify(manifest)),
+    writeFile(paths.records, JSON.stringify([completed, failed])),
+    writeFile(paths.capacity, JSON.stringify(input.capacity)),
+    writeFile(paths.prior, JSON.stringify(pendingReceipt)),
+  ]);
+  const { prior: priorPath, ...ordinary } = paths;
+  const advanced = { ...pack.state, work: pack.state.work.map(row => row.id === nextWork.id ? { ...row, revision: row.revision + 1 } : row) };
+  const recordIn = async (state, name, prior) => {
+    const output = join(f.root, name + ".json");
+    await runNativeToolCommand("execution-codex-peer-record", { workspace: f.workspace, output, ...ordinary, ...(prior ? { prior } : {}) },
+      { home: f.home, resolveWorkspace: async () => ({ root: f.workspace, state }) });
+    return JSON.parse(await readFile(output, "utf8"));
+  };
+  const newRecord = await recordIn(advanced, "unprepared-record", undefined);
+  assert.equal(newRecord.reasonCode, "CODEX_PEER_RECORD_INVALID");
+  const continued = await recordIn(advanced, "retained-record", priorPath);
+  assert.equal(continued.reportEligible, true);
+  assert.equal(continued.allTerminal, true);
+  assert.deepEqual(continued.records.map(row => row.preparation.attempt.id), [preparation.attempt.id, secondPreparation.attempt.id]);
+  const changedInitiative = { ...advanced, work: advanced.work.map(row => row.id === manifest.workId ? { ...row, revision: row.revision + 1 } : row) };
+  const drifted = await recordIn(changedInitiative, "advanced-initiative-record", priorPath);
+  assert.equal(drifted.reportEligible, false);
+  assert.ok(drifted.blockedReasons.includes("work-revision-drift:" + manifest.workId));
+  const anotherLibrary = { ...advanced, metadata: { ...advanced.metadata, workspaceId: "workspace:" + "0".repeat(24) } };
+  assert.equal((await recordIn(anotherLibrary, "foreign-retained-record", priorPath)).reasonCode, "CODEX_PEER_RECORD_INVALID");
+
   t.diagnostic(JSON.stringify({
     fixtureIdentity: candidatePackInput.fixtureIdentity,
     packId: pack.packRecord.id,

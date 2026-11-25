@@ -17,17 +17,17 @@ import { verifyWriteAuthorization } from "../../core/src/write-authorization.js"
 import { homedir } from "node:os";
 import { stageCodexPeerReceipt } from "../../core/src/codex-peer-hooks.js";
 import { deviceHome } from "../../core/src/device-home.js";
-import { readEngineModelPolicyFile } from "../../core/src/engine-model-policy.js";
+import { readEngineModelPolicyFile, readEngineModelPolicyForReceipt } from "../../core/src/engine-model-policy.js";
 import { validateHostExecutionRequest } from "../../core/src/execution-fallback.js";
 import { prepareHostNativeDispatch } from "../../core/src/dispatch-workflow.js";
-import { resolvePackDispatchContext } from "../../core/src/pack-dispatch.js";
+import { resolvePackDispatchContext, validatePackDispatchContext } from "../../core/src/pack-dispatch.js";
 import { stageCodexSettingsIntent } from "../../core/src/codex-peer-settings.js";
 import { recordHostNativeEvents, normalizeHostNativeRecord } from "../../core/src/native-tool-evidence.js";
 import type { HostNativeEvent } from "../../core/src/native-tool-evidence.js";
 import type { HostSelection } from "../../core/src/host-capabilities.js";
 // SPDX-License-Identifier: Apache-2.0
 import { readFile } from "node:fs/promises";
-import { canonicalJson } from "../../protocol/src/index.js";
+import { canonicalJson, canonicalSha256 } from "../../protocol/src/index.js";
 import type { JsonValue } from "../../protocol/src/index.js";
 import type { RuntimeCommandCatalogEntry, RuntimeCommandFlag } from "../../core/src/runtime-input-contract.js";
 import { dotObject, validateDotExecutionRequest } from "../../core/src/dot-execution.js";
@@ -192,22 +192,39 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
     const capacity = await input(values.capacity!) as CodexPeerBatchInput["capacity"];
     const delivery = values.delivery === undefined ? undefined : await input(values.delivery!) as CodexPeerBatchInput["delivery"];
     const prior = values.prior === undefined ? undefined : await input(values.prior);
-    const policy = await readEngineModelPolicyFile(context.home);
     const referenced = new Set([manifest?.workId, manifest?.pack?.packId, ...(Array.isArray(manifest?.members) ? manifest.members.map(member => member?.workId) : [])]);
     const workRevisions = workspace.state.work.filter(row => !row.tombstone && referenced.has(row.id)).map(row => ({ id: row.id, revision: row.revision }));
     let result: unknown;
     const observationCutoff = new Date().toISOString();
     try {
+      const retained = prior === undefined ? undefined : normalizeCodexPeerBatch(prior);
+      const samePreparedAttempt = retained !== undefined &&
+        retained.records.length === retained.manifest.members.length &&
+        canonicalSha256(retained.manifest) === canonicalSha256(manifest);
+      // A new dispatch must still validate every live Pack reference. Recording an existing
+      // attempt uses its retained preparation and checks its bound work and Pack revisions.
       if (manifest.pack) {
-        for (const member of manifest.members) {
-          resolvePackDispatchContext(workspace.state, {
-            packId: manifest.pack.packId, packRevision: manifest.pack.packRevision, assignmentId: member.assignmentId,
-            batchId: manifest.batchId, batchAttemptId: manifest.attemptId,
-            assignmentIds: manifest.pack.assignmentIds, capacity: manifest.pack.capacity,
-          }, member.workId, member.workRevision);
+        if (samePreparedAttempt) {
+          for (const record of retained.records) {
+            const prepared = validatePackDispatchContext(record.preparation.context.packDispatch);
+            if (prepared.sourceContexts.some(source => source.context.libraryId !== workspace.state.metadata.workspaceId)) {
+              throw new Error("retained Pack attempt belongs to another workspace");
+            }
+          }
+        } else {
+          for (const member of manifest.members) {
+            resolvePackDispatchContext(workspace.state, {
+              packId: manifest.pack.packId, packRevision: manifest.pack.packRevision, assignmentId: member.assignmentId,
+              batchId: manifest.batchId, batchAttemptId: manifest.attemptId,
+              assignmentIds: manifest.pack.assignmentIds, capacity: manifest.pack.capacity,
+            }, member.workId, member.workRevision);
+          }
         }
       }
-      result = recordCodexPeerBatch({ observationCutoff, manifest, records, capacity, policy, workRevisions, ...(delivery === undefined ? {} : { delivery }), ...(prior === undefined ? {} : { prior }) });
+      const policy = samePreparedAttempt
+        ? await readEngineModelPolicyForReceipt("codex", manifest.policyDigest, context.home)
+        : await readEngineModelPolicyFile(context.home);
+      result = recordCodexPeerBatch({ observationCutoff, manifest, records, capacity, policy, workRevisions, ...(delivery === undefined ? {} : { delivery }), ...(retained === undefined ? {} : { prior: retained }) });
     }
     catch (error) { result = { reasonCode: "CODEX_PEER_RECORD_INVALID", observationCutoff, manifest, records, capacity, ...(delivery === undefined ? {} : { delivery }), ...(prior === undefined ? {} : { prior }), validation: { status: "invalid" }, problems: [String(error)] }; }
     await writeDispatchArtifact(values.output!, result, [workspace.root], context.home);

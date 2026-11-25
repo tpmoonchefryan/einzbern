@@ -16,6 +16,7 @@ import {
 } from "../dist/build/packages/core/src/antigravity-swarm-batch.js";
 import { prepareHostNativeDispatch } from "../dist/build/packages/core/src/dispatch-workflow.js";
 import { runGates } from "../dist/build/packages/core/src/gates-run.js";
+import { planGates } from "../dist/build/packages/core/src/gates-plan.js";
 import { applyEngineModelPolicySet, engineModelPolicyOnboarding } from "../dist/build/packages/core/src/engine-model-policy.js";
 import { nativeFixture } from "./helpers/host-native-fixture.mjs";
 import { fileSymlinksAvailable } from "./helpers/filesystem-fixture.mjs";
@@ -128,13 +129,14 @@ test("execution-antigravity-swarm-record and evidence roundtrip stages guard and
   t.after(() => rm(outDir, { recursive: true, force: true }));
   const outPath = join(outDir, "receipt.json");
   const outPath2 = join(outDir, "receipt-2.json");
-  const gate = await runGates({
-    projectRoot: f.root, release: true, base: null, workIds: [f.work.id], changed: null, roots: ["."],
-    declarationsDigest: "fixture", evidenceOnly: true, gates: [{
+  const gatePlan = await planGates({
+    projectRoot: f.root, release: true, workIds: [f.work.id], gates: [{
       name: "fixture-check", root: ".", command: [process.execPath, "-e", "process.stdout.write('ok')"],
-      required: true, releaseOnly: false, reason: "release", matched: [], matchedWorkIds: [f.work.id],
+      required: true, enabled: true, releaseOnly: false, covers: ["**"],
     }],
-  }, { libraryId: f.state.metadata.workspaceId, at: new Date().toISOString(), deviceHome: f.home });
+  });
+  const gate = await runGates({ ...gatePlan, evidenceOnly: true }, { libraryId: f.state.metadata.workspaceId, at: new Date().toISOString(), deviceHome: f.home });
+  assert.deepEqual(gate.run.reds, []);
 
   await writeFile(manifestPath, JSON.stringify(f.manifest));
   await writeFile(prepsPath, JSON.stringify([f.authorPrep, f.monitorPrep]));
