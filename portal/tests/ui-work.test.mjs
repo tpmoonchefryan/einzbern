@@ -60,10 +60,10 @@ if (!MUTATION) test("INIT-003 recall preview shows the same candidate and terms 
     const form = panel.querySelector("form");
     const input = form.querySelector("textarea");
     const submit = (query) => { input.value = query; form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })); };
-    const row = () => panel.querySelector('[data-recall-preview-table="candidates"] tbody tr');
+    const row = () => panel.querySelector('[data-recall-preview-table="candidates"] .tcrn-table-shell__row');
     submit(record.externalKey);
     await waitFor(() => row()?.textContent.includes(record.externalKey), "the rendered recall candidate");
-    assert.deepEqual([...row().querySelectorAll("td")].map((cell) => cell.textContent), [record.externalKey, record.title, preview.candidates[0].score, record.externalKey]);
+    assert.deepEqual([...row().querySelectorAll('[role="cell"]')].map((cell) => cell.textContent), [record.externalKey, record.title, preview.candidates[0].score, record.externalKey]);
     document.querySelector('[data-locale-option="fr"]').click();
     assert.equal(panel.querySelector("h1").textContent, "Aperçu du rappel");
     submit("unmatchedbrevity");
