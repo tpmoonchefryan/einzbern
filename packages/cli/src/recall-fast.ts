@@ -11,7 +11,7 @@ import { readRuntimeKnowledgeLanguagePolicy, resolveQueryLanguage } from "../../
 import type { KnowledgeQueryLanguageAnswer } from "../../core/src/knowledge-language.js";
 import { RECALL_DEFAULT_TAU, preparePersistentRecall, recallDocuments, recallPersistent } from "../../core/src/recall.js";
 import type { RecallHit, RecallResult } from "../../core/src/recall.js";
-import { formatRecallLine, readRecallCards, recallCandidateEntries, recallContextEntries, recallDecisionHints, recallInputsFromState, recallMinutesMetadataOnly } from "../../core/src/recall-inputs.js";
+import { formatRecallLine, readRecallCards, recallCandidateEntries, recallContextEntries, recallDecisionHints, recallInputsFromState, recallMetadataOnly } from "../../core/src/recall-inputs.js";
 import type { RecallCardRead, RecallCardStoreRead, RecallUserCrestDegraded } from "../../core/src/recall-inputs.js";
 import type { DecisionStatusFilter } from "../../core/src/minutes.js";
 import type { KnowledgeStatusFilter } from "../../core/src/knowledge-core.js";
@@ -95,11 +95,11 @@ export async function readRecallQuery(workspace: string, query: string, options:
     const scopeExcerptBytes = Number.isSafeInteger(scopeBytes) && scopeBytes > 0 ? scopeBytes : 512;
     const promptBytes = Number(settingValue("injection.perPromptBytes") ?? "1600");
     const perPromptBytes = Number.isSafeInteger(promptBytes) && promptBytes > 0 ? promptBytes : 1600;
-    const minutesMetadataOnly = recallMinutesMetadataOnly(rawState.settings);
+    const metadataOnly = recallMetadataOnly(rawState.settings);
     const result = await recallPersistent({
       cacheKey: `${state.metadata.workspaceId}:${projectId ?? ""}`,
-      checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}${minutesMetadataOnly ? ":minutes=metadata" : ""}`,
-      documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes, minutesMetadataOnly,
+      checkpoint: `${state.headEventHash}:${cards.digest}:scope-bytes=${scopeExcerptBytes}${decisions === "valid" ? "" : `:decisions=${decisions}`}${metadataOnly ? ":fields=metadata" : ""}`,
+      documents: () => recallDocuments(recallInputsFromState(state, cards.cards, { scopeExcerptBytes, metadataOnly,
         ...(projectId === undefined ? {} : { projectId }), ...(decisions === "valid" ? {} : { decisions }) })),
       query,
       tau,

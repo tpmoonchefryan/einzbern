@@ -157,7 +157,7 @@ export type SettingKey =
   | "retrieval.promptLanguages"
   | "retrieval.scopeExcerptBytes"
   | "retrieval.tau"
-  | "retrieval.minutesMetadataOnly"
+  | "retrieval.metadataOnly"
   | "storage.segmentBytes"
   | "storage.snapshotEveryEvents"
   | "work.contentPolicy"
@@ -629,7 +629,7 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
     order: 2,
   },
   {
-    key: "retrieval.minutesMetadataOnly",
+    key: "retrieval.metadataOnly",
     type: "enum",
     controlType: "boolean",
     layerKind: SETTINGS_LAYER_KIND,
@@ -677,7 +677,7 @@ const catalogEntries: readonly (Omit<SettingsCatalogEntry, "layer" | "scope" | "
 
 export const SETTINGS_CATALOG: readonly SettingsCatalogEntry[] = Object.freeze(
   catalogEntries.slice().sort((left, right) => compareCanonicalText(left.key, right.key)).map((entry) => {
-    const libraryScoped = ["engine.requiredVersion", "retrieval.minutesMetadataOnly", "storage.segmentBytes", "storage.snapshotEveryEvents"].includes(entry.key);
+    const libraryScoped = ["engine.requiredVersion", "retrieval.metadataOnly", "storage.segmentBytes", "storage.snapshotEveryEvents"].includes(entry.key);
     return Object.freeze({
       ...entry,
       layer: libraryScoped ? "library" as const : SETTINGS_PROJECT_LAYER,

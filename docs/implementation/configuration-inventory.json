@@ -824,7 +824,7 @@
       "max": 100
     },
     {
-      "key": "retrieval.minutesMetadataOnly",
+      "key": "retrieval.metadataOnly",
       "semanticType": "enum",
       "storageType": "string",
       "controlType": "boolean",

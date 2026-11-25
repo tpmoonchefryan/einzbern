@@ -133,6 +133,16 @@ test("minutes search shares recall matching and preserves original text through 
     ...common, externalKey: "SEARCH-MIN-601", title: "Relay inventory", summary: "Review the inventory",
     decisions: [text], decisionMetadata: [{ title: "Auroral retention", tags: ["lumencompat"] }], decidedBy: [], linkedWorkIds: [],
   })).minutes[0];
+  const work = (await createWork(root, {
+    ...common, kind: "Initiative", externalKey: "SEARCH-INIT-601", parentId: null, title: "Laboratory register",
+    goal: "Retain a trogoniferous task note.",
+  })).work[0];
+  await initializeKnowledgeStore(root, { disposableAcknowledged: true });
+  const card = await captureKnowledgeUnit(root, {
+    ...common, externalKey: "SEARCH-CARD-601", subject: "Portable register",
+    scope: "project", summary: "The cnidiferous specimen was recorded.", snippet: "A specimen reference.",
+    tags: ["retention"], accountableOwnerId: "owner:test", body: "The specimen has a portable label.",
+  });
   const call = async (verb, args) => {
     let output = "";
     await runCli([verb, "--workspace", root, ...args], { write(chunk) { output += chunk; } });
@@ -145,10 +155,14 @@ test("minutes search shares recall matching and preserves original text through 
     assert.deepEqual(await minuteIds(query), [record.id]);
     assert.deepEqual(await recallRefs(query), [expected]);
   }
+  assert.ok((await recallRefs("trogoniferous")).some(line => line.endsWith(work.id)));
+  assert.ok((await recallRefs("cnidiferous")).some(line => line.endsWith(card.id)));
 
-  await setWorkspaceSetting(root, { occurredAt: at, key: "retrieval.minutesMetadataOnly", value: "true", authorization: { surface: "atelier" } });
+  await setWorkspaceSetting(root, { occurredAt: at, key: "retrieval.metadataOnly", value: "true", authorization: { surface: "atelier" } });
   assert.deepEqual(await minuteIds("plexitarian"), []);
   assert.deepEqual(await recallRefs("plexitarian"), []);
+  assert.deepEqual(await recallRefs("trogoniferous"), []);
+  assert.deepEqual(await recallRefs("cnidiferous"), []);
   for (const query of ["lumencompat", "SEARCH-MIN-601#D1", "Auroral retention", "Relay inventory"]) {
     assert.deepEqual(await minuteIds(query), [record.id]);
     assert.deepEqual(await recallRefs(query), [expected]);

@@ -38,7 +38,7 @@ import { NAVIGATION_LINES } from "./navigation-lines.js";
 import { CODEX_HOOK_EVENTS, HOST_HOOK_EVENTS, HOST_HOOK_HOSTS, HOST_HOOK_POINTER_EVENTS } from "./host-hooks.js";
 import type { HostHookHost } from "./host-hooks.js";
 import { preparePersistentRecall, recallPersistent, recallDocuments } from "./recall.js";
-import { readRecallCards, recallCandidateEntries, recallCandidateRef, recallDecisionHints, recallInputsFromState, recallMinutesMetadataOnly } from "./recall-inputs.js";
+import { readRecallCards, recallCandidateEntries, recallCandidateRef, recallContextLines, recallDecisionHints, recallInputsFromState, recallMetadataOnly } from "./recall-inputs.js";
 import { decisionLedger, minutesById } from "./minutes.js";
 import type { RecallHit } from "./recall.js";
 import { resolveLibrary } from "./registry.js";
@@ -211,17 +211,17 @@ export async function promptRecallOutcome(request: PromptRecallRequest): Promise
   let result;
   let state: Awaited<ReturnType<typeof effectiveProjectState>>;
   let perPromptBytes = 1600;
+  const metadataOnly = recallMetadataOnly(rawState.settings);
   try {
     state = await effectiveProjectState(rawState, library.entry.projectId);
     const tau = numericSetting(state, "retrieval.tau", (value) => Number.isFinite(value) && value >= 0);
     const scopeExcerptBytes = numericSetting(state, "retrieval.scopeExcerptBytes", (value) => Number.isSafeInteger(value) && value > 0);
     perPromptBytes = numericSetting(state, "injection.perPromptBytes", (value) => Number.isSafeInteger(value) && value > 0);
-    const minutesMetadataOnly = recallMinutesMetadataOnly(rawState.settings);
     result = await recallPersistent({
       // Its own index: the recall verb's documents are built another way and must not answer here.
       cacheKey: `prompt-hook:${state.metadata.workspaceId}:${state.configurationProjectId ?? "library"}`,
-      checkpoint: `${state.headEventHash}:${digest}${minutesMetadataOnly ? ":minutes=metadata" : ""}`,
-      documents: () => recallDocuments(recallInputsFromState(state, cards, { scopeExcerptBytes, minutesMetadataOnly, ...(projectId === undefined ? {} : { projectId }) })),
+      checkpoint: `${state.headEventHash}:${digest}${metadataOnly ? ":fields=metadata" : ""}`,
+      documents: () => recallDocuments(recallInputsFromState(state, cards, { scopeExcerptBytes, metadataOnly, ...(projectId === undefined ? {} : { projectId }) })),
       query: prompt,
       tau,
     }, library.libraryPath, prepared);
@@ -230,8 +230,9 @@ export async function promptRecallOutcome(request: PromptRecallRequest): Promise
     throw error;
   }
   const hits = recallDecisionHints(state, cards, result.records);
-  const successors = recallSuccessorCandidates(state, hits, projectId);
-  const lines = recallCandidateEntries([...hits, ...successors], perPromptBytes).map(entry => entry.line);
+  const lines = metadataOnly
+    ? recallCandidateEntries([...hits, ...recallSuccessorCandidates(state, hits, projectId)], perPromptBytes).map(entry => entry.line)
+    : recallContextLines(hits, perPromptBytes);
   if (lines.length === 0) return { answer: null, reasonCode: "HOOK_RECALL_NO_HITS" };
   return { answer: { lines, output: hookProtocolOutput(request.host, request.event ?? "UserPromptSubmit", lines) }, reasonCode: "HOOK_RECALL_ANSWERED" };
 }

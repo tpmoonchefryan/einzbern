@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 import { effectiveProjectState } from "./project-state-read.js";
-import { readRecallCards, recallCandidateEntries, recallCandidateRef, recallInputsFromState, recallMinutesMetadataOnly } from "./recall-inputs.js";
+import { readRecallCards, recallCandidateEntries, recallCandidateRef, recallInputsFromState, recallMetadataOnly } from "./recall-inputs.js";
 import { RECALL_DEFAULT_SCOPE_EXCERPT_BYTES, RECALL_DEFAULT_TAU, recallDocuments, recallPersistent } from "./recall.js";
 import { storyFields } from "./story-fields.js";
 import { workContent } from "./work-content.js";
@@ -25,12 +25,12 @@ export async function dispatchRecallOffer(state: WorkspaceState, workspace: stri
   };
   const scopeExcerptBytes = value("retrieval.scopeExcerptBytes", RECALL_DEFAULT_SCOPE_EXCERPT_BYTES);
   const perPromptBytes = value("injection.perPromptBytes", 1600);
-  const minutesMetadataOnly = recallMinutesMetadataOnly(state.settings);
+  const metadataOnly = recallMetadataOnly(state.settings);
   const { cards, digest } = await readRecallCards(workspace, { projectId: work.projectId, at });
   const result = await recallPersistent({
     cacheKey: `dispatch:${state.metadata.workspaceId}:${work.projectId}`,
-    checkpoint: `${state.headEventHash}:${digest}:scope-bytes=${scopeExcerptBytes}:without=${workId}${minutesMetadataOnly ? ":minutes=metadata" : ""}`,
-    documents: () => recallDocuments(recallInputsFromState(scoped, cards, { projectId: work.projectId, scopeExcerptBytes, minutesMetadataOnly })).filter(record => record.id !== workId),
+    checkpoint: `${state.headEventHash}:${digest}:scope-bytes=${scopeExcerptBytes}:without=${workId}${metadataOnly ? ":fields=metadata" : ""}`,
+    documents: () => recallDocuments(recallInputsFromState(scoped, cards, { projectId: work.projectId, scopeExcerptBytes, metadataOnly })).filter(record => record.id !== workId),
     query,
     tau: value("retrieval.tau", RECALL_DEFAULT_TAU),
   }, workspace);
