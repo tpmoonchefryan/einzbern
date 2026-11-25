@@ -152,7 +152,7 @@ if (!MUTATION) test("R46 I10: a library switch clears the design authority panel
     document.querySelector('[data-setting-group="general"]')?.click();
     const panel = document.querySelector("#design-authority");
     await waitFor(() => panel.hidden === false && panel.querySelector("[data-design-authority-state]"), "the first library's design authority panel");
-    assert.equal(panel.querySelector("[data-design-authority-state]").dataset.designAuthorityState, "unconfigured", "an explicit partial authority retains its warning");
+    assert.match(panel.textContent, /production documentation/iu, "a partial authority identifies the missing documentation");
     await page.waitForSettled();
     page.hold((path) => path === "/api/settings");
     const select = document.querySelector("#library-select");

@@ -657,11 +657,10 @@ function assertDomContract(document) {
   const missing = missingComponents(document);
   assert.deepEqual(missing, [], `rendered DOM components absent: ${JSON.stringify(missing)}`);
   const navigationItems = [...document.querySelectorAll(".tcrn-side-nav .tcrn-nav-item")];
-  // STORY-370 retired Entities, STORY-403 folds article reading into knowledge,
-  // STORY-485 adds the independent gate configuration destination, and TCRN-CROSS-SUB-409
-  // (STORY-508 R5) gives model categories and model tiers a page each.
-  assert.equal(navigationItems.length, 9, "the portal renders the engine host policy alongside the existing destinations");
-  assert.deepEqual(navigationItems.map((button) => button.getAttribute("data-page-target")), ["dashboard", "settings", "model-categories", "model-tiers", "engine-model-policy", "variables", "prose", "vocabulary", "gates"]);
+  assert.deepEqual(navigationItems.map((button) => button.getAttribute("data-page-target")), [
+    "dashboard", "settings", "model-categories", "model-tiers", "engine-model-policy",
+    "variables", "prose", "recall-preview", "vocabulary", "gates",
+  ]);
   assert.ok(navigationItems.every((button) => button.getAttribute("aria-label")?.trim()), "every destination must expose an accessible name");
   assert.ok(navigationItems.every((button) => button.getAttribute("data-i18n-aria-label")?.trim()), "every destination name must come from the locale table");
   assert.equal(document.querySelector('img.tcrn-brand-mark')?.getAttribute("alt"), "", "the decorative mark must not duplicate the brand accessible name");

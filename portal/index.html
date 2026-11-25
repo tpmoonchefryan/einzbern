@@ -7468,12 +7468,19 @@ const BOOT = __PORTAL_BOOT__;
   }));
   $("#receipt-chip").addEventListener("click", openReceipt); $("#receipt-details-trigger").addEventListener("click", toggleReceiptDetails); $("#drawer-button").addEventListener("click", openReceipt); $("#drawer-close").addEventListener("click", closeReceipt);
   // TCRN-CROSS-INIT-053 R46 (I10; U20 D3, D13): what a view shows for the target the page is leaving goes
-  // before any request for the next one is sent -- the design authority panel, the receipt (its badge back
-  // to idle, the drawer closed), the readiness and context results, an open knowledge body and a notice.
+  // before any request for the next one is sent. In-flight reads must not restore those results.
   const leaveTarget = () => {
-    designAuthorityState.epoch += 1;
-    Object.assign(designAuthorityState, { key: null, status: "unset", detail: null });
-    renderDesignAuthority();
+    designAuthorityRead = { context: null, status: "idle" };
+    const authorityPanel = $("#design-authority");
+    authorityPanel.hidden = true;
+    authorityPanel.replaceChildren();
+    recallPreview = null;
+    renderRecallPreview();
+    pendingActions = { target: null, loading: false, result: null };
+    renderPendingActions();
+    activity.target = null;
+    activity.serial += 1;
+    renderActivity();
     state.receipt = null;
     state.operationDetailsOpen = false;
     const chip = $("#receipt-chip");
