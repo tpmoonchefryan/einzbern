@@ -225,3 +225,37 @@ test("INIT068 R13: helper distribution consumes the same typed navigation source
   const body = await readFile(join(out, ...SKILL.split("/"), "SKILL.md"), "utf8");
   for (const clause of ["work-draft", "work-content-context", "inherited constraints", "not a second acceptance copy", "privacy-publication", "unavailable remains unverified"]) assert.ok(body.includes(clause), clause);
 });
+
+test("helper READMEs and install/doctor references separate install success from host readiness and pin release installs", async (context) => {
+  const out = await scratch(context);
+  const version = "7.6.5";
+  await generated(out, version);
+  for (const name of README_NAMES) {
+    const readme = await readFile(join(out, name), "utf8");
+    for (const host of ["Claude Code", "Codex", "Kiro", "Antigravity", "DeepSeek Harness"]) {
+      assert.ok(readme.includes(host), `${name} lists ${host}`);
+    }
+    assert.ok(readme.includes(`git clone --branch v${version} --depth 1 https://github.com/tpmoonchefryan/mana-orchestrate`), `${name} includes pinned-tag clone`);
+    assert.ok(readme.includes("npx skills add ./mana-orchestrate"), `${name} includes local pinned skills add`);
+    assert.ok(readme.includes('node "$EINZBERN_LAUNCHER" engine-list'), `${name} includes POSIX engine-list smoke`);
+    assert.ok(readme.includes("node $launcher engine-list"), `${name} includes PowerShell engine-list smoke`);
+    assert.ok(readme.includes("doctor --project ."), `${name} includes separate doctor check`);
+    assert.ok(readme.includes("--codex-admission"), `${name} distinguishes Codex admission observation`);
+  }
+  const installReference = await readFile(join(out, ...SKILL.split("/"), "references", "install.md"), "utf8");
+  for (const phrase of [
+    "## Two separate checks: install succeeded vs. host ready",
+    "### Check 1: Install succeeded (read-only engine smoke)",
+    "### Check 2: Host ready (project doctor and host-specific observation)",
+    'node "$EINZBERN_LAUNCHER" engine-list',
+    "node $launcher engine-list",
+    "ENGINE_LIST_READY",
+    "CLI_CATALOG_READY",
+    "Failure branch:",
+  ]) {
+    assert.ok(installReference.includes(phrase), `install.md includes ${phrase}`);
+  }
+  const doctorReference = await readFile(join(out, ...SKILL.split("/"), "references", "doctor.md"), "utf8");
+  assert.ok(doctorReference.includes("**Install status**"), "doctor.md separates Install status");
+  assert.ok(doctorReference.includes("**Host readiness**"), "doctor.md separates Host readiness");
+});
