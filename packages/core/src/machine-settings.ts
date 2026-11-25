@@ -48,6 +48,9 @@ export const AGENTS_NAVIGATION_SETTING = "agents.navigation" as const;
 export const AGENTS_NAVIGATION_CHOICES = Object.freeze(["written", "declined"] as const);
 export type AgentsNavigationChoice = typeof AGENTS_NAVIGATION_CHOICES[number];
 
+export const CODEX_DUAL_CONVERSATION_SETTING = "execution.codexDualConversation" as const;
+export const CODEX_NON_COORDINATOR_POLLING_SETTING = "execution.codexAllowNonCoordinatorPolling" as const;
+
 // Legacy device-wide managed-output root. New selection state lives in registry.json as
 // agentsProjectRoots keyed by libraryId. Readers accept this value only when the registered path
 // belongs to that library; setup and machine-settings-set migrate it into the per-library map.
@@ -56,6 +59,8 @@ export const AGENTS_PROJECT_ROOT_SETTING = "agents.projectRoot" as const;
 
 export const MACHINE_SETTING_KEYS = Object.freeze([
   MEMORY_POLICY_SETTING,
+  CODEX_DUAL_CONVERSATION_SETTING,
+  CODEX_NON_COORDINATOR_POLLING_SETTING,
   AGENTS_NAVIGATION_SETTING,
   AGENTS_PROJECT_ROOT_SETTING,
   "paths.artifacts",
@@ -98,8 +103,8 @@ function fail(reasonCode: MachineSettingsReasonCode, message: string): never {
 
 export interface MachineSettingsCatalogEntry {
   readonly key: MachineSettingKey;
-  readonly type: "enum" | "integer" | "path" | "string";
-  readonly controlType: "enum" | "number" | "text";
+  readonly type: "boolean" | "enum" | "integer" | "path" | "string";
+  readonly controlType: "boolean" | "enum" | "number" | "text";
   // TCRN-CROSS-STORY-469 R3: a device-level key, kept in this device's directory and never
   // written into a library (settings.ts has the project-level layer).
   readonly layer: "device";
@@ -133,6 +138,12 @@ export interface MachineSettingsCatalogEntry {
 export const MACHINE_SETTINGS_CATALOG: readonly MachineSettingsCatalogEntry[] = Object.freeze([
   Object.freeze({ key: MEMORY_POLICY_SETTING, type: "string", controlType: "text", layer: "device", layerKind: MACHINE_SETTINGS_LAYER_KIND,
     defaultValue: null, shape: "scalar", group: "models", order: 18, appliesOn: "next-open", valueSource: "settings-catalog" }),
+  Object.freeze({ key: CODEX_DUAL_CONVERSATION_SETTING, type: "boolean", controlType: "boolean", layer: "device",
+    layerKind: MACHINE_SETTINGS_LAYER_KIND, defaultValue: "true", allowedValues: Object.freeze(["false", "true"]),
+    shape: "scalar", group: "models", order: 19, appliesOn: "next-open", valueSource: "settings-catalog" }),
+  Object.freeze({ key: CODEX_NON_COORDINATOR_POLLING_SETTING, type: "boolean", controlType: "boolean", layer: "device",
+    layerKind: MACHINE_SETTINGS_LAYER_KIND, defaultValue: "false", allowedValues: Object.freeze(["false", "true"]),
+    shape: "scalar", group: "models", order: 20, appliesOn: "next-open", valueSource: "settings-catalog" }),
   // Local host integration only; shared AGENTS content follows project/library policy.
   Object.freeze({
     key: AGENTS_NAVIGATION_SETTING,
@@ -465,6 +476,21 @@ export async function readAgentsProjectRoot(device: string = deviceHome()): Prom
   return (await readMachineSettings(join(device, MACHINE_SETTINGS_FILE_NAME))).values[AGENTS_PROJECT_ROOT_SETTING] ?? null;
 }
 
+export interface CodexConversationSettings {
+  readonly dualConversation: boolean;
+  readonly allowNonCoordinatorPolling: boolean;
+}
+
+/** Unset values use the Owner defaults; polling only applies inside dual-conversation mode. */
+export async function readCodexConversationSettings(device: string = deviceHome()): Promise<CodexConversationSettings> {
+  const values = (await readMachineSettings(join(device, MACHINE_SETTINGS_FILE_NAME))).values;
+  const dualConversation = values[CODEX_DUAL_CONVERSATION_SETTING] !== "false";
+  return Object.freeze({
+    dualConversation,
+    allowNonCoordinatorPolling: dualConversation && values[CODEX_NON_COORDINATOR_POLLING_SETTING] === "true",
+  });
+}
+
 async function write(path: string, file: MachineSettingsFile): Promise<MachineSettingsFile> {
   await mkdir(dirname(path), { recursive: true });
   await writeFileAtomic(path, `${canonicalJson({ ...file, values: Object.fromEntries(Object.entries(file.values).map(([key, value]) => [key, BY_KEY.get(key as MachineSettingKey)?.type === "path" && typeof value === "string" ? storePath(dirname(path), value) : value])) })}\n`);
@@ -539,11 +565,12 @@ export interface MachineSettingsReadback {
 
 export async function readMachineSettingsCatalog(path: string = machineSettingsPath()): Promise<MachineSettingsReadback> {
   const file = await readMachineSettings(path);
+  const dualConversation = file.values[CODEX_DUAL_CONVERSATION_SETTING] !== "false";
   return Object.freeze({
     schemaVersion: MACHINE_SETTINGS_VERSION,
     layerKind: MACHINE_SETTINGS_LAYER_KIND,
     path,
-    settings: Object.freeze(MACHINE_SETTINGS_CATALOG.map((entry) => Object.freeze({
+    settings: Object.freeze(MACHINE_SETTINGS_CATALOG.filter((entry) => entry.key !== CODEX_NON_COORDINATOR_POLLING_SETTING || dualConversation).map((entry) => Object.freeze({
       ...entry,
       currentValue: Object.hasOwn(file.values, entry.key) ? file.values[entry.key]! : null,
     }))),

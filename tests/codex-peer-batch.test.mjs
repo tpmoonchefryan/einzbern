@@ -10,6 +10,7 @@ import { canonicalSha256 } from "../dist/build/packages/protocol/src/index.js";
 import { nativeFixture, selection, codexGuardFixture } from "./helpers/host-native-fixture.mjs";
 import { runCodexPeerHook, stageCodexPeerReceipt } from "../dist/build/packages/core/src/codex-peer-hooks.js";
 import { runNativeToolCommand } from "../dist/build/packages/cli/src/native-tool-commands.js";
+import { applyMachineSettingSet, CODEX_DUAL_CONVERSATION_SETTING } from "../dist/build/packages/core/src/machine-settings.js";
 
 const recordCodexPeerBatch = input => recordAtCutoff({ observationCutoff: new Date().toISOString(), ...input });
 const at = "2026-10-30T00:00:00Z";
@@ -162,6 +163,25 @@ test("STORY-711 coordinator role enrollment rejects restricted or unverifiable s
   }
   const success = recordCodexPeerBatch(f.input);
   assert.equal(success.manifest.coordinator.conversationId, "fixture-economy");
+});
+
+test("disabling dual-conversation mode stops an enrolled Economy coordinator from polling or re-enrolling", async t => {
+  const f = await fixture(t);
+  const receipt = recordCodexPeerBatch(f.input);
+  const { persistCodexPeerRole, resolveCodexPollingPolicy } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  await persistCodexPeerRole({ receipt, device: f.home, sessionId: "fixture-economy", libraryId: f.state.metadata.workspaceId, actor: "agent:fixture" });
+  assert.equal((await resolveCodexPollingPolicy(f.home, "fixture-economy")).scope, "native-children");
+
+  await applyMachineSettingSet({ path: `${f.home}/machine-settings.json`, key: CODEX_DUAL_CONVERSATION_SETTING, value: "false", occurredAt: at });
+  assert.equal((await resolveCodexPollingPolicy(f.home, "fixture-economy")).reasonCode, "CODEX_POLLING_DUAL_DISABLED_COORDINATOR");
+  assert.equal((await resolveCodexPollingPolicy(f.home, "fixture-economy")).scope, "none");
+  assert.equal((await runCodexPeerHook("PreToolUse", {
+    session_id: "fixture-economy", turn_id: "disabled-spawn", tool_name: "collaboration.spawn_agent", tool_input: {},
+  }, f.home)).reasonCode, "HOOK_PEER_DUAL_MODE_DISABLED", "the stale Economy coordinator cannot dispatch in single-conversation mode");
+  assert.equal((await runCodexPeerHook("PreToolUse", {
+    session_id: "fixture-main", turn_id: "main-spawn", tool_name: "collaboration.spawn_agent", tool_input: {},
+  }, f.home)).output, null, "Main retains native worker dispatch in single-conversation mode");
+  await assert.rejects(persistCodexPeerRole({ receipt, device: f.home, sessionId: "fixture-economy", libraryId: f.state.metadata.workspaceId, actor: "agent:fixture" }), /dual-conversation mode is disabled/u);
 });
 
 test("STORY-711 legacy v2 role recovery stays anchored to an intact same-ID thread/read receipt", async t => {
@@ -428,6 +448,7 @@ test("T13 actual wait/cursor/read shapes execute one query and zero subsequent s
 
 test("T14 only native children with returned in-progress turns permit another query", async t => {
   const f = await nativeFixture(t);
+  await applyMachineSettingSet({ path: `${f.home}/machine-settings.json`, key: CODEX_DUAL_CONVERSATION_SETTING, value: "false", occurredAt: at });
   const base = { session_id: "fixture-query-parent", turn_id: "turn-1" };
   const run = (event, payload) => runCodexPeerHook(event, { ...base, ...payload }, f.home);
   await run("SubagentStart", { agent_id: "fixture-child", agent_type: "worker" });
@@ -460,6 +481,7 @@ test("T14 only native children with returned in-progress turns permit another qu
 
 test("native spawn evidence, unknown/remote status and code-mode promise rejection keep their actual boundaries", async t => {
   const f = await nativeFixture(t);
+  await applyMachineSettingSet({ path: `${f.home}/machine-settings.json`, key: CODEX_DUAL_CONVERSATION_SETTING, value: "false", occurredAt: at });
   const owner = { session_id: "fixture-code-parent", turn_id: "turn" };
   await runCodexPeerHook("PostToolUse", { ...owner, tool_name: "collaboration.spawn_agent", tool_response: { task_name: "fixture-native-child" } }, f.home);
   const input = { threadId: "fixture-native-child" };
@@ -551,6 +573,8 @@ test("main-first handoff and later coordinator receipt recover without main stag
 test("coordinator delivery reminder is terminal-only and does not repeat or resend an unknown attempt", async t => {
   const f = await fixture(t);
   const terminal = recordCodexPeerBatch({ ...f.input, records: [finish(f)] });
+  const { persistCodexPeerRole } = await import("../dist/build/packages/core/src/codex-peer-hooks.js");
+  await persistCodexPeerRole({ receipt: recordCodexPeerBatch(f.input), device: f.home, sessionId: "fixture-economy", libraryId: f.state.metadata.workspaceId, actor: "agent:fixture" });
   const run = (event, values = {}) => runCodexPeerHook(event, { session_id: "fixture-economy", turn_id: "turn-1", ...values }, f.home);
   await stageCodexPeerReceipt(recordCodexPeerBatch(f.input), f.home, "fixture-economy");
   await run("PostToolUse", { tool_name: "Bash", tool_response: "record retained" });

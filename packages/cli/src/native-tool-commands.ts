@@ -1,4 +1,6 @@
 import { codexWorkerArguments, observedCodexCapacity, observedCodexUsage, observedHooks } from "../../core/src/codex-dispatch-input.js";
+import { armBatchRun, advanceBatchRun, batchRunStatus, registerBatchReceipt } from "../../core/src/codex-batch-run.js";
+import { prepareCodexBatch } from "../../core/src/codex-batch-prepare.js";
 import { reconcileImplementationQueue } from "../../core/src/implementation-queue.js";
 import { planImplementationBatch } from "../../core/src/implementation-batch.js";
 import { isCodexNativeSpawn } from "../../core/src/native-tool-evidence.js";
@@ -7,7 +9,7 @@ import type { CodexPeerBatchInput } from "../../core/src/codex-peer-batch.js";
 import type { CodexPeerBatch } from "../../core/src/codex-peer-batch.js";
 import { recordAntigravitySwarmBatch, normalizeAntigravitySwarmBatch, stageAntigravitySwarmGuardFromBatch } from "../../core/src/antigravity-swarm-batch.js";
 import type { AntigravitySwarmBatch, AntigravitySwarmBatchInput } from "../../core/src/antigravity-swarm-batch.js";
-import { persistCodexPeerRole, resolveCodexPeerHistoricalReceipt } from "../../core/src/codex-peer-hooks.js";
+import { persistCodexPeerRole, resolveCodexPeerHistoricalReceipt, resolveCodexPollingPolicy } from "../../core/src/codex-peer-hooks.js";
 import { codexNativeGuardHealth } from "../../core/src/codex-native-health.js";
 import type { CodexHookObservation } from "../../core/src/codex-native-health.js";
 import { verifyWriteAuthorization } from "../../core/src/write-authorization.js";
@@ -53,7 +55,13 @@ export const NATIVE_TOOL_COMMAND_CATALOG: readonly RuntimeCommandCatalogEntry[] 
   { name: "execution-antigravity-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true, "path", "Antigravity process evidence JSON.")] },
   { name: "execution-antigravity-swarm-record", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("manifest", true), flag("preparations", true), flag("observations", true), flag("prior", false), flag("output", true)] },
   { name: "execution-antigravity-swarm-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true)] },
-  { name: "execution-codex-peer-record", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("manifest", true), flag("records", true), flag("capacity", true), flag("codex-admission", false), flag("role-change", false), flag("actor", false, "string"), flag("delivery", false), flag("prior", false), flag("output", true)] },
+  { name: "execution-codex-batch-arm", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("initiative", true, "string"), flag("coordinator", true, "string"), flag("decided-in", true, "string"), flag("existing", false)] },
+  { name: "execution-codex-batch-status", availability: "cli", mutates: false, flags: [flag("coordinator", true, "string")] },
+  { name: "execution-codex-batch-adopt", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("from-file", true), flag("timing", false)] },
+  { name: "execution-codex-batch-observe", availability: "cli", mutates: true, flags: [] },
+  { name: "execution-codex-batch-prepare", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("from-file", true), flag("codex-admission", true), flag("codex-capacity", true), flag("codex-usage", false), flag("output", true)] },
+  { name: "execution-codex-polling-policy", availability: "cli", mutates: false, flags: [] },
+  { name: "execution-codex-peer-record", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("manifest", true), flag("records", true), flag("capacity", true), flag("codex-admission", false), flag("role-change", false), flag("actor", false, "string"), flag("delivery", false), flag("prior", false), flag("timing", false), flag("output", true)] },
   { name: "execution-codex-peer-evidence", availability: "cli", mutates: false, flags: [flag("from-file", true)] },
   { name: "execution-host-prepare", availability: "cli", mutates: true, flags: [flag("workspace", true), flag("request", true, "path", "HostExecutionRequest v1 JSON"), flag("codex-usage", false, "path", "Timestamped native rate-limit capture"), flag("codex-capacity", false, "path", "Timestamped native roster and observed limit"), flag("arguments", true, "path", "{selection, argumentsValue} actual request JSON"), flag("codex-peer-worker", false, "boolean"), flag("codex-startup-evidence", false, "path", "Same-ID Codex App Server thread/start response retained as {conversationId, sourceRef, raw, conversationPointer}"), flag("codex-admission", false), flag("codex-settings-intent", false, "path", "Existing Owner decision and exact settings target source; never a query permission"), flag("prior-peer-receipt", false, "path", "Exact validated prior Pack receipt required before a new Codex Pack application attempt"), flag("output", true)] },
   { name: "execution-host-record", availability: "cli", mutates: true, flags: [flag("binding", true), flag("events", false, "path", "HostNativeEvent array; absent preserves pending"), flag("prior", false), flag("output", true)] },
@@ -84,6 +92,40 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
   const catalog = NATIVE_TOOL_COMMAND_CATALOG.find(entry => entry.name === command); if (!catalog) return null;
   for (const key of Object.keys(values)) if (!catalog.flags.some(entry => entry.name === key)) throw new Error(`unsupported --${key}`);
   for (const f of catalog.flags) if (f.required && !values[f.name]?.trim()) throw new Error(`--${f.name} is required`);
+  if (command === "execution-codex-batch-arm") {
+    const workspace = await context.resolveWorkspace(values.workspace!);
+    const paths = values.existing === undefined ? [] : await input(values.existing);
+    if (!Array.isArray(paths) || paths.some(path => typeof path !== "string")) throw new Error("Expected a list of native receipt paths");
+    return json(await armBatchRun(context.home ?? deviceHome(), workspace.state, workspace.root, values.initiative!, values.coordinator!, values["decided-in"]!, await Promise.all(paths.map(input))));
+  }
+  if (command === "execution-codex-batch-status") return json(await batchRunStatus(context.home ?? deviceHome(), values.coordinator!));
+  if (command === "execution-codex-batch-adopt") {
+    const device = context.home ?? deviceHome();
+    const actor = process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"];
+    if (!actor || (await resolveCodexPollingPolicy(device, actor)).scope !== "native-children") throw new Error("Only the original coordinator adopts a retained batch");
+    const workspace = await context.resolveWorkspace(values.workspace!);
+    const batch = normalizeCodexPeerBatch(await input(values["from-file"]!));
+    if (batch.manifest.coordinator.conversationId !== actor || batch.schemaVersion === "tcrn.codex-peer-batch.v1") throw new Error("Use a scoped native receipt of this coordinator");
+    await registerBatchReceipt(device, actor, workspace.state, batch, values.timing === undefined ? undefined : await input(values.timing));
+    return json(await batchRunStatus(device, actor));
+  }
+  if (command === "execution-codex-batch-observe") {
+    const device = context.home ?? deviceHome();
+    const actor = process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"];
+    if (!actor || (await resolveCodexPollingPolicy(device, actor)).scope !== "native-children") throw new Error("Only an enrolled Economy coordinator observes native workers");
+    await advanceBatchRun(device, actor);
+    return json(await batchRunStatus(device, actor));
+  }
+  if (command === "execution-codex-batch-prepare") {
+    const workspace = await context.resolveWorkspace(values.workspace!);
+    const prepared = await prepareCodexBatch(workspace.state, await input(values["from-file"]!), await input(values["codex-capacity"]!),
+      await input(values["codex-admission"]!), values["codex-usage"] === undefined ? undefined : await input(values["codex-usage"]!), context.home ?? deviceHome());
+    await writeDispatchArtifact(values.output!, prepared, [workspace.root], context.home);
+    return json(prepared);
+  }
+  if (command === "execution-codex-polling-policy") {
+    return json(await resolveCodexPollingPolicy(context.home ?? deviceHome(), process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"]));
+  }
   if (command === "execution-queue-reconcile") {
     const workspace = await context.resolveWorkspace(values.workspace!);
     const assessments = values.assessments === undefined ? {} : await input(values.assessments);
@@ -172,6 +214,8 @@ export async function runNativeToolCommand(command: string, values: Readonly<Rec
           if (!health.ready) return json({ reasonCode: "CODEX_PEER_GUARD_NOT_READY", receipt: result, role, nativeGuard: health, receiptFile: values.output });
         }
         await stageCodexPeerReceipt(result as CodexPeerBatch, context.home ?? deviceHome(), process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"]);
+        if (role.status === "active") await registerBatchReceipt(context.home ?? deviceHome(), process.env["CODEX_THREAD_ID"] ?? process.env["CODEX_SESSION_ID"], workspace.state,
+          result as CodexPeerBatch, values.timing === undefined ? undefined : await input(values.timing));
       } catch (error) {
         return json({ reasonCode: "CODEX_PEER_GUARD_NOT_READY", receipt: result, problems: [String(error)], receiptFile: values.output });
       }
