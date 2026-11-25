@@ -3,7 +3,7 @@ import { open, realpath } from "node:fs/promises";
 import { openPrivateWindowsFile } from "../../../scripts/lib/windows-system.mjs";
 import type { FileHandle } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
-import { parseStrictInstant } from "../../protocol/src/index.js";
+import { canonicalSha256, parseStrictInstant } from "../../protocol/src/index.js";
 import { codexPeerReportDispatchProblem, readCodexPeerRole } from "./codex-peer-hooks.js";
 import { assertCodexPeerCoordinatorStartup, codexPackApplicationRecovery } from "./codex-peer-batch.js";
 import { codexNativeGuardHealth } from "./codex-native-health.js";
@@ -169,6 +169,19 @@ import type { HostExecutionRequest, HostExecutionDecision } from "./execution-fa
 import { HOST_NATIVE_PREPARATION_VERSION, validateHostNativePreparation } from "./native-tool-evidence.js";
 import type { HostNativePreparation } from "./native-tool-evidence.js";
 import { bindPackDispatchToNativeArguments, nativeTaskPromptField, packDispatchRequired, resolvePackDispatchContext } from "./pack-dispatch.js";
+
+function bindCodexPackTaskName(args: Record<string, unknown>): Record<string, unknown> {
+  const name = args.task_name;
+  if (name === undefined) return args;
+  if (typeof name !== "string" || !/^[a-z0-9_-]+$/u.test(name)) {
+    throw new HostExecutionError("Codex Pack task_name must use lowercase letters, digits, underscores, or hyphens");
+  }
+  if (!name.includes("-")) return args;
+  // Distinct names can share an underscore spelling. Retain the original name in the
+  // suffix calculation while keeping the rest of the Pack scope and prompt unchanged.
+  return { ...args, task_name: `${name.replaceAll("-", "_")}_${canonicalSha256(name).slice(0, 12)}` };
+}
+
 /** Optional audit preparation; no adapter, save transaction or prior success receipt prerequisite. */
 export async function prepareHostNativeDispatch(state: WorkspaceState, requestValue: HostExecutionRequest, tool: { readonly argumentsValue: unknown; readonly selection: HostSelection; readonly peerWorker?: boolean; readonly nativeSessionId?: string; readonly codexCoordinatorStartup?: unknown; readonly codexSettingsIntent?: unknown; readonly codexObservation?: import("./codex-native-health.js").CodexHookObservation; readonly priorPeerReceipt?: unknown; readonly userHome?: string; readonly cwd?: string; readonly workspaceRoot?: string }, home?: string): Promise<HostNativePreparation> {
   let request = validateHostExecutionRequest(requestValue);
@@ -235,6 +248,9 @@ export async function prepareHostNativeDispatch(state: WorkspaceState, requestVa
   let argumentsValue = executable && packDispatch !== undefined
     ? bindPackDispatchToNativeArguments(tool.argumentsValue, packDispatch)
     : tool.argumentsValue;
+  if (executable && packDispatch !== undefined && request.capabilities.hostKind === "codex" && isCodexNativeSpawn(request.capabilities.toolName)) {
+    argumentsValue = bindCodexPackTaskName(object(argumentsValue));
+  }
   const args = object(argumentsValue);
   const promptField = nativeTaskPromptField(args);
   const offer = executable && request.phase === "dispatch" && request.action !== "coordination" && tool.workspaceRoot !== undefined && promptField !== undefined

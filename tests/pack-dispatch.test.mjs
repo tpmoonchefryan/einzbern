@@ -119,14 +119,14 @@ test("general host preparation retains the live Pack row and frozen native capac
   assert.ok(["HOST_PREPARATION_READY", "HOST_PREPARATION_NOT_EXECUTABLE"].includes(nativeResult.reasonCode));
   const nativePrepared = JSON.parse(await readFile(nativeOutput, "utf8"));
   assert.ok(nativePrepared.attempt, JSON.stringify(nativePrepared.decision.reasons));
-  const { message: boundMessage, ...otherNativeArguments } = nativePrepared.attempt.argumentsValue;
+  const { message: boundMessage, task_name: boundTaskName, ...otherNativeArguments } = nativePrepared.attempt.argumentsValue;
   assert.equal(boundMessage, prepared.attempt.argumentsValue.prompt, "the native message receives the same Pack delegation as the generic prompt path");
+  assert.match(boundTaskName, /^sub793_r05_native_message_[a-f0-9]{12}$/u);
   assert.deepEqual(otherNativeArguments, {
-    task_name: nativeArguments.task_name,
     fork_turns: nativeArguments.fork_turns,
     model: prepared.attempt.argumentsValue.model,
     reasoning_effort: prepared.attempt.argumentsValue.reasoning_effort,
-  }, "task_name, fork_turns and selection fields stay unchanged");
+  }, "fork_turns and selection fields stay unchanged");
   assert.equal(nativePrepared.context.packDispatch.digest, prepared.context.packDispatch.digest);
   assert.match(nativePrepared.attempt.argumentsValue.message, new RegExp(pack.assignment.id, "u"));
   assert.match(nativePrepared.attempt.argumentsValue.message, new RegExp(pack.packRecord.externalKey, "u"));
@@ -417,10 +417,9 @@ test("Codex peer receipts retain Pack outcomes across coordinator handoff and ne
 
   const nextFailed = recordHostNativeEvents(nextPreparation, [{
     id: "next-worker-failed", at: new Date().toISOString(), kind: "host-response", sourceTool: "collaboration.spawn_agent",
-    raw: { state: "failed", terminal: true, conversationId: "fixture-next-worker-failed" },
-    status: { pointer: "/state", mapping: { failed: "failed" } },
-    terminal: { pointer: "/terminal", values: ["true"], contract: "Synthetic spawn terminal receipt" },
-    providerId: { pointer: "/conversationId" },
+    raw: { error: "fixture pre-creation refusal" },
+    status: { pointer: "/error", mapping: { "fixture pre-creation refusal": "failed" } },
+    terminal: { pointer: "/error", values: ["fixture pre-creation refusal"], contract: "Synthetic refusal before native agent creation" },
   }], recoveredNextReceipt.records[0]);
   const settledNextReceipt = recordCodexPeerBatch({
     observationCutoff: new Date().toISOString(), ...input,
@@ -429,6 +428,9 @@ test("Codex peer receipts retain Pack outcomes across coordinator handoff and ne
   });
   assert.equal(settledNextReceipt.applicationHistory[0].receiptDigest, handedOff.digest);
   assert.equal(settledNextReceipt.records[0].execution, "failed", "same-application continuation records its actual result after recovery");
+  assert.equal(settledNextReceipt.records[0].occupancy, "released");
+  assert.equal(settledNextReceipt.records[0].providerId.status, "unknown");
+  assert.equal(settledNextReceipt.reportEligible, false, "a pre-creation refusal allows retry but cannot be reported as a completed batch");
   const retryBinding = { ...nextBinding, batchAttemptId: "candidate-attempt-04", capacity: { limit: 2, active: 1 } };
   const retryCoordinator = "fixture-economy-retry";
   const retryPreparation = await prepareHostNativeDispatch(nextState, {
