@@ -128,6 +128,25 @@ function rows(writes) {
   return writes.map((entry) => [entry.step, entry.path, entry.action]);
 }
 
+test("restore a self-registered coordination library without selecting its library directory for output", async context => {
+  const f = await fixture(context);
+  await installOnA(f);
+  const coordination = join(f.a.deviceHome, "coordination-library");
+  const plan = await restorePlan(f, f.a, coordination, { projectRoot: coordination });
+  assert.deepEqual(plan.blockers, []);
+  assert.equal(plan.resolved.projectRoot, undefined);
+  assert.ok(!plan.questions.some(question => question.id === "projectRoot"));
+  assert.ok(!plan.writes.some(write => write.step === "managed-sections"));
+  const restored = await applySetup(plan);
+  assert.equal(restored.reasonCode, "SETUP_APPLIED");
+  assert.ok(!restored.written.some(write => write.step === "managed-sections"));
+  const registry = await readRegistry(f.a.deviceHome);
+  const entry = registry.entries.find(entry => entry.projectPath === coordination);
+  assert.equal(entry.libraryPath, coordination);
+  assert.equal(registry.agentsProjectRoots[entry.libraryId], undefined);
+  await assert.rejects(lstat(join(coordination, "AGENTS.md")), { code: "ENOENT" });
+});
+
 // Every file and directory under the roots, with its size and modification time.
 async function snapshot(roots) {
   const lines = [];

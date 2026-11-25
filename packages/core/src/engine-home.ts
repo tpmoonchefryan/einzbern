@@ -298,7 +298,8 @@ async function checkRegisteredLibraries(engine: EngineProbe, home: string): Prom
         details: refusal?.details ?? {},
       });
     } catch (error) {
-      const reasonCode = (error as { reasonCode?: unknown }).reasonCode;
+      const { code, reasonCode: reported } = error as NodeJS.ErrnoException & { reasonCode?: unknown };
+      const reasonCode = reported ?? (code === "EACCES" || code === "EPERM" ? code : null);
       if (typeof reasonCode !== "string") throw error;
       libraries.push({ ...base, formatVersion: null, minEngineVersion: null, opens: false, reasonCode, details: {} });
     }

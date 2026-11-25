@@ -197,15 +197,9 @@ async function writeRegistry(registry: Registry, home?: string): Promise<void> {
 
 async function liveAgentsProjectRoots(registry: Registry, libraryId: string): Promise<readonly string[]> {
   const paths = eligibleAgentsProjectRoots(registry, libraryId);
-  const live = await Promise.all(paths.map(async path => {
-    try {
-      return (await lstat(path)).isDirectory();
-    } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
-      if (code === "ENOENT" || code === "ENOTDIR") return false;
-      throw error;
-    }
-  }));
+  // Only an observed directory is eligible by default. The refresh planner reports
+  // path-specific failures and an explicit selection still validates the target.
+  const live = await Promise.all(paths.map(path => lstat(path).then(stat => stat.isDirectory(), () => false)));
   return paths.filter((_, index) => live[index]);
 }
 
@@ -227,13 +221,14 @@ export async function validateAgentsProjectRoot(libraryId: string | null, candid
 }
 
 /**
- * The effective managed-output root for a library on this device. A registry selection (including
- * a null tombstone) wins. Old installations may have only the former device-wide setting; it is
+ * The declared managed-output root for a library on this device. A registry selection (including
+ * a null tombstone) wins and retains an offline checkout while the registry still names it.
+ * Old installations may have only the former device-wide setting; it is
  * accepted only for the library that actually registers that path.
  */
 export async function readAgentsProjectRootSelection(libraryId: string, home?: string): Promise<AgentsProjectRootSelection> {
   const registry = await readRegistry(home);
-  const registered = await liveAgentsProjectRoots(registry, libraryId);
+  const registered = eligibleAgentsProjectRoots(registry, libraryId);
   if (Object.hasOwn(registry.agentsProjectRoots ?? {}, libraryId)) {
     const selected = registry.agentsProjectRoots![libraryId] ?? null;
     return { libraryId, projectPath: selected !== null && registered.includes(selected) ? selected : null, source: "registry" };
@@ -241,7 +236,9 @@ export async function readAgentsProjectRootSelection(libraryId: string, home?: s
   const legacy = await readAgentsProjectRoot(home);
   if (legacy !== null) {
     const realLegacy = await real(legacy).catch(() => null);
-    if (realLegacy !== null && registered.includes(realLegacy)) return { libraryId, projectPath: realLegacy, source: "legacy-machine-setting" };
+    if (realLegacy !== null && (await liveAgentsProjectRoots(registry, libraryId)).includes(realLegacy)) {
+      return { libraryId, projectPath: realLegacy, source: "legacy-machine-setting" };
+    }
   }
   return { libraryId, projectPath: null, source: "unset" };
 }

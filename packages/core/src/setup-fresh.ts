@@ -892,7 +892,7 @@ async function applyRegistry(recorder: SetupRecorder, input: WiringApplyInput, l
     (Object.hasOwn(registry.agentsProjectRoots ?? {}, library.libraryId) && registry.agentsProjectRoots![library.libraryId] === input.agentsProjectRoot);
   if (entry !== null && entry.projectId === input.configurationProjectId && entry.libraryPath === library.path && entry.libraryId === library.libraryId && entry.cloudHosted === input.cloud && entry.gitRemote === remote.normalized && selectedRootCurrent && await registryPathsPortable(deviceHome)) return;
   const kind = await entryKind(registryFile);
-  await registerLibrary({ projectPath: projectRoot, libraryPath: library.path, ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), registeredAt: at, cloudHosted: input.cloud, gitRemote: remote.raw, ...(input.agentsProjectRoot === undefined ? {} : { agentsProjectRoot: input.agentsProjectRoot }) }, deviceHome);
+  await registerLibrary({ projectPath: projectRoot, libraryPath: library.path, ...(input.configurationProjectId === undefined ? {} : { projectId: input.configurationProjectId }), registeredAt: at, cloudHosted: input.cloud, gitRemote: remote.raw, ...(selectedRootCurrent || input.agentsProjectRoot === undefined ? {} : { agentsProjectRoot: input.agentsProjectRoot }) }, deviceHome);
   recorder.write("registry", registryFile, kind === null ? "create" : "update");
 }
 
@@ -1077,7 +1077,7 @@ export async function applyWiring(recorder: SetupRecorder, input: WiringApplyInp
     // Contract item 3: the coordination a project library names is resolved, never replaced; one
     // this device does not locate stays unregistered here, and a competing identity refuses.
     if (identity?.role === "project") await resolveCoordinationBinding(identity.coordinationLibraryId, input.deviceHome);
-    if (identity?.role === "coordination") coordinationRoot = await coordinationSectionsRoot(library.path, input.projectRoot, prior, input.deviceHome);
+    if (identity?.role === "coordination") coordinationRoot = await coordinationSectionsRoot(library.path, input.projectRoot, prior, input.deviceHome, input.agentsProjectRoot);
     const configurationProjectId = coordinationRoot !== null ? input.configurationProjectId : input.configurationProjectId ?? await ensureSetupProjectBinding(input.projectRoot, library.path, input);
     input = { ...input, ...(configurationProjectId === undefined ? {} : { configurationProjectId }) };
     if ((await materializeWorkspace(library.path)).version !== prior.version) recorder.write("library", library.path, "update");
@@ -1187,8 +1187,8 @@ export async function planFreshSetup(input: SetupModeInput): Promise<SetupModePl
     if (reasonOf(error) === null) throw error;
     return null;
   });
-  const inferredDefault = priorSelection ?? (sameLibraryRoots.length === 0 ? projectRoot : sameLibraryRoots.length === 1 ? sameLibraryRoots[0]! : null);
-  const defaultProjectRoot = inferredDefault === null ? null : await validateAgentsProjectRoot(library.libraryId, inferredDefault, projectRoot, deviceHome);
+  const inferredDefault = sameLibraryRoots.length === 0 ? projectRoot : sameLibraryRoots.length === 1 ? sameLibraryRoots[0]! : null;
+  const defaultProjectRoot = priorSelection ?? (inferredDefault === null ? null : await validateAgentsProjectRoot(library.libraryId, inferredDefault, projectRoot, deviceHome));
   const explicitProjectRoot = answers.projectRoot === undefined ? null : await validateAgentsProjectRoot(library.libraryId, resolve(projectRoot, answers.projectRoot), projectRoot, deviceHome);
   const agentsRoot = answers.projectRoot === undefined ? defaultProjectRoot : explicitProjectRoot;
   if (agentsRoot === null) {
